@@ -463,8 +463,8 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                             );
                           },
                     onTap: kIsWeb || kIsDesktop
-                        ? () async {
-                            await showDialog(
+                        ? () {
+                            showDialog(
                               context: context,
                               builder: (connectContext) => ManualEntryDialog(
                                 onConnect: () {
