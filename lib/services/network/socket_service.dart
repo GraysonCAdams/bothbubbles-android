@@ -185,8 +185,6 @@ class SocketService extends GetxService {
           }
         });
         return;
-      default:
-        return;
     }
   }
 

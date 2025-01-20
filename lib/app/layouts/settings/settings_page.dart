@@ -164,9 +164,6 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                                       case SocketState.connecting:
                                         subtitle = "Connecting";
                                         break;
-                                      default:
-                                        subtitle = "Error";
-                                        break;
                                     }
 
                                     return SettingsTile(
