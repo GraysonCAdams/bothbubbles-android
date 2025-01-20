@@ -440,8 +440,8 @@ Future<void> paintGroupAvatar({
   }
 
   Color bgColor = theme.colorScheme.properSurface;
-  if (kIsDesktop && systemDark && ss.settings.useWindowsAccent.value && Platform.isWindows) {
-    bgColor = ts.windowsAccentColor ?? bgColor;
+  if (kIsDesktop && systemDark && ss.settings.useDesktopAccent.value) {
+    bgColor = ts.desktopAccentColor ?? bgColor;
   }
   Paint paint = Paint()..color = bgColor;
   Offset _offset = Offset(size * 0.5, size * 0.5);
