@@ -376,6 +376,18 @@ class _FindMyPageState extends OptimizedState<FindMyPage> with SingleTickerProvi
         .where((item) => (item.address?.label ?? item.address?.mapItemFullAddress) == null)
         .toList();
 
+    final Map<String, List<FindMyDevice>> groupedDevices = {};
+    for (FindMyDevice device in devicesWithLocation) {
+      String identifier = device.groupIdentifier ?? device.identifier ?? device.productIdentifier ?? device.name ?? 'unknown'; 
+      if (!groupedDevices.containsKey(identifier)) {
+        groupedDevices[identifier] = [];
+      }
+
+      groupedDevices[identifier]!.add(device);
+    }
+
+    // Sort the devices for each group by 
+
     final devicesBodySlivers = [
       SliverList(
         delegate: SliverChildListDelegate([

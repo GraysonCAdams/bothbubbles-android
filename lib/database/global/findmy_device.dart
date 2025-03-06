@@ -48,6 +48,13 @@ class FindMyDevice {
     required this.crowdSourcedLocation,
     required this.role,
     required this.lostModeMetadata,
+
+    this.identifier,
+    this.productIdentifier,
+    this.serialNumber,
+    this.groupIdentifier,
+    this.isAppleAudioAccessory,
+    this.capabilities
   });
 
   final String? deviceModel;
@@ -99,6 +106,13 @@ class FindMyDevice {
   final Map<String, dynamic>? role;
   final Map<String, dynamic>? lostModeMetadata;
 
+  final String? identifier;
+  final String? productIdentifier;
+  final String? serialNumber;
+  final String? groupIdentifier;
+  final bool? isAppleAudioAccessory;
+  final int? capabilities;
+
   factory FindMyDevice.fromJson(Map<String, dynamic> json) => FindMyDevice(
     deviceModel: json["deviceModel"],
     lowPowerMode: json["lowPowerMode"],
@@ -148,6 +162,13 @@ class FindMyDevice {
     crowdSourcedLocation: json["crowdSourcedLocation"],
     role: json["role"],
     lostModeMetadata: json["lostModeMetadata"],
+
+    identifier: json["identifier"],
+    productIdentifier: json["productIdentifier"],
+    serialNumber: json["serialNumber"],
+    groupIdentifier: json["groupIdentifier"],
+    isAppleAudioAccessory: json["isAppleAudioAccessory"],
+    capabilities: json["capabilities"],
   );
 
   Map<String, dynamic> toJson() => {
@@ -197,6 +218,15 @@ class FindMyDevice {
     "maxMsgChar": maxMsgChar,
     "deviceClass": deviceClass,
     "crowdSourcedLocation": crowdSourcedLocation,
+    "role": role,
+    "lostModeMetadata": lostModeMetadata,
+
+    "identifier": identifier,
+    "productIdentifier": productIdentifier,
+    "serialNumber": serialNumber,
+    "groupIdentifier": groupIdentifier,
+    "isAppleAudioAccessory": isAppleAudioAccessory,
+    "capabilities": capabilities,
   };
 }
 
