@@ -613,7 +613,8 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                                       subtitle:
                                           "Backup and restore all app settings and custom themes",
                                     ),
-                                    const SettingsDivider(),
+                                    if (!kIsWeb && !kIsDesktop)
+                                      const SettingsDivider(),
                                     if (!kIsWeb && !kIsDesktop)
                                       SettingsTile(
                                         backgroundColor: tileColor,
