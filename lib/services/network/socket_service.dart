@@ -209,7 +209,6 @@ class SocketService extends GetxService {
             notif.createSocketError();
           }
         });
-        return;
     }
   }
 
