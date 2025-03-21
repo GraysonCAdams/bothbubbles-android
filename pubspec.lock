@@ -1781,8 +1781,8 @@ packages:
     dependency: "direct main"
     description:
       path: "."
-      ref: "7526556fe2beb5c61ddede34e1992726907cd7ae"
-      resolved-ref: "7526556fe2beb5c61ddede34e1992726907cd7ae"
+      ref: "838278324c1ce007303e45111e57c4a9b3ac01f1"
+      resolved-ref: "838278324c1ce007303e45111e57c4a9b3ac01f1"
       url: "https://github.com/BlueBubblesApp/local_notifier.git"
     source: git
     version: "0.1.6"

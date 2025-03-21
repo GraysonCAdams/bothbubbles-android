@@ -158,7 +158,8 @@ class Settings {
   final Rx<Level> logLevel = Level.info.obs;
 
   // Notification actions
-  final RxList<int> selectedActionIndices = Platform.isWindows ? [0, 1, 2, 3, 4].obs : [0, 1, 2].obs;
+  final RxBool showReplyField = true.obs;
+  final RxList<int> selectedActionIndices = Platform.isWindows ? [0, 1, 2, 3].obs : [0, 1, 2].obs;
   final RxList<String> actionList = RxList.from([
     "Mark Read",
     ReactionTypes.LOVE,
@@ -308,6 +309,7 @@ class Settings {
       'spellcheck': spellcheck.value,
       'spellcheckLanguage': spellcheckLanguage.value,
       'minimizeToTray': minimizeToTray.value,
+      'showReplyField': showReplyField.value,
       'selectedActionIndices': selectedActionIndices,
       'actionList': actionList,
       'detailsMenuActions': detailsMenuActions.map((action) => action.name).toList(),
@@ -500,7 +502,8 @@ class Settings {
     ss.settings.maxAvatarsInGroupWidget.value = map['maxAvatarsInGroupWidget'] ?? 4;
     ss.settings.useCustomTitleBar.value = map['useCustomTitleBar'] ?? true;
 
-    ss.settings.selectedActionIndices.value = _processSelectedActionIndices(map['selectedActionIndices']);
+    ss.settings.showReplyField.value = map['showReplyField'] ?? true;
+    ss.settings.selectedActionIndices.value = _processSelectedActionIndices(map['selectedActionIndices'], ss.settings.showReplyField.value);
     ss.settings.actionList.value = _processActionList(map['actionList']);
     ss.settings._detailsMenuActions.value = _processDetailsMenuActions(map['detailsMenuActions'], ss.settings.detailsMenuActions);
 
@@ -642,7 +645,8 @@ class Settings {
     s.maxAvatarsInGroupWidget.value = map['maxAvatarsInGroupWidget'] ?? 4;
     s.useCustomTitleBar.value = map['useCustomTitleBar'] ?? true;
 
-    s.selectedActionIndices.value = _processSelectedActionIndices(map['selectedActionIndices']);
+    s.showReplyField.value = map['showReplyField'] ?? true;
+    s.selectedActionIndices.value = _processSelectedActionIndices(map['selectedActionIndices'], s.showReplyField.value);
     s.actionList.value = _processActionList(map['actionList']);
     s._detailsMenuActions.value = _processDetailsMenuActions(map['detailsMenuActions'], DetailsMenuAction.values);
 
@@ -684,12 +688,12 @@ Map<String, String> _processCustomHeaders(dynamic rawJson) {
   }
 }
 
-List<int> _processSelectedActionIndices(dynamic rawJson) {
+List<int> _processSelectedActionIndices(dynamic rawJson, bool showReplyField) {
   try {
-    return (rawJson is List ? rawJson : jsonDecode(rawJson) as List).cast<int>().take(Platform.isWindows ? 5 : 3).toList();
+    return (rawJson is List ? rawJson : jsonDecode(rawJson) as List).cast<int>().take(Platform.isWindows ? (showReplyField ? 4 : 5) : 3).sorted(Comparable.compare);
   } catch (e) {
     debugPrint("Using default selectedActionIndices");
-    return [0, 1, 2, 3, 4].take(Platform.isWindows ? 5 : 3).toList();
+    return [0, 1, 2, 3, 4].take(Platform.isWindows ? (showReplyField ? 4 : 5) : 3).sorted(Comparable.compare);
   }
 }
 
