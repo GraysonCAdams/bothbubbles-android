@@ -367,11 +367,10 @@ class MessagesViewState extends OptimizedState<MessagesView> {
 
           reader.getFile(format, (file) async {
             Uint8List bytes = await file.readAll();
-            String name = file.fileName ?? "${randomString(8)}.${getFormatExtension(format)}";
             controller.pickedAttachments.add(PlatformFile(
-              path: name,
-              name: name,
-              size: bytes.length,
+              path: file.fileName!,
+              name: file.fileName!,
+              size: file.fileSize!,
               bytes: bytes,
             ));
           });

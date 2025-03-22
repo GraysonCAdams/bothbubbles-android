@@ -1178,20 +1178,18 @@ class TextFieldComponentState extends State<TextFieldComponent> {
           ));
         }
       });
-      if (Platform.isWindows) { // Disable on Linux because the path still gets pasted in the text field
-        Pasteboard.files().then((files) {
-          for (final String path in files) {
-            final String name = basename(path);
-            final File file = File(path);
-            controller!.pickedAttachments.add(PlatformFile(
-              name: name,
-              path: path,
-              bytes: file.readAsBytesSync(),
-              size: file.lengthSync(),
-            ));
-          }
-        });
-      }
+      Pasteboard.files().then((files) {
+        for (final String path in files) {
+          final String name = basename(path);
+          final File file = File(path);
+          controller!.pickedAttachments.add(PlatformFile(
+            name: name,
+            path: path,
+            bytes: file.readAsBytesSync(),
+            size: file.lengthSync(),
+          ));
+        }
+      });
     }
 
     if (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed) {
