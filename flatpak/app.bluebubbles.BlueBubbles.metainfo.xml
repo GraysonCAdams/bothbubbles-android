@@ -44,28 +44,47 @@
   <launchable type="desktop-id">app.bluebubbles.BlueBubbles.desktop</launchable>
   <screenshots>
     <screenshot type="default" xml:lang="en">
-      <image>https://raw.githubusercontent.com/flathub/app.bluebubbles.BlueBubbles/931c0db62212394509edbdc15814baca65e94e9f/screenshots/Ios%20Skin.png</image>
+      <image>https://raw.githubusercontent.com/BlueBubblesApp/bluebubbles-app/refs/tags/v1.15.4%2B73-desktop/flatpak/screenshots/Ios%20Skin.png</image>
       <caption>Chat with friends and family</caption>
     </screenshot>
     <screenshot xml:lang="en">
-      <image>https://raw.githubusercontent.com/flathub/app.bluebubbles.BlueBubbles/931c0db62212394509edbdc15814baca65e94e9f/screenshots/Dark.png</image>
+      <image>https://raw.githubusercontent.com/BlueBubblesApp/bluebubbles-app/refs/tags/v1.15.4%2B73-desktop/flatpak/screenshots/Dark.png</image>
       <caption>Dark Mode</caption>
     </screenshot>
     <screenshot xml:lang="en">
-      <image>https://raw.githubusercontent.com/flathub/app.bluebubbles.BlueBubbles/931c0db62212394509edbdc15814baca65e94e9f/screenshots/Settings.png</image>
+      <image>https://raw.githubusercontent.com/BlueBubblesApp/bluebubbles-app/refs/tags/v1.15.4%2B73-desktop/flatpak/screenshots/Settings.png</image>
       <caption>Extensive Customization</caption>
     </screenshot>
     <screenshot xml:lang="en">
-      <image>https://raw.githubusercontent.com/flathub/app.bluebubbles.BlueBubbles/931c0db62212394509edbdc15814baca65e94e9f/screenshots/Material%20Skin.png</image>
+      <image>https://raw.githubusercontent.com/BlueBubblesApp/bluebubbles-app/refs/tags/v1.15.4%2B73-desktop/flatpak/screenshots/Material%20Skin.png</image>
       <caption>Material Skin</caption>
     </screenshot>
     <screenshot xml:lang="en">
-      <image>https://raw.githubusercontent.com/flathub/app.bluebubbles.BlueBubbles/931c0db62212394509edbdc15814baca65e94e9f/screenshots/Samsung%20Skin.png</image>
+      <image>https://raw.githubusercontent.com/BlueBubblesApp/bluebubbles-app/refs/tags/v1.15.4%2B73-desktop/flatpak/screenshots/Samsung%20Skin.png</image>
       <caption>Samsung Skin</caption>
     </screenshot>
   </screenshots>
 
   <releases>
+    <release date="2025-04-03" version="1.15.4.0">
+      <url type="details">https://github.com/BlueBubblesApp/bluebubbles-app/releases/tag/v1.15.4%2B73-desktop</url>
+      <description>
+        <p>Fixes</p>
+        <ul>
+          <li>Fixes connection issues when using custom headers.</li>
+          <li>Fixes Firebase Panel UI not showing when a Firebase project has been configured.</li>
+        </ul>
+      </description>
+    </release>
+    <release date="2025-03-26" version="1.15.3.0">
+      <url type="details">https://github.com/BlueBubblesApp/bluebubbles-app/releases/tag/v1.15.3%2B72-desktop</url>
+      <description>
+        <p>Fixes</p>
+        <ul>
+          <li>Fixes lag issues.</li>
+        </ul>
+      </description>
+    </release>
     <release date="2025-03-24" version="1.15.1.0">
       <url type="details">https://github.com/BlueBubblesApp/bluebubbles-app/releases/tag/v1.15.1%2B71-desktop</url>
       <description>
