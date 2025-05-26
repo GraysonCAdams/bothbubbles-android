@@ -24,7 +24,6 @@ list(APPEND FLUTTER_PLUGIN_LIST
   permission_handler_windows
   printing
   record_windows
-  screen_brightness_windows
   screen_retriever_windows
   secure_application
   share_plus
@@ -32,6 +31,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   system_tray
   tray_manager
   url_launcher_windows
+  volume_controller
   window_manager
   windows_taskbar
 )
