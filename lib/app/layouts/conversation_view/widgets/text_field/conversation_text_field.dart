@@ -862,7 +862,6 @@ class TextFieldComponent extends StatefulWidget {
   State<StatefulWidget> createState() => TextFieldComponentState();
 }
 
-
 class TextFieldComponentState extends State<TextFieldComponent> {
   late final ConversationViewController? controller;
   late final FocusNode? focusNode;
@@ -873,6 +872,7 @@ class TextFieldComponentState extends State<TextFieldComponent> {
   late final Future<void> Function({String? effect}) sendMessage;
 
   late final ValueNotifier<bool> isRecordingNotifier;
+
   TextFieldComponentState() : isRecordingNotifier = ValueNotifier<bool>(false);
 
   @override
@@ -1169,27 +1169,70 @@ class TextFieldComponentState extends State<TextFieldComponent> {
     if ((kIsWeb || Platform.isWindows || Platform.isLinux) &&
         (ev.physicalKey == PhysicalKeyboardKey.keyV || ev.logicalKey == LogicalKeyboardKey.keyV) &&
         HardwareKeyboard.instance.isControlPressed) {
-      Pasteboard.image.then((image) {
-        if (image != null) {
-          controller!.pickedAttachments.add(PlatformFile(
-            name: "${randomString(8)}.png",
-            bytes: image,
-            size: image.length,
-          ));
-        }
-      });
-      Pasteboard.files().then((files) {
-        for (final String path in files) {
-          final String name = basename(path);
-          final File file = File(path);
-          controller!.pickedAttachments.add(PlatformFile(
-            name: name,
-            path: path,
-            bytes: file.readAsBytesSync(),
-            size: file.lengthSync(),
-          ));
-        }
-      });
+      if (kIsDesktop) {
+        Pasteboard.files().then((files) {
+          if (files.isEmpty) {
+            Pasteboard.image.then((image) async {
+              if (image != null) {
+                controller!.pickedAttachments.add(PlatformFile(
+                  name: "image-${controller!.pickedAttachments.length + 1}.png",
+                  bytes: image,
+                  size: image.length,
+                ));
+              } else {
+                String? clipboardText = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+                if (clipboardText == null) return;
+
+                TextSelection selection = controller!.lastFocusedTextController.selection;
+                String oldText = controller!.lastFocusedTextController.text;
+                String newText = oldText.replaceRange(selection.start, selection.end, clipboardText);
+                controller!.lastFocusedTextController.value = TextEditingValue(
+                  text: newText,
+                  selection: TextSelection.fromPosition(
+                    TextPosition(offset: selection.start + clipboardText.length),
+                  ),
+                );
+              }
+            });
+          } else {
+            for (final String path in files) {
+              final String name = basename(path);
+              final File file = File(path);
+              controller!.pickedAttachments.add(PlatformFile(
+                name: name,
+                path: path,
+                bytes: file.readAsBytesSync(),
+                size: file.lengthSync(),
+              ));
+            }
+          }
+        });
+      } else {
+        // This is just web
+        Pasteboard.image.then((image) async {
+          if (image != null) {
+            controller!.pickedAttachments.add(PlatformFile(
+              name: "image-${controller!.pickedAttachments.length + 1}.png",
+              bytes: image,
+              size: image.length,
+            ));
+          } else {
+            String? clipboardText = (await Clipboard.getData(Clipboard.kTextPlain))?.text;
+            if (clipboardText == null) return;
+
+            TextSelection selection = controller!.lastFocusedTextController.selection;
+            String oldText = controller!.lastFocusedTextController.text;
+            String newText = oldText.replaceRange(selection.start, selection.end, clipboardText);
+            controller!.lastFocusedTextController.value = TextEditingValue(
+              text: newText,
+              selection: TextSelection.fromPosition(
+                TextPosition(offset: selection.start + clipboardText.length),
+              ),
+            );
+          }
+        });
+      }
+      return KeyEventResult.handled;
     }
 
     if (HardwareKeyboard.instance.isMetaPressed || HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isAltPressed) {
@@ -1342,6 +1385,10 @@ class TextFieldComponentState extends State<TextFieldComponent> {
       }
       if (controller!.replyToMessage != null) {
         controller!.replyToMessage = null;
+        return KeyEventResult.handled;
+      }
+      if (controller!.pickedAttachments.isNotEmpty) {
+        controller!.pickedAttachments.clear();
         return KeyEventResult.handled;
       }
     }
