@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:bluebubbles/services/services.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/database/models.dart';
 import 'package:dio/dio.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:html/dom.dart' as html;
 import 'package:html/parser.dart' as parser;
 import 'package:metadata_fetch/metadata_fetch.dart';
 import 'package:universal_io/io.dart';
@@ -83,6 +86,21 @@ class MetadataHelper {
     // Tell everyone that it's complete
     completer.complete(data);
     return completer.future;
+  }
+
+  static Future<Metadata> getLocationMetadata(Position locationData) async {
+    String metaUrl = "https://maps.apple.com/?ll=${locationData.latitude},${locationData.longitude}";
+    String userAgent = "Safari/macOS: Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.2 Safari/605.1.15";
+
+    HttpClient client = HttpClient();
+    client.userAgent = userAgent;
+
+    HttpClientRequest request = await client.getUrl(Uri.parse(metaUrl));
+    HttpClientResponse response = await request.close();
+    String data = await response.transform(utf8.decoder).join();
+    html.Document document = parser.parse(data);
+
+    return MetadataParser.parse(document);
   }
 
   /// Manually tries to parse out metadata from a given [url]

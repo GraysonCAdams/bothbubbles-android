@@ -3,10 +3,12 @@ import 'dart:convert';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:bluebubbles/database/models.dart';
+import 'package:dio/dio.dart' as dio;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
+import 'package:html/dom.dart' as html;
 import 'package:metadata_fetch/metadata_fetch.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:tuple/tuple.dart';
@@ -109,11 +111,10 @@ class Share {
       // Build out the file we are going to send
       String _attachmentGuid = "temp-${randomString(8)}";
       String fileName = "$_attachmentGuid-CL.loc.vcf";
-      final bytes = Uint8List.fromList(utf8.encode(vcfString));
-      final meta = await MetadataFetch.extract(
-          "https://maps.apple.com/?ll=${_locationData.latitude},${_locationData.longitude}&q=${_locationData.latitude},${_locationData.longitude}");
-      print("https://maps.apple.com/?ll=${_locationData.latitude},${_locationData.longitude}&q=${_locationData.latitude},${_locationData.longitude}");
-      String url = "https://maps.apple.com${meta!.image}";
+      Uint8List bytes = Uint8List.fromList(utf8.encode(vcfString));
+
+      Metadata meta = await MetadataHelper.getLocationMetadata(_locationData);
+      String url = meta.image!;
       String? title = meta.title;
 
       return Tuple5(_attachmentGuid, fileName, bytes, url, title);
