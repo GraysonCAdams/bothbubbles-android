@@ -28,6 +28,7 @@ import 'package:latlong2/latlong.dart';
 import 'package:maps_launcher/maps_launcher.dart';
 import 'package:sliding_up_panel2/sliding_up_panel2.dart';
 import 'package:universal_io/io.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 class FindMyPage extends StatefulWidget {
   const FindMyPage({super.key});
@@ -1653,6 +1654,15 @@ class _FindMyPageState extends OptimizedState<FindMyPage> with SingleTickerProvi
               },
             ),
           ),
+        ),
+        RichAttributionWidget(
+          attributions: [
+            // Suggested attribution for the OpenStreetMap public tile server
+            TextSourceAttribution(
+              'OpenStreetMap contributors',
+              onTap: () => launchUrl(Uri.parse('https://openstreetmap.org/copyright')),
+            ),
+          ],
         ),
       ],
     );
