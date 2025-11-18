@@ -89,8 +89,8 @@ class MetadataHelper {
   }
 
   static Future<Metadata> getLocationMetadata(Position locationData) async {
-    String metaUrl = "https://maps.apple.com/?ll=${locationData.latitude},${locationData.longitude}";
-    String userAgent = "Safari/macOS: Mozilla/5.0 (Macintosh; Intel Mac OS X 11_1) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0.2 Safari/605.1.15";
+    String metaUrl = "https://maps.apple.com/?ll=${locationData.latitude},${locationData.longitude}&q=${locationData.latitude},${locationData.longitude}";
+    String userAgent = " Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36 Edg/142.0.0.0";
 
     HttpClient client = HttpClient();
     client.userAgent = userAgent;
@@ -98,9 +98,17 @@ class MetadataHelper {
     HttpClientRequest request = await client.getUrl(Uri.parse(metaUrl));
     HttpClientResponse response = await request.close();
     String data = await response.transform(utf8.decoder).join();
-    html.Document document = parser.parse(data);
 
-    return MetadataParser.parse(document);
+    html.Document document = parser.parse(data);
+    Metadata metadata = MetadataParser.parse(document);
+    String title = document.getElementsByTagName("title")[0].text;
+    int split = title.lastIndexOf(' - ');
+    if (split != -1) {
+      title = title.substring(0, split);
+    }
+    metadata.title = title;
+
+    return metadata;
   }
 
   /// Manually tries to parse out metadata from a given [url]
