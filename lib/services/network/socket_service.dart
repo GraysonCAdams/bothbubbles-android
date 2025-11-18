@@ -59,7 +59,6 @@ class SocketService extends GetxService {
   @override
   void onClose() {
     closeSocket();
-    internetConnectionListener?.cancel();
     super.onClose();
   }
 
@@ -143,6 +142,7 @@ class SocketService extends GetxService {
 
   void closeSocket() {
     if (isNullOrEmpty(serverAddress)) return;
+    internetConnectionListener?.cancel();
     socket.dispose();
     state.value = SocketState.disconnected;
   }
