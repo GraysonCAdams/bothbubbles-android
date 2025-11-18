@@ -593,8 +593,51 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
                         controller.showingOverlays = true;
                       }
                       Tenor tenor = Tenor(apiKey: kIsWeb ? TENOR_API_KEY : dotenv.get('TENOR_API_KEY'));
-                      TenorResult? result = await tenor.showAsBottomSheet(
+                      TextEditingController tenorController = TextEditingController();
+                      FocusNode focus = FocusNode();
+                      Future<TenorResult?> resultFuture = tenor.showAsBottomSheet(
+                        maxExtent: 0.8,
+                        minExtent: 0.5,
+                        debounce: const Duration(seconds: 1),
                         context: context,
+                        searchFieldController: tenorController,
+                        // Copied and slightly modified from source, just so I can autofocus
+                        searchFieldWidget: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              TextField(
+                                focusNode: focus,
+                                controller: tenorController,
+                                decoration: InputDecoration(
+                                  border: OutlineInputBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                    borderSide: const BorderSide(
+                                      width: 0,
+                                      style: BorderStyle.none,
+                                    ),
+                                  ),
+                                  contentPadding: const EdgeInsets.fromLTRB(28, 5, 32, 7),
+                                  filled: true,
+                                  hintStyle: const TenorSearchFieldStyle().hintStyle,
+                                  hintText: "Search Tenor",
+                                  isCollapsed: true,
+                                  isDense: true,
+                                ),
+                                style: context.theme.textTheme.bodyMedium!,
+                              ),
+                              const Positioned(
+                                left: 4,
+                                child: Icon(
+                                  Icons.search,
+                                  color: Color(0xFF8A8A86),
+                                  size: 22,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                         style: TenorStyle(
                           color: context.theme.colorScheme.properSurface,
                           attributionStyle: TenorAttributionStyle(brightnes: context.theme.brightness),
@@ -610,11 +653,10 @@ class ConversationTextFieldState extends CustomState<ConversationTextField, void
                             labelColor: context.theme.colorScheme.onSurface,
                             unselectedLabelColor: context.theme.colorScheme.onSurface.withValues(alpha: 0.5),
                           ),
-                          searchFieldStyle: TenorSearchFieldStyle(
-                            fillColor: context.theme.colorScheme.properSurface,
-                          ),
                         ),
                       );
+                      focus.requestFocus();
+                      TenorResult? result = await resultFuture;
                       if (kIsDesktop || kIsWeb) {
                         controller.showingOverlays = false;
                       }
