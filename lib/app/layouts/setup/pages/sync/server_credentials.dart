@@ -689,7 +689,7 @@ class _ServerCredentialsState extends OptimizedState<ServerCredentials> {
       }
     });
 
-    Get.back();
+    Navigator.of(context, rootNavigator: true).pop();
     SystemChannels.textInput.invokeMethod('TextInput.hide');
     // Unauthorized request
     if (serverResponse?.statusCode == 401) {

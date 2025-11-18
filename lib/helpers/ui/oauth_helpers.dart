@@ -160,7 +160,7 @@ Future<void> requestPassword(BuildContext context, String serverUrl, Future<void
           actions: [
             TextButton(
               child: Text("Cancel", style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary)),
-              onPressed: () => Get.back(),
+              onPressed: () => Navigator.of(context, rootNavigator: true).pop(),
             ),
             AnimatedContainer(
               decoration: BoxDecoration(
@@ -179,7 +179,7 @@ Future<void> requestPassword(BuildContext context, String serverUrl, Future<void
                     if (passController.text.isEmpty) {
                       return;
                     }
-                    Get.back();
+                    Navigator.of(context, rootNavigator: true).pop();
                   },
                 ),
               ),
@@ -203,7 +203,7 @@ Future<void> requestPassword(BuildContext context, String serverUrl, Future<void
               if (passController.text.isEmpty) {
                 return;
               }
-              Get.back();
+              Navigator.of(context, rootNavigator: true).pop();
             },
           ),
           title: Text("Enter Server Password", style: context.theme.textTheme.titleLarge),

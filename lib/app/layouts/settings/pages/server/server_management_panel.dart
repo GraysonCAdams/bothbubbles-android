@@ -454,10 +454,10 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                               context: context,
                               builder: (connectContext) => ManualEntryDialog(
                                 onConnect: () {
-                                  Get.back();
+                                  Navigator.of(context, rootNavigator: true).pop();
                                 },
                                 onClose: () {
-                                  Get.back();
+                                  Navigator.of(context, rootNavigator: true).pop();
                                 },
                               ),
                             );
@@ -468,10 +468,10 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                               context: context,
                               builder: (connectContext) => ManualEntryDialog(
                                 onConnect: () {
-                                  Get.back();
+                                  Navigator.of(context, rootNavigator: true).pop();
                                 },
                                 onClose: () {
-                                  Get.back();
+                                  Navigator.of(context, rootNavigator: true).pop();
                                 },
                               ),
                             );
@@ -545,7 +545,7 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                                 );
                                 await manager!.start();
                               } catch (_) {}
-                              Get.back();
+                              Navigator.of(context, rootNavigator: true).pop();
                               manager = null;
                               sync.isIncrementalSyncing.value = false;
                             }
@@ -682,7 +682,7 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                                               showSnackbar("Error", "Enter a valid port!");
                                               return;
                                             }
-                                            Get.back();
+                                            Navigator.of(context, rootNavigator: true).pop();
                                             ss.settings.localhostPort.value = portController.text;
                                           },
                                         ),

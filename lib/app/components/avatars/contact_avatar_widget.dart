@@ -63,7 +63,7 @@ class _ContactAvatarWidgetState extends OptimizedState<ContactAvatarWidget> {
             TextButton(
               onPressed: () async {
                 didReset = true;
-                Get.back();
+                Navigator.of(context, rootNavigator: true).pop();
                 widget.handle!.color = null;
                 widget.handle!.save(updateColor: true);
                 eventDispatcher.emit("refresh-avatar", [widget.handle?.address, widget.handle?.color]);

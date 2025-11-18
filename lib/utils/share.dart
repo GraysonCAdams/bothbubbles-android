@@ -3,12 +3,10 @@ import 'dart:convert';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/services/services.dart';
 import 'package:bluebubbles/database/models.dart';
-import 'package:dio/dio.dart' as dio;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:get/get.dart';
-import 'package:html/dom.dart' as html;
 import 'package:metadata_fetch/metadata_fetch.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:tuple/tuple.dart';
@@ -51,7 +49,7 @@ class Share {
                 actions: [
                   if (!kIsDesktop || !Platform.isLinux)
                     TextButton(
-                        onPressed: () => Get.back(),
+                        onPressed: () => Navigator.of(Get.context!, rootNavigator: true).pop(),
                         child: Text("Cancel", style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary))),
                   if (!kIsDesktop || !Platform.isLinux)
                     TextButton(
@@ -59,7 +57,7 @@ class Share {
                         child: Text("Open Settings", style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary))),
                   if (kIsDesktop && Platform.isLinux)
                     TextButton(
-                        onPressed: () => Get.back(),
+                        onPressed: () => Navigator.of(Get.context!, rootNavigator: true).pop(),
                         child: Text("OK", style: context.theme.textTheme.bodyLarge!.copyWith(color: context.theme.colorScheme.primary))),
                 ],
               ));
@@ -85,7 +83,7 @@ class Share {
                   ),
                   actions: [
                     TextButton(
-                        onPressed: () => Get.back(),
+                        onPressed: () => Navigator.of(Get.context!, rootNavigator: true).pop(),
                         child: Text("Cancel", style: Get.textTheme.bodyLarge!.copyWith(color: Get.theme.colorScheme.primary))),
                     TextButton(
                         onPressed: () async => await Geolocator.openLocationSettings(),
@@ -100,7 +98,7 @@ class Share {
 
     String? _attachmentGuid;
     String? fileName;
-    late final Uint8List bytes;
+    Uint8List? bytes;
     String? url;
     String? title;
 
@@ -183,12 +181,12 @@ class Share {
                 ),
                 actions: [
                   TextButton(
-                      onPressed: () => Get.back(),
+                      onPressed: () => Navigator.of(Get.context!, rootNavigator: true).pop(),
                       child: Text("Cancel", style: Get.textTheme.bodyLarge!.copyWith(color: Get.theme.colorScheme.primary))),
                   TextButton(
                       onPressed: () {
                         send = true;
-                        Get.back();
+                        Navigator.of(Get.context!, rootNavigator: true).pop();
                       },
                       child: Text("Send", style: Get.textTheme.bodyLarge!.copyWith(color: Get.theme.colorScheme.primary)))
                 ],
@@ -199,6 +197,7 @@ class Share {
     }
 
     if (!send) return;
+    if (bytes == null) return;
 
     final message = Message(
       guid: _attachmentGuid,
@@ -213,7 +212,7 @@ class Share {
           uti: "public.vlocation",
           bytes: bytes,
           transferName: fileName,
-          totalBytes: bytes.length,
+          totalBytes: bytes!.length,
         ),
       ],
       isFromMe: true,
