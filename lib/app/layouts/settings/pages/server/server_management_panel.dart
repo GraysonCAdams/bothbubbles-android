@@ -656,7 +656,7 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                           backgroundColor: tileColor,
                           leading: const SettingsLeadingIcon(
                             iosIcon: CupertinoIcons.wifi,
-                            materialIcon: Icons.network_check,
+                            materialIcon: Icons.wifi,
                             containerColor: Colors.green,
                           ),
                           onChanged: (bool val) async {
@@ -724,6 +724,7 @@ class _ServerManagementPanelState extends CustomState<ServerManagementPanel, voi
                               ss.settings.useLocalIpv6.value = val;
                               NetworkTasks.detectLocalhost(createSnackbar: true);
                             },
+                      leading: const SettingsLeadingIcon(iosIcon: CupertinoIcons.globe, materialIcon: Icons.network_check_outlined),
                           )
                         : const SizedBox.shrink()),
                 ]),
