@@ -106,7 +106,7 @@ dependencies:
   local_notifier:
     git:
       url: https://github.com/BlueBubblesApp/local_notifier.git
-      ref: 838278324c1ce007303e45111e57c4a9b3ac01f1
+      ref: 1483ded842d728f438310ab38765dcda6b9926e7
   maps_launcher: ^3.0.0+1
   logger: ^2.6.1
   material_color_utilities: ^0.11.1  # Pinned because of flutter SDK
