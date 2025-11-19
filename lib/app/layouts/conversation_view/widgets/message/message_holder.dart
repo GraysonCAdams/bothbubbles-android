@@ -63,9 +63,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
   Message? get replyTo => message.threadOriginatorGuid == null
       ? null
       : ss.settings.repliesToPrevious.value
-          ? (service.struct
-                  .getPreviousReply(message.threadOriginatorGuid!, message.normalizedThreadPart, message.guid!) ??
-              service.struct.getThreadOriginator(message.threadOriginatorGuid!))
+          ? (service.struct.getPreviousReply(message.threadOriginatorGuid!, message.normalizedThreadPart, message.guid!) ?? service.struct.getThreadOriginator(message.threadOriginatorGuid!))
           : service.struct.getThreadOriginator(message.threadOriginatorGuid!);
 
   Chat get chat => widget.cvController.chat;
@@ -73,25 +71,15 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
   MessagesService get service => ms(widget.cvController.chat.guid);
 
   bool get canSwipeToReply =>
-      ss.settings.enablePrivateAPI.value &&
-      ss.isMinBigSurSync &&
-      chat.isIMessage &&
-      !widget.isReplyThread &&
-      !message.guid!.startsWith("temp") &&
-      !message.guid!.startsWith("error");
+      ss.settings.enablePrivateAPI.value && ss.isMinBigSurSync && chat.isIMessage && !widget.isReplyThread && !message.guid!.startsWith("temp") && !message.guid!.startsWith("error");
 
   bool get showSender =>
       !message.isGroupEvent &&
-      (!message.sameSender(olderMessage) ||
-          (olderMessage?.isGroupEvent ?? false) ||
-          (olderMessage == null || !message.dateCreated!.isWithin(olderMessage!.dateCreated!, minutes: 30)));
+      (!message.sameSender(olderMessage) || (olderMessage?.isGroupEvent ?? false) || (olderMessage == null || !message.dateCreated!.isWithin(olderMessage!.dateCreated!, minutes: 30)));
 
   bool get showAvatar => chat.isGroup;
 
-  bool isEditing(int part) =>
-      message.isFromMe! &&
-      widget.cvController.editing.firstWhereOrNull((e2) => e2.item1.guid == message.guid! && e2.item2.part == part) !=
-          null;
+  bool isEditing(int part) => message.isFromMe! && widget.cvController.editing.firstWhereOrNull((e2) => e2.item1.guid == message.guid! && e2.item2.part == part) != null;
 
   List<MessagePart> messageParts = [];
   List<RxDouble> replyOffsets = [];
@@ -189,8 +177,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
   Widget build(BuildContext context) {
     controller.built = true;
     final stickers = message.associatedMessages.where((e) => e.associatedMessageType == "sticker");
-    final reactions = message.associatedMessages
-        .where((e) => ReactionTypes.toList().contains(e.associatedMessageType?.replaceAll("-", "")));
+    final reactions = message.associatedMessages.where((e) => ReactionTypes.toList().contains(e.associatedMessageType?.replaceAll("-", "")));
     Iterable<Message> stickersForPart(int part) {
       return stickers.where((s) => (s.associatedMessagePart ?? 0) == part);
     }
@@ -233,8 +220,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
           // use stack so avatar can be placed at bottom
           Row(
             children: [
-              if (!message.isFromMe! && !message.isGroupEvent)
-                SelectCheckbox(message: message, controller: widget.cvController),
+              if (!message.isFromMe! && !message.isGroupEvent) SelectCheckbox(message: message, controller: widget.cvController),
               Expanded(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -250,9 +236,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                               // add previous edits if needed
                               if (e.isEdited)
                                 Padding(
-                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value
-                                      ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value)
-                                      : EdgeInsets.zero,
+                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value) : EdgeInsets.zero,
                                   child: Obx(() => AnimatedSize(
                                         duration: const Duration(milliseconds: 250),
                                         alignment: Alignment.bottomCenter,
@@ -261,21 +245,14 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                             ? Opacity(
                                                 opacity: 0.75,
                                                 child: Column(
-                                                  crossAxisAlignment: message.isFromMe!
-                                                      ? CrossAxisAlignment.end
-                                                      : CrossAxisAlignment.start,
+                                                  crossAxisAlignment: message.isFromMe! ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: e.edits
                                                       .map((edit) => ClipPath(
                                                             clipper: TailClipper(
                                                               isFromMe: message.isFromMe!,
-                                                              showTail: message.showTail(newerMessage) &&
-                                                                  e.part == controller.parts.length - 1,
-                                                              connectLower: iOS
-                                                                  ? false
-                                                                  : (e.part != 0 &&
-                                                                          e.part != controller.parts.length - 1) ||
-                                                                      (e.part == 0 && controller.parts.length > 1),
+                                                              showTail: message.showTail(newerMessage) && e.part == controller.parts.length - 1,
+                                                              connectLower: iOS ? false : (e.part != 0 && e.part != controller.parts.length - 1) || (e.part == 0 && controller.parts.length > 1),
                                                               connectUpper: iOS ? false : e.part != 0,
                                                             ),
                                                             child: TextBubble(
@@ -286,12 +263,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                       .toList(),
                                                 ),
                                               )
-                                            : Container(
-                                                height: 0,
-                                                constraints: BoxConstraints(
-                                                    maxWidth: ns.width(context) *
-                                                            MessageWidgetController.maxBubbleSizeFactor -
-                                                        30)),
+                                            : Container(height: 0, constraints: BoxConstraints(maxWidth: ns.width(context) * MessageWidgetController.maxBubbleSizeFactor - 30)),
                                       )),
                                 ),
                               if (iOS &&
@@ -303,10 +275,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                   replyTo != null &&
                                   getActiveMwc(replyTo!.guid!) != null)
                                 Padding(
-                                  padding: EdgeInsets.only(
-                                      left: (showAvatar || ss.settings.alwaysShowAvatars.value) && replyTo!.isFromMe!
-                                          ? 35
-                                          : 0),
+                                  padding: EdgeInsets.only(left: (showAvatar || ss.settings.alwaysShowAvatars.value) && replyTo!.isFromMe! ? 35 : 0),
                                   child: DecoratedBox(
                                     decoration: replyTo!.isFromMe == message.isFromMe
                                         ? ReplyLineDecoration(
@@ -322,31 +291,21 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                       alignment: replyTo!.isFromMe! ? Alignment.centerRight : Alignment.centerLeft,
                                       child: ReplyBubble(
                                         parentController: getActiveMwc(replyTo!.guid!)!,
-                                        part: replyTo!.guid! == message.threadOriginatorGuid
-                                            ? message.normalizedThreadPart
-                                            : 0,
-                                        showAvatar: (chat.isGroup || ss.settings.alwaysShowAvatars.value || !iOS) &&
-                                            !replyTo!.isFromMe!,
+                                        part: replyTo!.guid! == message.threadOriginatorGuid ? message.normalizedThreadPart : 0,
+                                        showAvatar: (chat.isGroup || ss.settings.alwaysShowAvatars.value || !iOS) && !replyTo!.isFromMe!,
                                         cvController: widget.cvController,
                                       ),
                                     ),
                                   ),
                                 ),
                               // show sender, if needed
-                              if (chat.isGroup &&
-                                  !message.isFromMe! &&
-                                  showSender &&
-                                  e.part == (messageParts.firstWhereOrNull((e) => !e.isUnsent)?.part))
+                              if (chat.isGroup && !message.isFromMe! && showSender && e.part == (messageParts.firstWhereOrNull((e) => !e.isUnsent)?.part))
                                 Padding(
-                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value
-                                      ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value)
-                                      : EdgeInsets.zero,
+                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value) : EdgeInsets.zero,
                                   child: MessageSender(olderMessage: olderMessage, message: message),
                                 ),
                               // add a box to account for height of reactions
-                              if ((messageParts.length == 1 && reactions.isNotEmpty) ||
-                                  reactionsForPart(e.part).isNotEmpty)
-                                const SizedBox(height: 12.5),
+                              if ((messageParts.length == 1 && reactions.isNotEmpty) || reactionsForPart(e.part).isNotEmpty) const SizedBox(height: 12.5),
                               if (!iOS &&
                                   index == 0 &&
                                   !widget.isReplyThread &&
@@ -355,22 +314,16 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                   replyTo != null &&
                                   getActiveMwc(replyTo!.guid!) != null)
                                 Padding(
-                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value
-                                      ? const EdgeInsets.only(left: 45.0, right: 10)
-                                      : const EdgeInsets.symmetric(horizontal: 10),
+                                  padding: showAvatar || ss.settings.alwaysShowAvatars.value ? const EdgeInsets.only(left: 45.0, right: 10) : const EdgeInsets.symmetric(horizontal: 10),
                                   child: DecoratedBox(
                                     decoration: BoxDecoration(
                                       borderRadius: BorderRadius.circular(25),
-                                      border: Border.fromBorderSide(
-                                          BorderSide(color: context.theme.colorScheme.properSurface)),
+                                      border: Border.fromBorderSide(BorderSide(color: context.theme.colorScheme.properSurface)),
                                     ),
                                     child: ReplyBubble(
                                       parentController: getActiveMwc(replyTo!.guid!)!,
-                                      part: replyTo!.guid! == message.threadOriginatorGuid
-                                          ? message.normalizedThreadPart
-                                          : 0,
-                                      showAvatar: (chat.isGroup || ss.settings.alwaysShowAvatars.value || !iOS) &&
-                                          !replyTo!.isFromMe!,
+                                      part: replyTo!.guid! == message.threadOriginatorGuid ? message.normalizedThreadPart : 0,
+                                      showAvatar: (chat.isGroup || ss.settings.alwaysShowAvatars.value || !iOS) && !replyTo!.isFromMe!,
                                       cvController: widget.cvController,
                                     ),
                                   ),
@@ -394,25 +347,19 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                       ),
                                     ),
                                   Padding(
-                                    padding: (showAvatar || ss.settings.alwaysShowAvatars.value) &&
-                                            !(message.isGroupEvent || e.isUnsent)
+                                    padding: (showAvatar || ss.settings.alwaysShowAvatars.value) && !(message.isGroupEvent || e.isUnsent)
                                         ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value)
                                         : EdgeInsets.zero,
                                     child: DecoratedBox(
                                         decoration: iOS &&
                                                 !widget.isReplyThread &&
-                                                ((index == 0 &&
-                                                        message.threadOriginatorGuid != null &&
-                                                        olderMessage != null) ||
-                                                    (index == messageParts.length - 1 &&
-                                                        service.struct.threads(message.guid!, index).isNotEmpty &&
-                                                        newerMessage != null))
+                                                ((index == 0 && message.threadOriginatorGuid != null && olderMessage != null) ||
+                                                    (index == messageParts.length - 1 && service.struct.threads(message.guid!, index).isNotEmpty && newerMessage != null))
                                             ? ReplyLineDecoration(
                                                 isFromMe: message.isFromMe!,
                                                 color: context.theme.colorScheme.properSurface,
                                                 connectUpper: message.connectToUpper(),
-                                                connectLower:
-                                                    newerMessage != null && message.connectToLower(newerMessage!),
+                                                connectLower: newerMessage != null && message.connectToLower(newerMessage!),
                                                 context: context,
                                               )
                                             : const BoxDecoration(),
@@ -434,8 +381,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                               ignoring: widget.cvController.inSelectMode.value,
                                               child: Container(
                                                 width: double.infinity,
-                                                alignment:
-                                                    message.isFromMe! ? Alignment.centerRight : Alignment.centerLeft,
+                                                alignment: message.isFromMe! ? Alignment.centerRight : Alignment.centerLeft,
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
@@ -447,30 +393,22 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                       ),
                                                     if (samsung)
                                                       Padding(
-                                                        padding: (messageParts.length == 1 && reactions.isNotEmpty) ||
-                                                                reactionsForPart(e.part).isNotEmpty
-                                                            ? EdgeInsets.only(
-                                                                left: message.isFromMe! ? 0 : 10,
-                                                                right: message.isFromMe! ? 20 : 0)
+                                                        padding: (messageParts.length == 1 && reactions.isNotEmpty) || reactionsForPart(e.part).isNotEmpty
+                                                            ? EdgeInsets.only(left: message.isFromMe! ? 0 : 10, right: message.isFromMe! ? 20 : 0)
                                                             : const EdgeInsets.only(right: 10),
-                                                        child: MessageTimestamp(
-                                                            controller: controller, cvController: widget.cvController),
+                                                        child: MessageTimestamp(controller: controller, cvController: widget.cvController),
                                                       ),
                                                     // otherwise show content
                                                     if (!message.isGroupEvent && !e.isUnsent)
                                                       Column(
-                                                        crossAxisAlignment: message.isFromMe!
-                                                            ? CrossAxisAlignment.end
-                                                            : CrossAxisAlignment.start,
+                                                        crossAxisAlignment: message.isFromMe! ? CrossAxisAlignment.end : CrossAxisAlignment.start,
                                                         children: [
                                                           // interactive messages may have subjects, so render them here
                                                           // also render the subject for attachments that may have not rendered already
                                                           if ((message.hasApplePayloadData ||
                                                                   message.isLegacyUrlPreview ||
                                                                   message.isInteractive ||
-                                                                  (e.part == 0 &&
-                                                                      isNullOrEmpty(e.text) &&
-                                                                      e.attachments.isNotEmpty)) &&
+                                                                  (e.part == 0 && isNullOrEmpty(e.text) && e.attachments.isNotEmpty)) &&
                                                               !isNullOrEmpty(message.subject))
                                                             Padding(
                                                               padding: const EdgeInsets.only(bottom: 2.0),
@@ -478,11 +416,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                 clipper: TailClipper(
                                                                   isFromMe: message.isFromMe!,
                                                                   showTail: false,
-                                                                  connectLower: iOS
-                                                                      ? false
-                                                                      : (e.part != 0 &&
-                                                                              e.part != controller.parts.length - 1) ||
-                                                                          (e.part == 0 && controller.parts.length > 1),
+                                                                  connectLower: iOS ? false : (e.part != 0 && e.part != controller.parts.length - 1) || (e.part == 0 && controller.parts.length > 1),
                                                                   connectUpper: iOS ? false : e.part != 0,
                                                                 ),
                                                                 child: TextBubble(
@@ -504,8 +438,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                 message: message,
                                                                 part: index,
                                                                 globalKey: keys.length > index ? keys[index] : null,
-                                                                showTail: message.showTail(newerMessage) &&
-                                                                    e.part == controller.parts.length - 1,
+                                                                showTail: message.showTail(newerMessage) && e.part == controller.parts.length - 1,
                                                                 child: MessagePopupHolder(
                                                                   key: keys.length > index ? keys[index] : null,
                                                                   controller: controller,
@@ -514,80 +447,57 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                   isEditing: isEditing(e.part),
                                                                   child: GestureDetector(
                                                                     behavior: HitTestBehavior.deferToChild,
-                                                                    onHorizontalDragUpdate:
-                                                                        !canSwipeToReply || isEditing(e.part)
-                                                                            ? null
-                                                                            : (details) {
-                                                                                if (ReplyScope.maybeOf(context) != null)
-                                                                                  return;
-                                                                                final offset = replyOffsets[index];
-                                                                                offset.value += details.delta.dx * 0.5;
-                                                                                if (message.isFromMe!) {
-                                                                                  offset.value = offset.value
-                                                                                      .clamp(-double.infinity, 0);
-                                                                                } else {
-                                                                                  offset.value = offset.value
-                                                                                      .clamp(0, double.infinity);
-                                                                                }
-                                                                                if (!gaveHapticFeedback &&
-                                                                                    offset.value.abs() >=
-                                                                                        SlideToReply.replyThreshold) {
-                                                                                  HapticFeedback.lightImpact();
-                                                                                  gaveHapticFeedback = true;
-                                                                                } else if (offset.value.abs() <
-                                                                                    SlideToReply.replyThreshold) {
-                                                                                  gaveHapticFeedback = false;
-                                                                                }
-                                                                              },
-                                                                    onHorizontalDragEnd:
-                                                                        !canSwipeToReply || isEditing(e.part)
-                                                                            ? null
-                                                                            : (details) {
-                                                                                if (ReplyScope.maybeOf(context) != null)
-                                                                                  return;
-                                                                                final offset = replyOffsets[index];
-                                                                                if (offset.value.abs() >=
-                                                                                    SlideToReply.replyThreshold) {
-                                                                                  widget.cvController.replyToMessage =
-                                                                                      Tuple2(message, index);
-                                                                                }
-                                                                                offset.value = 0;
-                                                                              },
-                                                                    onHorizontalDragCancel:
-                                                                        !canSwipeToReply || isEditing(e.part)
-                                                                            ? null
-                                                                            : () {
-                                                                                if (ReplyScope.maybeOf(context) != null)
-                                                                                  return;
-                                                                                replyOffsets[index].value = 0;
-                                                                              },
+                                                                    onHorizontalDragUpdate: !canSwipeToReply || isEditing(e.part)
+                                                                        ? null
+                                                                        : (details) {
+                                                                            if (ReplyScope.maybeOf(context) != null) return;
+                                                                            final offset = replyOffsets[index];
+                                                                            offset.value += details.delta.dx * 0.5;
+                                                                            if (message.isFromMe!) {
+                                                                              offset.value = offset.value.clamp(-double.infinity, 0);
+                                                                            } else {
+                                                                              offset.value = offset.value.clamp(0, double.infinity);
+                                                                            }
+                                                                            if (!gaveHapticFeedback && offset.value.abs() >= SlideToReply.replyThreshold) {
+                                                                              HapticFeedback.lightImpact();
+                                                                              gaveHapticFeedback = true;
+                                                                            } else if (offset.value.abs() < SlideToReply.replyThreshold) {
+                                                                              gaveHapticFeedback = false;
+                                                                            }
+                                                                          },
+                                                                    onHorizontalDragEnd: !canSwipeToReply || isEditing(e.part)
+                                                                        ? null
+                                                                        : (details) {
+                                                                            if (ReplyScope.maybeOf(context) != null) return;
+                                                                            final offset = replyOffsets[index];
+                                                                            if (offset.value.abs() >= SlideToReply.replyThreshold) {
+                                                                              widget.cvController.replyToMessage = Tuple2(message, index);
+                                                                            }
+                                                                            offset.value = 0;
+                                                                          },
+                                                                    onHorizontalDragCancel: !canSwipeToReply || isEditing(e.part)
+                                                                        ? null
+                                                                        : () {
+                                                                            if (ReplyScope.maybeOf(context) != null) return;
+                                                                            replyOffsets[index].value = 0;
+                                                                          },
                                                                     child: ClipPath(
                                                                       clipper: TailClipper(
                                                                         isFromMe: message.isFromMe!,
-                                                                        showTail: message.showTail(newerMessage) &&
-                                                                            e.part == controller.parts.length - 1,
-                                                                        connectLower: iOS
-                                                                            ? false
-                                                                            : (e.part != 0 &&
-                                                                                    e.part !=
-                                                                                        controller.parts.length - 1) ||
-                                                                                (e.part == 0 &&
-                                                                                    controller.parts.length > 1),
+                                                                        showTail: message.showTail(newerMessage) && e.part == controller.parts.length - 1,
+                                                                        connectLower:
+                                                                            iOS ? false : (e.part != 0 && e.part != controller.parts.length - 1) || (e.part == 0 && controller.parts.length > 1),
                                                                         connectUpper: iOS ? false : e.part != 0,
                                                                       ),
                                                                       child: Stack(
                                                                         alignment: Alignment.centerRight,
                                                                         children: [
-                                                                          message.hasApplePayloadData ||
-                                                                                  message.isLegacyUrlPreview ||
-                                                                                  message.isInteractive
+                                                                          message.hasApplePayloadData || message.isLegacyUrlPreview || message.isInteractive
                                                                               ? InteractiveHolder(
                                                                                   parentController: controller,
                                                                                   message: e,
                                                                                 )
-                                                                              : e.attachments.isEmpty &&
-                                                                                      (e.text != null ||
-                                                                                          e.subject != null)
+                                                                              : e.attachments.isEmpty && (e.text != null || e.subject != null)
                                                                                   ? TextBubble(
                                                                                       parentController: controller,
                                                                                       message: e,
@@ -600,14 +510,10 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                                       : const SizedBox.shrink(),
                                                                           if (message.isFromMe!)
                                                                             Obx(() {
-                                                                              final editStuff = widget
-                                                                                  .cvController.editing
-                                                                                  .firstWhereOrNull((e2) =>
-                                                                                      e2.item1.guid == message.guid! &&
-                                                                                      e2.item2.part == e.part);
+                                                                              final editStuff =
+                                                                                  widget.cvController.editing.firstWhereOrNull((e2) => e2.item1.guid == message.guid! && e2.item2.part == e.part);
                                                                               return AnimatedSize(
-                                                                                  duration:
-                                                                                      const Duration(milliseconds: 250),
+                                                                                  duration: const Duration(milliseconds: 250),
                                                                                   alignment: Alignment.centerRight,
                                                                                   curve: Curves.easeOutBack,
                                                                                   child: editStuff == null
@@ -617,371 +523,144 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                                           child: Container(
                                                                                             decoration: BoxDecoration(
                                                                                               color: !message.isBigEmoji
-                                                                                                  ? context
-                                                                                                      .theme
-                                                                                                      .colorScheme
-                                                                                                      .primary
-                                                                                                      .darkenAmount(message
-                                                                                                              .guid!
-                                                                                                              .startsWith(
-                                                                                                                  "temp")
-                                                                                                          ? 0.2
-                                                                                                          : 0)
-                                                                                                  : context
-                                                                                                      .theme
-                                                                                                      .colorScheme
-                                                                                                      .background,
+                                                                                                  ? context.theme.colorScheme.primary.darkenAmount(message.guid!.startsWith("temp") ? 0.2 : 0)
+                                                                                                  : context.theme.colorScheme.background,
                                                                                             ),
                                                                                             constraints: BoxConstraints(
-                                                                                              maxWidth: ns.width(
-                                                                                                          context) *
-                                                                                                      MessageWidgetController
-                                                                                                          .maxBubbleSizeFactor -
-                                                                                                  40,
+                                                                                              maxWidth: ns.width(context) * MessageWidgetController.maxBubbleSizeFactor - 40,
                                                                                               minHeight: 40,
                                                                                             ),
-                                                                                            padding:
-                                                                                                const EdgeInsets.only(
-                                                                                                        right: 10)
-                                                                                                    .add(
-                                                                                                        const EdgeInsets
-                                                                                                            .all(5)),
+                                                                                            padding: const EdgeInsets.only(right: 10).add(const EdgeInsets.all(5)),
                                                                                             child: Focus(
                                                                                               focusNode: FocusNode(),
                                                                                               onKeyEvent: (_, ev) {
-                                                                                                if (ev
-                                                                                                    is! KeyDownEvent) {
-                                                                                                  if (ev.logicalKey ==
-                                                                                                      LogicalKeyboardKey
-                                                                                                          .tab) {
+                                                                                                if (ev is! KeyDownEvent) {
+                                                                                                  if (ev.logicalKey == LogicalKeyboardKey.tab) {
                                                                                                     // Absorb tab
-                                                                                                    return KeyEventResult
-                                                                                                        .skipRemainingHandlers;
+                                                                                                    return KeyEventResult.skipRemainingHandlers;
                                                                                                   }
-                                                                                                  return KeyEventResult
-                                                                                                      .ignored;
+                                                                                                  return KeyEventResult.ignored;
                                                                                                 }
-                                                                                                if (ev.logicalKey ==
-                                                                                                        LogicalKeyboardKey
-                                                                                                            .enter &&
-                                                                                                    !HardwareKeyboard
-                                                                                                        .instance
-                                                                                                        .isShiftPressed) {
-                                                                                                  completeEdit(
-                                                                                                      editStuff
-                                                                                                          .item3.text,
-                                                                                                      e.part);
-                                                                                                  return KeyEventResult
-                                                                                                      .handled;
+                                                                                                if (ev.logicalKey == LogicalKeyboardKey.enter && !HardwareKeyboard.instance.isShiftPressed) {
+                                                                                                  completeEdit(editStuff.item3.text, e.part);
+                                                                                                  return KeyEventResult.handled;
                                                                                                 }
-                                                                                                if (ev.logicalKey ==
-                                                                                                    LogicalKeyboardKey
-                                                                                                        .escape) {
-                                                                                                  widget.cvController
-                                                                                                      .editing
-                                                                                                      .removeWhere((e2) =>
-                                                                                                          e2.item1.guid ==
-                                                                                                              message
-                                                                                                                  .guid! &&
-                                                                                                          e2.item2.part ==
-                                                                                                              e.part);
-                                                                                                  if (widget
-                                                                                                      .cvController
-                                                                                                      .editing
-                                                                                                      .isEmpty) {
-                                                                                                    widget.cvController
-                                                                                                        .lastFocusedNode
-                                                                                                        .requestFocus();
+                                                                                                if (ev.logicalKey == LogicalKeyboardKey.escape) {
+                                                                                                  widget.cvController.editing
+                                                                                                      .removeWhere((e2) => e2.item1.guid == message.guid! && e2.item2.part == e.part);
+                                                                                                  if (widget.cvController.editing.isEmpty) {
+                                                                                                    widget.cvController.lastFocusedNode.requestFocus();
                                                                                                   } else {
-                                                                                                    widget
-                                                                                                        .cvController
-                                                                                                        .editing
-                                                                                                        .last
-                                                                                                        .item3
-                                                                                                        .focusNode
-                                                                                                        ?.requestFocus();
+                                                                                                    widget.cvController.editing.last.item3.focusNode?.requestFocus();
                                                                                                   }
-                                                                                                  return KeyEventResult
-                                                                                                      .handled;
+                                                                                                  return KeyEventResult.handled;
                                                                                                 }
-                                                                                                if (ev.logicalKey ==
-                                                                                                    LogicalKeyboardKey
-                                                                                                        .tab) {
+                                                                                                if (ev.logicalKey == LogicalKeyboardKey.tab) {
                                                                                                   // Absorb tab
-                                                                                                  return KeyEventResult
-                                                                                                      .skipRemainingHandlers;
+                                                                                                  return KeyEventResult.skipRemainingHandlers;
                                                                                                 }
-                                                                                                return KeyEventResult
-                                                                                                    .ignored;
+                                                                                                return KeyEventResult.ignored;
                                                                                               },
                                                                                               child: TextField(
-                                                                                                textCapitalization:
-                                                                                                    TextCapitalization
-                                                                                                        .sentences,
+                                                                                                textCapitalization: TextCapitalization.sentences,
                                                                                                 autocorrect: true,
-                                                                                                controller:
-                                                                                                    editStuff.item3,
-                                                                                                focusNode: editStuff
-                                                                                                    .item3.focusNode,
-                                                                                                scrollPhysics:
-                                                                                                    const CustomBouncingScrollPhysics(),
-                                                                                                style: context.theme
-                                                                                                    .extension<
-                                                                                                        BubbleText>()!
-                                                                                                    .bubbleText
-                                                                                                    .apply(
-                                                                                                      fontSizeFactor:
-                                                                                                          message.isBigEmoji
-                                                                                                              ? 3
-                                                                                                              : 1,
+                                                                                                controller: editStuff.item3,
+                                                                                                focusNode: editStuff.item3.focusNode,
+                                                                                                scrollPhysics: const CustomBouncingScrollPhysics(),
+                                                                                                style: context.theme.extension<BubbleText>()!.bubbleText.apply(
+                                                                                                      fontSizeFactor: message.isBigEmoji ? 3 : 1,
                                                                                                     ),
-                                                                                                keyboardType:
-                                                                                                    TextInputType
-                                                                                                        .multiline,
+                                                                                                keyboardType: TextInputType.multiline,
                                                                                                 maxLines: 14,
                                                                                                 minLines: 1,
-                                                                                                autofocus:
-                                                                                                    !(kIsDesktop ||
-                                                                                                        kIsWeb),
-                                                                                                enableIMEPersonalizedLearning:
-                                                                                                    !ss
-                                                                                                        .settings
-                                                                                                        .incognitoKeyboard
-                                                                                                        .value,
-                                                                                                textInputAction: ss
-                                                                                                            .settings
-                                                                                                            .sendWithReturn
-                                                                                                            .value &&
-                                                                                                        !kIsWeb &&
-                                                                                                        !kIsDesktop
-                                                                                                    ? TextInputAction
-                                                                                                        .send
-                                                                                                    : TextInputAction
-                                                                                                        .newline,
-                                                                                                cursorColor: context
-                                                                                                    .theme
-                                                                                                    .extension<
-                                                                                                        BubbleText>()!
-                                                                                                    .bubbleText
-                                                                                                    .color,
-                                                                                                cursorHeight: context
-                                                                                                        .theme
-                                                                                                        .extension<
-                                                                                                            BubbleText>()!
-                                                                                                        .bubbleText
-                                                                                                        .fontSize! *
-                                                                                                    1.25 *
-                                                                                                    (message.isBigEmoji
-                                                                                                        ? 3
-                                                                                                        : 1),
-                                                                                                decoration:
-                                                                                                    InputDecoration(
-                                                                                                  contentPadding:
-                                                                                                      EdgeInsets.all(iOS
-                                                                                                          ? 10
-                                                                                                          : 12.5),
+                                                                                                autofocus: !(kIsDesktop || kIsWeb),
+                                                                                                enableIMEPersonalizedLearning: !ss.settings.incognitoKeyboard.value,
+                                                                                                textInputAction: ss.settings.sendWithReturn.value && !kIsWeb && !kIsDesktop
+                                                                                                    ? TextInputAction.send
+                                                                                                    : TextInputAction.newline,
+                                                                                                cursorColor: context.theme.extension<BubbleText>()!.bubbleText.color,
+                                                                                                cursorHeight:
+                                                                                                    context.theme.extension<BubbleText>()!.bubbleText.fontSize! * 1.25 * (message.isBigEmoji ? 3 : 1),
+                                                                                                decoration: InputDecoration(
+                                                                                                  contentPadding: EdgeInsets.all(iOS ? 10 : 12.5),
                                                                                                   isDense: true,
                                                                                                   isCollapsed: true,
-                                                                                                  hintText:
-                                                                                                      "Edited Message",
-                                                                                                  enabledBorder:
-                                                                                                      OutlineInputBorder(
-                                                                                                    borderSide: BorderSide(
-                                                                                                        color: context
-                                                                                                            .theme
-                                                                                                            .colorScheme
-                                                                                                            .outline,
-                                                                                                        width: 1.5),
-                                                                                                    borderRadius:
-                                                                                                        BorderRadius
-                                                                                                            .circular(
-                                                                                                                20),
+                                                                                                  hintText: "Edited Message",
+                                                                                                  enabledBorder: OutlineInputBorder(
+                                                                                                    borderSide: BorderSide(color: context.theme.colorScheme.outline, width: 1.5),
+                                                                                                    borderRadius: BorderRadius.circular(20),
                                                                                                   ),
-                                                                                                  border:
-                                                                                                      OutlineInputBorder(
-                                                                                                    borderSide: BorderSide(
-                                                                                                        color: context
-                                                                                                            .theme
-                                                                                                            .colorScheme
-                                                                                                            .outline,
-                                                                                                        width: 1.5),
-                                                                                                    borderRadius:
-                                                                                                        BorderRadius
-                                                                                                            .circular(
-                                                                                                                20),
+                                                                                                  border: OutlineInputBorder(
+                                                                                                    borderSide: BorderSide(color: context.theme.colorScheme.outline, width: 1.5),
+                                                                                                    borderRadius: BorderRadius.circular(20),
                                                                                                   ),
-                                                                                                  focusedBorder:
-                                                                                                      OutlineInputBorder(
-                                                                                                    borderSide: BorderSide(
-                                                                                                        color: context
-                                                                                                            .theme
-                                                                                                            .colorScheme
-                                                                                                            .outline,
-                                                                                                        width: 1.5),
-                                                                                                    borderRadius:
-                                                                                                        BorderRadius
-                                                                                                            .circular(
-                                                                                                                20),
+                                                                                                  focusedBorder: OutlineInputBorder(
+                                                                                                    borderSide: BorderSide(color: context.theme.colorScheme.outline, width: 1.5),
+                                                                                                    borderRadius: BorderRadius.circular(20),
                                                                                                   ),
-                                                                                                  fillColor: Colors
-                                                                                                      .transparent,
-                                                                                                  hintStyle: context
-                                                                                                      .theme
-                                                                                                      .extension<
-                                                                                                          BubbleText>()!
+                                                                                                  fillColor: Colors.transparent,
+                                                                                                  hintStyle: context.theme
+                                                                                                      .extension<BubbleText>()!
                                                                                                       .bubbleText
-                                                                                                      .copyWith(
-                                                                                                          color: context
-                                                                                                              .theme
-                                                                                                              .colorScheme
-                                                                                                              .outline),
-                                                                                                  prefixIconConstraints:
-                                                                                                      const BoxConstraints(
-                                                                                                          minHeight: 0,
-                                                                                                          minWidth: 40),
-                                                                                                  prefixIcon:
-                                                                                                      IconButton(
-                                                                                                    constraints:
-                                                                                                        const BoxConstraints(
-                                                                                                            maxWidth:
-                                                                                                                27),
-                                                                                                    padding:
-                                                                                                        const EdgeInsets
-                                                                                                            .only(
-                                                                                                            left: 5),
-                                                                                                    visualDensity:
-                                                                                                        VisualDensity
-                                                                                                            .compact,
+                                                                                                      .copyWith(color: context.theme.colorScheme.outline),
+                                                                                                  prefixIconConstraints: const BoxConstraints(minHeight: 0, minWidth: 40),
+                                                                                                  prefixIcon: IconButton(
+                                                                                                    constraints: const BoxConstraints(maxWidth: 27),
+                                                                                                    padding: const EdgeInsets.only(left: 5),
+                                                                                                    visualDensity: VisualDensity.compact,
                                                                                                     icon: Icon(
-                                                                                                      CupertinoIcons
-                                                                                                          .xmark_circle_fill,
-                                                                                                      color: context
-                                                                                                          .theme
-                                                                                                          .colorScheme
-                                                                                                          .outline,
+                                                                                                      CupertinoIcons.xmark_circle_fill,
+                                                                                                      color: context.theme.colorScheme.outline,
                                                                                                       size: 22,
                                                                                                     ),
                                                                                                     onPressed: () {
-                                                                                                      widget
-                                                                                                          .cvController
-                                                                                                          .editing
-                                                                                                          .removeWhere((e2) =>
-                                                                                                              e2.item1.guid ==
-                                                                                                                  message
-                                                                                                                      .guid! &&
-                                                                                                              e2.item2.part ==
-                                                                                                                  e.part);
-                                                                                                      widget
-                                                                                                          .cvController
-                                                                                                          .lastFocusedNode
-                                                                                                          .requestFocus();
+                                                                                                      widget.cvController.editing
+                                                                                                          .removeWhere((e2) => e2.item1.guid == message.guid! && e2.item2.part == e.part);
+                                                                                                      widget.cvController.lastFocusedNode.requestFocus();
                                                                                                     },
                                                                                                     iconSize: 22,
-                                                                                                    style:
-                                                                                                        const ButtonStyle(
-                                                                                                      tapTargetSize:
-                                                                                                          MaterialTapTargetSize
-                                                                                                              .shrinkWrap,
-                                                                                                      visualDensity:
-                                                                                                          VisualDensity
-                                                                                                              .compact,
+                                                                                                    style: const ButtonStyle(
+                                                                                                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                                                                      visualDensity: VisualDensity.compact,
                                                                                                     ),
                                                                                                   ),
-                                                                                                  suffixIconConstraints:
-                                                                                                      const BoxConstraints(
-                                                                                                          minHeight: 0,
-                                                                                                          minWidth: 40),
-                                                                                                  suffixIcon:
-                                                                                                      ValueListenableBuilder(
-                                                                                                    valueListenable:
-                                                                                                        editStuff.item3,
-                                                                                                    builder: (context,
-                                                                                                        value, _) {
+                                                                                                  suffixIconConstraints: const BoxConstraints(minHeight: 0, minWidth: 40),
+                                                                                                  suffixIcon: ValueListenableBuilder(
+                                                                                                    valueListenable: editStuff.item3,
+                                                                                                    builder: (context, value, _) {
                                                                                                       return Padding(
-                                                                                                        padding:
-                                                                                                            const EdgeInsets
-                                                                                                                .all(
-                                                                                                                3.0),
-                                                                                                        child:
-                                                                                                            TextButton(
-                                                                                                          style: TextButton
-                                                                                                              .styleFrom(
-                                                                                                            backgroundColor:
-                                                                                                                Colors
-                                                                                                                    .transparent,
-                                                                                                            shape:
-                                                                                                                const CircleBorder(),
-                                                                                                            padding:
-                                                                                                                const EdgeInsets
-                                                                                                                    .all(
-                                                                                                                    0),
-                                                                                                            maximumSize:
-                                                                                                                const Size(
-                                                                                                                    27,
-                                                                                                                    27),
-                                                                                                            minimumSize:
-                                                                                                                const Size(
-                                                                                                                    27,
-                                                                                                                    27),
-                                                                                                            tapTargetSize:
-                                                                                                                MaterialTapTargetSize
-                                                                                                                    .shrinkWrap,
+                                                                                                        padding: const EdgeInsets.all(3.0),
+                                                                                                        child: TextButton(
+                                                                                                          style: TextButton.styleFrom(
+                                                                                                            backgroundColor: Colors.transparent,
+                                                                                                            shape: const CircleBorder(),
+                                                                                                            padding: const EdgeInsets.all(0),
+                                                                                                            maximumSize: const Size(27, 27),
+                                                                                                            minimumSize: const Size(27, 27),
+                                                                                                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                                                                                           ),
-                                                                                                          child:
-                                                                                                              AnimatedContainer(
-                                                                                                            duration: const Duration(
-                                                                                                                milliseconds:
-                                                                                                                    150),
-                                                                                                            constraints: const BoxConstraints(
-                                                                                                                minHeight:
-                                                                                                                    27,
-                                                                                                                minWidth:
-                                                                                                                    27),
-                                                                                                            decoration:
-                                                                                                                BoxDecoration(
-                                                                                                              shape: iOS
-                                                                                                                  ? BoxShape
-                                                                                                                      .circle
-                                                                                                                  : BoxShape
-                                                                                                                      .rectangle,
+                                                                                                          child: AnimatedContainer(
+                                                                                                            duration: const Duration(milliseconds: 150),
+                                                                                                            constraints: const BoxConstraints(minHeight: 27, minWidth: 27),
+                                                                                                            decoration: BoxDecoration(
+                                                                                                              shape: iOS ? BoxShape.circle : BoxShape.rectangle,
                                                                                                               color: !iOS
                                                                                                                   ? null
                                                                                                                   : editStuff.item3.text.isNotEmpty
                                                                                                                       ? Colors.white
                                                                                                                       : context.theme.colorScheme.outline,
                                                                                                             ),
-                                                                                                            alignment:
-                                                                                                                Alignment
-                                                                                                                    .center,
+                                                                                                            alignment: Alignment.center,
                                                                                                             child: Icon(
-                                                                                                              iOS
-                                                                                                                  ? CupertinoIcons
-                                                                                                                      .arrow_up
-                                                                                                                  : Icons
-                                                                                                                      .send_outlined,
+                                                                                                              iOS ? CupertinoIcons.arrow_up : Icons.send_outlined,
                                                                                                               color: !iOS
-                                                                                                                  ? context
-                                                                                                                      .theme
-                                                                                                                      .extension<
-                                                                                                                          BubbleText>()!
-                                                                                                                      .bubbleText
-                                                                                                                      .color
-                                                                                                                  : context
-                                                                                                                      .theme
-                                                                                                                      .colorScheme
-                                                                                                                      .bubble(context, chat.isIMessage),
-                                                                                                              size: iOS
-                                                                                                                  ? 18
-                                                                                                                  : 26,
+                                                                                                                  ? context.theme.extension<BubbleText>()!.bubbleText.color
+                                                                                                                  : context.theme.colorScheme.bubble(context, chat.isIMessage),
+                                                                                                              size: iOS ? 18 : 26,
                                                                                                             ),
                                                                                                           ),
-                                                                                                          onPressed:
-                                                                                                              () {
-                                                                                                            completeEdit(
-                                                                                                                editStuff
-                                                                                                                    .item3
-                                                                                                                    .text,
-                                                                                                                e.part);
+                                                                                                          onPressed: () {
+                                                                                                            completeEdit(editStuff.item3.text, e.part);
                                                                                                           },
                                                                                                         ),
                                                                                                       );
@@ -989,13 +668,10 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                                                   ),
                                                                                                 ),
                                                                                                 onTap: () {
-                                                                                                  HapticFeedback
-                                                                                                      .selectionClick();
+                                                                                                  HapticFeedback.selectionClick();
                                                                                                 },
-                                                                                                onSubmitted:
-                                                                                                    (String value) {
-                                                                                                  completeEdit(
-                                                                                                      value, e.part);
+                                                                                                onSubmitted: (String value) {
+                                                                                                  completeEdit(value, e.part);
                                                                                                 },
                                                                                               ),
                                                                                             ),
@@ -1009,14 +685,9 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                 ),
                                                               ),
                                                               // show stickers on top
-                                                              if ((messageParts.length == 1
-                                                                      ? stickers
-                                                                      : stickersForPart(e.part))
-                                                                  .isNotEmpty)
+                                                              if ((messageParts.length == 1 ? stickers : stickersForPart(e.part)).isNotEmpty)
                                                                 StickerHolder(
-                                                                  stickerMessages: messageParts.length == 1
-                                                                      ? stickers
-                                                                      : stickersForPart(e.part),
+                                                                  stickerMessages: messageParts.length == 1 ? stickers : stickersForPart(e.part),
                                                                   controller: widget.cvController,
                                                                 ),
                                                               // show reactions on top
@@ -1025,9 +696,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                   top: -14,
                                                                   left: -20,
                                                                   child: ReactionHolder(
-                                                                    reactions: messageParts.length == 1
-                                                                        ? reactions
-                                                                        : reactionsForPart(e.part),
+                                                                    reactions: messageParts.length == 1 ? reactions : reactionsForPart(e.part),
                                                                     message: message,
                                                                   ),
                                                                 ),
@@ -1036,9 +705,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                                   top: -14,
                                                                   right: -20,
                                                                   child: ReactionHolder(
-                                                                    reactions: messageParts.length == 1
-                                                                        ? reactions
-                                                                        : reactionsForPart(e.part),
+                                                                    reactions: messageParts.length == 1 ? reactions : reactionsForPart(e.part),
                                                                     message: message,
                                                                   ),
                                                                 ),
@@ -1048,9 +715,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                                       ),
                                                     // swipe to reply
                                                     if (canSwipeToReply && !message.isGroupEvent && !e.isUnsent)
-                                                      Obx(() => SlideToReply(
-                                                          width: replyOffsets[index].value.abs(),
-                                                          isFromMe: message.isFromMe!)),
+                                                      Obx(() => SlideToReply(width: replyOffsets[index].value.abs(), isFromMe: message.isFromMe!)),
                                                   ].conditionalReverse(message.isFromMe!),
                                                 ),
                                               ),
@@ -1062,13 +727,8 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                               ),
                               // message properties (replies, edits, effect)
                               Padding(
-                                padding: showAvatar || ss.settings.alwaysShowAvatars.value
-                                    ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value)
-                                    : EdgeInsets.zero,
-                                child: MessageProperties(
-                                    globalKey: keys.length > index ? keys[index] : null,
-                                    parentController: controller,
-                                    part: e),
+                                padding: showAvatar || ss.settings.alwaysShowAvatars.value ? EdgeInsets.only(left: 35.0 * ss.settings.avatarScale.value) : EdgeInsets.zero,
+                                child: MessageProperties(globalKey: keys.length > index ? keys[index] : null, parentController: controller, part: e),
                               ),
                             ],
                           ),
@@ -1078,8 +738,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                   ],
                 ),
               ),
-              if (message.isFromMe! && !message.isGroupEvent)
-                SelectCheckbox(message: message, controller: widget.cvController),
+              if (message.isFromMe! && !message.isGroupEvent) SelectCheckbox(message: message, controller: widget.cvController),
               Obx(() {
                 if (message.error > 0 || message.guid!.startsWith("error-")) {
                   int errorCode = message.error;
@@ -1105,9 +764,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                             content: Text("Error ($errorCode): $errorText", style: context.theme.textTheme.bodyLarge),
                             actions: <Widget>[
                               TextButton(
-                                child: Text("Retry",
-                                    style: context.theme.textTheme.bodyLarge!
-                                        .copyWith(color: Get.context!.theme.colorScheme.primary)),
+                                child: Text("Retry", style: context.theme.textTheme.bodyLarge!.copyWith(color: Get.context!.theme.colorScheme.primary)),
                                 onPressed: () async {
                                   // Remove the original message and notification
                                   Navigator.of(context).pop();
@@ -1139,9 +796,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                 },
                               ),
                               TextButton(
-                                child: Text("Remove",
-                                    style: context.theme.textTheme.bodyLarge!
-                                        .copyWith(color: Get.context!.theme.colorScheme.primary)),
+                                child: Text("Remove", style: context.theme.textTheme.bodyLarge!.copyWith(color: Get.context!.theme.colorScheme.primary)),
                                 onPressed: () async {
                                   Navigator.of(context).pop();
                                   // Delete the message from the DB
@@ -1156,9 +811,7 @@ class _MessageHolderState extends CustomState<MessageHolder, void, MessageWidget
                                 },
                               ),
                               TextButton(
-                                child: Text("Cancel",
-                                    style: context.theme.textTheme.bodyLarge!
-                                        .copyWith(color: Get.context!.theme.colorScheme.primary)),
+                                child: Text("Cancel", style: context.theme.textTheme.bodyLarge!.copyWith(color: Get.context!.theme.colorScheme.primary)),
                                 onPressed: () async {
                                   Navigator.of(context).pop();
                                   await notif.clearFailedToSend(chat.id!);
