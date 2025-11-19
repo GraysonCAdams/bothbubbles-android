@@ -1027,6 +1027,7 @@ class _MessagePopupState extends OptimizedState<MessagePopup> with SingleTickerP
                                 backgroundColor: context.theme.colorScheme.properSurface,
                                 content: content,
                               ),
+                        navigatorKey: ns.key,
                         name: 'Popup Menu');
                   },
                   title: 'More...',

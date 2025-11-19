@@ -26,6 +26,7 @@ import local_auth_darwin
 import local_notifier
 import macos_window_utils
 import maps_launcher
+import media_kit_libs_macos_video
 import media_kit_video
 import mobile_scanner
 import network_info_plus
@@ -71,6 +72,7 @@ func RegisterGeneratedPlugins(registry: FlutterPluginRegistry) {
   LocalNotifierPlugin.register(with: registry.registrar(forPlugin: "LocalNotifierPlugin"))
   MacOSWindowUtilsPlugin.register(with: registry.registrar(forPlugin: "MacOSWindowUtilsPlugin"))
   MapsLauncherPlugin.register(with: registry.registrar(forPlugin: "MapsLauncherPlugin"))
+  MediaKitLibsMacosVideoPlugin.register(with: registry.registrar(forPlugin: "MediaKitLibsMacosVideoPlugin"))
   MediaKitVideoPlugin.register(with: registry.registrar(forPlugin: "MediaKitVideoPlugin"))
   MobileScannerPlugin.register(with: registry.registrar(forPlugin: "MobileScannerPlugin"))
   NetworkInfoPlusPlugin.register(with: registry.registrar(forPlugin: "NetworkInfoPlusPlugin"))
