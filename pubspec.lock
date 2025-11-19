@@ -1010,12 +1010,13 @@ packages:
     source: hosted
     version: "1.0.3"
   flutter_map:
-    dependency: "direct main"
+    dependency: "direct overridden"
     description:
-      name: flutter_map
-      sha256: "391e7dc95cc3f5190748210a69d4cfeb5d8f84dcdfa9c3235d0a9d7742ccb3f8"
-      url: "https://pub.dev"
-    source: hosted
+      path: "."
+      ref: "67cca68e9f6db59649af56b6454e5f58efcedbbe"
+      resolved-ref: "67cca68e9f6db59649af56b6454e5f58efcedbbe"
+      url: "https://github.com/BlueBubblesApp/flutter_map.git"
+    source: git
     version: "8.2.2"
   flutter_map_marker_popup:
     dependency: "direct main"

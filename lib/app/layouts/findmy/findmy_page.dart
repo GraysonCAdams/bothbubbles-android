@@ -9,6 +9,7 @@ import 'package:bluebubbles/app/layouts/findmy/findmy_location_clipper.dart';
 import 'package:bluebubbles/app/layouts/findmy/findmy_pin_clipper.dart';
 import 'package:bluebubbles/app/wrappers/scrollbar_wrapper.dart';
 import 'package:bluebubbles/app/wrappers/theme_switcher.dart';
+import 'package:bluebubbles/app/wrappers/trackpad_bug_wrapper.dart';
 import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/app/layouts/settings/widgets/settings_widgets.dart';
 import 'package:bluebubbles/database/models.dart';
@@ -1570,7 +1571,8 @@ class _FindMyPageState extends OptimizedState<FindMyPage> with SingleTickerProvi
   }
 
   Widget buildMap() {
-    return FlutterMap(
+    return TrackpadBugWrapper(builder: (context, bugDetected) {
+      return FlutterMap(
       mapController: mapController,
       options: MapOptions(
         initialZoom: 5.0,
@@ -1580,8 +1582,9 @@ class _FindMyPageState extends OptimizedState<FindMyPage> with SingleTickerProvi
         onTap: (_, __) => popupController.hideAllPopups(),
         // Hide popup when the map is tapped.
         keepAlive: true,
-        interactionOptions: const InteractionOptions(
+        interactionOptions: InteractionOptions(
           flags: InteractiveFlag.all & ~InteractiveFlag.rotate,
+          forceOnlySinglePinchGesture: bugDetected,
         ),
         onMapReady: () {
           if (!completer.isCompleted) {
@@ -1665,6 +1668,6 @@ class _FindMyPageState extends OptimizedState<FindMyPage> with SingleTickerProvi
           ],
         ),
       ],
-    );
+    );});
   }
 }
