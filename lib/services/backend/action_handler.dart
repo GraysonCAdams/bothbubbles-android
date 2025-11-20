@@ -348,9 +348,7 @@ class ActionHandler extends GetxService {
     c = m.isParticipantEvent ? await handleNewOrUpdatedChat(c) : kIsWeb ? c : (Chat.findOne(guid: c.guid) ?? await handleNewOrUpdatedChat(c));
     // Get the message handle
     m.handle = c.handles.firstWhereOrNull((e) => e.originalROWID == m.handleId) ?? Handle.findOne(originalROWID: m.handleId);
-
-    await c.addMessage(m);
-
+    
     // Display notification if needed and save everything to DB
     bool shouldNotify = shouldNotifyForNewMessageGuid(m.guid!);
     if (!shouldNotify) {
@@ -372,6 +370,7 @@ class ActionHandler extends GetxService {
     if ((!ls.isAlive || ss.settings.endpointUnifiedPush.value != "" || (cm.activeChat == null && Get.rawRoute?.settings.name != "/")) && shouldNotify) {
       await MessageHelper.handleNotification(m, c);
     }
+    await c.addMessage(m);
   }
 
   Future<void> handleUpdatedMessage(Chat c, Message m, String? tempGuid, {bool checkExisting = true}) async {
