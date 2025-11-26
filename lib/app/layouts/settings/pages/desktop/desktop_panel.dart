@@ -222,7 +222,7 @@ class _DesktopPanelState extends OptimizedState<DesktopPanel> {
                           subtitle: ss.settings.desktopNotificationSoundPath.value != null
                               ? basename(ss.settings.desktopNotificationSoundPath.value!)
                                   .substring("notification-".length)
-                              : "Adds a sound to be played with notifications. This is separate from the system notification settings.${Platform.isWindows ? "This will silence the system notification sound." : ""}",
+                              : "Adds a sound to be played with notifications. This is separate from the system notification settings.${Platform.isWindows ? " This will silence the system notification sound." : ""}",
                           onTap: () async {
                             FilePickerResult? result =
                                 await FilePicker.platform.pickFiles(type: FileType.audio, withData: true);
