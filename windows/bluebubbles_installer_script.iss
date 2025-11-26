@@ -59,6 +59,23 @@ Source: "{#ProjectRoot}\build\windows\x64\runner\Release\*.dll"; DestDir: "{app}
 Source: "{#ProjectRoot}\build\windows\x64\runner\Release\data\*"; DestDir: "{app}\data"; Flags: ignoreversion recursesubdirs createallsubdirs
 ; NOTE: Don't use "Flags: ignoreversion" on any shared system files
 
+; Having old versions of these causes crashes for some users
+[InstallDelete]
+Type: files; Name: "{app}\api-ms-win-*.dll"
+Type: files; Name: "{app}\concrt140.dll"
+Type: files; Name: "{app}\libc++.dll"
+Type: files; Name: "{app}\media_kit_native_event_loop.dll"
+Type: files; Name: "{app}\msvcp140*.dll"
+Type: files; Name: "{app}\screen_brightness_windows_plugin.dll"
+Type: files; Name: "{app}\ucrtbase.dll"
+Type: files; Name: "{app}\ucrtbased.dll"
+Type: files; Name: "{app}\vccorlib140.dll"
+Type: files; Name: "{app}\vccorlib140d.dll"
+Type: files; Name: "{app}\vcruntime140.dll"
+Type: files; Name: "{app}\vcruntime140_1.dll"
+Type: files; Name: "{app}\vcruntime140_1d.dll"
+Type: files; Name: "{app}\vcruntime140d.dll"
+
 [Icons]
 Name: "{autoprograms}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
