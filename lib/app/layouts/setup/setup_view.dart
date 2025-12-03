@@ -6,6 +6,7 @@ import 'package:bluebubbles/app/layouts/setup/pages/sync/server_credentials.dart
 import 'package:bluebubbles/app/layouts/setup/pages/contacts/request_contacts.dart';
 import 'package:bluebubbles/app/layouts/setup/pages/setup_checks/mac_setup_check.dart';
 import 'package:bluebubbles/app/layouts/setup/pages/sync/sync_progress.dart';
+import 'package:bluebubbles/app/layouts/setup/pages/sms/sms_sync_progress.dart';
 import 'package:bluebubbles/app/layouts/setup/pages/welcome/welcome_page.dart';
 import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/services/services.dart';
@@ -15,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
 import 'package:get/get.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:universal_io/io.dart';
 
 class SetupViewController extends StatefulController {
   final pageController = PageController(initialPage: 0);
@@ -22,6 +24,7 @@ class SetupViewController extends StatefulController {
   int numberToDownload = 25;
   bool skipEmptyChats = true;
   bool saveToDownloads = false;
+  int syncAfterTimestamp = 0;  // 0 means sync all messages
   String error = "";
   bool obscurePass = true;
 
@@ -111,19 +114,30 @@ class SetupHeader extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            children: [
-              Hero(
-                tag: "setup-icon",
-                child: Image.asset("assets/icon/icon.png", width: 30, fit: BoxFit.contain)
+          // Use Flexible to prevent overflow, and FittedBox to scale down if needed
+          Flexible(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Hero(
+                    tag: "setup-icon",
+                    child: Image.asset("assets/icon/icon.png", width: 30, fit: BoxFit.contain)
+                  ),
+                  const SizedBox(width: 10),
+                  Text(
+                    "BlueBubbles",
+                    style: context.theme.textTheme.bodyLarge!.apply(fontWeightDelta: 2, fontSizeFactor: 1.35),
+                    maxLines: 1,
+                    overflow: TextOverflow.visible,
+                  ),
+                ],
               ),
-              const SizedBox(width: 10),
-              Text(
-                "BlueBubbles",
-                style: context.theme.textTheme.bodyLarge!.apply(fontWeightDelta: 2, fontSizeFactor: 1.35),
-              ),
-            ],
+            ),
           ),
+          const SizedBox(width: 10),
           Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(25),
@@ -160,15 +174,33 @@ class _PageNumberState extends CustomState<PageNumber, int, SetupViewController>
 
   @override
   Widget build(BuildContext context) {
+    // Calculate total pages and display page based on platform and mode
+    String totalPages;
+    int displayPage = controller.currentPage;
+
+    if (kIsWeb) {
+      totalPages = "4";
+    } else if (kIsDesktop) {
+      totalPages = "5";
+    } else if (Platform.isAndroid && ss.settings.smsOnlyMode.value) {
+      totalPages = "5"; // SMS-only flow: Welcome, Contacts, Battery, MacSetupCheck, SmsSyncProgress
+      // If on SmsSyncProgress page (index 7, displayed as 8), show as page 5
+      if (controller.currentPage == 8) {
+        displayPage = 5;
+      }
+    } else {
+      totalPages = "7";
+    }
+
     return RichText(
       text: TextSpan(
         children: [
           TextSpan(
-            text: "${controller.currentPage}",
+            text: "$displayPage",
             style: context.theme.textTheme.bodyLarge!.copyWith(color: Colors.white, fontWeight: FontWeight.bold)
           ),
           TextSpan(
-            text: " of ${kIsWeb ? "4" : kIsDesktop ? "5" : "7"}",
+            text: " of $totalPages",
             style: context.theme.textTheme.bodyLarge!.copyWith(color: Colors.white38, fontWeight: FontWeight.bold)
           ),
         ],
@@ -219,7 +251,8 @@ class SetupPages extends StatelessWidget {
           if (!kIsWeb)
             SyncSettings(),
           SyncProgress(),
-          //ThemeSelector(),
+          // SMS-only sync progress page (Android only)
+          if (!kIsWeb && !kIsDesktop && Platform.isAndroid) SmsSyncProgress(),
         ],
       ),
     );

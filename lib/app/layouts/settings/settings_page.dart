@@ -19,6 +19,7 @@ import 'package:bluebubbles/app/layouts/settings/pages/advanced/private_api_pane
 import 'package:bluebubbles/app/layouts/settings/pages/advanced/redacted_mode_panel.dart';
 import 'package:bluebubbles/app/layouts/settings/pages/server/server_management_panel.dart';
 import 'package:bluebubbles/app/layouts/settings/pages/scheduling/scheduled_messages_panel.dart';
+import 'package:bluebubbles/app/layouts/settings/pages/sms/sms_panel.dart';
 import 'package:bluebubbles/app/layouts/settings/widgets/settings_widgets.dart';
 import 'package:bluebubbles/app/layouts/settings/pages/theming/theming_panel.dart';
 import 'package:bluebubbles/app/layouts/settings/pages/misc/troubleshoot_panel.dart';
@@ -141,174 +142,176 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                                     ),
                                   ],
                                 ),
-                              if (!kIsWeb)
+                              // Only show server section when not in SMS-only mode
+                              if (!kIsWeb && !ss.settings.smsOnlyMode.value)
                                 SettingsHeader(
                                     iosSubtitle: iosSubtitle,
                                     materialSubtitle: materialSubtitle,
                                     text: "Server & Message Management"),
-                              SettingsSection(
-                                backgroundColor: tileColor,
-                                children: [
-                                  Obx(() {
-                                    String? subtitle;
-                                    switch (socket.state.value) {
-                                      case SocketState.connected:
-                                        subtitle = "Connected";
-                                        break;
-                                      case SocketState.disconnected:
-                                        subtitle = "Disconnected";
-                                        break;
-                                      case SocketState.error:
-                                        subtitle = "Error";
-                                        break;
-                                      case SocketState.connecting:
-                                        subtitle = "Connecting";
-                                        break;
-                                      default:
-                                        subtitle = "Error";
-                                        break;
-                                    }
+                              if (!ss.settings.smsOnlyMode.value)
+                                SettingsSection(
+                                  backgroundColor: tileColor,
+                                  children: [
+                                    Obx(() {
+                                      String? subtitle;
+                                      switch (socket.state.value) {
+                                        case SocketState.connected:
+                                          subtitle = "Connected";
+                                          break;
+                                        case SocketState.disconnected:
+                                          subtitle = "Disconnected";
+                                          break;
+                                        case SocketState.error:
+                                          subtitle = "Error";
+                                          break;
+                                        case SocketState.connecting:
+                                          subtitle = "Connecting";
+                                          break;
+                                        default:
+                                          subtitle = "Error";
+                                          break;
+                                      }
 
-                                    return SettingsTile(
-                                      backgroundColor: tileColor,
-                                      title: "Connection & Server",
-                                      onTap: () async {
-                                        ns.pushAndRemoveSettingsUntil(
-                                          context,
-                                          ServerManagementPanel(),
-                                          (route) => route.isFirst,
-                                        );
-                                      },
-                                      onLongPress: () {
-                                        Clipboard.setData(
-                                            ClipboardData(text: http.origin));
-                                        if (!Platform.isAndroid ||
-                                            (fs.androidInfo?.version.sdkInt ??
-                                                    0) <
-                                                33) {
-                                          showSnackbar("Copied",
-                                              "Server address copied to clipboard!");
-                                        }
-                                      },
-                                      leading: Column(
-                                        mainAxisAlignment:
-                                            MainAxisAlignment.center,
-                                        children: [
-                                          Material(
-                                            shape: samsung
-                                                ? SquircleBorder(
-                                                    side: BorderSide(
-                                                        color:
-                                                            getIndicatorColor(
-                                                                socket.state
-                                                                    .value),
-                                                        width: 3.0),
-                                                  )
-                                                : null,
-                                            color: ss.settings.skin.value !=
-                                                    Skins.Material
-                                                ? getIndicatorColor(
-                                                    socket.state.value)
-                                                : Colors.transparent,
-                                            borderRadius: iOS
-                                                ? BorderRadius.circular(6)
-                                                : null,
-                                            child: SizedBox(
-                                              width: 30,
-                                              height: 30,
-                                              child: Stack(
-                                                  alignment: Alignment.center,
-                                                  children: [
-                                                    Icon(
-                                                      iOS
-                                                          ? CupertinoIcons
-                                                              .antenna_radiowaves_left_right
-                                                          : Icons.router,
-                                                      color: ss.settings.skin
-                                                                  .value !=
-                                                              Skins.Material
-                                                          ? Colors.white
-                                                          : Colors.grey,
-                                                      size: ss.settings.skin
-                                                                  .value !=
-                                                              Skins.Material
-                                                          ? 21
-                                                          : 28,
-                                                    ),
-                                                    if (material)
-                                                      Positioned.fill(
-                                                        child: Align(
-                                                            alignment: Alignment
-                                                                .bottomRight,
-                                                            child:
-                                                                getIndicatorIcon(
-                                                                    socket.state
-                                                                        .value,
-                                                                    size: 12,
-                                                                    showAlpha:
-                                                                        false)),
+                                      return SettingsTile(
+                                        backgroundColor: tileColor,
+                                        title: "Connection & Server",
+                                        onTap: () async {
+                                          ns.pushAndRemoveSettingsUntil(
+                                            context,
+                                            ServerManagementPanel(),
+                                            (route) => route.isFirst,
+                                          );
+                                        },
+                                        onLongPress: () {
+                                          Clipboard.setData(
+                                              ClipboardData(text: http.origin));
+                                          if (!Platform.isAndroid ||
+                                              (fs.androidInfo?.version.sdkInt ??
+                                                      0) <
+                                                  33) {
+                                            showSnackbar("Copied",
+                                                "Server address copied to clipboard!");
+                                          }
+                                        },
+                                        leading: Column(
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
+                                          children: [
+                                            Material(
+                                              shape: samsung
+                                                  ? SquircleBorder(
+                                                      side: BorderSide(
+                                                          color:
+                                                              getIndicatorColor(
+                                                                  socket.state
+                                                                      .value),
+                                                          width: 3.0),
+                                                    )
+                                                  : null,
+                                              color: ss.settings.skin.value !=
+                                                      Skins.Material
+                                                  ? getIndicatorColor(
+                                                      socket.state.value)
+                                                  : Colors.transparent,
+                                              borderRadius: iOS
+                                                  ? BorderRadius.circular(6)
+                                                  : null,
+                                              child: SizedBox(
+                                                width: 30,
+                                                height: 30,
+                                                child: Stack(
+                                                    alignment: Alignment.center,
+                                                    children: [
+                                                      Icon(
+                                                        iOS
+                                                            ? CupertinoIcons
+                                                                .antenna_radiowaves_left_right
+                                                            : Icons.router,
+                                                        color: ss.settings.skin
+                                                                    .value !=
+                                                                Skins.Material
+                                                            ? Colors.white
+                                                            : Colors.grey,
+                                                        size: ss.settings.skin
+                                                                    .value !=
+                                                                Skins.Material
+                                                            ? 21
+                                                            : 28,
                                                       ),
-                                                  ]),
+                                                      if (material)
+                                                        Positioned.fill(
+                                                          child: Align(
+                                                              alignment: Alignment
+                                                                  .bottomRight,
+                                                              child:
+                                                                  getIndicatorIcon(
+                                                                      socket.state
+                                                                          .value,
+                                                                      size: 12,
+                                                                      showAlpha:
+                                                                          false)),
+                                                        ),
+                                                    ]),
+                                              ),
                                             ),
-                                          ),
-                                        ],
+                                          ],
+                                        ),
+                                        trailing: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              subtitle,
+                                              style: context.theme.textTheme.bodyMedium!.apply(color: context.theme.colorScheme.outline.withOpacity(0.85)),
+                                            ),
+                                            const SizedBox(width: 5),
+                                            const NextButton(),
+                                          ]
+                                        )
+                                      );
+                                    }),
+                                    if (ss.serverDetailsSync().item4 >= 205)
+                                      const SettingsDivider(),
+                                    if (ss.serverDetailsSync().item4 >= 205)
+                                      SettingsTile(
+                                        backgroundColor: tileColor,
+                                        title: "Scheduled Messages",
+                                        onTap: () {
+                                          ns.pushAndRemoveSettingsUntil(
+                                            context,
+                                            ScheduledMessagesPanel(),
+                                            (route) => route.isFirst,
+                                          );
+                                        },
+                                        trailing: const NextButton(),
+                                        leading: const SettingsLeadingIcon(
+                                          iosIcon: CupertinoIcons.calendar,
+                                          materialIcon:
+                                              Icons.schedule_send_outlined,
+                                          containerColor: Colors.redAccent,
+                                        ),
                                       ),
-                                      trailing: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Text(
-                                            subtitle,
-                                            style: context.theme.textTheme.bodyMedium!.apply(color: context.theme.colorScheme.outline.withOpacity(0.85)),
-                                          ),
-                                          const SizedBox(width: 5),
-                                          const NextButton(),
-                                        ]
-                                      )
-                                    );
-                                  }),
-                                  if (ss.serverDetailsSync().item4 >= 205)
-                                    const SettingsDivider(),
-                                  if (ss.serverDetailsSync().item4 >= 205)
-                                    SettingsTile(
-                                      backgroundColor: tileColor,
-                                      title: "Scheduled Messages",
-                                      onTap: () {
-                                        ns.pushAndRemoveSettingsUntil(
-                                          context,
-                                          ScheduledMessagesPanel(),
-                                          (route) => route.isFirst,
-                                        );
-                                      },
-                                      trailing: const NextButton(),
-                                      leading: const SettingsLeadingIcon(
-                                        iosIcon: CupertinoIcons.calendar,
-                                        materialIcon:
-                                            Icons.schedule_send_outlined,
-                                        containerColor: Colors.redAccent,
+                                    if (Platform.isAndroid)
+                                      const SettingsDivider(),
+                                    if (Platform.isAndroid)
+                                      SettingsTile(
+                                        backgroundColor: tileColor,
+                                        title: "Message Reminders",
+                                        onTap: () {
+                                          ns.pushAndRemoveSettingsUntil(
+                                            context,
+                                            MessageRemindersPanel(),
+                                            (route) => route.isFirst,
+                                          );
+                                        },
+                                        trailing: const NextButton(),
+                                        leading: const SettingsLeadingIcon(
+                                          iosIcon: CupertinoIcons.alarm_fill,
+                                          materialIcon: Icons.alarm,
+                                          containerColor: Colors.blueAccent,
+                                        ),
                                       ),
-                                    ),
-                                  if (Platform.isAndroid)
-                                    const SettingsDivider(),
-                                  if (Platform.isAndroid)
-                                    SettingsTile(
-                                      backgroundColor: tileColor,
-                                      title: "Message Reminders",
-                                      onTap: () {
-                                        ns.pushAndRemoveSettingsUntil(
-                                          context,
-                                          MessageRemindersPanel(),
-                                          (route) => route.isFirst,
-                                        );
-                                      },
-                                      trailing: const NextButton(),
-                                      leading: const SettingsLeadingIcon(
-                                        iosIcon: CupertinoIcons.alarm_fill,
-                                        materialIcon: Icons.alarm,
-                                        containerColor: Colors.blueAccent,
-                                      ),
-                                    ),
-                                ],
-                              ),
+                                  ],
+                                ),
                               SettingsHeader(
                                   iosSubtitle: iosSubtitle,
                                   materialSubtitle: materialSubtitle,
@@ -424,6 +427,29 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                                     trailing: const NextButton(),
                                   ),
                                   const SettingsDivider(),
+                                  if (Platform.isAndroid)
+                                    Obx(() => SettingsTile(
+                                      backgroundColor: tileColor,
+                                      title: "SMS/MMS Settings",
+                                      subtitle: sms.isDefaultSmsApp.value
+                                          ? "Default SMS app"
+                                          : "Not set as default",
+                                      onTap: () {
+                                        ns.pushAndRemoveSettingsUntil(
+                                          context,
+                                          SmsPanel(),
+                                          (route) => route.isFirst,
+                                        );
+                                      },
+                                      leading: SettingsLeadingIcon(
+                                        iosIcon: CupertinoIcons.bubble_left_bubble_right_fill,
+                                        materialIcon: Icons.textsms,
+                                        containerColor: sms.isDefaultSmsApp.value ? Colors.green : Colors.orange,
+                                      ),
+                                      trailing: const NextButton(),
+                                    )),
+                                  if (Platform.isAndroid)
+                                    const SettingsDivider(),
                                   if (kIsDesktop)
                                     SettingsTile(
                                       backgroundColor: tileColor,
@@ -468,42 +494,45 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                               SettingsSection(
                                 backgroundColor: tileColor,
                                 children: [
-                                  Obx(() => SettingsTile(
-                                        backgroundColor: tileColor,
-                                        title: "Private API Features",
-                                        trailing: Row(
-                                          mainAxisSize: MainAxisSize.min,
-                                          children: [
-                                            Text(
-                                              ss.settings.enablePrivateAPI.value ? ss.settings.serverPrivateAPI.value == false ? "Not Set Up" : "Enabled" : "Disabled",
-                                              style: context.theme.textTheme.bodyMedium!.apply(color: context.theme.colorScheme.outline.withOpacity(0.85)),
-                                            ),
-                                            const SizedBox(width: 5),
-                                            const NextButton(),
-                                          ]
-                                        ),
-                                        onTap: () async {
-                                          ns.pushAndRemoveSettingsUntil(
-                                            context,
-                                            PrivateAPIPanel(),
-                                            (route) => route.isFirst,
-                                          );
-                                        },
-                                        leading: SettingsLeadingIcon(
-                                          iosIcon: CupertinoIcons
-                                              .exclamationmark_shield_fill,
-                                          materialIcon: Icons.gpp_maybe,
-                                          containerColor:
-                                              ss.settings.enablePrivateAPI.value
-                                                  ? ss.settings.serverPrivateAPI
-                                                              .value ==
-                                                          false
-                                                      ? Colors.redAccent
-                                                      : Colors.green
-                                                  : Colors.amber,
-                                        ),
-                                      )),
-                                  const SettingsDivider(),
+                                  // Hide Private API when in SMS-only mode
+                                  if (!ss.settings.smsOnlyMode.value)
+                                    Obx(() => SettingsTile(
+                                          backgroundColor: tileColor,
+                                          title: "Private API Features",
+                                          trailing: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Text(
+                                                ss.settings.enablePrivateAPI.value ? ss.settings.serverPrivateAPI.value == false ? "Not Set Up" : "Enabled" : "Disabled",
+                                                style: context.theme.textTheme.bodyMedium!.apply(color: context.theme.colorScheme.outline.withOpacity(0.85)),
+                                              ),
+                                              const SizedBox(width: 5),
+                                              const NextButton(),
+                                            ]
+                                          ),
+                                          onTap: () async {
+                                            ns.pushAndRemoveSettingsUntil(
+                                              context,
+                                              PrivateAPIPanel(),
+                                              (route) => route.isFirst,
+                                            );
+                                          },
+                                          leading: SettingsLeadingIcon(
+                                            iosIcon: CupertinoIcons
+                                                .exclamationmark_shield_fill,
+                                            materialIcon: Icons.gpp_maybe,
+                                            containerColor:
+                                                ss.settings.enablePrivateAPI.value
+                                                    ? ss.settings.serverPrivateAPI
+                                                                .value ==
+                                                            false
+                                                        ? Colors.redAccent
+                                                        : Colors.green
+                                                    : Colors.amber,
+                                          ),
+                                        )),
+                                  if (!ss.settings.smsOnlyMode.value)
+                                    const SettingsDivider(),
                                   Obx(() => SettingsTile(
                                         backgroundColor: tileColor,
                                         title: "Redacted Mode",
@@ -616,8 +645,10 @@ class _SettingsPageState extends OptimizedState<SettingsPage> {
                                       subtitle:
                                           "Backup and restore all app settings and custom themes",
                                     ),
-                                    const SettingsDivider(),
-                                    if (!kIsWeb && !kIsDesktop)
+                                    // Hide Export Contacts when in SMS-only mode (requires server)
+                                    if (!kIsWeb && !kIsDesktop && !ss.settings.smsOnlyMode.value)
+                                      const SettingsDivider(),
+                                    if (!kIsWeb && !kIsDesktop && !ss.settings.smsOnlyMode.value)
                                       SettingsTile(
                                         backgroundColor: tileColor,
                                         onTap: () async {

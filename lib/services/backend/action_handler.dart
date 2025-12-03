@@ -15,6 +15,18 @@ import 'package:universal_io/io.dart';
 
 ActionHandler ah = Get.isRegistered<ActionHandler>() ? Get.find<ActionHandler>() : Get.put(ActionHandler());
 
+/// Method for sending a message
+enum SendMethod {
+  /// Send via iMessage through the Mac server
+  iMessage,
+  /// Send SMS through the Mac server's text forwarding
+  serverSms,
+  /// Send SMS directly via Android
+  localSms,
+  /// Send MMS directly via Android
+  localMms,
+}
+
 class ActionHandler extends GetxService {
   final RxList<Tuple2<String, RxDouble>> attachmentProgress = <Tuple2<String, RxDouble>>[].obs;
   final List<String> outOfOrderTempGuids = [];
@@ -144,8 +156,154 @@ class ActionHandler extends GetxService {
     }
   }
 
+  /// Determine the appropriate method for sending a message
+  /// Priority: iMessage > Server SMS > Local SMS/MMS
+  Future<SendMethod> determineSendMethod(Chat chat, Message message) async {
+    // 1. If this is explicitly a local SMS-only chat, use local SMS
+    if (chat.isLocalSmsOnly) {
+      return message.hasAttachments ? SendMethod.localMms : SendMethod.localSms;
+    }
+
+    // 2. Check if we're on Android and SMS is enabled
+    final isAndroid = !kIsWeb && Platform.isAndroid;
+    final smsEnabled = isAndroid && sms.smsEnabled.value;
+
+    // 3. Check if server is connected
+    if (socket.state.value != SocketState.connected) {
+      if (smsEnabled) {
+        Logger.info("Server not connected, routing to local SMS", tag: "SendMethod");
+        return message.hasAttachments ? SendMethod.localMms : SendMethod.localSms;
+      }
+      // Can't send - no server and SMS not enabled
+      // Let the normal flow handle the error
+      return SendMethod.iMessage;
+    }
+
+    // 4. If chat is iMessage, use iMessage
+    if (chat.isIMessage) {
+      return SendMethod.iMessage;
+    }
+
+    // 5. If chat is text forwarding (server SMS), use server SMS
+    if (chat.isTextForwarding) {
+      return SendMethod.serverSms;
+    }
+
+    // 6. Default to iMessage if server is connected
+    return SendMethod.iMessage;
+  }
+
+  /// Send a message via local SMS (Android only)
+  Future<void> sendViaSms(Chat c, Message m) async {
+    if (!Platform.isAndroid) {
+      throw Exception("SMS sending is only supported on Android");
+    }
+
+    final address = c.handles.firstOrNull?.address;
+    if (address == null) {
+      throw Exception("No address found for chat");
+    }
+
+    // Send via SMS service
+    final result = await sms.sendSms(
+      address: address,
+      text: m.text ?? '',
+      tempGuid: m.guid,
+    );
+
+    if (!result.success) {
+      throw Exception(result.error ?? "Failed to send SMS");
+    }
+
+    // Update message metadata
+    m.metadata = {
+      ...?m.metadata,
+      'smsType': 'sms',
+    };
+
+    // Write to Android content provider
+    await sms.writeSmsToProvider(
+      address: address,
+      body: m.text ?? '',
+    );
+
+    Logger.info("SMS sent successfully to $address", tag: "SMS");
+  }
+
+  /// Send a message via local MMS (Android only)
+  Future<void> sendViaMms(Chat c, Message m) async {
+    if (!Platform.isAndroid) {
+      throw Exception("MMS sending is only supported on Android");
+    }
+
+    final addresses = c.handles.map((h) => h.address).toList();
+    if (addresses.isEmpty) {
+      throw Exception("No addresses found for chat");
+    }
+
+    // Convert attachments to MMS format
+    final mmsAttachments = m.attachments.whereNotNull().map((a) => MmsAttachment(
+      path: a.path,
+      mimeType: a.mimeType ?? 'application/octet-stream',
+      name: a.transferName,
+    )).toList();
+
+    // Send via SMS service
+    final result = await sms.sendMms(
+      addresses: addresses,
+      text: m.text,
+      subject: m.subject,
+      attachments: mmsAttachments,
+      tempGuid: m.guid,
+    );
+
+    if (!result.success) {
+      throw Exception(result.error ?? "Failed to send MMS");
+    }
+
+    // Update message metadata
+    m.metadata = {
+      ...?m.metadata,
+      'smsType': 'mms',
+    };
+
+    Logger.info("MMS sent successfully to ${addresses.join(', ')}", tag: "SMS");
+  }
+
   Future<void> sendMessage(Chat c, Message m, Message? selected, String? r) async {
     final completer = Completer<void>();
+
+    // Determine send method for non-tapback messages
+    if (r == null && !kIsWeb && Platform.isAndroid && sms.smsEnabled.value) {
+      final sendMethod = await determineSendMethod(c, m);
+
+      if (sendMethod == SendMethod.localSms) {
+        try {
+          await sendViaSms(c, m);
+          // Mark as sent
+          m.dateDelivered = DateTime.now();
+          await Message.replaceMessage(m.guid, m);
+          completer.complete();
+          return completer.future;
+        } catch (e) {
+          Logger.error("Failed to send SMS, falling back to server", error: e, tag: "SMS");
+          // Fall through to try server
+        }
+      } else if (sendMethod == SendMethod.localMms) {
+        try {
+          await sendViaMms(c, m);
+          // Mark as sent
+          m.dateDelivered = DateTime.now();
+          await Message.replaceMessage(m.guid, m);
+          completer.complete();
+          return completer.future;
+        } catch (e) {
+          Logger.error("Failed to send MMS, falling back to server", error: e, tag: "SMS");
+          // Fall through to try server
+        }
+      }
+    }
+
     if (r == null) {
       http.sendMessage(
         c.guid,
@@ -173,6 +331,36 @@ class ActionHandler extends GetxService {
         completer.complete();
       }).catchError((error, stack) async {
         Logger.error('Failed to send message!', error: error, trace: stack);
+
+        // Check if we should auto-retry as SMS
+        final isAndroid = !kIsWeb && Platform.isAndroid;
+        final shouldAutoRetryAsSms = ss.settings.autoRetryFailedAsSms.value
+            && isAndroid
+            && sms.smsEnabled.value
+            && !m.hasAttachments; // Only auto-retry text messages for now
+
+        // Check if this is an iMessage failure (error code 22 = recipient not registered)
+        int errorCode = 0;
+        if (error is Response) {
+          errorCode = error.statusCode ?? 0;
+        } else if (error is DioException) {
+          errorCode = error.response?.statusCode ?? 0;
+        }
+
+        if (shouldAutoRetryAsSms && (errorCode == 22 || c.isIMessage)) {
+          Logger.info("Auto-retrying failed iMessage as SMS", tag: "SMS");
+          try {
+            await sendViaSms(c, m);
+            // Mark as sent
+            m.dateDelivered = DateTime.now();
+            await Message.replaceMessage(m.guid, m);
+            completer.complete();
+            return;
+          } catch (smsError) {
+            Logger.error("Auto-retry as SMS also failed", error: smsError, tag: "SMS");
+            // Fall through to normal error handling
+          }
+        }
 
         final tempGuid = m.guid;
         m = handleSendError(error, m);

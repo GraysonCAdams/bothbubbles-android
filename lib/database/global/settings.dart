@@ -19,6 +19,9 @@ class Settings {
   final RxString serverAddress = "".obs;
   final RxMap<String, String> customHeaders = <String, String>{}.obs;
   final RxBool finishedSetup = false.obs;
+  final RxBool smsOnlyMode = false.obs;
+  final RxBool enableSmsForwarding = true.obs;
+  final RxBool autoRetryFailedAsSms = true.obs;
   final RxBool reachedConversationList = false.obs;
   final RxBool autoDownload = true.obs;
   final RxBool onlyWifiDownload = false.obs;
@@ -374,6 +377,9 @@ class Settings {
         'serverAddress': serverAddress.value,
         'customHeaders': customHeaders,
         'finishedSetup': finishedSetup.value,
+        'smsOnlyMode': smsOnlyMode.value,
+        'enableSmsForwarding': enableSmsForwarding.value,
+        'autoRetryFailedAsSms': autoRetryFailedAsSms.value,
         'reachedConversationList': reachedConversationList.value,
         'colorsFromMedia': colorsFromMedia.value,
         'monetTheming': monetTheming.value.index,
@@ -520,6 +526,9 @@ class Settings {
     s.serverAddress.value = map['serverAddress'] ?? "";
     s.customHeaders.value = _processCustomHeaders(map['customHeaders']);
     s.finishedSetup.value = map['finishedSetup'] ?? false;
+    s.smsOnlyMode.value = map['smsOnlyMode'] ?? false;
+    s.enableSmsForwarding.value = map['enableSmsForwarding'] ?? true;
+    s.autoRetryFailedAsSms.value = map['autoRetryFailedAsSms'] ?? true;
     s.autoDownload.value = map['autoDownload'] ?? true;
     s.autoSave.value = map['autoSave'] ?? false;
     s.autoSavePicsLocation.value = map['autoSavePicsLocation'] ?? "Pictures";
