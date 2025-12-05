@@ -64,6 +64,7 @@ class SocketEventHandler @Inject constructor(
                 is SocketEvent.GroupNameChanged -> handleGroupNameChanged(event)
                 is SocketEvent.GroupIconChanged -> handleGroupIconChanged(event)
                 is SocketEvent.ServerUpdate -> handleServerUpdate(event)
+                is SocketEvent.FaceTimeCall -> handleFaceTimeCall(event)
                 is SocketEvent.Error -> handleError(event)
             }
         } catch (e: Exception) {
@@ -141,5 +142,32 @@ class SocketEventHandler @Inject constructor(
 
     private fun handleError(event: SocketEvent.Error) {
         Log.e(TAG, "Socket error: ${event.message}")
+    }
+
+    private fun handleFaceTimeCall(event: SocketEvent.FaceTimeCall) {
+        Log.d(TAG, "FaceTime call: ${event.callUuid}, status: ${event.status}")
+
+        when (event.status) {
+            FaceTimeCallStatus.INCOMING -> {
+                // Show incoming FaceTime call notification
+                val callerDisplay = event.callerName ?: event.callerAddress ?: "Unknown"
+                notificationService.showFaceTimeCallNotification(
+                    callUuid = event.callUuid,
+                    callerName = callerDisplay,
+                    callerAddress = event.callerAddress
+                )
+            }
+            FaceTimeCallStatus.DISCONNECTED -> {
+                // Dismiss the notification when call ends
+                notificationService.dismissFaceTimeCallNotification(event.callUuid)
+            }
+            FaceTimeCallStatus.CONNECTED, FaceTimeCallStatus.RINGING -> {
+                // Update notification state if needed
+                Log.d(TAG, "FaceTime call state: ${event.status}")
+            }
+            FaceTimeCallStatus.UNKNOWN -> {
+                Log.w(TAG, "Unknown FaceTime call status")
+            }
+        }
     }
 }

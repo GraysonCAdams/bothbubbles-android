@@ -44,6 +44,13 @@ interface ChatDao {
     """)
     fun getArchivedChats(): Flow<List<ChatEntity>>
 
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_starred = 1
+        ORDER BY latest_message_date DESC
+    """)
+    fun getStarredChats(): Flow<List<ChatEntity>>
+
     @Query("SELECT * FROM chats WHERE guid = :guid")
     suspend fun getChatByGuid(guid: String): ChatEntity?
 
@@ -58,6 +65,26 @@ interface ChatDao {
         ORDER BY latest_message_date DESC
     """)
     fun searchChats(query: String): Flow<List<ChatEntity>>
+
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL
+        AND is_group = 1
+        AND (display_name LIKE '%' || :query || '%'
+             OR chat_identifier LIKE '%' || :query || '%')
+        ORDER BY latest_message_date DESC
+        LIMIT 10
+    """)
+    fun searchGroupChats(query: String): Flow<List<ChatEntity>>
+
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL
+        AND is_group = 1
+        ORDER BY latest_message_date DESC
+        LIMIT 5
+    """)
+    fun getRecentGroupChats(): Flow<List<ChatEntity>>
 
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL")
     suspend fun getChatCount(): Int
@@ -107,11 +134,40 @@ interface ChatDao {
     @Query("UPDATE chats SET is_archived = :isArchived WHERE guid = :guid")
     suspend fun updateArchiveStatus(guid: String, isArchived: Boolean)
 
+    @Query("UPDATE chats SET is_starred = :isStarred WHERE guid = :guid")
+    suspend fun updateStarredStatus(guid: String, isStarred: Boolean)
+
     @Query("UPDATE chats SET has_unread_message = :hasUnread WHERE guid = :guid")
     suspend fun updateUnreadStatus(guid: String, hasUnread: Boolean)
 
     @Query("UPDATE chats SET mute_type = :muteType, mute_args = :muteArgs WHERE guid = :guid")
     suspend fun updateMuteStatus(guid: String, muteType: String?, muteArgs: String?)
+
+    // ===== Notification Settings =====
+
+    @Query("UPDATE chats SET notifications_enabled = :enabled WHERE guid = :guid")
+    suspend fun updateNotificationsEnabled(guid: String, enabled: Boolean)
+
+    @Query("UPDATE chats SET notification_priority = :priority WHERE guid = :guid")
+    suspend fun updateNotificationPriority(guid: String, priority: String)
+
+    @Query("UPDATE chats SET bubble_enabled = :enabled WHERE guid = :guid")
+    suspend fun updateBubbleEnabled(guid: String, enabled: Boolean)
+
+    @Query("UPDATE chats SET pop_on_screen = :enabled WHERE guid = :guid")
+    suspend fun updatePopOnScreen(guid: String, enabled: Boolean)
+
+    @Query("UPDATE chats SET custom_notification_sound = :sound WHERE guid = :guid")
+    suspend fun updateNotificationSound(guid: String, sound: String?)
+
+    @Query("UPDATE chats SET lock_screen_visibility = :visibility WHERE guid = :guid")
+    suspend fun updateLockScreenVisibility(guid: String, visibility: String)
+
+    @Query("UPDATE chats SET show_notification_dot = :enabled WHERE guid = :guid")
+    suspend fun updateShowNotificationDot(guid: String, enabled: Boolean)
+
+    @Query("UPDATE chats SET vibration_enabled = :enabled WHERE guid = :guid")
+    suspend fun updateVibrationEnabled(guid: String, enabled: Boolean)
 
     @Query("UPDATE chats SET latest_message_date = :date WHERE guid = :guid")
     suspend fun updateLatestMessageDate(guid: String, date: Long)
@@ -144,6 +200,15 @@ interface ChatDao {
 
     @Query("DELETE FROM chats")
     suspend fun deleteAllChats()
+
+    @Query("UPDATE chats SET has_unread_message = 0, unread_count = 0 WHERE has_unread_message = 1")
+    suspend fun markAllChatsAsRead(): Int
+
+    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_archived = 1")
+    fun getArchivedChatCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_starred = 1")
+    fun getStarredChatCount(): Flow<Int>
 
     // ===== Transactions =====
 

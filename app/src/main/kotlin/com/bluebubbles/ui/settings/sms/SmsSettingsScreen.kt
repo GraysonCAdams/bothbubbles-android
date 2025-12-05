@@ -363,7 +363,7 @@ private fun ImportSmsCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Import SMS History", style = MaterialTheme.typography.titleSmall)
                     Text(
-                        "Import existing SMS/MMS messages into BlueBubbles",
+                        "Import existing SMS/MMS messages into BothBubbles",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

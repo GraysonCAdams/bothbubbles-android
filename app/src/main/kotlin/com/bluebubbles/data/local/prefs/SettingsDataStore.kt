@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -54,6 +55,10 @@ class SettingsDataStore @Inject constructor(
 
     val useDynamicColor: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.USE_DYNAMIC_COLOR] ?: true
+    }
+
+    val useSimpleAppTitle: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.USE_SIMPLE_APP_TITLE] ?: false
     }
 
     val denseChatTiles: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -120,6 +125,30 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.KEEP_ALIVE] ?: true
     }
 
+    // ===== Swipe Gesture Settings =====
+
+    val swipeGesturesEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SWIPE_GESTURES_ENABLED] ?: true
+    }
+
+    val swipeLeftAction: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.SWIPE_LEFT_ACTION] ?: "archive"
+    }
+
+    val swipeRightAction: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.SWIPE_RIGHT_ACTION] ?: "pin"
+    }
+
+    val swipeSensitivity: Flow<Float> = dataStore.data.map { prefs ->
+        prefs[Keys.SWIPE_SENSITIVITY] ?: 0.25f
+    }
+
+    // ===== Call Settings =====
+
+    val preferredCallMethod: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.PREFERRED_CALL_METHOD] ?: "google_meet"
+    }
+
     // ===== Setters =====
 
     suspend fun setServerAddress(address: String) {
@@ -158,6 +187,12 @@ class SettingsDataStore @Inject constructor(
     suspend fun setUseDynamicColor(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.USE_DYNAMIC_COLOR] = enabled
+        }
+    }
+
+    suspend fun setUseSimpleAppTitle(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.USE_SIMPLE_APP_TITLE] = enabled
         }
     }
 
@@ -245,6 +280,36 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun setSwipeGesturesEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SWIPE_GESTURES_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSwipeLeftAction(action: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SWIPE_LEFT_ACTION] = action
+        }
+    }
+
+    suspend fun setSwipeRightAction(action: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SWIPE_RIGHT_ACTION] = action
+        }
+    }
+
+    suspend fun setSwipeSensitivity(sensitivity: Float) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SWIPE_SENSITIVITY] = sensitivity
+        }
+    }
+
+    suspend fun setPreferredCallMethod(method: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.PREFERRED_CALL_METHOD] = method
+        }
+    }
+
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
     }
@@ -275,6 +340,7 @@ class SettingsDataStore @Inject constructor(
 
         // UI
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
+        val USE_SIMPLE_APP_TITLE = booleanPreferencesKey("use_simple_app_title")
         val DENSE_CHAT_TILES = booleanPreferencesKey("dense_chat_tiles")
         val USE_24_HOUR_FORMAT = booleanPreferencesKey("use_24_hour_format")
         val SHOW_DELIVERY_TIMESTAMPS = booleanPreferencesKey("show_delivery_timestamps")
@@ -297,5 +363,14 @@ class SettingsDataStore @Inject constructor(
 
         // Background
         val KEEP_ALIVE = booleanPreferencesKey("keep_alive")
+
+        // Swipe Gestures
+        val SWIPE_GESTURES_ENABLED = booleanPreferencesKey("swipe_gestures_enabled")
+        val SWIPE_LEFT_ACTION = stringPreferencesKey("swipe_left_action")
+        val SWIPE_RIGHT_ACTION = stringPreferencesKey("swipe_right_action")
+        val SWIPE_SENSITIVITY = floatPreferencesKey("swipe_sensitivity")
+
+        // Call Settings
+        val PREFERRED_CALL_METHOD = stringPreferencesKey("preferred_call_method")
     }
 }

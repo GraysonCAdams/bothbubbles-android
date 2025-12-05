@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import com.bluebubbles.ui.theme.KumbhSansFamily
 
 /**
  * Empty state for no conversations
@@ -162,7 +163,7 @@ fun EmptyState(
 
         Text(
             text = title,
-            style = MaterialTheme.typography.titleLarge,
+            style = MaterialTheme.typography.titleLarge.copy(fontFamily = KumbhSansFamily),
             textAlign = TextAlign.Center
         )
 

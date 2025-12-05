@@ -3,7 +3,10 @@ package com.bluebubbles.ui.components
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,21 +26,64 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bluebubbles.ui.conversations.MessageStatus
 
 /**
- * Swipe actions for conversation tiles
+ * Available swipe actions for conversation tiles
  */
-data class SwipeAction(
-    val icon: ImageVector,
+enum class SwipeActionType(
+    val key: String,
     val label: String,
-    val color: Color,
-    val onClick: () -> Unit
+    val icon: ImageVector,
+    val color: Color
+) {
+    NONE("none", "None", Icons.Default.Block, Color.Gray),
+    PIN("pin", "Pin", Icons.Default.PushPin, Color(0xFF1976D2)),
+    UNPIN("unpin", "Unpin", Icons.Outlined.PushPin, Color(0xFF1976D2)),
+    ARCHIVE("archive", "Archive", Icons.Default.Archive, Color(0xFF388E3C)),
+    DELETE("delete", "Delete", Icons.Default.Delete, Color(0xFFD32F2F)),
+    MUTE("mute", "Mute", Icons.Default.NotificationsOff, Color(0xFF7B1FA2)),
+    UNMUTE("unmute", "Unmute", Icons.Default.Notifications, Color(0xFF7B1FA2)),
+    MARK_READ("mark_read", "Mark as Read", Icons.Default.MarkEmailRead, Color(0xFF0097A7)),
+    MARK_UNREAD("mark_unread", "Mark as Unread", Icons.Default.MarkEmailUnread, Color(0xFF0097A7));
+
+    companion object {
+        fun fromKey(key: String): SwipeActionType =
+            entries.find { it.key == key } ?: NONE
+
+        /**
+         * Get the appropriate action based on current state
+         */
+        fun getContextualAction(
+            baseAction: SwipeActionType,
+            isPinned: Boolean,
+            isMuted: Boolean,
+            isRead: Boolean
+        ): SwipeActionType {
+            return when (baseAction) {
+                PIN, UNPIN -> if (isPinned) UNPIN else PIN
+                MUTE, UNMUTE -> if (isMuted) UNMUTE else MUTE
+                MARK_READ, MARK_UNREAD -> if (isRead) MARK_UNREAD else MARK_READ
+                else -> baseAction
+            }
+        }
+    }
+}
+
+/**
+ * Data class to hold swipe configuration
+ */
+data class SwipeConfig(
+    val enabled: Boolean = true,
+    val leftAction: SwipeActionType = SwipeActionType.ARCHIVE,
+    val rightAction: SwipeActionType = SwipeActionType.PIN,
+    val sensitivity: Float = 0.25f
 )
 
 /**
- * A conversation list tile with swipe actions
+ * A conversation list tile with configurable swipe actions
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SwipeableConversationTile(
     title: String,
@@ -47,44 +93,85 @@ fun SwipeableConversationTile(
     isPinned: Boolean = false,
     isMuted: Boolean = false,
     isTyping: Boolean = false,
+    messageStatus: MessageStatus = MessageStatus.NONE,
     avatarContent: @Composable () -> Unit,
     onClick: () -> Unit,
-    onPin: () -> Unit,
-    onMute: () -> Unit,
-    onArchive: () -> Unit,
-    onDelete: () -> Unit,
-    onMarkRead: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onSwipeAction: (SwipeActionType) -> Unit,
+    onAvatarClick: (() -> Unit)? = null,
+    swipeConfig: SwipeConfig = SwipeConfig(),
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
+    val isRead = unreadCount == 0
+
+    // Get contextual actions based on current state
+    val leftAction = SwipeActionType.getContextualAction(
+        swipeConfig.leftAction,
+        isPinned,
+        isMuted,
+        isRead
+    )
+    val rightAction = SwipeActionType.getContextualAction(
+        swipeConfig.rightAction,
+        isPinned,
+        isMuted,
+        isRead
+    )
+
+    if (!swipeConfig.enabled || (leftAction == SwipeActionType.NONE && rightAction == SwipeActionType.NONE)) {
+        // No swipe actions, render simple tile
+        ConversationTileContent(
+            title = title,
+            subtitle = subtitle,
+            timestamp = timestamp,
+            unreadCount = unreadCount,
+            isPinned = isPinned,
+            isMuted = isMuted,
+            isTyping = isTyping,
+            messageStatus = messageStatus,
+            avatarContent = avatarContent,
+            onClick = onClick,
+            onLongClick = onLongClick,
+            onAvatarClick = onAvatarClick
+        )
+        return
+    }
 
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
             when (dismissValue) {
                 SwipeToDismissBoxValue.StartToEnd -> {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    if (unreadCount > 0) onMarkRead() else onPin()
+                    if (rightAction != SwipeActionType.NONE) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSwipeAction(rightAction)
+                    }
                     false // Don't dismiss, reset
                 }
                 SwipeToDismissBoxValue.EndToStart -> {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    onArchive()
-                    true // Dismiss
+                    if (leftAction != SwipeActionType.NONE) {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onSwipeAction(leftAction)
+                    }
+                    // Dismiss for delete/archive, reset for others
+                    leftAction == SwipeActionType.DELETE || leftAction == SwipeActionType.ARCHIVE
                 }
                 SwipeToDismissBoxValue.Settled -> false
             }
         },
-        positionalThreshold = { it * 0.25f }
+        positionalThreshold = { it * swipeConfig.sensitivity }
     )
 
     SwipeToDismissBox(
         state = dismissState,
+        enableDismissFromStartToEnd = rightAction != SwipeActionType.NONE,
+        enableDismissFromEndToStart = leftAction != SwipeActionType.NONE,
         backgroundContent = {
             SwipeBackground(
                 dismissDirection = dismissState.dismissDirection,
                 targetValue = dismissState.targetValue,
-                unreadCount = unreadCount,
-                isPinned = isPinned
+                leftAction = leftAction,
+                rightAction = rightAction
             )
         },
         modifier = modifier
@@ -97,8 +184,12 @@ fun SwipeableConversationTile(
             isPinned = isPinned,
             isMuted = isMuted,
             isTyping = isTyping,
+            messageStatus = messageStatus,
             avatarContent = avatarContent,
-            onClick = onClick
+            onClick = onClick,
+            onLongClick = onLongClick,
+            onAvatarClick = onAvatarClick,
+            hasRoundedCorners = true
         )
     }
 }
@@ -108,17 +199,23 @@ fun SwipeableConversationTile(
 private fun SwipeBackground(
     dismissDirection: SwipeToDismissBoxValue,
     targetValue: SwipeToDismissBoxValue,
-    unreadCount: Int,
-    isPinned: Boolean
+    leftAction: SwipeActionType,
+    rightAction: SwipeActionType
 ) {
+    val action = when (targetValue) {
+        SwipeToDismissBoxValue.StartToEnd -> rightAction
+        SwipeToDismissBoxValue.EndToStart -> leftAction
+        else -> SwipeActionType.NONE
+    }
+
+    // Use a single desaturated color for all swipe actions (MD3 style)
+    val swipeBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
+
     val color by animateColorAsState(
-        targetValue = when (targetValue) {
-            SwipeToDismissBoxValue.StartToEnd -> {
-                if (unreadCount > 0) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.tertiary
-            }
-            SwipeToDismissBoxValue.EndToStart -> MaterialTheme.colorScheme.secondary
-            else -> Color.Transparent
+        targetValue = if (targetValue != SwipeToDismissBoxValue.Settled) {
+            swipeBackgroundColor
+        } else {
+            Color.Transparent
         },
         animationSpec = tween(200),
         label = "swipeColor"
@@ -133,6 +230,8 @@ private fun SwipeBackground(
     Box(
         modifier = Modifier
             .fillMaxSize()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(16.dp))
             .background(color)
             .padding(horizontal = 24.dp),
         contentAlignment = when (dismissDirection) {
@@ -141,29 +240,32 @@ private fun SwipeBackground(
             else -> Alignment.CenterStart
         }
     ) {
-        when (dismissDirection) {
-            SwipeToDismissBoxValue.StartToEnd -> {
+        if (action != SwipeActionType.NONE) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
                 Icon(
-                    imageVector = if (unreadCount > 0) Icons.Default.MarkEmailRead else
-                        if (isPinned) Icons.Outlined.PushPin else Icons.Default.PushPin,
-                    contentDescription = if (unreadCount > 0) "Mark as read" else "Pin",
-                    tint = Color.White,
+                    imageVector = action.icon,
+                    contentDescription = action.label,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .scale(scale)
+                        .size(28.dp)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = action.label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.scale(scale)
                 )
             }
-            SwipeToDismissBoxValue.EndToStart -> {
-                Icon(
-                    imageVector = Icons.Default.Archive,
-                    contentDescription = "Archive",
-                    tint = Color.White,
-                    modifier = Modifier.scale(scale)
-                )
-            }
-            else -> {}
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ConversationTileContent(
     title: String,
@@ -173,13 +275,23 @@ private fun ConversationTileContent(
     isPinned: Boolean,
     isMuted: Boolean,
     isTyping: Boolean,
+    messageStatus: MessageStatus = MessageStatus.NONE,
     avatarContent: @Composable () -> Unit,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
+    onAvatarClick: (() -> Unit)? = null,
+    hasRoundedCorners: Boolean = false
 ) {
     Surface(
-        onClick = onClick,
         color = MaterialTheme.colorScheme.surface,
-        modifier = Modifier.fillMaxWidth()
+        shape = if (hasRoundedCorners) RoundedCornerShape(16.dp) else RoundedCornerShape(0.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(if (hasRoundedCorners) Modifier.padding(vertical = 4.dp) else Modifier)
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick
+            )
     ) {
         Row(
             modifier = Modifier
@@ -187,8 +299,21 @@ private fun ConversationTileContent(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar
-            Box(modifier = Modifier.size(56.dp)) {
+            // Avatar - clickable/long-clickable if handler provided
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .then(
+                        if (onAvatarClick != null) {
+                            Modifier.clip(CircleShape).combinedClickable(
+                                onClick = onAvatarClick,
+                                onLongClick = onAvatarClick
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
                 avatarContent()
             }
 
@@ -203,7 +328,7 @@ private fun ConversationTileContent(
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (unreadCount > 0) FontWeight.SemiBold else FontWeight.Normal,
+                        fontWeight = if (unreadCount > 0) FontWeight.ExtraBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
                         modifier = Modifier.weight(1f, fill = false)
@@ -228,7 +353,7 @@ private fun ConversationTileContent(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
                 if (isTyping) {
                     Text(
@@ -238,17 +363,26 @@ private fun ConversationTileContent(
                         fontWeight = FontWeight.Medium
                     )
                 } else {
-                    Text(
-                        text = subtitle,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (unreadCount > 0)
-                            MaterialTheme.colorScheme.onSurface
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = if (unreadCount > 0) FontWeight.Medium else FontWeight.Normal,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Message status indicator
+                        if (messageStatus != MessageStatus.NONE) {
+                            MessageStatusIndicator(status = messageStatus)
+                        }
+                        Text(
+                            text = subtitle,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = if (unreadCount > 0)
+                                MaterialTheme.colorScheme.onSurface
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
 
@@ -282,7 +416,7 @@ fun UnreadBadge(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.primary,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
         shape = CircleShape,
         modifier = modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
     ) {
@@ -290,7 +424,7 @@ fun UnreadBadge(
             Text(
                 text = if (count > 99) "99+" else count.toString(),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }
@@ -385,5 +519,49 @@ fun PinnedConversationTile(
                 }
             }
         }
+    }
+}
+
+/**
+ * Indicator showing message delivery/read status
+ */
+@Composable
+fun MessageStatusIndicator(
+    status: MessageStatus,
+    modifier: Modifier = Modifier
+) {
+    when (status) {
+        MessageStatus.SENDING -> {
+            CircularProgressIndicator(
+                modifier = modifier.size(14.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        MessageStatus.SENT -> {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Sent",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier.size(16.dp)
+            )
+        }
+        MessageStatus.DELIVERED -> {
+            Icon(
+                imageVector = Icons.Default.DoneAll,
+                contentDescription = "Delivered",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier.size(16.dp)
+            )
+        }
+        MessageStatus.READ -> {
+            Icon(
+                imageVector = Icons.Default.DoneAll,
+                contentDescription = "Read",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = modifier.size(16.dp)
+            )
+        }
+        MessageStatus.NONE -> { /* No indicator */ }
     }
 }

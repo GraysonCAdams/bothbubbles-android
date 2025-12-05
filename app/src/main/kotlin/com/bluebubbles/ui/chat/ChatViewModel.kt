@@ -1,6 +1,10 @@
 package com.bluebubbles.ui.chat
 
+import android.content.Context
+import android.content.Intent
 import android.net.Uri
+import android.provider.ContactsContract
+import android.provider.BlockedNumberContract
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +13,7 @@ import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.data.repository.MessageDeliveryMode
 import com.bluebubbles.data.repository.MessageRepository
+import com.bluebubbles.data.repository.SmsRepository
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.ui.components.MessageUiModel
@@ -24,6 +29,7 @@ class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val smsRepository: SmsRepository,
     private val socketService: SocketService
 ) : ViewModel() {
 
@@ -37,9 +43,33 @@ class ChatViewModel @Inject constructor(
     init {
         loadChat()
         loadMessages()
+        syncMessages()
         observeTypingIndicators()
         markAsRead()
         determineChatType()
+    }
+
+    private fun syncMessages() {
+        if (messageRepository.isLocalSmsChat(chatGuid)) {
+            syncSmsMessages()
+        } else {
+            syncMessagesFromServer()
+        }
+    }
+
+    private fun syncSmsMessages() {
+        viewModelScope.launch {
+            smsRepository.importMessagesForChat(chatGuid, limit = 100).fold(
+                onSuccess = { count ->
+                    // Messages are now in Room and will be picked up by observeMessagesForChat
+                },
+                onFailure = { e ->
+                    if (_uiState.value.messages.isEmpty()) {
+                        _uiState.update { it.copy(error = "Failed to load SMS messages: ${e.message}") }
+                    }
+                }
+            )
+        }
     }
 
     private fun determineChatType() {
@@ -54,7 +84,10 @@ class ChatViewModel @Inject constructor(
                     _uiState.update { state ->
                         state.copy(
                             chatTitle = it.displayName ?: it.chatIdentifier ?: "Unknown",
-                            isGroup = it.isGroup
+                            isGroup = it.isGroup,
+                            isArchived = it.isArchived,
+                            isStarred = it.isStarred,
+                            participantPhone = it.chatIdentifier
                         )
                     }
                 }
@@ -74,6 +107,20 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                 }
+        }
+    }
+
+    private fun syncMessagesFromServer() {
+        viewModelScope.launch {
+            messageRepository.syncMessagesForChat(
+                chatGuid = chatGuid,
+                limit = 50
+            ).onFailure { e ->
+                // Only show error if we have no local messages
+                if (_uiState.value.messages.isEmpty()) {
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            }
         }
     }
 
@@ -228,6 +275,134 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    // ===== Menu Actions =====
+
+    fun archiveChat() {
+        viewModelScope.launch {
+            chatRepository.setArchived(chatGuid, true).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(isArchived = true) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            )
+        }
+    }
+
+    fun unarchiveChat() {
+        viewModelScope.launch {
+            chatRepository.setArchived(chatGuid, false).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(isArchived = false) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            )
+        }
+    }
+
+    fun toggleStarred() {
+        val currentStarred = _uiState.value.isStarred
+        viewModelScope.launch {
+            chatRepository.setStarred(chatGuid, !currentStarred).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(isStarred = !currentStarred) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            )
+        }
+    }
+
+    fun deleteChat() {
+        viewModelScope.launch {
+            chatRepository.deleteChat(chatGuid).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(chatDeleted = true) }
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            )
+        }
+    }
+
+    fun toggleSubjectField() {
+        _uiState.update { it.copy(showSubjectField = !it.showSubjectField) }
+    }
+
+    /**
+     * Create intent to add contact to Android Contacts app
+     */
+    fun getAddToContactsIntent(): Intent {
+        val phone = _uiState.value.participantPhone ?: ""
+        return Intent(Intent.ACTION_INSERT).apply {
+            type = ContactsContract.Contacts.CONTENT_TYPE
+            putExtra(ContactsContract.Intents.Insert.PHONE, phone)
+        }
+    }
+
+    /**
+     * Create intent to start Google Meet call
+     */
+    fun getGoogleMeetIntent(): Intent {
+        // Open Google Meet to create a new meeting
+        return Intent(Intent.ACTION_VIEW, Uri.parse("https://meet.google.com/new"))
+    }
+
+    /**
+     * Create intent to start WhatsApp video call
+     */
+    fun getWhatsAppCallIntent(): Intent? {
+        val phone = _uiState.value.participantPhone?.replace(Regex("[^0-9+]"), "") ?: return null
+        return Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$phone"))
+    }
+
+    /**
+     * Create intent to open help page
+     */
+    fun getHelpIntent(): Intent {
+        return Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/BlueBubblesApp/bluebubbles-app/issues"))
+    }
+
+    /**
+     * Block a phone number (SMS only)
+     */
+    fun blockContact(context: Context): Boolean {
+        if (!_uiState.value.isLocalSmsChat) return false
+
+        val phone = _uiState.value.participantPhone ?: return false
+
+        return try {
+            val values = android.content.ContentValues().apply {
+                put(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER, phone)
+            }
+            context.contentResolver.insert(
+                BlockedNumberContract.BlockedNumbers.CONTENT_URI,
+                values
+            )
+            true
+        } catch (e: Exception) {
+            _uiState.update { it.copy(error = "Failed to block contact: ${e.message}") }
+            false
+        }
+    }
+
+    /**
+     * Check if WhatsApp is installed
+     */
+    fun isWhatsAppAvailable(context: Context): Boolean {
+        return try {
+            context.packageManager.getPackageInfo("com.whatsapp", 0)
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     private fun MessageEntity.toUiModel(): MessageUiModel {
         return MessageUiModel(
             guid = guid,
@@ -263,5 +438,11 @@ data class ChatUiState(
     val isTyping: Boolean = false,
     val error: String? = null,
     val isLocalSmsChat: Boolean = false,
-    val attachmentCount: Int = 0
+    val attachmentCount: Int = 0,
+    // Menu-related state
+    val isArchived: Boolean = false,
+    val isStarred: Boolean = false,
+    val showSubjectField: Boolean = false,
+    val participantPhone: String? = null,
+    val chatDeleted: Boolean = false
 )

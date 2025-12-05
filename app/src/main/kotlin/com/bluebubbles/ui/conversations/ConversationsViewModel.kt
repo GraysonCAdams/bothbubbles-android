@@ -1,28 +1,43 @@
 package com.bluebubbles.ui.conversations
 
+import android.app.Application
+import android.provider.ContactsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.ChatEntity
+import com.bluebubbles.data.local.db.entity.MessageEntity
+import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sync.SyncService
 import com.bluebubbles.services.sync.SyncState
+import com.bluebubbles.ui.components.SwipeActionType
+import com.bluebubbles.ui.components.SwipeConfig
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.text.format.DateFormat
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
+@OptIn(FlowPreview::class)
 @HiltViewModel
 class ConversationsViewModel @Inject constructor(
+    private val application: Application,
     private val chatRepository: ChatRepository,
+    private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val socketService: SocketService,
-    private val syncService: SyncService
+    private val syncService: SyncService,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConversationsUiState())
@@ -36,6 +51,54 @@ class ConversationsViewModel @Inject constructor(
         observeConnectionState()
         observeTypingIndicators()
         observeSyncState()
+        observeSwipeSettings()
+        observeMessageSearch()
+        observeAppTitleSetting()
+        loadUserProfile()
+    }
+
+    private fun observeAppTitleSetting() {
+        viewModelScope.launch {
+            settingsDataStore.useSimpleAppTitle.collect { useSimple ->
+                _uiState.update { it.copy(useSimpleAppTitle = useSimple) }
+            }
+        }
+    }
+
+    private fun loadUserProfile() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    val contentResolver = application.contentResolver
+
+                    // Query the device owner's profile contact
+                    val profileUri = ContactsContract.Profile.CONTENT_URI
+                    val projection = arrayOf(
+                        ContactsContract.Profile.DISPLAY_NAME,
+                        ContactsContract.Profile.PHOTO_URI
+                    )
+
+                    contentResolver.query(profileUri, projection, null, null, null)?.use { cursor ->
+                        if (cursor.moveToFirst()) {
+                            val nameIndex = cursor.getColumnIndex(ContactsContract.Profile.DISPLAY_NAME)
+                            val photoIndex = cursor.getColumnIndex(ContactsContract.Profile.PHOTO_URI)
+
+                            val name = if (nameIndex >= 0) cursor.getString(nameIndex) else null
+                            val photoUri = if (photoIndex >= 0) cursor.getString(photoIndex) else null
+
+                            _uiState.update {
+                                it.copy(
+                                    userProfileName = name,
+                                    userProfileAvatarUri = photoUri
+                                )
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Silently fail if we can't access profile (missing permission, etc.)
+                }
+            }
+        }
     }
 
     private fun loadConversations() {
@@ -110,6 +173,77 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    private fun observeSwipeSettings() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.swipeGesturesEnabled,
+                settingsDataStore.swipeLeftAction,
+                settingsDataStore.swipeRightAction,
+                settingsDataStore.swipeSensitivity
+            ) { enabled, leftAction, rightAction, sensitivity ->
+                SwipeConfig(
+                    enabled = enabled,
+                    leftAction = SwipeActionType.fromKey(leftAction),
+                    rightAction = SwipeActionType.fromKey(rightAction),
+                    sensitivity = sensitivity
+                )
+            }.collect { config ->
+                _uiState.update { it.copy(swipeConfig = config) }
+            }
+        }
+    }
+
+    private fun observeMessageSearch() {
+        viewModelScope.launch {
+            _searchQuery
+                .debounce(300) // Wait 300ms after typing stops
+                .distinctUntilChanged()
+                .flatMapLatest { query ->
+                    if (query.length >= 2) {
+                        messageDao.searchMessages(query, 50)
+                    } else {
+                        flowOf(emptyList())
+                    }
+                }
+                .collect { messages ->
+                    val results = messages.mapNotNull { message ->
+                        val chat = chatDao.getChatByGuid(message.chatGuid)
+                        if (chat != null) {
+                            MessageSearchResult(
+                                messageGuid = message.guid,
+                                chatGuid = message.chatGuid,
+                                chatDisplayName = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                                messageText = message.text ?: "",
+                                timestamp = message.dateCreated,
+                                isFromMe = message.isFromMe
+                            )
+                        } else null
+                    }
+                    _uiState.update { it.copy(messageSearchResults = results) }
+                }
+        }
+    }
+
+    fun handleSwipeAction(chatGuid: String, action: SwipeActionType) {
+        viewModelScope.launch {
+            when (action) {
+                SwipeActionType.PIN, SwipeActionType.UNPIN -> togglePin(chatGuid)
+                SwipeActionType.ARCHIVE -> archiveChat(chatGuid)
+                SwipeActionType.DELETE -> deleteChat(chatGuid)
+                SwipeActionType.MUTE, SwipeActionType.UNMUTE -> toggleMute(chatGuid)
+                SwipeActionType.MARK_READ -> markAsRead(chatGuid)
+                SwipeActionType.MARK_UNREAD -> markAsUnread(chatGuid)
+                SwipeActionType.NONE -> { /* No action */ }
+            }
+        }
+    }
+
+    fun markAsUnread(chatGuid: String) {
+        viewModelScope.launch {
+            chatRepository.markChatAsUnread(chatGuid)
+        }
+    }
+
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
         _uiState.update { it.copy(searchQuery = query) }
@@ -127,9 +261,23 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             val chat = chatRepository.getChat(chatGuid)
             chat?.let {
-                chatRepository.setPinned(chatGuid, !it.isPinned)
+                // If already pinned, always allow unpinning
+                // If not pinned, only allow pinning if the contact is saved
+                if (it.isPinned || canPinChat(chatGuid)) {
+                    chatRepository.setPinned(chatGuid, !it.isPinned)
+                }
             }
         }
+    }
+
+    /**
+     * Check if a chat can be pinned.
+     * Only chats with saved contacts can be pinned.
+     * Chats that are already pinned can always be unpinned.
+     */
+    fun canPinChat(chatGuid: String): Boolean {
+        val conversation = _uiState.value.conversations.find { it.guid == chatGuid }
+        return conversation?.hasContact == true
     }
 
     fun toggleMute(chatGuid: String) {
@@ -160,10 +308,35 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    fun markChatsAsUnread(chatGuids: Set<String>) {
+        viewModelScope.launch {
+            chatGuids.forEach { chatGuid ->
+                chatRepository.markChatAsUnread(chatGuid)
+            }
+        }
+    }
+
+    fun blockChats(chatGuids: Set<String>) {
+        viewModelScope.launch {
+            chatGuids.forEach { chatGuid ->
+                // TODO: Implement actual blocking via server API
+                // For now, archive the chat as a placeholder
+                chatRepository.setArchived(chatGuid, true)
+            }
+        }
+    }
+
     private suspend fun ChatEntity.toUiModel(typingChats: Set<String>): ConversationUiModel {
         val lastMessage = messageDao.getLatestMessageForChat(guid)
         val messageText = lastMessage?.text ?: lastMessageText ?: ""
         val isFromMe = lastMessage?.isFromMe ?: false
+
+        // Get participants for this chat
+        val participants = chatDao.getParticipantsForChat(guid)
+        val participantNames = participants.map { it.displayName }
+        val primaryParticipant = participants.firstOrNull()
+        val address = primaryParticipant?.address ?: chatIdentifier ?: ""
+        val avatarPath = primaryParticipant?.cachedAvatarPath
 
         // Determine message type from attachments or content
         val messageType = when {
@@ -182,10 +355,21 @@ class ConversationsViewModel @Inject constructor(
             else -> MessageType.TEXT
         }
 
+        // Determine message status for outgoing messages
+        val messageStatus = when {
+            !isFromMe -> MessageStatus.NONE
+            lastMessage == null -> MessageStatus.NONE
+            lastMessage.guid.startsWith("temp-") -> MessageStatus.SENDING
+            lastMessage.dateRead != null -> MessageStatus.READ
+            lastMessage.dateDelivered != null -> MessageStatus.DELIVERED
+            lastMessage.error == 0 -> MessageStatus.SENT
+            else -> MessageStatus.NONE
+        }
+
         return ConversationUiModel(
             guid = guid,
             displayName = displayName ?: chatIdentifier ?: "Unknown",
-            avatarPath = null, // TODO: Get from handles
+            avatarPath = avatarPath,
             lastMessageText = messageText,
             lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L),
             lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,
@@ -198,7 +382,9 @@ class ConversationsViewModel @Inject constructor(
             hasDraft = false, // TODO: Implement draft storage
             draftText = null,
             lastMessageType = messageType,
-            participantNames = emptyList() // TODO: Get from handles
+            lastMessageStatus = messageStatus,
+            participantNames = participantNames,
+            address = address
         )
     }
 
@@ -206,19 +392,26 @@ class ConversationsViewModel @Inject constructor(
         if (timestamp == 0L) return ""
 
         val now = System.currentTimeMillis()
-        val diff = now - timestamp
+        val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val today = Calendar.getInstance()
 
-        val seconds = diff / 1000
-        val minutes = seconds / 60
-        val hours = minutes / 60
-        val days = hours / 24
+        val isToday = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                messageDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
+
+        val isSameYear = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+
+        // Check if within the last 7 days
+        val daysDiff = (now - timestamp) / (1000 * 60 * 60 * 24)
+
+        // Get system time format (12h or 24h)
+        val is24Hour = DateFormat.is24HourFormat(application)
+        val timePattern = if (is24Hour) "HH:mm" else "h:mm a"
 
         return when {
-            days > 6 -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
-            days > 0 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
-            hours > 0 -> "${hours}h"
-            minutes > 0 -> "${minutes}m"
-            else -> "now"
+            isToday -> SimpleDateFormat(timePattern, Locale.getDefault()).format(Date(timestamp))
+            daysDiff < 7 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
+            isSameYear -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
+            else -> SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(timestamp))
         }
     }
 }
@@ -231,7 +424,24 @@ data class ConversationsUiState(
     val isConnected: Boolean = false,
     val conversations: List<ConversationUiModel> = emptyList(),
     val searchQuery: String = "",
-    val error: String? = null
+    val error: String? = null,
+    val swipeConfig: SwipeConfig = SwipeConfig(),
+    val messageSearchResults: List<MessageSearchResult> = emptyList(),
+    val useSimpleAppTitle: Boolean = false,
+    val userProfileName: String? = null,
+    val userProfileAvatarUri: String? = null
+)
+
+/**
+ * Represents a message that matched a search query
+ */
+data class MessageSearchResult(
+    val messageGuid: String,
+    val chatGuid: String,
+    val chatDisplayName: String,
+    val messageText: String,
+    val timestamp: Long,
+    val isFromMe: Boolean
 )
 
 data class ConversationUiModel(
@@ -250,8 +460,17 @@ data class ConversationUiModel(
     val hasDraft: Boolean = false,
     val draftText: String? = null,
     val lastMessageType: MessageType = MessageType.TEXT,
-    val participantNames: List<String> = emptyList()
-)
+    val lastMessageStatus: MessageStatus = MessageStatus.NONE,
+    val participantNames: List<String> = emptyList(),
+    val address: String = "" // Primary address (phone/email) for the chat
+) {
+    /**
+     * Returns true if this conversation has a saved contact.
+     * A contact is considered "missing" if the displayName looks like a phone number or email address.
+     */
+    val hasContact: Boolean
+        get() = !displayName.contains("@") && !displayName.matches(Regex("^[+\\d\\s()-]+$"))
+}
 
 enum class MessageType {
     TEXT,
@@ -260,4 +479,15 @@ enum class MessageType {
     AUDIO,
     LINK,
     ATTACHMENT
+}
+
+/**
+ * Status of the last sent message for display in conversation list
+ */
+enum class MessageStatus {
+    NONE,       // Not from me or no status available
+    SENDING,    // Message is being sent (temp guid)
+    SENT,       // Message sent but not delivered
+    DELIVERED,  // Message delivered to recipient
+    READ        // Message read by recipient
 }

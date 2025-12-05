@@ -142,3 +142,11 @@ data class FcmClientDto(
     @Json(name = "apiKey") val apiKey: String? = null,
     @Json(name = "storageBucket") val storageBucket: String? = null
 )
+
+/**
+ * FaceTime Link DTO - returned when answering a FaceTime call
+ */
+@JsonClass(generateAdapter = true)
+data class FaceTimeLinkDto(
+    @Json(name = "link") val link: String
+)

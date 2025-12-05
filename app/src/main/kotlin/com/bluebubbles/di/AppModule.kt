@@ -18,6 +18,16 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
 
+    /**
+     * Provides the Room database instance.
+     *
+     * Migration strategy:
+     * - All migrations are defined in [BlueBubblesDatabase.ALL_MIGRATIONS]
+     * - On downgrade (rare), data is cleared as a safety measure
+     * - If a migration is missing, the app will crash - this is intentional
+     *   to catch migration issues during development rather than silently
+     *   destroying user data in production
+     */
     @Provides
     @Singleton
     fun provideDatabase(
@@ -28,7 +38,10 @@ object AppModule {
             BlueBubblesDatabase::class.java,
             BlueBubblesDatabase.DATABASE_NAME
         )
-            .fallbackToDestructiveMigration()
+            .addMigrations(*BlueBubblesDatabase.ALL_MIGRATIONS)
+            // Only destroy data on downgrade (e.g., rolling back to older app version)
+            // Missing migrations will crash - this is intentional to catch issues early
+            .fallbackToDestructiveMigrationOnDowngrade()
             .build()
     }
 

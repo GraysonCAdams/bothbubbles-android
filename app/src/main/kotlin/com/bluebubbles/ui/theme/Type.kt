@@ -2,13 +2,26 @@ package com.bluebubbles.ui.theme
 
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
+import com.bluebubbles.R
 
-// Using default system font (Roboto on most Android devices)
-// Google Sans would require licensing, so we use system default
+// Plus Jakarta Sans font family - used ONLY for app logo and empty state design elements
+val PlusJakartaFamily = FontFamily(
+    Font(R.font.plusjakarta, FontWeight.Normal),
+    Font(R.font.plusjakarta, FontWeight.Medium),
+    Font(R.font.plusjakarta_bold, FontWeight.Bold),
+)
 
+// Alias for backward compatibility
+val KumbhSansFamily = PlusJakartaFamily
+
+// Alias for backward compatibility
+val GoogleSansFamily = KumbhSansFamily
+
+// Use system default fonts for the main typography
 val Typography = Typography(
     displayLarge = TextStyle(
         fontFamily = FontFamily.Default,

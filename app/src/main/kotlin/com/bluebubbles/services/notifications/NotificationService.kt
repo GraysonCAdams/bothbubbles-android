@@ -26,15 +26,20 @@ class NotificationService @Inject constructor(
     companion object {
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_SERVICE = "service"
+        const val CHANNEL_FACETIME = "facetime"
 
         const val ACTION_REPLY = "com.bluebubbles.action.REPLY"
         const val ACTION_MARK_READ = "com.bluebubbles.action.MARK_READ"
+        const val ACTION_ANSWER_FACETIME = "com.bluebubbles.action.ANSWER_FACETIME"
+        const val ACTION_DECLINE_FACETIME = "com.bluebubbles.action.DECLINE_FACETIME"
 
         const val EXTRA_CHAT_GUID = "chat_guid"
         const val EXTRA_MESSAGE_GUID = "message_guid"
         const val EXTRA_REPLY_TEXT = "reply_text"
+        const val EXTRA_CALL_UUID = "call_uuid"
 
         private const val GROUP_MESSAGES = "messages_group"
+        private const val FACETIME_NOTIFICATION_ID_PREFIX = 1000000
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
@@ -63,7 +68,17 @@ class NotificationService @Inject constructor(
             setShowBadge(false)
         }
 
-        notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel))
+        val faceTimeChannel = NotificationChannel(
+            CHANNEL_FACETIME,
+            "FaceTime Calls",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Incoming FaceTime call notifications"
+            enableVibration(true)
+            enableLights(true)
+        }
+
+        notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel, faceTimeChannel))
     }
 
     /**
@@ -190,6 +205,74 @@ class NotificationService @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
+    }
+
+    /**
+     * Show incoming FaceTime call notification
+     */
+    fun showFaceTimeCallNotification(
+        callUuid: String,
+        callerName: String,
+        callerAddress: String?
+    ) {
+        if (!hasNotificationPermission()) return
+
+        val notificationId = FACETIME_NOTIFICATION_ID_PREFIX + callUuid.hashCode()
+
+        // Answer action - opens browser with FaceTime link
+        val answerIntent = Intent(context, NotificationReceiver::class.java).apply {
+            action = ACTION_ANSWER_FACETIME
+            putExtra(EXTRA_CALL_UUID, callUuid)
+        }
+        val answerPendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId + 1,
+            answerIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Decline action
+        val declineIntent = Intent(context, NotificationReceiver::class.java).apply {
+            action = ACTION_DECLINE_FACETIME
+            putExtra(EXTRA_CALL_UUID, callUuid)
+        }
+        val declinePendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationId + 2,
+            declineIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_FACETIME)
+            .setSmallIcon(android.R.drawable.ic_menu_call)
+            .setContentTitle("Incoming FaceTime Call")
+            .setContentText("$callerName is calling...")
+            .addAction(
+                android.R.drawable.ic_menu_call,
+                "Answer",
+                answerPendingIntent
+            )
+            .addAction(
+                android.R.drawable.ic_menu_close_clear_cancel,
+                "Decline",
+                declinePendingIntent
+            )
+            .setCategory(NotificationCompat.CATEGORY_CALL)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .setOngoing(true)
+            .setAutoCancel(false)
+            .build()
+
+        notificationManager.notify(notificationId, notification)
+    }
+
+    /**
+     * Dismiss FaceTime call notification
+     */
+    fun dismissFaceTimeCallNotification(callUuid: String) {
+        val notificationId = FACETIME_NOTIFICATION_ID_PREFIX + callUuid.hashCode()
+        notificationManager.cancel(notificationId)
     }
 
     private fun hasNotificationPermission(): Boolean {

@@ -10,6 +10,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["guid"], unique = true),
         Index(value = ["is_pinned"]),
+        Index(value = ["is_starred"]),
         Index(value = ["latest_message_date"])
     ]
 )
@@ -34,6 +35,9 @@ data class ChatEntity(
 
     @ColumnInfo(name = "is_archived")
     val isArchived: Boolean = false,
+
+    @ColumnInfo(name = "is_starred")
+    val isStarred: Boolean = false,
 
     @ColumnInfo(name = "mute_type")
     val muteType: String? = null,
@@ -64,6 +68,28 @@ data class ChatEntity(
 
     @ColumnInfo(name = "custom_notification_sound")
     val customNotificationSound: String? = null,
+
+    // Per-chat notification settings
+    @ColumnInfo(name = "notifications_enabled", defaultValue = "1")
+    val notificationsEnabled: Boolean = true,
+
+    @ColumnInfo(name = "notification_priority", defaultValue = "'default'")
+    val notificationPriority: String = "default", // "priority", "default", "silent"
+
+    @ColumnInfo(name = "bubble_enabled", defaultValue = "0")
+    val bubbleEnabled: Boolean = false,
+
+    @ColumnInfo(name = "pop_on_screen", defaultValue = "1")
+    val popOnScreen: Boolean = true,
+
+    @ColumnInfo(name = "lock_screen_visibility", defaultValue = "'all'")
+    val lockScreenVisibility: String = "all", // "all", "hide_sensitive", "hide_all"
+
+    @ColumnInfo(name = "show_notification_dot", defaultValue = "1")
+    val showNotificationDot: Boolean = true,
+
+    @ColumnInfo(name = "vibration_enabled", defaultValue = "1")
+    val vibrationEnabled: Boolean = true,
 
     @ColumnInfo(name = "auto_send_read_receipts")
     val autoSendReadReceipts: Boolean? = null,

@@ -90,26 +90,17 @@ private fun getInitials(name: String): String {
     }.uppercase()
 }
 
-// Google Messages-style avatar colors
+// Google Messages-style avatar colors - muted pastels that work in light and dark mode
 private val avatarColors = listOf(
-    Color(0xFF1A73E8), // Blue
-    Color(0xFF34A853), // Green
-    Color(0xFFEA4335), // Red
-    Color(0xFFFBBC04), // Yellow/Amber
-    Color(0xFF9334E6), // Purple
-    Color(0xFF00ACC1), // Cyan/Teal
-    Color(0xFFE91E63), // Pink
-    Color(0xFF8E24AA), // Violet
+    Color(0xFF5C6BC0), // Soft Indigo
+    Color(0xFF26A69A), // Muted Teal
+    Color(0xFFAB47BC), // Soft Purple
+    Color(0xFFEC407A), // Dusty Rose
+    Color(0xFF42A5F5), // Soft Blue
 )
 
-// Default color for phone numbers
-private val phoneNumberAvatarColor = Color(0xFFFBBC04) // Yellow/Amber
-
 private fun getAvatarColor(name: String): Color {
-    // Use yellow/amber for phone numbers (like Google Messages)
-    if (isPhoneNumber(name)) {
-        return phoneNumberAvatarColor
-    }
+    // Hash the name/number to get a consistent color for each contact
     val hash = abs(name.hashCode())
     return avatarColors[hash % avatarColors.size]
 }

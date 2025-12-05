@@ -28,11 +28,19 @@ class ChatRepository @Inject constructor(
 
     fun observeArchivedChats(): Flow<List<ChatEntity>> = chatDao.getArchivedChats()
 
+    fun observeStarredChats(): Flow<List<ChatEntity>> = chatDao.getStarredChats()
+
     fun observeChat(guid: String): Flow<ChatEntity?> = chatDao.observeChatByGuid(guid)
 
     suspend fun getChat(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
 
     suspend fun getChatCount(): Int = chatDao.getChatCount()
+
+    fun observeArchivedChatCount(): Flow<Int> = chatDao.getArchivedChatCount()
+
+    fun observeStarredChatCount(): Flow<Int> = chatDao.getStarredChatCount()
+
+    fun observeUnreadChatCount(): Flow<Int> = chatDao.getUnreadChatCount()
 
     // ===== Remote Operations =====
 
@@ -105,6 +113,22 @@ class ChatRepository @Inject constructor(
     }
 
     /**
+     * Mark chat as unread locally
+     */
+    suspend fun markChatAsUnread(guid: String): Result<Unit> = runCatching {
+        chatDao.updateUnreadStatus(guid, true)
+        // Set unread count to 1 to indicate there are unread messages
+        chatDao.updateUnreadCount(guid, 1)
+    }
+
+    /**
+     * Mark all chats as read locally (batch operation)
+     */
+    suspend fun markAllChatsAsRead(): Result<Int> = runCatching {
+        chatDao.markAllChatsAsRead()
+    }
+
+    /**
      * Update chat pin status
      */
     suspend fun setPinned(guid: String, isPinned: Boolean, pinIndex: Int? = null): Result<Unit> = runCatching {
@@ -127,11 +151,52 @@ class ChatRepository @Inject constructor(
     }
 
     /**
+     * Star/unstar a chat (local only)
+     */
+    suspend fun setStarred(guid: String, isStarred: Boolean): Result<Unit> = runCatching {
+        chatDao.updateStarredStatus(guid, isStarred)
+    }
+
+    /**
      * Delete a chat locally
      */
     suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
         messageDao.deleteMessagesForChat(guid)
         chatDao.deleteChatByGuid(guid)
+    }
+
+    // ===== Per-Chat Notification Settings =====
+
+    suspend fun setNotificationsEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
+        chatDao.updateNotificationsEnabled(guid, enabled)
+    }
+
+    suspend fun setNotificationPriority(guid: String, priority: String): Result<Unit> = runCatching {
+        chatDao.updateNotificationPriority(guid, priority)
+    }
+
+    suspend fun setBubbleEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
+        chatDao.updateBubbleEnabled(guid, enabled)
+    }
+
+    suspend fun setPopOnScreen(guid: String, enabled: Boolean): Result<Unit> = runCatching {
+        chatDao.updatePopOnScreen(guid, enabled)
+    }
+
+    suspend fun setNotificationSound(guid: String, sound: String?): Result<Unit> = runCatching {
+        chatDao.updateNotificationSound(guid, sound)
+    }
+
+    suspend fun setLockScreenVisibility(guid: String, visibility: String): Result<Unit> = runCatching {
+        chatDao.updateLockScreenVisibility(guid, visibility)
+    }
+
+    suspend fun setShowNotificationDot(guid: String, enabled: Boolean): Result<Unit> = runCatching {
+        chatDao.updateShowNotificationDot(guid, enabled)
+    }
+
+    suspend fun setVibrationEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
+        chatDao.updateVibrationEnabled(guid, enabled)
     }
 
     /**

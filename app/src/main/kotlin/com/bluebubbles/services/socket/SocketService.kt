@@ -47,7 +47,24 @@ sealed class SocketEvent {
     data class GroupNameChanged(val chatGuid: String, val newName: String) : SocketEvent()
     data class GroupIconChanged(val chatGuid: String) : SocketEvent()
     data class ServerUpdate(val version: String) : SocketEvent()
+    data class FaceTimeCall(
+        val callUuid: String,
+        val callerName: String?,
+        val callerAddress: String?,
+        val status: FaceTimeCallStatus
+    ) : SocketEvent()
     data class Error(val message: String) : SocketEvent()
+}
+
+/**
+ * FaceTime call status values
+ */
+enum class FaceTimeCallStatus {
+    INCOMING,
+    CONNECTED,
+    DISCONNECTED,
+    RINGING,
+    UNKNOWN
 }
 
 @Singleton
@@ -69,6 +86,7 @@ class SocketService @Inject constructor(
         private const val EVENT_GROUP_NAME_CHANGED = "group-name-change"
         private const val EVENT_GROUP_ICON_CHANGED = "group-icon-changed"
         private const val EVENT_SERVER_UPDATE = "server-update"
+        private const val EVENT_FACETIME_CALL = "ft-call-status-changed"
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -133,6 +151,7 @@ class SocketService @Inject constructor(
                     on(EVENT_GROUP_NAME_CHANGED, onGroupNameChanged)
                     on(EVENT_GROUP_ICON_CHANGED, onGroupIconChanged)
                     on(EVENT_SERVER_UPDATE, onServerUpdate)
+                    on(EVENT_FACETIME_CALL, onFaceTimeCall)
 
                     connect()
                 }
@@ -325,6 +344,31 @@ class SocketService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing server update", e)
+        }
+    }
+
+    private val onFaceTimeCall = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val callUuid = data.optString("callUuid", "")
+            val callerName = data.optString("caller", null)
+            val callerAddress = data.optString("handle", null)
+            val statusString = data.optString("status", "").lowercase()
+
+            val status = when (statusString) {
+                "incoming" -> FaceTimeCallStatus.INCOMING
+                "connected" -> FaceTimeCallStatus.CONNECTED
+                "disconnected" -> FaceTimeCallStatus.DISCONNECTED
+                "ringing" -> FaceTimeCallStatus.RINGING
+                else -> FaceTimeCallStatus.UNKNOWN
+            }
+
+            if (callUuid.isNotBlank()) {
+                Log.d(TAG, "FaceTime call: $callUuid, status: $status")
+                _events.tryEmit(SocketEvent.FaceTimeCall(callUuid, callerName, callerAddress, status))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing FaceTime call event", e)
         }
     }
 }

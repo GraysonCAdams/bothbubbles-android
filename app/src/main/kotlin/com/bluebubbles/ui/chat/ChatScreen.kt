@@ -11,6 +11,7 @@ import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -243,7 +244,7 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            Column {
+            Column(modifier = Modifier.imePadding()) {
                 // Attachment picker panel (slides up above input)
                 AttachmentPickerPanel(
                     visible = showAttachmentPicker,

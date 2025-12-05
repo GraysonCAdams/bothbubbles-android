@@ -51,6 +51,11 @@ android {
     }
 }
 
+// Room schema export for migration testing
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
+
 dependencies {
     // Core Android
     implementation(libs.androidx.core.ktx)
@@ -105,6 +110,12 @@ dependencies {
     // Images - Coil
     implementation(libs.coil.compose)
 
+    // CameraX
+    implementation(libs.camerax.core)
+    implementation(libs.camerax.camera2)
+    implementation(libs.camerax.lifecycle)
+    implementation(libs.camerax.view)
+
     // WorkManager
     implementation(libs.work.runtime.ktx)
 
@@ -115,6 +126,12 @@ dependencies {
     // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+
+    // Google Play Services
+    implementation(libs.play.services.location)
+
+    // Phone Number Formatting
+    implementation(libs.libphonenumber)
 
     // Testing
     testImplementation(libs.junit)

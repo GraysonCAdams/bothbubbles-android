@@ -167,4 +167,16 @@ interface BlueBubblesApi {
 
     @GET("api/v1/fcm/client")
     suspend fun getFcmClient(): Response<ApiResponse<FcmClientDto>>
+
+    // ===== FaceTime =====
+
+    @POST("api/v1/facetime/answer/{callUuid}")
+    suspend fun answerFaceTime(
+        @Path("callUuid") callUuid: String
+    ): Response<ApiResponse<FaceTimeLinkDto>>
+
+    @POST("api/v1/facetime/leave/{callUuid}")
+    suspend fun leaveFaceTime(
+        @Path("callUuid") callUuid: String
+    ): Response<ApiResponse<Unit>>
 }

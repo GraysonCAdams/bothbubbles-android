@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.bluebubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -22,6 +23,7 @@ class BlueBubblesApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        PhoneNumberFormatter.init(this)
         createNotificationChannels()
     }
 

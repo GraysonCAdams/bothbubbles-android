@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">BlueBubbles</string>
+    <string name="app_name">BothBubbles</string>
 
     <!-- Navigation -->
     <string name="nav_conversations">Messages</string>
@@ -15,8 +15,13 @@
     <!-- Chat Screen -->
     <string name="typing_indicator">typing…</string>
     <string name="message_placeholder">Message</string>
+    <string name="message_placeholder_imessage">iMessage</string>
+    <string name="message_placeholder_text">Text message</string>
     <string name="send_message">Send</string>
     <string name="attach_file">Attach</string>
+    <string name="attach_image">Attach image</string>
+    <string name="emoji">Emoji</string>
+    <string name="voice_memo">Voice memo</string>
     <string name="video_call">Video call</string>
     <string name="audio_call">Call</string>
     <string name="chat_details">Details</string>
@@ -39,7 +44,7 @@
 
     <!-- SMS -->
     <string name="sms_default_app_title">Default SMS App</string>
-    <string name="sms_default_app_summary">Set BlueBubbles as your default SMS app</string>
+    <string name="sms_default_app_summary">Set BothBubbles as your default SMS app</string>
     <string name="sms_mode_title">Messaging Mode</string>
     <string name="sms_only_mode">SMS Only Mode</string>
 
@@ -62,4 +67,54 @@
     <string name="action_copy">Copy</string>
     <string name="action_forward">Forward</string>
     <string name="action_reply">Reply</string>
+
+    <!-- Chat Menu -->
+    <string name="menu_add_people">Add people</string>
+    <string name="menu_details">Details</string>
+    <string name="menu_starred">Starred</string>
+    <string name="menu_search">Search</string>
+    <string name="menu_archive">Archive</string>
+    <string name="menu_unarchive">Unarchive</string>
+    <string name="menu_delete">Delete</string>
+    <string name="menu_video">Video</string>
+    <string name="menu_block_and_report">Block &amp; report spam</string>
+    <string name="menu_show_subject_field">Show subject field</string>
+    <string name="menu_hide_subject_field">Hide subject field</string>
+    <string name="menu_help_and_feedback">Help &amp; feedback</string>
+
+    <!-- Delete Dialog -->
+    <string name="dialog_delete_title">Delete conversation?</string>
+    <string name="dialog_delete_message">This will permanently delete your conversation with %1$s. This action cannot be undone.</string>
+
+    <!-- Block Dialog -->
+    <string name="dialog_block_title">Block &amp; report spam?</string>
+    <string name="dialog_block_sms_message">Block %1$s? You will no longer receive messages from this contact. This will add the number to your device\'s blocked list.</string>
+    <string name="dialog_block_imessage_message">Blocking is only supported for SMS conversations. For iMessage conversations, you can block contacts directly on your Mac.</string>
+    <string name="action_block">Block</string>
+
+    <!-- Video Call -->
+    <string name="video_call_title">Start video call</string>
+    <string name="video_call_message">Choose how you want to start the video call</string>
+    <string name="video_call_google_meet">Google Meet</string>
+    <string name="video_call_whatsapp">WhatsApp</string>
+
+    <!-- FaceTime -->
+    <string name="notification_channel_facetime">FaceTime Calls</string>
+    <string name="notification_channel_facetime_desc">Incoming FaceTime call notifications</string>
+    <string name="facetime_incoming_call">Incoming FaceTime Call</string>
+    <string name="facetime_calling">%1$s is calling…</string>
+    <string name="action_answer">Answer</string>
+    <string name="action_decline">Decline</string>
+    <string name="contact_blocked">Contact blocked</string>
+
+    <!-- Attachment Picker -->
+    <string name="picker_gallery">Gallery</string>
+    <string name="picker_camera">Camera</string>
+    <string name="picker_gifs">GIFs</string>
+    <string name="picker_stickers">Stickers</string>
+    <string name="picker_magic_compose">Magic Compose</string>
+    <string name="picker_files">Files</string>
+    <string name="picker_location">Location</string>
+    <string name="picker_contacts">Contacts</string>
+    <string name="picker_schedule">Schedule</string>
 </resources>
