@@ -1,0 +1,156 @@
+package com.bluebubbles.ui.chat
+
+import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.bluebubbles.data.local.db.dao.ChatDao
+import com.bluebubbles.data.local.db.dao.MessageDao
+import com.bluebubbles.data.local.db.entity.MessageEntity
+import com.bluebubbles.ui.components.MessageUiModel
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.*
+import javax.inject.Inject
+
+@HiltViewModel
+class ChatViewModel @Inject constructor(
+    savedStateHandle: SavedStateHandle,
+    private val chatDao: ChatDao,
+    private val messageDao: MessageDao
+) : ViewModel() {
+
+    private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
+
+    private val _uiState = MutableStateFlow(ChatUiState())
+    val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    init {
+        loadChat()
+        loadMessages()
+    }
+
+    private fun loadChat() {
+        viewModelScope.launch {
+            chatDao.observeChatByGuid(chatGuid).collect { chat ->
+                chat?.let {
+                    _uiState.update { state ->
+                        state.copy(
+                            chatTitle = it.displayName ?: it.chatIdentifier ?: "Unknown"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun loadMessages() {
+        viewModelScope.launch {
+            messageDao.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
+                .map { messages -> messages.map { it.toUiModel() } }
+                .collect { messageModels ->
+                    _uiState.update { state ->
+                        state.copy(
+                            isLoading = false,
+                            messages = messageModels
+                        )
+                    }
+                }
+        }
+    }
+
+    fun updateDraft(text: String) {
+        _uiState.update { it.copy(draftText = text) }
+    }
+
+    fun sendMessage() {
+        val text = _uiState.value.draftText.trim()
+        if (text.isBlank()) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSending = true, draftText = "") }
+
+            try {
+                // Create temp message for immediate UI feedback
+                val tempGuid = "temp-${UUID.randomUUID()}"
+                val tempMessage = MessageEntity(
+                    guid = tempGuid,
+                    chatGuid = chatGuid,
+                    text = text,
+                    dateCreated = System.currentTimeMillis(),
+                    isFromMe = true,
+                    error = 0
+                )
+                messageDao.insertMessage(tempMessage)
+
+                // TODO: Send to server via API
+                // For now, just mark as "sent" locally
+
+                _uiState.update { it.copy(isSending = false) }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isSending = false,
+                        error = e.message
+                    )
+                }
+            }
+        }
+    }
+
+    fun loadMoreMessages() {
+        val currentCount = _uiState.value.messages.size
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMore = true) }
+
+            val moreMessages = messageDao.getMessagesForChat(
+                chatGuid = chatGuid,
+                limit = 50,
+                offset = currentCount
+            )
+
+            _uiState.update { state ->
+                state.copy(
+                    isLoadingMore = false,
+                    messages = state.messages + moreMessages.map { it.toUiModel() },
+                    canLoadMore = moreMessages.size == 50
+                )
+            }
+        }
+    }
+
+    private fun MessageEntity.toUiModel(): MessageUiModel {
+        return MessageUiModel(
+            guid = guid,
+            text = text,
+            dateCreated = dateCreated,
+            formattedTime = formatTime(dateCreated),
+            isFromMe = isFromMe,
+            isSent = !guid.startsWith("temp-") && error == 0,
+            isDelivered = dateDelivered != null,
+            isRead = dateRead != null,
+            hasError = error != 0,
+            isReaction = associatedMessageType?.contains("reaction") == true,
+            attachments = emptyList(), // TODO: Load attachments
+            senderName = null, // TODO: Get from handle
+            messageSource = messageSource
+        )
+    }
+
+    private fun formatTime(timestamp: Long): String {
+        return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
+    }
+}
+
+data class ChatUiState(
+    val chatTitle: String = "",
+    val isLoading: Boolean = true,
+    val isLoadingMore: Boolean = false,
+    val isSending: Boolean = false,
+    val canLoadMore: Boolean = true,
+    val messages: List<MessageUiModel> = emptyList(),
+    val draftText: String = "",
+    val isTyping: Boolean = false,
+    val error: String? = null
+)

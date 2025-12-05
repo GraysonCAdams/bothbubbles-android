@@ -4,133 +4,239 @@ We encourage all contributions to this project! All we ask are you follow these 
 
 * Write clean code
 * Comment your code
-* Follow [dart doc guidelines](https://dart.dev/guides/language/effective-dart)
+* Follow Kotlin coding conventions
+
+## Current Development Focus
+
+The app is a **pure Kotlin/Jetpack Compose Android app** styled after Google Messages. Key priorities:
+
+- **Conversation List**: Google Messages-style layout with iOS-style pinned section
+- **Message View**: iMessage-style bubbles with delivery status
+- **SMS/MMS Support**: Native Android SMS/MMS integration
+
+See [PLAN_SMS_MMS_SUPPORT.md](PLAN_SMS_MMS_SUPPORT.md) for detailed feature status.
+
+## Project Structure
+
+```
+bluebubbles-app/
+├── app/                          # Main Android app module
+│   ├── build.gradle.kts
+│   ├── proguard-rules.pro
+│   └── src/
+│       ├── main/
+│       │   ├── kotlin/com/bluebubbles/
+│       │   │   ├── data/         # Data layer (DB, API, repos)
+│       │   │   ├── di/           # Hilt dependency injection
+│       │   │   ├── services/     # Background services
+│       │   │   └── ui/           # Compose UI
+│       │   │       ├── chat/
+│       │   │       ├── components/
+│       │   │       ├── conversations/
+│       │   │       ├── navigation/
+│       │   │       ├── settings/
+│       │   │       └── theme/
+│       │   ├── res/              # Android resources
+│       │   └── AndroidManifest.xml
+│       ├── test/                 # Unit tests
+│       └── androidTest/          # Instrumentation tests
+├── gradle/
+│   ├── libs.versions.toml        # Version catalog
+│   └── wrapper/
+├── build.gradle.kts              # Root build config
+├── settings.gradle.kts
+└── referential-old-app/          # Legacy Flutter code (reference only)
+```
 
 ## Pre-requisites
 
-Please make sure you have completed the following pre-requisites:
+* **Git**: [download](https://git-scm.com/downloads)
+* **Android Studio** (Ladybug or newer): [download](https://developer.android.com/studio)
+  - Includes bundled JDK 17+
+  - Install Android SDK via SDK Manager
+* **ADB** (included with Android SDK)
 
-* Install Git: [download](https://git-scm.com/downloads)
-* Install Java: [download](https://www.oracle.com/java/technologies/javase/javase-jdk8-downloads.html)
-* Install Flutter: [guide/download](https://flutter.dev/docs/get-started/install)
-* Install Android Studio [download](https://developer.android.com/studio)
-    - Also install the Flutter & Dart Plugins via the Plugin Manager
-    - If you wish you use a virtual Android device, install one via the AVD Manager
-    - Install Command Line Tools via the SDK Tools interface
-* Install a code editor (if you don't want to use Android Studio). Here is my preferred editor:
-    - [Visual Studio Code](https://code.visualstudio.com/download)
+## Building the App
 
-Once you have a code editor installed, remember to install all of the required plugins/extensions such as the following:
+### Quick Start (Command Line)
 
-* Dart
-* Flutter
-* Intellisense/Intellicode
+```bash
+# Clone the repository
+git clone https://github.com/BlueBubblesApp/bluebubbles-app.git
+cd bluebubbles-app
+
+# Set JAVA_HOME to Android Studio's bundled JDK (macOS)
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+export PATH="$JAVA_HOME/bin:$PATH"
+
+# Build debug APK
+./gradlew :app:assembleDebug
+
+# The APK will be at:
+# app/build/outputs/apk/debug/app-debug.apk
+```
+
+### Build Commands
+
+| Command | Description |
+|---------|-------------|
+| `./gradlew :app:assembleDebug` | Build debug APK |
+| `./gradlew :app:assembleRelease` | Build release APK |
+| `./gradlew :app:installDebug` | Build and install to connected device |
+| `./gradlew clean` | Clean build cache |
+
+### APK Output Locations
+
+- **Debug:** `app/build/outputs/apk/debug/app-debug.apk`
+- **Release:** `app/build/outputs/apk/release/app-release.apk`
+
+### Installing on Device
+
+```bash
+# List connected devices
+adb devices
+
+# Install the APK
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# Launch the app
+adb shell am start -n com.bluebubbles/.MainActivity
+```
+
+### Building in Android Studio
+
+1. Open the project in Android Studio
+2. Wait for Gradle sync to complete
+3. Select `app` configuration and your device
+4. Click Run (or press Shift+F10)
+
+### macOS Build Script
+
+For convenience, add this to your shell profile (`~/.zshrc` or `~/.bashrc`):
+
+```bash
+# BlueBubbles build helper
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+alias bb-build='cd ~/Repos/bluebubbles-app && ./gradlew :app:assembleDebug'
+alias bb-install='adb install -r ~/Repos/bluebubbles-app/app/build/outputs/apk/debug/app-debug.apk'
+alias bb-run='bb-build && bb-install'
+```
+
+Then use:
+```bash
+bb-run  # Build and install in one command
+```
 
 ## Forking the Repository
 
-In order to start contributing, follow these steps:
-
 1. Create a GitHub account
-2. Fork the `BlueBubbles-Android-App` repository: [here](https://github.com/BlueBubblesApp/BlueBubbles-Android-App)
-    * Click the fork button at the top right of your brwoser
-3. On your projects folder (or any preferred folder), clone your forked repository:
-    * HTTPS: `git clone https://github.com/BlueBubblesApp/BlueBubbles-Android-App.git`
-    * SSH: `git clone git@github.com:BlueBubblesApp/BlueBubbles-Android-App.git`
-4. Set the upstream to our main repo (this will allow you to pull official changes)
-    * `git remote add upstream git@github.com:BlueBubblesApp/BlueBubbles-Android-App.git`
-5. Fetch all the required branches/code
-    * `git fetch`
-    * `git fetch upstream`
-6. Pull the latest changes, or a specific branch you want to start from
-    * Pull code from the main repository's master branch: `git pull upstream master`
-    * Checkout a specific branch: `git checkout upstream <name of branch>`
+2. Fork the repository: [here](https://github.com/BlueBubblesApp/bluebubbles-app)
+3. Clone your forked repository:
+    * HTTPS: `git clone https://github.com/<your-username>/bluebubbles-app.git`
+    * SSH: `git clone git@github.com:<your-username>/bluebubbles-app.git`
+4. Set the upstream to the main repo:
+    * `git remote add upstream git@github.com:BlueBubblesApp/bluebubbles-app.git`
+5. Fetch all branches:
+    * `git fetch --all`
+6. Pull the latest changes:
+    * `git pull upstream master`
 
 ## Picking an Issue
 
-If you are working on something that does not have an issue created for it yet, please create an issue for it so we can easily track it. Otherwise, check out our issues page [here](https://github.com/BlueBubblesApp/BlueBubbles-Android-App/issues), and here are some tips:
+Check out our [issues page](https://github.com/BlueBubblesApp/bluebubbles-app/issues):
 
-* I have labelled issues by difficulty. You can add `label:"Difficulty: Easy"` to the query to filter. The options are Easy, Medium, or Hard.
-    - Some issues have 2 Difficulty labels. This just means they are somewhere in between the two difficulties.
-* I have also labelled issues by if they are bugs (`bug`)or feature requests (`enhancement`)
-* If you are new to Flutter/Dart, you can filter on issues with the `label:"good first issue"`
-    - Though, you may find issues with similar difficulty by just filtering on the `Difficulty: Easy` label
+* Filter by difficulty: `label:"Difficulty: Easy"`, `label:"Difficulty: Medium"`, `label:"Difficulty: Hard"`
+* Filter by type: `bug` or `enhancement`
+* New contributors: Look for `label:"good first issue"`
+
+If you're working on something without an existing issue, please create one first.
 
 ## Committing Code
 
-When you are ready to work on the code, follow these steps.
-
-1. Create your own branch
-    * `git checkout -b <your name>/<feature|bug>/<short descriptor>`
+1. Create a branch:
+    * `git checkout -b <your-name>/<feature|bug>/<short-descriptor>`
     * Example: `git checkout -b zach/feature/improved-animations`
-2. Make your code changes :)
-3. Stage your changes to the commit using a code-editor plugin, or Git directly
-    * Stage a specific file: `git add <file name>`
-    * Stage all changes: `git add -A`
-4. Commit your changes
-    * `git commit -m "<Description of your changes>"`
-5. Push your changes to your forked repository
-    * `git push origin <your branch name>`
+2. Make your code changes
+3. Stage your changes:
+    * `git add -A` (all changes)
+    * `git add <file>` (specific file)
+4. Commit with a descriptive message:
+    * `git commit -m "Description of your changes"`
+5. Push to your fork:
+    * `git push origin <your-branch-name>`
 
-## Submitting a Pull-Request
+## Submitting a Pull Request
 
-Once you have made all your changes, follow these instructions:
-
-1. Login to GitHub's website
-2. Go to your forked `BlueBubbles-Android-App` repository
-3. Go to the `Pull requests` tab
-4. Create a new Pull request, merging your changes into the main `development` branch
-5. Please include the following information with your pull request:
+1. Go to your forked repository on GitHub
+2. Go to the `Pull requests` tab
+3. Create a new Pull Request to the main `master` branch
+4. Include:
     * The problem
     * What your code solves
     * How you fixed it
-6. Once submitted, your changes will be reviewed, and hopefully committed into the master branch!
 
-## Getting GIF Keyboard Support
+## Architecture Overview
 
-One feature that is not yet native in the Dart/Flutter languages is the ability to use a keyboard to send an image to an app. For example, the ability to use the GIF keyboard in Google's Keyboard to send a GIF. There is currently an open GitHub issue for the Flutter team to implement this feature. However, as of writing this, it is not supported. You can follow the progress of the feature here:
+### Tech Stack
 
-[GitHub Issue - Image keyboard support](https://github.com/flutter/flutter/issues/20796)
+- **UI**: Jetpack Compose with Material 3
+- **DI**: Hilt
+- **Database**: Room
+- **Networking**: Retrofit + OkHttp + Socket.IO
+- **Async**: Kotlin Coroutines + Flow
 
-That said, we have modified the Flutter engine and Flutter framework to support GIF insertion from a keyboard. We have forked the Flutter engine repository, and the flutter framework repository to integrate this feature for BlueBubbles. You can view the forked repositories here:
+### Key Patterns
 
-* [Flutter Engine](https://github.com/BlueBubblesApp/engine)
-* [Flutter Framework](https://github.com/BlueBubblesApp/flutter)
+- **MVVM**: ViewModels expose StateFlow to Composables
+- **Repository Pattern**: Repositories abstract data sources
+- **Single Activity**: Navigation via Compose Navigation
 
-If you would like to get this feature in your own personal builds, you have 2 options. The first option is to build your own Flutter Engine with the GIF Keyboard changes. The second option is to download my pre-built Flutter Engine with the changes already made to the Flutter SDK, `v1.22.4`
+### Package Guide
 
-Once you have a custom Flutter Engine built, you will be able to use it when using `flutter run`, `flutter build`, etc. There are 2 additional CLI params/flags you need to use to reference the custom Flutter Engine:
+| Package | Purpose |
+|---------|---------|
+| `data.local.db` | Room database, DAOs, entities |
+| `data.remote.api` | Retrofit API interfaces, DTOs |
+| `data.repository` | Repository implementations |
+| `di` | Hilt modules |
+| `services` | Background services (socket, sync, SMS) |
+| `ui.components` | Reusable Compose components |
+| `ui.conversations` | Conversation list screen |
+| `ui.chat` | Chat/message screen |
+| `ui.settings` | Settings screens |
+| `ui.theme` | Material 3 theme |
 
-* `--local-engine`
-    - This specifies which of the engines to use (debug, profile, release, etc.)
-* `--local-engine-src-path`
-    - This specifies the path to the built Flutter Engine
+## Troubleshooting
 
-You can use the flags above, like so: `flutter run --debug --local-engine=android_debug_unopt --local-engine-src-path=/path/to/your/extracted/engine/src`
+### Build fails with "Unable to locate Java Runtime"
 
-### Using my Pre-built Flutter Engine (Optional)
+Set JAVA_HOME to Android Studio's JDK:
+```bash
+export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+```
 
-This method will only work if you are running Ubuntu 18.04. Building your own custom Flutter Engine only works on a few Operating Systems. Ubuntu 18.04 is one of those, and newer versions of Ubuntu are not supported as of writing this. I am unsure if this build will work on other Unix flavors, that is for you to try and find out! If you want a sure-fire way to use the custom engine, just use Ubuntu 18.04
+### Build fails with experimental API errors
 
-**Flutter Engine Download**: https://mega.nz/file/sxJXnQoR#XNwRm7aDdqV7UTxKisiFflI2fWur4Hb2S9Ud2BwzNcg
+Add `@OptIn(ExperimentalFoundationApi::class)` to functions using experimental APIs.
 
-Download the .zip file above and extract it somewhere. The location doesn't really matter, as long as you can reference it when you add the additional CLI params/flags like above
+### Gradle sync fails
 
-### Building your own Flutter Engine (Optional)
+```bash
+./gradlew clean
+./gradlew --refresh-dependencies
+```
 
-If you would like to compile your own engine to get GIF insertion, you can via Google's official guide, which can take a few hours to complete. You can find a guide on how to setup a Flutter development environment here:
+### App won't install - signature mismatch
 
-[Setting up the Engine development environment](https://github.com/flutter/flutter/wiki/Setting-up-the-Engine-development-environment)
+Uninstall existing app first:
+```bash
+adb uninstall com.bluebubbles
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
 
-Make sure to use the BlueBubbles Flutter Engine repository listed above when cloning from Git (using `gclient sync`)
+### Force stop and restart app
 
-### Modifying the Flutter Framework
-
-Once the Flutter Engine is built, you will also need to make similar changes in the Flutter Framework (SDK) so that you can actually utilize the new `onContentCommitted` hooks. Luckily, we have done most of the work for you. Simply checkout the BlueBubbles Flutter Framework repository (master branch) and use that as your Flutter SDK (make sure to add any environmental references to the bin path)
-
-### Building a "release" build
-
-Here is how you can build a "release" build. A build that is optimized and has no extra debugging or profiling tools. This type of build will run the smoothest for you. All you have to do is run the following:
-
-**ARM Devices**: `flutter build apk --release --split-per-abi --local-engine=android_release --local-engine-src-path=/path/to/your/extracted/engine/src`
-
-**ARM x64 Devices**: `flutter build apk --release --split-per-abi --local-engine=android_release_arm64 --target-platform=android-arm64 --local-engine-src-path=/path/to/your/extracted/engine/src`
+```bash
+adb shell am force-stop com.bluebubbles
+adb shell am start -n com.bluebubbles/.MainActivity
+```

@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">BlueBubbles</string>
+
+    <!-- Navigation -->
+    <string name="nav_conversations">Messages</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Conversations Screen -->
+    <string name="new_message">New message</string>
+    <string name="search_conversations">Search conversations</string>
+    <string name="no_conversations">No conversations yet</string>
+    <string name="draft_prefix">Draft: %1$s</string>
+
+    <!-- Chat Screen -->
+    <string name="typing_indicator">typing…</string>
+    <string name="message_placeholder">Message</string>
+    <string name="send_message">Send</string>
+    <string name="attach_file">Attach</string>
+    <string name="video_call">Video call</string>
+    <string name="audio_call">Call</string>
+    <string name="chat_details">Details</string>
+
+    <!-- Message Status -->
+    <string name="status_sending">Sending…</string>
+    <string name="status_sent">Sent</string>
+    <string name="status_delivered">Delivered</string>
+    <string name="status_read">Read</string>
+    <string name="status_failed">Failed to send</string>
+
+    <!-- Settings -->
+    <string name="settings_server">Server</string>
+    <string name="settings_appearance">Appearance</string>
+    <string name="settings_notifications">Notifications</string>
+    <string name="settings_sms">SMS/MMS</string>
+    <string name="settings_about">About</string>
+    <string name="settings_privacy">Privacy</string>
+    <string name="settings_backup">Backup &amp; Restore</string>
+
+    <!-- SMS -->
+    <string name="sms_default_app_title">Default SMS App</string>
+    <string name="sms_default_app_summary">Set BlueBubbles as your default SMS app</string>
+    <string name="sms_mode_title">Messaging Mode</string>
+    <string name="sms_only_mode">SMS Only Mode</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_messages_desc">New message notifications</string>
+    <string name="notification_channel_service">Background Service</string>
+    <string name="notification_channel_service_desc">Keeps the connection alive</string>
+
+    <!-- Errors -->
+    <string name="error_connection">Connection failed</string>
+    <string name="error_send_message">Failed to send message</string>
+    <string name="error_load_messages">Failed to load messages</string>
+
+    <!-- Actions -->
+    <string name="action_retry">Retry</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_ok">OK</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_copy">Copy</string>
+    <string name="action_forward">Forward</string>
+    <string name="action_reply">Reply</string>
+</resources>
