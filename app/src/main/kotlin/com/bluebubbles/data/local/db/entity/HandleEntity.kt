@@ -44,7 +44,11 @@ data class HandleEntity(
     val cachedDisplayName: String? = null,
 
     @ColumnInfo(name = "cached_avatar_path")
-    val cachedAvatarPath: String? = null
+    val cachedAvatarPath: String? = null,
+
+    // Inferred name from self-introduction messages (e.g., "Hey it's John")
+    @ColumnInfo(name = "inferred_name")
+    val inferredName: String? = null
 ) {
     /**
      * Unique identifier for this handle (address + service)
@@ -65,10 +69,19 @@ data class HandleEntity(
         get() = service.equals("iMessage", ignoreCase = true)
 
     /**
-     * Display name (cached contact name or formatted address)
+     * Display name with priority: saved contact > "Maybe: inferred" > formatted address > raw address
      */
     val displayName: String
-        get() = cachedDisplayName ?: formattedAddress ?: address
+        get() = cachedDisplayName
+            ?: inferredName?.let { "Maybe: $it" }
+            ?: formattedAddress
+            ?: address
+
+    /**
+     * Whether this handle has an inferred (unconfirmed) name
+     */
+    val hasInferredName: Boolean
+        get() = cachedDisplayName == null && inferredName != null
 
     /**
      * Generate initials from display name

@@ -64,6 +64,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bluebubbles.R
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.ui.components.Avatar
+import com.bluebubbles.ui.components.ConnectionBannerState
+import com.bluebubbles.ui.components.ConnectionStatusBanner
 import com.bluebubbles.ui.components.ContactInfo
 import com.bluebubbles.ui.components.ContactQuickActionsPopup
 import com.bluebubbles.ui.components.GroupAvatar
@@ -101,9 +103,20 @@ fun ConversationsScreen(
     onNewMessageClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onSettingsNavigate: (String) -> Unit = {},
+    onSetupServerClick: () -> Unit = {},
     viewModel: ConversationsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Determine if connection banner should be visible (for padding calculation)
+    val isBannerVisible = when (uiState.connectionBannerState) {
+        is ConnectionBannerState.NotConfigured,
+        is ConnectionBannerState.Reconnecting -> true
+        else -> false
+    }
+    // Banner height for padding (approximate: 56dp content + 16dp padding + nav bar)
+    val bannerPadding = if (isBannerVisible) 72.dp else 0.dp
+
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
     val focusRequester = remember { FocusRequester() }
@@ -410,7 +423,7 @@ fun ConversationsScreen(
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
-                        contentPadding = PaddingValues(bottom = 88.dp)
+                        contentPadding = PaddingValues(bottom = 88.dp + bannerPadding)
                     ) {
                     // Pinned section (iOS-style horizontal row)
                     // Always show pinned at top - in selection mode they are view-only (not selectable)
@@ -646,6 +659,22 @@ fun ConversationsScreen(
                 onNavigate = onSettingsNavigate
             )
         }
+
+        // Connection status banner at the bottom
+        ConnectionStatusBanner(
+            state = uiState.connectionBannerState,
+            onSetupClick = {
+                // Navigate to server settings
+                onSettingsNavigate("server")
+            },
+            onDismiss = {
+                viewModel.dismissSetupBanner()
+            },
+            onRetryClick = {
+                viewModel.retryConnection()
+            },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
@@ -1397,11 +1426,11 @@ private fun GoogleStyleConversationTile(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 // Message preview with status indicator
                 Row(
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalAlignment = Alignment.Top,
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     if (conversation.lastMessageStatus != MessageStatus.NONE) {
@@ -1410,14 +1439,15 @@ private fun GoogleStyleConversationTile(
                     Text(
                         text = formatMessagePreview(conversation),
                         style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
+                            fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                            lineHeight = 18.sp
                         ),
                         color = when {
                             conversation.hasDraft -> MaterialTheme.colorScheme.error
                             conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
                             else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         },
-                        maxLines = 1,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                 }

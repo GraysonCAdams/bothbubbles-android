@@ -16,12 +16,17 @@ import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.data.repository.MessageDeliveryMode
 import com.bluebubbles.data.repository.MessageRepository
 import com.bluebubbles.data.repository.SmsRepository
+import com.bluebubbles.services.messaging.ChatFallbackTracker
+import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
+import com.bluebubbles.services.sound.SoundManager
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ReactionUiModel
 import com.bluebubbles.ui.components.Tapback
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -35,7 +40,9 @@ class ChatViewModel @Inject constructor(
     private val messageRepository: MessageRepository,
     private val smsRepository: SmsRepository,
     private val socketService: SocketService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val chatFallbackTracker: ChatFallbackTracker,
+    private val soundManager: SoundManager
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -45,6 +52,11 @@ class ChatViewModel @Inject constructor(
 
     private val _pendingAttachments = MutableStateFlow<List<Uri>>(emptyList())
 
+    // Typing indicator state
+    private var typingDebounceJob: Job? = null
+    private var isCurrentlyTyping = false
+    private val typingDebounceMs = 3000L // 3 seconds after last keystroke to send stopped-typing
+
     init {
         loadChat()
         loadMessages()
@@ -53,6 +65,24 @@ class ChatViewModel @Inject constructor(
         markAsRead()
         determineChatType()
         observeParticipantsForSaveContactBanner()
+        observeFallbackMode()
+        observeConnectionState()
+    }
+
+    private fun observeFallbackMode() {
+        viewModelScope.launch {
+            chatFallbackTracker.fallbackModeChats.collect { fallbackChats ->
+                _uiState.update { it.copy(isInSmsFallbackMode = chatGuid in fallbackChats) }
+            }
+        }
+    }
+
+    private fun observeConnectionState() {
+        viewModelScope.launch {
+            socketService.connectionState.collect { state ->
+                _uiState.update { it.copy(isServerConnected = state == ConnectionState.CONNECTED) }
+            }
+        }
     }
 
     private fun syncMessages() {
@@ -85,18 +115,27 @@ class ChatViewModel @Inject constructor(
 
     private fun observeParticipantsForSaveContactBanner() {
         viewModelScope.launch {
-            // Combine participants with dismissed banners
-            chatRepository.observeParticipantsForChat(chatGuid)
-                .combine(settingsDataStore.dismissedSaveContactBanners) { participants, dismissed ->
-                    Pair(participants, dismissed)
+            // Combine chat info, participants, and dismissed banners
+            // This ensures we have the correct isGroup state before checking
+            chatRepository.observeChat(chatGuid)
+                .filterNotNull()
+                .combine(chatRepository.observeParticipantsForChat(chatGuid)) { chat, participants ->
+                    Triple(chat, participants, chat.isGroup)
                 }
-                .collect { (participants, dismissedAddresses) ->
+                .combine(settingsDataStore.dismissedSaveContactBanners) { (chat, participants, isGroup), dismissed ->
+                    Triple(participants, isGroup, dismissed)
+                }
+                .collect { (participants, isGroup, dismissedAddresses) ->
                     // Only show banner for 1-on-1 chats with unsaved contacts
-                    val isGroup = _uiState.value.isGroup
-                    if (isGroup || participants.isEmpty()) {
+                    if (isGroup) {
                         _uiState.update { it.copy(showSaveContactBanner = false, unsavedSenderAddress = null) }
                         return@collect
                     }
+
+                    // For chats without participants in the cross-ref table,
+                    // check if the chat title looks like a phone number (unsaved contact)
+                    val chatTitle = _uiState.value.chatTitle
+                    val participantPhone = _uiState.value.participantPhone
 
                     // Find the first unsaved participant (no cached display name)
                     val unsavedParticipant = participants.firstOrNull { participant ->
@@ -104,14 +143,40 @@ class ChatViewModel @Inject constructor(
                             participant.address !in dismissedAddresses
                     }
 
+                    // If we have an unsaved participant from the DB, use that
+                    // Otherwise, check if the chat title looks like a phone/address (no contact name)
+                    val unsavedAddress = when {
+                        unsavedParticipant != null -> unsavedParticipant.address
+                        participants.isEmpty() && participantPhone != null &&
+                            participantPhone !in dismissedAddresses &&
+                            looksLikePhoneOrAddress(chatTitle) -> participantPhone
+                        else -> null
+                    }
+
+                    // Get inferred name from participant if available
+                    val inferredName = unsavedParticipant?.inferredName
+
                     _uiState.update {
                         it.copy(
-                            showSaveContactBanner = unsavedParticipant != null,
-                            unsavedSenderAddress = unsavedParticipant?.address
+                            showSaveContactBanner = unsavedAddress != null,
+                            unsavedSenderAddress = unsavedAddress,
+                            inferredSenderName = inferredName
                         )
                     }
                 }
         }
+    }
+
+    /**
+     * Check if a string looks like a phone number or email address (not a contact name)
+     */
+    private fun looksLikePhoneOrAddress(text: String): Boolean {
+        val trimmed = text.trim()
+        // Check for phone number patterns (digits, spaces, dashes, parens, plus)
+        val phonePattern = Regex("^[+]?[0-9\\s\\-().]+$")
+        // Check for email pattern
+        val emailPattern = Regex("^[^@]+@[^@]+\\.[^@]+$")
+        return phonePattern.matches(trimmed) || emailPattern.matches(trimmed)
     }
 
     fun dismissSaveContactBanner() {
@@ -143,6 +208,7 @@ class ChatViewModel @Inject constructor(
     private fun loadMessages() {
         viewModelScope.launch {
             messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
+                .distinctUntilChanged()
                 .map { messages ->
                     // Separate actual reactions (iMessage tapbacks)
                     val iMessageReactions = messages.filter { it.isReaction }
@@ -309,6 +375,66 @@ class ChatViewModel @Inject constructor(
 
     fun updateDraft(text: String) {
         _uiState.update { it.copy(draftText = text) }
+        handleTypingIndicator(text)
+    }
+
+    /**
+     * Handle typing indicator logic with debouncing.
+     * Sends started-typing when user starts typing and stopped-typing after 3 seconds of inactivity.
+     */
+    private fun handleTypingIndicator(text: String) {
+        // Only send typing indicators for iMessage chats (not local SMS)
+        if (_uiState.value.isLocalSmsChat) return
+
+        viewModelScope.launch {
+            // Check if Private API and typing indicators are enabled
+            val privateApiEnabled = settingsDataStore.enablePrivateApi.first()
+            val typingEnabled = settingsDataStore.sendTypingIndicators.first()
+
+            if (!privateApiEnabled || !typingEnabled) return@launch
+
+            // Cancel any pending stopped-typing
+            typingDebounceJob?.cancel()
+
+            if (text.isNotEmpty()) {
+                // User is typing - send started-typing if not already sent
+                if (!isCurrentlyTyping) {
+                    isCurrentlyTyping = true
+                    socketService.sendStartedTyping(chatGuid)
+                }
+
+                // Set up debounce to send stopped-typing after inactivity
+                typingDebounceJob = viewModelScope.launch {
+                    delay(typingDebounceMs)
+                    if (isCurrentlyTyping) {
+                        isCurrentlyTyping = false
+                        socketService.sendStoppedTyping(chatGuid)
+                    }
+                }
+            } else {
+                // Text cleared - immediately send stopped-typing
+                if (isCurrentlyTyping) {
+                    isCurrentlyTyping = false
+                    socketService.sendStoppedTyping(chatGuid)
+                }
+            }
+        }
+    }
+
+    /**
+     * Called when leaving the chat to ensure we send stopped-typing
+     */
+    fun onChatLeave() {
+        typingDebounceJob?.cancel()
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false
+            socketService.sendStoppedTyping(chatGuid)
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        onChatLeave()
     }
 
     fun addAttachment(uri: Uri) {
@@ -326,11 +452,18 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(attachmentCount = 0) }
     }
 
-    fun sendMessage() {
+    fun sendMessage(effectId: String? = null) {
         val text = _uiState.value.draftText.trim()
         val attachments = _pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
+
+        // Stop typing indicator immediately when sending
+        typingDebounceJob?.cancel()
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false
+            socketService.sendStoppedTyping(chatGuid)
+        }
 
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, draftText = "") }
@@ -340,10 +473,12 @@ class ChatViewModel @Inject constructor(
             messageRepository.sendUnified(
                 chatGuid = chatGuid,
                 text = text,
-                attachments = attachments
+                attachments = attachments,
+                effectId = effectId
             ).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isSending = false, attachmentCount = 0) }
+                    soundManager.playSendSound()
                 },
                 onFailure = { e ->
                     _uiState.update {
@@ -379,6 +514,7 @@ class ChatViewModel @Inject constructor(
             ).fold(
                 onSuccess = {
                     _uiState.update { it.copy(isSending = false, attachmentCount = 0) }
+                    soundManager.playSendSound()
                 },
                 onFailure = { e ->
                     _uiState.update {
@@ -455,6 +591,29 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             messageRepository.retryMessage(messageGuid)
         }
+    }
+
+    /**
+     * Retry a failed iMessage as SMS/MMS
+     */
+    fun retryMessageAsSms(messageGuid: String) {
+        viewModelScope.launch {
+            messageRepository.retryAsSms(messageGuid).fold(
+                onSuccess = {
+                    // Message was successfully sent via SMS
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(error = e.message) }
+                }
+            )
+        }
+    }
+
+    /**
+     * Check if a failed message can be retried as SMS
+     */
+    suspend fun canRetryAsSms(messageGuid: String): Boolean {
+        return messageRepository.canRetryAsSms(messageGuid)
     }
 
     fun loadMoreMessages() {
@@ -594,13 +753,19 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Create intent to add contact to Android Contacts app
+     * Create intent to add contact to Android Contacts app.
+     * Pre-fills the name if we have an inferred name from a self-introduction message.
      */
     fun getAddToContactsIntent(): Intent {
         val phone = _uiState.value.participantPhone ?: ""
+        val inferredName = _uiState.value.inferredSenderName
         return Intent(Intent.ACTION_INSERT).apply {
             type = ContactsContract.Contacts.CONTENT_TYPE
             putExtra(ContactsContract.Intents.Insert.PHONE, phone)
+            // Pre-fill the contact name if we inferred it from a self-introduction message
+            if (inferredName != null) {
+                putExtra(ContactsContract.Intents.Insert.NAME, inferredName)
+            }
         }
     }
 
@@ -711,7 +876,9 @@ class ChatViewModel @Inject constructor(
             senderName = null, // TODO: Get from handle
             messageSource = messageSource,
             reactions = allReactions,
-            myReactions = myReactions
+            myReactions = myReactions,
+            expressiveSendStyleId = expressiveSendStyleId,
+            effectPlayed = false // TODO: Track effect playback in metadata
         )
     }
 
@@ -773,9 +940,13 @@ data class ChatUiState(
     // Unsaved sender banner
     val showSaveContactBanner: Boolean = false,
     val unsavedSenderAddress: String? = null,
+    val inferredSenderName: String? = null, // Inferred name from self-introduction (for add contact pre-fill)
     // Inline search state
     val isSearchActive: Boolean = false,
     val searchQuery: String = "",
     val searchMatchIndices: List<Int> = emptyList(),
-    val currentSearchMatchIndex: Int = -1
+    val currentSearchMatchIndex: Int = -1,
+    // SMS fallback mode
+    val isInSmsFallbackMode: Boolean = false,
+    val isServerConnected: Boolean = true
 )

@@ -178,6 +178,9 @@ interface ChatDao {
     @Query("UPDATE chats SET display_name = :displayName WHERE guid = :guid")
     suspend fun updateDisplayName(guid: String, displayName: String?)
 
+    @Query("UPDATE chats SET custom_avatar_path = :avatarPath WHERE guid = :guid")
+    suspend fun updateCustomAvatarPath(guid: String, avatarPath: String?)
+
     @Query("UPDATE chats SET text_field_text = :text WHERE guid = :guid")
     suspend fun updateDraftText(guid: String, text: String?)
 

@@ -1,0 +1,883 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 4,
+    "identityHash": "1af69abc02825f5a90c7ca209b9a76e6",
+    "entities": [
+      {
+        "tableName": "chats",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `chat_identifier` TEXT, `display_name` TEXT, `is_pinned` INTEGER NOT NULL, `pin_index` INTEGER, `is_archived` INTEGER NOT NULL, `is_starred` INTEGER NOT NULL, `mute_type` TEXT, `mute_args` TEXT, `has_unread_message` INTEGER NOT NULL, `unread_count` INTEGER NOT NULL, `style` INTEGER, `is_group` INTEGER NOT NULL, `last_message_text` TEXT, `last_message_date` INTEGER, `custom_avatar_path` TEXT, `custom_notification_sound` TEXT, `notifications_enabled` INTEGER NOT NULL DEFAULT 1, `notification_priority` TEXT NOT NULL DEFAULT 'default', `bubble_enabled` INTEGER NOT NULL DEFAULT 0, `pop_on_screen` INTEGER NOT NULL DEFAULT 1, `lock_screen_visibility` TEXT NOT NULL DEFAULT 'all', `show_notification_dot` INTEGER NOT NULL DEFAULT 1, `vibration_enabled` INTEGER NOT NULL DEFAULT 1, `auto_send_read_receipts` INTEGER, `auto_send_typing_indicators` INTEGER, `text_field_text` TEXT, `lock_chat_name` INTEGER NOT NULL, `lock_chat_icon` INTEGER NOT NULL, `latest_message_date` INTEGER, `date_created` INTEGER NOT NULL, `date_deleted` INTEGER)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatIdentifier",
+            "columnName": "chat_identifier",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "displayName",
+            "columnName": "display_name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isPinned",
+            "columnName": "is_pinned",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "pinIndex",
+            "columnName": "pin_index",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isArchived",
+            "columnName": "is_archived",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isStarred",
+            "columnName": "is_starred",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "muteType",
+            "columnName": "mute_type",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "muteArgs",
+            "columnName": "mute_args",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hasUnreadMessage",
+            "columnName": "has_unread_message",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "unreadCount",
+            "columnName": "unread_count",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "style",
+            "columnName": "style",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isGroup",
+            "columnName": "is_group",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lastMessageText",
+            "columnName": "last_message_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lastMessageDate",
+            "columnName": "last_message_date",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "customAvatarPath",
+            "columnName": "custom_avatar_path",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "customNotificationSound",
+            "columnName": "custom_notification_sound",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "notificationsEnabled",
+            "columnName": "notifications_enabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "notificationPriority",
+            "columnName": "notification_priority",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'default'"
+          },
+          {
+            "fieldPath": "bubbleEnabled",
+            "columnName": "bubble_enabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "0"
+          },
+          {
+            "fieldPath": "popOnScreen",
+            "columnName": "pop_on_screen",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "lockScreenVisibility",
+            "columnName": "lock_screen_visibility",
+            "affinity": "TEXT",
+            "notNull": true,
+            "defaultValue": "'all'"
+          },
+          {
+            "fieldPath": "showNotificationDot",
+            "columnName": "show_notification_dot",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "vibrationEnabled",
+            "columnName": "vibration_enabled",
+            "affinity": "INTEGER",
+            "notNull": true,
+            "defaultValue": "1"
+          },
+          {
+            "fieldPath": "autoSendReadReceipts",
+            "columnName": "auto_send_read_receipts",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "autoSendTypingIndicators",
+            "columnName": "auto_send_typing_indicators",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "textFieldText",
+            "columnName": "text_field_text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "lockChatName",
+            "columnName": "lock_chat_name",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "lockChatIcon",
+            "columnName": "lock_chat_icon",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latestMessageDate",
+            "columnName": "latest_message_date",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dateCreated",
+            "columnName": "date_created",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateDeleted",
+            "columnName": "date_deleted",
+            "affinity": "INTEGER",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_chats_guid",
+            "unique": true,
+            "columnNames": [
+              "guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_chats_guid` ON `${TABLE_NAME}` (`guid`)"
+          },
+          {
+            "name": "index_chats_is_pinned",
+            "unique": false,
+            "columnNames": [
+              "is_pinned"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chats_is_pinned` ON `${TABLE_NAME}` (`is_pinned`)"
+          },
+          {
+            "name": "index_chats_is_starred",
+            "unique": false,
+            "columnNames": [
+              "is_starred"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chats_is_starred` ON `${TABLE_NAME}` (`is_starred`)"
+          },
+          {
+            "name": "index_chats_latest_message_date",
+            "unique": false,
+            "columnNames": [
+              "latest_message_date"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chats_latest_message_date` ON `${TABLE_NAME}` (`latest_message_date`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "messages",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `chat_guid` TEXT NOT NULL, `handle_id` INTEGER, `text` TEXT, `subject` TEXT, `date_created` INTEGER NOT NULL, `date_read` INTEGER, `date_delivered` INTEGER, `date_edited` INTEGER, `date_played` INTEGER, `date_deleted` INTEGER, `is_from_me` INTEGER NOT NULL, `error` INTEGER NOT NULL, `item_type` INTEGER NOT NULL, `group_title` TEXT, `group_action_type` INTEGER NOT NULL, `balloon_bundle_id` TEXT, `associated_message_guid` TEXT, `associated_message_part` INTEGER, `associated_message_type` TEXT, `expressive_send_style_id` TEXT, `thread_originator_guid` TEXT, `thread_originator_part` TEXT, `has_attachments` INTEGER NOT NULL, `has_reactions` INTEGER NOT NULL, `big_emoji` INTEGER NOT NULL, `was_delivered_quietly` INTEGER NOT NULL, `did_notify_recipient` INTEGER NOT NULL, `is_bookmarked` INTEGER NOT NULL, `has_dd_results` INTEGER NOT NULL, `message_source` TEXT NOT NULL, `sms_id` INTEGER, `sms_thread_id` INTEGER, `sms_status` TEXT, `sim_slot` INTEGER, `metadata` TEXT, FOREIGN KEY(`chat_guid`) REFERENCES `chats`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatGuid",
+            "columnName": "chat_guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handleId",
+            "columnName": "handle_id",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "text",
+            "columnName": "text",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "subject",
+            "columnName": "subject",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dateCreated",
+            "columnName": "date_created",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "dateRead",
+            "columnName": "date_read",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dateDelivered",
+            "columnName": "date_delivered",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dateEdited",
+            "columnName": "date_edited",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "datePlayed",
+            "columnName": "date_played",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "dateDeleted",
+            "columnName": "date_deleted",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isFromMe",
+            "columnName": "is_from_me",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "error",
+            "columnName": "error",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "itemType",
+            "columnName": "item_type",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "groupTitle",
+            "columnName": "group_title",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "groupActionType",
+            "columnName": "group_action_type",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "balloonBundleId",
+            "columnName": "balloon_bundle_id",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "associatedMessageGuid",
+            "columnName": "associated_message_guid",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "associatedMessagePart",
+            "columnName": "associated_message_part",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "associatedMessageType",
+            "columnName": "associated_message_type",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "expressiveSendStyleId",
+            "columnName": "expressive_send_style_id",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "threadOriginatorGuid",
+            "columnName": "thread_originator_guid",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "threadOriginatorPart",
+            "columnName": "thread_originator_part",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hasAttachments",
+            "columnName": "has_attachments",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasReactions",
+            "columnName": "has_reactions",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "bigEmoji",
+            "columnName": "big_emoji",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "wasDeliveredQuietly",
+            "columnName": "was_delivered_quietly",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "didNotifyRecipient",
+            "columnName": "did_notify_recipient",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isBookmarked",
+            "columnName": "is_bookmarked",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hasDdResults",
+            "columnName": "has_dd_results",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageSource",
+            "columnName": "message_source",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "smsId",
+            "columnName": "sms_id",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "smsThreadId",
+            "columnName": "sms_thread_id",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "smsStatus",
+            "columnName": "sms_status",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "simSlot",
+            "columnName": "sim_slot",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "metadata",
+            "columnName": "metadata",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_messages_guid",
+            "unique": true,
+            "columnNames": [
+              "guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_messages_guid` ON `${TABLE_NAME}` (`guid`)"
+          },
+          {
+            "name": "index_messages_chat_guid",
+            "unique": false,
+            "columnNames": [
+              "chat_guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid` ON `${TABLE_NAME}` (`chat_guid`)"
+          },
+          {
+            "name": "index_messages_date_created",
+            "unique": false,
+            "columnNames": [
+              "date_created"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_date_created` ON `${TABLE_NAME}` (`date_created`)"
+          },
+          {
+            "name": "index_messages_handle_id",
+            "unique": false,
+            "columnNames": [
+              "handle_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_handle_id` ON `${TABLE_NAME}` (`handle_id`)"
+          },
+          {
+            "name": "index_messages_associated_message_guid",
+            "unique": false,
+            "columnNames": [
+              "associated_message_guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_associated_message_guid` ON `${TABLE_NAME}` (`associated_message_guid`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "chats",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "chat_guid"
+            ],
+            "referencedColumns": [
+              "guid"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "handles",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `original_row_id` INTEGER, `address` TEXT NOT NULL, `formatted_address` TEXT, `service` TEXT NOT NULL, `country` TEXT, `color` TEXT, `default_email` TEXT, `default_phone` TEXT, `cached_display_name` TEXT, `cached_avatar_path` TEXT, `inferred_name` TEXT)",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalRowId",
+            "columnName": "original_row_id",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "address",
+            "columnName": "address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "formattedAddress",
+            "columnName": "formatted_address",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "service",
+            "columnName": "service",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "country",
+            "columnName": "country",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "color",
+            "columnName": "color",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "defaultEmail",
+            "columnName": "default_email",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "defaultPhone",
+            "columnName": "default_phone",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "cachedDisplayName",
+            "columnName": "cached_display_name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "cachedAvatarPath",
+            "columnName": "cached_avatar_path",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "inferredName",
+            "columnName": "inferred_name",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_handles_address_service",
+            "unique": true,
+            "columnNames": [
+              "address",
+              "service"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_handles_address_service` ON `${TABLE_NAME}` (`address`, `service`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "attachments",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `message_guid` TEXT NOT NULL, `original_row_id` INTEGER, `uti` TEXT, `mime_type` TEXT, `is_outgoing` INTEGER NOT NULL, `transfer_name` TEXT, `total_bytes` INTEGER, `height` INTEGER, `width` INTEGER, `web_url` TEXT, `has_live_photo` INTEGER NOT NULL, `hide_attachment` INTEGER NOT NULL, `is_sticker` INTEGER NOT NULL, `local_path` TEXT, `blurhash` TEXT, `metadata` TEXT, FOREIGN KEY(`message_guid`) REFERENCES `messages`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "guid",
+            "columnName": "guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "messageGuid",
+            "columnName": "message_guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "originalRowId",
+            "columnName": "original_row_id",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "uti",
+            "columnName": "uti",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "mimeType",
+            "columnName": "mime_type",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "isOutgoing",
+            "columnName": "is_outgoing",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transferName",
+            "columnName": "transfer_name",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "totalBytes",
+            "columnName": "total_bytes",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "height",
+            "columnName": "height",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "width",
+            "columnName": "width",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "webUrl",
+            "columnName": "web_url",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "hasLivePhoto",
+            "columnName": "has_live_photo",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "hideAttachment",
+            "columnName": "hide_attachment",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "isSticker",
+            "columnName": "is_sticker",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "localPath",
+            "columnName": "local_path",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "blurhash",
+            "columnName": "blurhash",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "metadata",
+            "columnName": "metadata",
+            "affinity": "TEXT",
+            "notNull": false
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_attachments_guid",
+            "unique": true,
+            "columnNames": [
+              "guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_attachments_guid` ON `${TABLE_NAME}` (`guid`)"
+          },
+          {
+            "name": "index_attachments_message_guid",
+            "unique": false,
+            "columnNames": [
+              "message_guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_attachments_message_guid` ON `${TABLE_NAME}` (`message_guid`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "messages",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "message_guid"
+            ],
+            "referencedColumns": [
+              "guid"
+            ]
+          }
+        ]
+      },
+      {
+        "tableName": "chat_handle_cross_ref",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`chat_guid` TEXT NOT NULL, `handle_id` INTEGER NOT NULL, PRIMARY KEY(`chat_guid`, `handle_id`), FOREIGN KEY(`chat_guid`) REFERENCES `chats`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`handle_id`) REFERENCES `handles`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "chatGuid",
+            "columnName": "chat_guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "handleId",
+            "columnName": "handle_id",
+            "affinity": "INTEGER",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "chat_guid",
+            "handle_id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_chat_handle_cross_ref_chat_guid",
+            "unique": false,
+            "columnNames": [
+              "chat_guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_handle_cross_ref_chat_guid` ON `${TABLE_NAME}` (`chat_guid`)"
+          },
+          {
+            "name": "index_chat_handle_cross_ref_handle_id",
+            "unique": false,
+            "columnNames": [
+              "handle_id"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_chat_handle_cross_ref_handle_id` ON `${TABLE_NAME}` (`handle_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "chats",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "chat_guid"
+            ],
+            "referencedColumns": [
+              "guid"
+            ]
+          },
+          {
+            "table": "handles",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "handle_id"
+            ],
+            "referencedColumns": [
+              "id"
+            ]
+          }
+        ]
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1af69abc02825f5a90c7ca209b9a76e6')"
+    ]
+  }
+}

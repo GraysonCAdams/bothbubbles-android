@@ -3,13 +3,16 @@ package com.bluebubbles.services.socket
 import android.util.Log
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.dto.MessageDto
+import com.bluebubbles.services.sound.SoundManager
 import com.squareup.moshi.Moshi
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -27,10 +30,16 @@ import javax.inject.Singleton
  * Socket.IO connection states
  */
 enum class ConnectionState {
+    /** Not connected and not attempting to connect */
     DISCONNECTED,
+    /** Actively attempting to connect */
     CONNECTING,
+    /** Successfully connected to server */
     CONNECTED,
-    ERROR
+    /** Connection failed with error, will attempt retry */
+    ERROR,
+    /** Server not configured (no address/password) */
+    NOT_CONFIGURED
 }
 
 /**
@@ -70,7 +79,8 @@ enum class FaceTimeCallStatus {
 @Singleton
 class SocketService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val moshi: Moshi
+    private val moshi: Moshi,
+    private val soundManager: SoundManager
 ) {
     companion object {
         private const val TAG = "SocketService"
@@ -87,20 +97,40 @@ class SocketService @Inject constructor(
         private const val EVENT_GROUP_ICON_CHANGED = "group-icon-changed"
         private const val EVENT_SERVER_UPDATE = "server-update"
         private const val EVENT_FACETIME_CALL = "ft-call-status-changed"
+
+        // Retry configuration
+        private const val INITIAL_RETRY_DELAY_MS = 1000L
+        private const val MAX_RETRY_DELAY_MS = 30000L
+        private const val RETRY_DELAY_MULTIPLIER = 1.5
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    
+
     private var socket: Socket? = null
+    private var retryJob: Job? = null
+    private var currentRetryDelay = INITIAL_RETRY_DELAY_MS
+    private var retryCount = 0
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+
+    private val _retryAttempt = MutableStateFlow(0)
+    val retryAttempt: StateFlow<Int> = _retryAttempt.asStateFlow()
 
     private val _events = MutableSharedFlow<SocketEvent>(extraBufferCapacity = 100)
     val events: SharedFlow<SocketEvent> = _events.asSharedFlow()
 
     private val messageAdapter by lazy {
         moshi.adapter(MessageDto::class.java)
+    }
+
+    /**
+     * Check if server is configured (has address and password)
+     */
+    suspend fun isServerConfigured(): Boolean {
+        val serverAddress = settingsDataStore.serverAddress.first()
+        val password = settingsDataStore.serverPassword.first()
+        return serverAddress.isNotBlank() && password.isNotBlank()
     }
 
     /**
@@ -112,6 +142,9 @@ class SocketService @Inject constructor(
             return
         }
 
+        // Cancel any pending retry
+        retryJob?.cancel()
+
         scope.launch {
             try {
                 _connectionState.value = ConnectionState.CONNECTING
@@ -121,7 +154,7 @@ class SocketService @Inject constructor(
 
                 if (serverAddress.isBlank() || password.isBlank()) {
                     Log.e(TAG, "Server address or password not configured")
-                    _connectionState.value = ConnectionState.ERROR
+                    _connectionState.value = ConnectionState.NOT_CONFIGURED
                     return@launch
                 }
 
@@ -159,25 +192,69 @@ class SocketService @Inject constructor(
                 Log.e(TAG, "Failed to connect", e)
                 _connectionState.value = ConnectionState.ERROR
                 _events.tryEmit(SocketEvent.Error(e.message ?: "Connection failed"))
+                scheduleRetry()
             }
         }
+    }
+
+    /**
+     * Schedule a retry with exponential backoff
+     */
+    private fun scheduleRetry() {
+        retryJob?.cancel()
+        retryJob = scope.launch {
+            retryCount++
+            _retryAttempt.value = retryCount
+            Log.d(TAG, "Scheduling retry #$retryCount in ${currentRetryDelay}ms")
+
+            delay(currentRetryDelay)
+
+            // Increase delay for next retry (exponential backoff)
+            currentRetryDelay = (currentRetryDelay * RETRY_DELAY_MULTIPLIER)
+                .toLong()
+                .coerceAtMost(MAX_RETRY_DELAY_MS)
+
+            // Attempt reconnection
+            connect()
+        }
+    }
+
+    /**
+     * Reset retry state (called on successful connection)
+     */
+    private fun resetRetryState() {
+        retryJob?.cancel()
+        retryCount = 0
+        currentRetryDelay = INITIAL_RETRY_DELAY_MS
+        _retryAttempt.value = 0
     }
 
     /**
      * Disconnect from the server
      */
     fun disconnect() {
+        retryJob?.cancel()
         socket?.disconnect()
         socket?.off()
         socket = null
         _connectionState.value = ConnectionState.DISCONNECTED
+        resetRetryState()
     }
 
     /**
      * Reconnect to the server
      */
     fun reconnect() {
+        resetRetryState()
         disconnect()
+        connect()
+    }
+
+    /**
+     * Force an immediate retry (for user-triggered retry)
+     */
+    fun retryNow() {
+        resetRetryState()
         connect()
     }
 
@@ -186,16 +263,59 @@ class SocketService @Inject constructor(
      */
     fun isConnected(): Boolean = socket?.connected() == true
 
+    // ===== Typing Indicators (Outbound) =====
+
+    /**
+     * Send started-typing event to the server.
+     * This notifies the other party that we are typing.
+     * Requires Private API to be enabled on the server.
+     */
+    fun sendStartedTyping(chatGuid: String) {
+        if (!isConnected()) {
+            Log.d(TAG, "Cannot send typing indicator: not connected")
+            return
+        }
+
+        val payload = JSONObject().apply {
+            put("chatGuid", chatGuid)
+        }
+
+        socket?.emit("started-typing", payload)
+        Log.d(TAG, "Sent started-typing for chat: $chatGuid")
+    }
+
+    /**
+     * Send stopped-typing event to the server.
+     * This notifies the other party that we stopped typing.
+     * Requires Private API to be enabled on the server.
+     */
+    fun sendStoppedTyping(chatGuid: String) {
+        if (!isConnected()) {
+            Log.d(TAG, "Cannot send typing indicator: not connected")
+            return
+        }
+
+        val payload = JSONObject().apply {
+            put("chatGuid", chatGuid)
+        }
+
+        socket?.emit("stopped-typing", payload)
+        Log.d(TAG, "Sent stopped-typing for chat: $chatGuid")
+    }
+
     // ===== Socket Event Handlers =====
 
     private val onConnect = Emitter.Listener {
         Log.d(TAG, "Connected to server")
+        resetRetryState()
         _connectionState.value = ConnectionState.CONNECTED
     }
 
     private val onDisconnect = Emitter.Listener { args ->
         Log.d(TAG, "Disconnected from server: ${args.firstOrNull()}")
         _connectionState.value = ConnectionState.DISCONNECTED
+        // Schedule retry on unexpected disconnect
+        scheduleRetry()
     }
 
     private val onConnectError = Emitter.Listener { args ->
@@ -203,6 +323,8 @@ class SocketService @Inject constructor(
         Log.e(TAG, "Connection error: $error")
         _connectionState.value = ConnectionState.ERROR
         _events.tryEmit(SocketEvent.Error(error?.toString() ?: "Connection error"))
+        // Schedule retry on connection error
+        scheduleRetry()
     }
 
     private val onNewMessage = Emitter.Listener { args ->
@@ -215,6 +337,11 @@ class SocketService @Inject constructor(
             if (message != null) {
                 Log.d(TAG, "New message received: ${message.guid}")
                 _events.tryEmit(SocketEvent.NewMessage(message, chatGuid))
+
+                // Play receive sound for messages from others (not from me)
+                if (message.isFromMe != true) {
+                    soundManager.playReceiveSound()
+                }
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing new message", e)

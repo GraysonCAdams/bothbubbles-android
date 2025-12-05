@@ -31,6 +31,7 @@ fun SettingsScreen(
     onSmsSettingsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
     onSwipeSettingsClick: () -> Unit = {},
+    onEffectsSettingsClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -95,10 +96,7 @@ fun SettingsScreen(
                         } else null
                     )
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     // Archived
                     SettingsMenuItem(
@@ -116,10 +114,7 @@ fun SettingsScreen(
                         } else null
                     )
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     // Blocked contacts
                     SettingsMenuItem(
@@ -147,10 +142,7 @@ fun SettingsScreen(
                         onClick = onNotificationsClick
                     )
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     // SMS/MMS settings
                     SettingsMenuItem(
@@ -158,6 +150,53 @@ fun SettingsScreen(
                         title = stringResource(R.string.settings_sms),
                         subtitle = "Local SMS messaging options",
                         onClick = onSmsSettingsClick
+                    )
+                }
+            }
+
+            // iMessage Features Section
+            item {
+                SettingsSectionTitle(title = "iMessage features")
+            }
+
+            item {
+                SettingsCard(
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                ) {
+                    // Private API toggle
+                    SettingsMenuItem(
+                        icon = Icons.Default.VpnKey,
+                        title = "Enable Private API",
+                        subtitle = if (uiState.enablePrivateApi) "Advanced iMessage features enabled" else "Enables typing indicators, reactions, and more",
+                        onClick = { viewModel.setEnablePrivateApi(!uiState.enablePrivateApi) },
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.enablePrivateApi,
+                                onCheckedChange = { viewModel.setEnablePrivateApi(it) }
+                            )
+                        }
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Send typing indicators toggle
+                    SettingsMenuItem(
+                        icon = Icons.Default.Keyboard,
+                        title = "Send typing indicators",
+                        subtitle = "Let others know when you're typing",
+                        onClick = {
+                            if (uiState.enablePrivateApi) {
+                                viewModel.setSendTypingIndicators(!uiState.sendTypingIndicators)
+                            }
+                        },
+                        enabled = uiState.enablePrivateApi,
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.sendTypingIndicators && uiState.enablePrivateApi,
+                                onCheckedChange = { viewModel.setSendTypingIndicators(it) },
+                                enabled = uiState.enablePrivateApi
+                            )
+                        }
                     )
                 }
             }
@@ -185,10 +224,7 @@ fun SettingsScreen(
                         }
                     )
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     // Swipe gestures
                     SettingsMenuItem(
@@ -196,6 +232,48 @@ fun SettingsScreen(
                         title = "Swipe actions",
                         subtitle = "Customize conversation swipe gestures",
                         onClick = onSwipeSettingsClick
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Message effects
+                    SettingsMenuItem(
+                        icon = Icons.Default.AutoAwesome,
+                        title = "Message effects",
+                        subtitle = "Animations for screen and bubble effects",
+                        onClick = onEffectsSettingsClick
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Send sound toggle
+                    SettingsMenuItem(
+                        icon = Icons.Default.VolumeUp,
+                        title = "Send sound",
+                        subtitle = "Play sound when sending messages",
+                        onClick = { viewModel.setSendSoundEnabled(!uiState.sendSoundEnabled) },
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.sendSoundEnabled,
+                                onCheckedChange = { viewModel.setSendSoundEnabled(it) }
+                            )
+                        }
+                    )
+
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    // Receive sound toggle
+                    SettingsMenuItem(
+                        icon = Icons.Default.VolumeDown,
+                        title = "Receive sound",
+                        subtitle = "Play sound when receiving messages",
+                        onClick = { viewModel.setReceiveSoundEnabled(!uiState.receiveSoundEnabled) },
+                        trailingContent = {
+                            Switch(
+                                checked = uiState.receiveSoundEnabled,
+                                onCheckedChange = { viewModel.setReceiveSoundEnabled(it) }
+                            )
+                        }
                     )
                 }
             }
@@ -217,10 +295,7 @@ fun SettingsScreen(
                         onClick = onServerSettingsClick
                     )
 
-                    HorizontalDivider(
-                        modifier = Modifier.padding(start = 56.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant
-                    )
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     // Sync settings
                     SettingsMenuItem(

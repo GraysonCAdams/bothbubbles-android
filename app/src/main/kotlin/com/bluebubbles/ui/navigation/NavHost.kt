@@ -27,6 +27,7 @@ import com.bluebubbles.ui.chat.details.PlacesScreen
 import com.bluebubbles.ui.settings.SettingsScreen
 import com.bluebubbles.ui.settings.sms.SmsSettingsScreen
 import com.bluebubbles.ui.chatcreator.ChatCreatorScreen
+import com.bluebubbles.ui.chatcreator.GroupCreatorScreen
 import com.bluebubbles.ui.camera.InAppCameraScreen
 
 private const val TRANSITION_DURATION = 300
@@ -92,6 +93,7 @@ fun BlueBubblesNavHost(
                         "sms" -> navController.navigate(Screen.SmsSettings)
                         "notifications" -> navController.navigate(Screen.NotificationSettings)
                         "swipe" -> navController.navigate(Screen.SwipeSettings)
+                        "effects" -> navController.navigate(Screen.EffectsSettings)
                         "about" -> navController.navigate(Screen.About)
                     }
                 }
@@ -137,7 +139,30 @@ fun BlueBubblesNavHost(
                     }
                 },
                 onCreateGroupClick = {
-                    // TODO: Navigate to group creation screen
+                    navController.navigate(Screen.GroupCreator())
+                }
+            )
+        }
+
+        // Group creator (Step 1: Contact picker)
+        composable<Screen.GroupCreator> {
+            GroupCreatorScreen(
+                onBackClick = { navController.popBackStack() },
+                onNextClick = { participantsJson, groupService ->
+                    navController.navigate(Screen.GroupSetup(participantsJson, groupService))
+                }
+            )
+        }
+
+        // Group setup (Step 2: Name/photo configuration)
+        composable<Screen.GroupSetup> { backStackEntry ->
+            val route: Screen.GroupSetup = backStackEntry.toRoute()
+            com.bluebubbles.ui.chatcreator.GroupSetupScreen(
+                onBackClick = { navController.popBackStack() },
+                onGroupCreated = { chatGuid ->
+                    navController.navigate(Screen.Chat(chatGuid)) {
+                        popUpTo(Screen.Conversations) { inclusive = false }
+                    }
                 }
             )
         }
@@ -156,6 +181,14 @@ fun BlueBubblesNavHost(
                 },
                 onNotificationSettingsClick = {
                     navController.navigate(Screen.ChatNotificationSettings(route.chatGuid))
+                },
+                onCreateGroupClick = { address, displayName, service, avatarPath ->
+                    navController.navigate(Screen.GroupCreator(
+                        preSelectedAddress = address,
+                        preSelectedDisplayName = displayName,
+                        preSelectedService = service,
+                        preSelectedAvatarPath = avatarPath
+                    ))
                 }
             )
         }
@@ -180,6 +213,7 @@ fun BlueBubblesNavHost(
                 onSmsSettingsClick = { navController.navigate(Screen.SmsSettings) },
                 onNotificationsClick = { navController.navigate(Screen.NotificationSettings) },
                 onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings) },
+                onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings) },
                 onAboutClick = { navController.navigate(Screen.About) }
             )
         }
@@ -239,6 +273,13 @@ fun BlueBubblesNavHost(
         // Swipe Settings
         composable<Screen.SwipeSettings> {
             com.bluebubbles.ui.settings.swipe.SwipeSettingsScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
+        }
+
+        // Effects Settings
+        composable<Screen.EffectsSettings> {
+            com.bluebubbles.ui.settings.EffectsSettingsScreen(
                 onNavigateBack = { navController.popBackStack() }
             )
         }

@@ -67,6 +67,7 @@ fun ServerSettingsScreen(
                         ConnectionState.CONNECTING -> Triple(ConnectingOrange, "Connecting...", Icons.Default.Sync)
                         ConnectionState.DISCONNECTED -> Triple(DisconnectedRed, "Disconnected", Icons.Default.CloudOff)
                         ConnectionState.ERROR -> Triple(DisconnectedRed, "Connection Error", Icons.Default.Error)
+                        ConnectionState.NOT_CONFIGURED -> Triple(DisconnectedRed, "Not Configured", Icons.Default.CloudOff)
                     }
 
                     Icon(

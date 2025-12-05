@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.bluebubbles.ui.conversations.MessageStatus
 
 /**
@@ -353,7 +354,7 @@ private fun ConversationTileContent(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(2.dp))
 
                 if (isTyping) {
                     Text(
@@ -364,7 +365,7 @@ private fun ConversationTileContent(
                     )
                 } else {
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
+                        verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         // Message status indicator
@@ -373,13 +374,15 @@ private fun ConversationTileContent(
                         }
                         Text(
                             text = subtitle,
-                            style = MaterialTheme.typography.bodyMedium,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                lineHeight = 18.sp
+                            ),
                             color = if (unreadCount > 0)
                                 MaterialTheme.colorScheme.onSurface
                             else
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
@@ -416,15 +419,17 @@ fun UnreadBadge(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.inverseSurface,
         shape = CircleShape,
         modifier = modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = if (count > 99) "99+" else count.toString(),
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.labelSmall.copy(
+                    fontWeight = FontWeight.Bold
+                ),
+                color = MaterialTheme.colorScheme.inverseOnSurface,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
             )
         }

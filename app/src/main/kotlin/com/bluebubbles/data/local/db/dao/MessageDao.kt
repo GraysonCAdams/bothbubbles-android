@@ -99,10 +99,10 @@ interface MessageDao {
 
     // ===== Inserts/Updates =====
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMessage(message: MessageEntity): Long
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMessages(messages: List<MessageEntity>)
 
     @Update
@@ -122,6 +122,9 @@ interface MessageDao {
 
     @Query("UPDATE messages SET has_reactions = :hasReactions WHERE guid = :guid")
     suspend fun updateReactionStatus(guid: String, hasReactions: Boolean)
+
+    @Query("UPDATE messages SET message_source = :messageSource WHERE guid = :guid")
+    suspend fun updateMessageSource(guid: String, messageSource: String)
 
     // Replace temp GUID with server GUID
     @Query("""

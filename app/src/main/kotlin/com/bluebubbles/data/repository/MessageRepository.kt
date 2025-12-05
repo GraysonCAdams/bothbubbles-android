@@ -1,6 +1,9 @@
 package com.bluebubbles.data.repository
 
+import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
+import android.util.Log
 import com.bluebubbles.data.local.db.dao.AttachmentDao
 import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
@@ -8,6 +11,7 @@ import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
+import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.remote.api.dto.EditMessageRequest
 import com.bluebubbles.data.remote.api.dto.MessageDto
@@ -16,7 +20,17 @@ import com.bluebubbles.data.remote.api.dto.SendReactionRequest
 import com.bluebubbles.data.remote.api.dto.UnsendMessageRequest
 import com.bluebubbles.services.sms.MmsSendService
 import com.bluebubbles.services.sms.SmsSendService
+import com.bluebubbles.services.messaging.ChatFallbackTracker
+import com.bluebubbles.services.nameinference.NameInferenceService
+import com.bluebubbles.services.messaging.FallbackReason
+import com.bluebubbles.services.socket.ConnectionState
+import com.bluebubbles.services.socket.SocketService
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,14 +47,22 @@ enum class MessageDeliveryMode {
 
 @Singleton
 class MessageRepository @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val attachmentDao: AttachmentDao,
     private val api: BlueBubblesApi,
     private val smsSendService: SmsSendService,
-    private val mmsSendService: MmsSendService
+    private val mmsSendService: MmsSendService,
+    private val socketService: SocketService,
+    private val settingsDataStore: SettingsDataStore,
+    private val chatFallbackTracker: ChatFallbackTracker,
+    private val nameInferenceService: NameInferenceService
 ) {
+    companion object {
+        private const val TAG = "MessageRepository"
+    }
     // ===== Local Operations =====
 
     fun observeMessagesForChat(chatGuid: String, limit: Int, offset: Int): Flow<List<MessageEntity>> =
@@ -101,7 +123,8 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Send a new message
+     * Send a new message via iMessage.
+     * If the send fails and autoRetryAsSms is enabled, automatically retries via SMS.
      */
     suspend fun sendMessage(
         chatGuid: String,
@@ -142,9 +165,37 @@ class MessageRepository @Inject constructor(
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
-            // Mark message as failed
-            messageDao.updateErrorStatus(tempGuid, 1)
-            throw Exception(body?.message ?: "Failed to send message")
+            // iMessage send failed - check if we should auto-retry as SMS
+            val autoRetry = settingsDataStore.autoRetryAsSms.first()
+            val address = extractAddressFromChatGuid(chatGuid)
+            val canFallback = address?.isPhoneNumber() == true
+
+            if (autoRetry && canFallback) {
+                Log.i(TAG, "iMessage failed, auto-retrying as SMS: $tempGuid")
+
+                // Update message source to SMS and clear error
+                messageDao.updateMessageSource(tempGuid, MessageSource.LOCAL_SMS.name)
+                messageDao.updateErrorStatus(tempGuid, 0)
+
+                // Enter fallback mode for this chat
+                chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.IMESSAGE_FAILED)
+
+                // Send via local SMS
+                val smsResult = smsSendService.sendSms(address, text, chatGuid)
+                if (smsResult.isSuccess) {
+                    // Replace the temp message with the SMS message
+                    messageDao.deleteMessage(tempGuid)
+                    return@runCatching smsResult.getOrThrow()
+                } else {
+                    // SMS also failed - mark as failed
+                    messageDao.updateErrorStatus(tempGuid, 1)
+                    throw smsResult.exceptionOrNull() ?: Exception("SMS send failed")
+                }
+            } else {
+                // Mark message as failed (no auto-retry)
+                messageDao.updateErrorStatus(tempGuid, 1)
+                throw Exception(body?.message ?: "Failed to send message")
+            }
         }
 
         // Replace temp GUID with server GUID
@@ -287,6 +338,62 @@ class MessageRepository @Inject constructor(
         ).getOrThrow()
     }
 
+    /**
+     * Retry sending a failed iMessage as SMS/MMS.
+     * This marks the original message as superseded and sends a new message via SMS.
+     */
+    suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> = runCatching {
+        val message = messageDao.getMessageByGuid(messageGuid)
+            ?: throw Exception("Message not found")
+
+        val chat = chatDao.getChatByGuid(message.chatGuid)
+
+        // Check if we can send SMS for this chat
+        val address = extractAddressFromChatGuid(message.chatGuid)
+        if (address == null || !address.isPhoneNumber()) {
+            throw Exception("Cannot send SMS to this contact (no phone number)")
+        }
+
+        // Soft delete the original failed message
+        messageDao.softDeleteMessage(messageGuid)
+
+        // Enter fallback mode for this chat
+        chatFallbackTracker.enterFallbackMode(message.chatGuid, FallbackReason.IMESSAGE_FAILED)
+
+        // Determine SMS/MMS based on whether it had attachments or is group
+        val deliveryMode = if (message.hasAttachments || chat?.isGroup == true) {
+            MessageDeliveryMode.LOCAL_MMS
+        } else {
+            MessageDeliveryMode.LOCAL_SMS
+        }
+
+        Log.i(TAG, "Retrying message $messageGuid as $deliveryMode")
+
+        // Re-send via SMS/MMS
+        sendUnified(
+            chatGuid = message.chatGuid,
+            text = message.text ?: "",
+            subject = message.subject,
+            deliveryMode = deliveryMode
+        ).getOrThrow()
+    }
+
+    /**
+     * Check if a failed iMessage can be retried as SMS
+     */
+    suspend fun canRetryAsSms(messageGuid: String): Boolean {
+        val message = messageDao.getMessageByGuid(messageGuid) ?: return false
+
+        // Only failed iMessages can be retried as SMS
+        if (message.error == 0 || message.messageSource != MessageSource.IMESSAGE.name) {
+            return false
+        }
+
+        // Check if we have a phone number
+        val address = extractAddressFromChatGuid(message.chatGuid)
+        return address?.isPhoneNumber() == true
+    }
+
     // ===== Unified Send Operations =====
 
     /**
@@ -312,7 +419,150 @@ class MessageRepository @Inject constructor(
         return when (actualMode) {
             MessageDeliveryMode.LOCAL_SMS -> sendLocalSms(chatGuid, text, subscriptionId)
             MessageDeliveryMode.LOCAL_MMS -> sendLocalMms(chatGuid, text, attachments, subject, subscriptionId)
-            else -> sendMessage(chatGuid, text, replyToGuid, effectId, subject)
+            else -> {
+                // iMessage mode - handle attachments via BlueBubbles API
+                if (attachments.isNotEmpty()) {
+                    sendIMessageWithAttachments(chatGuid, text, attachments, replyToGuid, effectId, subject)
+                } else {
+                    sendMessage(chatGuid, text, replyToGuid, effectId, subject)
+                }
+            }
+        }
+    }
+
+    /**
+     * Send a message with attachments via BlueBubbles API.
+     * Uploads attachments first, then sends the text message.
+     */
+    private suspend fun sendIMessageWithAttachments(
+        chatGuid: String,
+        text: String,
+        attachments: List<Uri>,
+        replyToGuid: String? = null,
+        effectId: String? = null,
+        subject: String? = null
+    ): Result<MessageEntity> = runCatching {
+        val tempGuid = "temp-${UUID.randomUUID()}"
+
+        // Create temporary message for immediate UI feedback
+        val tempMessage = MessageEntity(
+            guid = tempGuid,
+            chatGuid = chatGuid,
+            text = text.ifBlank { null },
+            subject = subject,
+            dateCreated = System.currentTimeMillis(),
+            isFromMe = true,
+            hasAttachments = true,
+            threadOriginatorGuid = replyToGuid,
+            expressiveSendStyleId = effectId,
+            messageSource = MessageSource.IMESSAGE.name
+        )
+        messageDao.insertMessage(tempMessage)
+
+        // Update chat's last message
+        chatDao.updateLastMessage(chatGuid, System.currentTimeMillis(), text.ifBlank { "[Attachment]" })
+
+        var lastResponse: MessageDto? = null
+
+        // Upload each attachment
+        attachments.forEachIndexed { index, uri ->
+            val attachmentResult = uploadAttachment(chatGuid, "$tempGuid-att-$index", uri)
+            if (attachmentResult.isFailure) {
+                // Mark message as failed
+                messageDao.updateErrorStatus(tempGuid, 1)
+                throw attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
+            }
+            lastResponse = attachmentResult.getOrNull()
+        }
+
+        // Send text message if present
+        if (text.isNotBlank()) {
+            val response = api.sendMessage(
+                SendMessageRequest(
+                    chatGuid = chatGuid,
+                    message = text,
+                    tempGuid = tempGuid,
+                    selectedMessageGuid = replyToGuid,
+                    effectId = effectId,
+                    subject = subject
+                )
+            )
+
+            val body = response.body()
+            if (!response.isSuccessful || body == null || body.status != 200) {
+                messageDao.updateErrorStatus(tempGuid, 1)
+                throw Exception(body?.message ?: "Failed to send message")
+            }
+            lastResponse = body.data
+        }
+
+        // Replace temp GUID with server GUID if we got one
+        lastResponse?.let { serverMessage ->
+            messageDao.replaceGuid(tempGuid, serverMessage.guid)
+            serverMessage.toEntity(chatGuid)
+        } ?: run {
+            messageDao.updateErrorStatus(tempGuid, 0)
+            tempMessage
+        }
+    }
+
+    /**
+     * Upload a single attachment to BlueBubbles server
+     */
+    private suspend fun uploadAttachment(
+        chatGuid: String,
+        tempGuid: String,
+        uri: Uri
+    ): Result<MessageDto> = runCatching {
+        val contentResolver = context.contentResolver
+
+        // Get file name from URI
+        val fileName = getFileName(uri) ?: "attachment"
+
+        // Get MIME type
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+
+        // Read file bytes
+        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: throw Exception("Cannot read attachment")
+
+        Log.d(TAG, "Uploading attachment: $fileName ($mimeType, ${bytes.size} bytes)")
+
+        // Create multipart request
+        val requestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+        val filePart = MultipartBody.Part.createFormData("attachment", fileName, requestBody)
+
+        val response = api.sendAttachment(
+            chatGuid = chatGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
+            tempGuid = tempGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
+            name = fileName.toRequestBody("text/plain".toMediaTypeOrNull()),
+            method = "private-api".toRequestBody("text/plain".toMediaTypeOrNull()),
+            attachment = filePart
+        )
+
+        val body = response.body()
+        if (!response.isSuccessful || body == null || body.status != 200) {
+            throw Exception(body?.message ?: "Failed to upload attachment")
+        }
+
+        body.data ?: throw Exception("No message returned from attachment upload")
+    }
+
+    /**
+     * Get file name from a content URI
+     */
+    private fun getFileName(uri: Uri): String? {
+        return when (uri.scheme) {
+            "content" -> {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (cursor.moveToFirst() && nameIndex >= 0) {
+                        cursor.getString(nameIndex)
+                    } else null
+                }
+            }
+            "file" -> uri.lastPathSegment
+            else -> uri.lastPathSegment
         }
     }
 
@@ -358,7 +608,12 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Determine the best delivery mode for a chat
+     * Determine the best delivery mode for a chat based on:
+     * 1. SMS-only mode setting
+     * 2. Chat-level SMS fallback mode
+     * 3. Chat type (SMS/MMS prefix)
+     * 4. Server connection status
+     * 5. Whether fallback to SMS is possible (phone number available)
      */
     private suspend fun determineDeliveryMode(
         chatGuid: String,
@@ -366,7 +621,28 @@ class MessageRepository @Inject constructor(
     ): MessageDeliveryMode {
         val chat = chatDao.getChatByGuid(chatGuid)
 
-        // Check if it's a local SMS/MMS chat
+        // Check if SMS-only mode is enabled in settings
+        if (settingsDataStore.smsOnlyMode.first()) {
+            return if (chat?.isGroup == true || hasAttachments) {
+                MessageDeliveryMode.LOCAL_MMS
+            } else {
+                MessageDeliveryMode.LOCAL_SMS
+            }
+        }
+
+        // Check if chat is in SMS fallback mode (due to previous iMessage failure)
+        if (chatFallbackTracker.isInFallbackMode(chatGuid)) {
+            val address = extractAddressFromChatGuid(chatGuid)
+            if (address?.isPhoneNumber() == true) {
+                return if (chat?.isGroup == true || hasAttachments) {
+                    MessageDeliveryMode.LOCAL_MMS
+                } else {
+                    MessageDeliveryMode.LOCAL_SMS
+                }
+            }
+        }
+
+        // Check if it's already a local SMS/MMS chat
         if (chatGuid.startsWith("sms;-;") || chatGuid.startsWith("mms;-;")) {
             // Use MMS if group or has attachments
             return if (chat?.isGroup == true || hasAttachments) {
@@ -376,8 +652,34 @@ class MessageRepository @Inject constructor(
             }
         }
 
-        // Default to iMessage for other chats
+        // Check server connection for iMessage chats
+        val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+        if (!isConnected) {
+            // Server disconnected - try SMS fallback if we have phone numbers
+            val address = extractAddressFromChatGuid(chatGuid)
+            val canFallbackToSms = address?.isPhoneNumber() == true
+
+            if (canFallbackToSms) {
+                // Enter fallback mode for this chat
+                chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.SERVER_DISCONNECTED)
+                return if (chat?.isGroup == true || hasAttachments) {
+                    MessageDeliveryMode.LOCAL_MMS
+                } else {
+                    MessageDeliveryMode.LOCAL_SMS
+                }
+            }
+        }
+
+        // Default to iMessage for connected server or non-phone-number chats
         return MessageDeliveryMode.IMESSAGE
+    }
+
+    /**
+     * Check if a string looks like a phone number
+     */
+    private fun String.isPhoneNumber(): Boolean {
+        val cleaned = this.replace(Regex("[^0-9+]"), "")
+        return cleaned.startsWith("+") || (cleaned.length >= 10 && cleaned.all { it.isDigit() })
     }
 
     /**
@@ -439,6 +741,11 @@ class MessageRepository @Inject constructor(
             val chat = chatDao.getChatByGuid(chatGuid)
             chatDao.updateLastMessage(chatGuid, message.dateCreated, message.text)
             chatDao.updateUnreadCount(chatGuid, (chat?.unreadCount ?: 0) + 1)
+
+            // Try to infer sender name from self-introduction patterns (e.g., "Hey it's John")
+            message.handleId?.let { handleId ->
+                nameInferenceService.processIncomingMessage(handleId.toLong(), message.text)
+            }
         }
 
         // Sync attachments

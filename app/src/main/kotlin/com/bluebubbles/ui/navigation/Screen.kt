@@ -23,6 +23,20 @@ sealed interface Screen {
     ) : Screen
 
     @Serializable
+    data class GroupCreator(
+        val preSelectedAddress: String? = null,
+        val preSelectedDisplayName: String? = null,
+        val preSelectedService: String? = null,
+        val preSelectedAvatarPath: String? = null
+    ) : Screen
+
+    @Serializable
+    data class GroupSetup(
+        val participantsJson: String,  // JSON-encoded List of participants
+        val groupService: String       // "IMESSAGE" or "MMS"
+    ) : Screen
+
+    @Serializable
     data class ChatDetails(val chatGuid: String) : Screen
 
     @Serializable
@@ -54,6 +68,9 @@ sealed interface Screen {
 
     @Serializable
     data object SwipeSettings : Screen
+
+    @Serializable
+    data object EffectsSettings : Screen
 
     @Serializable
     data class MediaViewer(

@@ -9,14 +9,17 @@ import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.prefs.SettingsDataStore
+import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sync.SyncService
 import com.bluebubbles.services.sync.SyncState
+import com.bluebubbles.ui.components.ConnectionBannerState
 import com.bluebubbles.ui.components.SwipeActionType
 import com.bluebubbles.ui.components.SwipeConfig
+import com.bluebubbles.ui.components.determineConnectionBannerState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -37,7 +40,8 @@ class ConversationsViewModel @Inject constructor(
     private val messageDao: MessageDao,
     private val socketService: SocketService,
     private val syncService: SyncService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val api: BlueBubblesApi
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConversationsUiState())
@@ -46,15 +50,20 @@ class ConversationsViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     private val _typingChats = MutableStateFlow<Set<String>>(emptySet())
 
+    // Track if we've ever successfully connected (for banner logic)
+    private var wasEverConnected = false
+
     init {
         loadConversations()
         observeConnectionState()
+        observeConnectionBannerState()
         observeTypingIndicators()
         observeSyncState()
         observeSwipeSettings()
         observeMessageSearch()
         observeAppTitleSetting()
         loadUserProfile()
+        checkPrivateApiPrompt()
     }
 
     private fun observeAppTitleSetting() {
@@ -62,6 +71,40 @@ class ConversationsViewModel @Inject constructor(
             settingsDataStore.useSimpleAppTitle.collect { useSimple ->
                 _uiState.update { it.copy(useSimpleAppTitle = useSimple) }
             }
+        }
+    }
+
+    /**
+     * Auto-enable Private API when connected to a server that supports it.
+     * This runs once per server connection to sync the client setting with server capability.
+     */
+    private fun checkPrivateApiPrompt() {
+        viewModelScope.launch {
+            // Wait for connection state to settle
+            socketService.connectionState
+                .filter { it == ConnectionState.CONNECTED }
+                .take(1)
+                .collect {
+                    // Check if we've already synced Private API setting
+                    val hasChecked = settingsDataStore.hasShownPrivateApiPrompt.first()
+                    if (hasChecked) return@collect
+
+                    // Fetch server info to check Private API availability
+                    try {
+                        val response = api.getServerInfo()
+                        if (response.isSuccessful) {
+                            val serverInfo = response.body()?.data
+                            // Auto-enable if server supports it
+                            if (serverInfo?.privateApi == true) {
+                                settingsDataStore.setEnablePrivateApi(true)
+                            }
+                            // Mark as checked so we don't repeat
+                            settingsDataStore.setHasShownPrivateApiPrompt(true)
+                        }
+                    } catch (e: Exception) {
+                        // Silently fail - will retry on next launch
+                    }
+                }
         }
     }
 
@@ -137,11 +180,50 @@ class ConversationsViewModel @Inject constructor(
     private fun observeConnectionState() {
         viewModelScope.launch {
             socketService.connectionState.collect { state ->
+                // Track if we ever connected (for banner logic)
+                if (state == ConnectionState.CONNECTED) {
+                    wasEverConnected = true
+                    // Reset dismissed banner state when connection is established
+                    settingsDataStore.resetSetupBannerDismissal()
+                }
+
                 _uiState.update {
-                    it.copy(isConnected = state == ConnectionState.CONNECTED)
+                    it.copy(
+                        isConnected = state == ConnectionState.CONNECTED,
+                        connectionState = state
+                    )
                 }
             }
         }
+    }
+
+    private fun observeConnectionBannerState() {
+        viewModelScope.launch {
+            combine(
+                socketService.connectionState,
+                socketService.retryAttempt,
+                settingsDataStore.dismissedSetupBanner
+            ) { connectionState, retryAttempt, isSetupBannerDismissed ->
+                determineConnectionBannerState(
+                    connectionState = connectionState,
+                    retryAttempt = retryAttempt,
+                    isSetupBannerDismissed = isSetupBannerDismissed,
+                    wasEverConnected = wasEverConnected
+                )
+            }.collect { bannerState ->
+                _uiState.update { it.copy(connectionBannerState = bannerState) }
+            }
+        }
+    }
+
+    fun dismissSetupBanner() {
+        viewModelScope.launch {
+            settingsDataStore.setDismissedSetupBanner(true)
+        }
+    }
+
+    fun retryConnection() {
+        socketService.retryNow()
     }
 
     private fun observeTypingIndicators() {
@@ -366,9 +448,17 @@ class ConversationsViewModel @Inject constructor(
             else -> MessageStatus.NONE
         }
 
+        // For 1:1 chats, use the participant's display name (includes "Maybe:" prefix for inferred names)
+        // For group chats, use the chat's display name
+        val resolvedDisplayName = if (!isGroup && primaryParticipant != null) {
+            primaryParticipant.displayName
+        } else {
+            displayName ?: chatIdentifier ?: "Unknown"
+        }
+
         return ConversationUiModel(
             guid = guid,
-            displayName = displayName ?: chatIdentifier ?: "Unknown",
+            displayName = resolvedDisplayName,
             avatarPath = avatarPath,
             lastMessageText = messageText,
             lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L),
@@ -384,7 +474,9 @@ class ConversationsViewModel @Inject constructor(
             lastMessageType = messageType,
             lastMessageStatus = messageStatus,
             participantNames = participantNames,
-            address = address
+            address = address,
+            hasInferredName = primaryParticipant?.hasInferredName == true,
+            inferredName = primaryParticipant?.inferredName
         )
     }
 
@@ -422,6 +514,8 @@ data class ConversationsUiState(
     val isSyncing: Boolean = false,
     val syncProgress: Float? = null,
     val isConnected: Boolean = false,
+    val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
+    val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
     val conversations: List<ConversationUiModel> = emptyList(),
     val searchQuery: String = "",
     val error: String? = null,
@@ -462,14 +556,19 @@ data class ConversationUiModel(
     val lastMessageType: MessageType = MessageType.TEXT,
     val lastMessageStatus: MessageStatus = MessageStatus.NONE,
     val participantNames: List<String> = emptyList(),
-    val address: String = "" // Primary address (phone/email) for the chat
+    val address: String = "", // Primary address (phone/email) for the chat
+    val hasInferredName: Boolean = false, // True if displaying an inferred "Maybe: X" name
+    val inferredName: String? = null // Raw inferred name without "Maybe:" prefix (for add contact)
 ) {
     /**
      * Returns true if this conversation has a saved contact.
-     * A contact is considered "missing" if the displayName looks like a phone number or email address.
+     * A contact is considered "missing" if the displayName looks like a phone number or email address,
+     * or if it's showing an inferred "Maybe:" name.
      */
     val hasContact: Boolean
-        get() = !displayName.contains("@") && !displayName.matches(Regex("^[+\\d\\s()-]+$"))
+        get() = !hasInferredName &&
+                !displayName.contains("@") &&
+                !displayName.matches(Regex("^[+\\d\\s()-]+$"))
 }
 
 enum class MessageType {

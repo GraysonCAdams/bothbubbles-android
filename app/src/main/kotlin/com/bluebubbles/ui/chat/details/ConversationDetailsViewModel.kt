@@ -56,6 +56,19 @@ data class ConversationDetailsUiState(
 
     val isSms: Boolean
         get() = chat?.isLocalSms == true || chat?.isTextForwarding == true
+
+    /**
+     * Whether the first participant is a saved contact.
+     * True if the participant has a cachedDisplayName (synced from device contacts).
+     */
+    val hasContact: Boolean
+        get() = participants.firstOrNull()?.cachedDisplayName != null
+
+    /**
+     * The address of the first participant (phone number or email)
+     */
+    val firstParticipantAddress: String
+        get() = participants.firstOrNull()?.address ?: ""
 }
 
 @HiltViewModel

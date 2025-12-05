@@ -1,14 +1,20 @@
 package com.bluebubbles.ui.chatcreator
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
+import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.remote.api.dto.CreateChatRequest
+import com.bluebubbles.services.socket.ConnectionState
+import com.bluebubbles.services.socket.SocketService
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -19,16 +25,90 @@ import javax.inject.Inject
 class ChatCreatorViewModel @Inject constructor(
     private val handleDao: HandleDao,
     private val chatDao: ChatDao,
-    private val api: BlueBubblesApi
+    private val api: BlueBubblesApi,
+    private val socketService: SocketService,
+    private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
+    companion object {
+        private const val TAG = "ChatCreatorViewModel"
+    }
+
     private val _searchQuery = MutableStateFlow("")
+    private var iMessageCheckJob: Job? = null
 
     private val _uiState = MutableStateFlow(ChatCreatorUiState())
     val uiState: StateFlow<ChatCreatorUiState> = _uiState.asStateFlow()
 
     init {
         loadContacts()
+        observeSearchQueryForAddressDetection()
+    }
+
+    private fun observeSearchQueryForAddressDetection() {
+        viewModelScope.launch {
+            _searchQuery
+                .debounce(500) // Wait 500ms after user stops typing
+                .distinctUntilChanged()
+                .collect { query ->
+                    checkIfValidAddress(query)
+                }
+        }
+    }
+
+    private suspend fun checkIfValidAddress(query: String) {
+        val trimmedQuery = query.trim()
+
+        // Check if the query looks like a phone number or email
+        if (trimmedQuery.isPhoneNumber() || trimmedQuery.isEmail()) {
+            _uiState.update { it.copy(isCheckingAvailability = true) }
+
+            // Check if we're in SMS-only mode
+            val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
+            val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+
+            var isIMessageAvailable = false
+            var service = "SMS"
+
+            // Only check iMessage availability if not in SMS-only mode and server is connected
+            if (!smsOnlyMode && isConnected && trimmedQuery.isPhoneNumber()) {
+                try {
+                    val response = api.checkIMessageAvailability(trimmedQuery)
+                    if (response.isSuccessful && response.body()?.data == true) {
+                        isIMessageAvailable = true
+                        service = "iMessage"
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to check iMessage availability", e)
+                }
+            } else if (!smsOnlyMode && isConnected && trimmedQuery.isEmail()) {
+                // Emails are always iMessage
+                isIMessageAvailable = true
+                service = "iMessage"
+            }
+
+            _uiState.update {
+                it.copy(
+                    isCheckingAvailability = false,
+                    manualAddressEntry = ManualAddressEntry(
+                        address = trimmedQuery,
+                        isIMessageAvailable = isIMessageAvailable,
+                        service = service
+                    )
+                )
+            }
+        } else {
+            _uiState.update { it.copy(manualAddressEntry = null, isCheckingAvailability = false) }
+        }
+    }
+
+    private fun String.isPhoneNumber(): Boolean {
+        val cleaned = this.replace(Regex("[^0-9+]"), "")
+        return cleaned.startsWith("+") || (cleaned.length >= 10 && cleaned.all { it.isDigit() })
+    }
+
+    private fun String.isEmail(): Boolean {
+        return this.contains("@") && this.contains(".") && this.length > 5
     }
 
     private fun loadContacts() {
@@ -133,6 +213,83 @@ class ChatCreatorViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Start a conversation with a manually entered address (phone number or email).
+     */
+    fun startConversationWithAddress(address: String, service: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            try {
+                // For SMS mode or when iMessage is not available, create a local SMS chat
+                if (service == "SMS") {
+                    // Create local SMS chat GUID
+                    val chatGuid = "sms;-;$address"
+
+                    // Try to find or create the chat in the local database
+                    val existingChat = chatDao.getChatByGuid(chatGuid)
+                    if (existingChat == null) {
+                        // Create a minimal chat entry for local SMS
+                        val newChat = ChatEntity(
+                            guid = chatGuid,
+                            chatIdentifier = address,
+                            displayName = null,
+                            isArchived = false,
+                            isPinned = false,
+                            isGroup = false,
+                            hasUnreadMessage = false,
+                            unreadCount = 0,
+                            lastMessageDate = System.currentTimeMillis(),
+                            lastMessageText = null
+                        )
+                        chatDao.insertChat(newChat)
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            createdChatGuid = chatGuid
+                        )
+                    }
+                } else {
+                    // Use BlueBubbles server to create iMessage chat
+                    val response = api.createChat(
+                        CreateChatRequest(
+                            addresses = listOf(address),
+                            service = service
+                        )
+                    )
+
+                    val body = response.body()
+                    if (response.isSuccessful && body?.data != null) {
+                        val chatGuid = body.data.guid
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                createdChatGuid = chatGuid
+                            )
+                        }
+                    } else {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                error = body?.message ?: "Failed to create chat"
+                            )
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start conversation", e)
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        error = e.message ?: "Failed to create chat"
+                    )
+                }
+            }
+        }
+    }
+
     fun resetCreatedChatGuid() {
         _uiState.update { it.copy(createdChatGuid = null) }
     }
@@ -198,8 +355,20 @@ data class ChatCreatorUiState(
     val favoriteContacts: List<ContactUiModel> = emptyList(),
     val groupChats: List<GroupChatUiModel> = emptyList(),
     val isLoading: Boolean = false,
+    val isCheckingAvailability: Boolean = false,
+    val manualAddressEntry: ManualAddressEntry? = null,
     val error: String? = null,
     val createdChatGuid: String? = null
+)
+
+/**
+ * Represents a manually entered address (phone number or email)
+ * that is not in the contacts list
+ */
+data class ManualAddressEntry(
+    val address: String,
+    val isIMessageAvailable: Boolean,
+    val service: String // "iMessage" or "SMS"
 )
 
 /**

@@ -87,6 +87,14 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.ENABLE_PRIVATE_API] ?: false
     }
 
+    val sendTypingIndicators: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SEND_TYPING_INDICATORS] ?: true
+    }
+
+    val hasShownPrivateApiPrompt: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.HAS_SHOWN_PRIVATE_API_PROMPT] ?: false
+    }
+
     // ===== SMS Settings =====
 
     val smsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -98,7 +106,7 @@ class SettingsDataStore @Inject constructor(
     }
 
     val autoRetryAsSms: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.AUTO_RETRY_AS_SMS] ?: false
+        prefs[Keys.AUTO_RETRY_AS_SMS] ?: true  // Default to auto-retry as SMS when iMessage fails
     }
 
     val preferSmsOverIMessage: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -156,6 +164,46 @@ class SettingsDataStore @Inject constructor(
             .split(",")
             .filter { it.isNotEmpty() }
             .toSet()
+    }
+
+    val dismissedSetupBanner: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DISMISSED_SETUP_BANNER] ?: false
+    }
+
+    // ===== Message Effects =====
+
+    val effectsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.EFFECTS_ENABLED] ?: true
+    }
+
+    val autoPlayEffects: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_PLAY_EFFECTS] ?: true
+    }
+
+    val replayEffectsOnScroll: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REPLAY_EFFECTS_ON_SCROLL] ?: false
+    }
+
+    val reduceMotion: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REDUCE_MOTION] ?: false
+    }
+
+    val disableEffectsOnLowBattery: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DISABLE_EFFECTS_LOW_BATTERY] ?: true
+    }
+
+    val lowBatteryThreshold: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.LOW_BATTERY_THRESHOLD] ?: 20
+    }
+
+    // ===== Sound Settings =====
+
+    val sendSoundEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SEND_SOUND_ENABLED] ?: true
+    }
+
+    val receiveSoundEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.RECEIVE_SOUND_ENABLED] ?: true
     }
 
     // ===== Setters =====
@@ -238,6 +286,18 @@ class SettingsDataStore @Inject constructor(
     suspend fun setEnablePrivateApi(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.ENABLE_PRIVATE_API] = enabled
+        }
+    }
+
+    suspend fun setSendTypingIndicators(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SEND_TYPING_INDICATORS] = enabled
+        }
+    }
+
+    suspend fun setHasShownPrivateApiPrompt(shown: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.HAS_SHOWN_PRIVATE_API_PROMPT] = shown
         }
     }
 
@@ -330,6 +390,66 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun setDismissedSetupBanner(dismissed: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DISMISSED_SETUP_BANNER] = dismissed
+        }
+    }
+
+    suspend fun resetSetupBannerDismissal() {
+        dataStore.edit { prefs ->
+            prefs[Keys.DISMISSED_SETUP_BANNER] = false
+        }
+    }
+
+    suspend fun setEffectsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.EFFECTS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setAutoPlayEffects(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_PLAY_EFFECTS] = enabled
+        }
+    }
+
+    suspend fun setReplayEffectsOnScroll(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REPLAY_EFFECTS_ON_SCROLL] = enabled
+        }
+    }
+
+    suspend fun setReduceMotion(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REDUCE_MOTION] = enabled
+        }
+    }
+
+    suspend fun setDisableEffectsOnLowBattery(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DISABLE_EFFECTS_LOW_BATTERY] = enabled
+        }
+    }
+
+    suspend fun setLowBatteryThreshold(threshold: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LOW_BATTERY_THRESHOLD] = threshold
+        }
+    }
+
+    suspend fun setSendSoundEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SEND_SOUND_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setReceiveSoundEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.RECEIVE_SOUND_ENABLED] = enabled
+        }
+    }
+
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
     }
@@ -369,6 +489,8 @@ class SettingsDataStore @Inject constructor(
         val SEND_WITH_RETURN = booleanPreferencesKey("send_with_return")
         val AUTO_OPEN_KEYBOARD = booleanPreferencesKey("auto_open_keyboard")
         val ENABLE_PRIVATE_API = booleanPreferencesKey("enable_private_api")
+        val SEND_TYPING_INDICATORS = booleanPreferencesKey("send_typing_indicators")
+        val HAS_SHOWN_PRIVATE_API_PROMPT = booleanPreferencesKey("has_shown_private_api_prompt")
 
         // SMS
         val SMS_ENABLED = booleanPreferencesKey("sms_enabled")
@@ -395,5 +517,18 @@ class SettingsDataStore @Inject constructor(
 
         // Dismissed Banners
         val DISMISSED_SAVE_CONTACT_BANNERS = stringPreferencesKey("dismissed_save_contact_banners")
+        val DISMISSED_SETUP_BANNER = booleanPreferencesKey("dismissed_setup_banner")
+
+        // Message Effects
+        val EFFECTS_ENABLED = booleanPreferencesKey("effects_enabled")
+        val AUTO_PLAY_EFFECTS = booleanPreferencesKey("auto_play_effects")
+        val REPLAY_EFFECTS_ON_SCROLL = booleanPreferencesKey("replay_effects_on_scroll")
+        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
+        val DISABLE_EFFECTS_LOW_BATTERY = booleanPreferencesKey("disable_effects_low_battery")
+        val LOW_BATTERY_THRESHOLD = intPreferencesKey("low_battery_threshold")
+
+        // Sound Settings
+        val SEND_SOUND_ENABLED = booleanPreferencesKey("send_sound_enabled")
+        val RECEIVE_SOUND_ENABLED = booleanPreferencesKey("receive_sound_enabled")
     }
 }

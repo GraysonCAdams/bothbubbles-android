@@ -33,6 +33,8 @@ class SettingsViewModel @Inject constructor(
         observeChatCounts()
         observeSyncState()
         observeAppTitleSetting()
+        observePrivateApiSettings()
+        observeSoundSettings()
     }
 
     private fun observeAppTitleSetting() {
@@ -46,6 +48,66 @@ class SettingsViewModel @Inject constructor(
     fun setUseSimpleAppTitle(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setUseSimpleAppTitle(enabled)
+        }
+    }
+
+    private fun observePrivateApiSettings() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.enablePrivateApi,
+                settingsDataStore.sendTypingIndicators
+            ) { privateApi, sendTyping ->
+                Pair(privateApi, sendTyping)
+            }.collect { (privateApi, sendTyping) ->
+                _uiState.update {
+                    it.copy(
+                        enablePrivateApi = privateApi,
+                        sendTypingIndicators = sendTyping
+                    )
+                }
+            }
+        }
+    }
+
+    fun setEnablePrivateApi(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setEnablePrivateApi(enabled)
+        }
+    }
+
+    fun setSendTypingIndicators(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSendTypingIndicators(enabled)
+        }
+    }
+
+    private fun observeSoundSettings() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.sendSoundEnabled,
+                settingsDataStore.receiveSoundEnabled
+            ) { sendSound, receiveSound ->
+                Pair(sendSound, receiveSound)
+            }.collect { (sendSound, receiveSound) ->
+                _uiState.update {
+                    it.copy(
+                        sendSoundEnabled = sendSound,
+                        receiveSoundEnabled = receiveSound
+                    )
+                }
+            }
+        }
+    }
+
+    fun setSendSoundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSendSoundEnabled(enabled)
+        }
+    }
+
+    fun setReceiveSoundEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setReceiveSoundEnabled(enabled)
         }
     }
 
@@ -161,5 +223,11 @@ data class SettingsUiState(
     val lastSyncFormatted: String = "Never",
     val isMarkingAllRead: Boolean = false,
     val error: String? = null,
-    val useSimpleAppTitle: Boolean = false
+    val useSimpleAppTitle: Boolean = false,
+    // Private API settings
+    val enablePrivateApi: Boolean = false,
+    val sendTypingIndicators: Boolean = true,
+    // Sound settings
+    val sendSoundEnabled: Boolean = true,
+    val receiveSoundEnabled: Boolean = true
 )

@@ -1,6 +1,7 @@
 package com.bluebubbles.ui.chat
 
 import android.Manifest
+import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
@@ -9,7 +10,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -20,6 +24,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
@@ -31,7 +36,14 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PersonAddAlt
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
@@ -41,6 +53,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -52,15 +65,25 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.launch
 import com.bluebubbles.util.PhoneNumberFormatter
 import com.bluebubbles.R
 import com.bluebubbles.ui.components.AttachmentPickerPanel
 import com.bluebubbles.ui.components.Avatar
+import com.bluebubbles.ui.components.DateSeparator
 import com.bluebubbles.ui.components.MessageBubble
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ScheduleMessageDialog
 import com.bluebubbles.ui.components.TapbackMenu
+import com.bluebubbles.ui.effects.EffectPickerSheet
+import com.bluebubbles.ui.effects.MessageEffect
+import com.bluebubbles.ui.effects.screen.ScreenEffectOverlay
 import com.bluebubbles.ui.theme.BlueBubblesTheme
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,8 +111,18 @@ fun ChatScreen(
     var showAttachmentPicker by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
 
+    // Effect picker and active screen effect state
+    var showEffectPicker by remember { mutableStateOf(false) }
+    var activeScreenEffect by remember { mutableStateOf<MessageEffect.Screen?>(null) }
+    var activeScreenEffectMessageText by remember { mutableStateOf<String?>(null) }
+
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
+
+    // Failed message retry menu state
+    var selectedMessageForRetry by remember { mutableStateOf<MessageUiModel?>(null) }
+    var canRetrySmsForMessage by remember { mutableStateOf(false) }
+    val retryMenuScope = rememberCoroutineScope()
 
     // Track pending attachments locally for UI
     var pendingAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -99,6 +132,16 @@ fun ChatScreen(
     var recordingDuration by remember { mutableLongStateOf(0L) }
     var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile by remember { mutableStateOf<java.io.File?>(null) }
+
+    // Voice memo preview/playback state
+    var isPreviewingVoiceMemo by remember { mutableStateOf(false) }
+    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
+    var isPlayingVoiceMemo by remember { mutableStateOf(false) }
+    var playbackPosition by remember { mutableLongStateOf(0L) }
+    var playbackDuration by remember { mutableLongStateOf(0L) }
+
+    // Audio amplitude history for waveform visualization (stores last 20 amplitude values)
+    var amplitudeHistory by remember { mutableStateOf(List(20) { 0f }) }
 
     // Check WhatsApp availability
     val isWhatsAppAvailable = remember { viewModel.isWhatsAppAvailable(context) }
@@ -125,21 +168,50 @@ fun ChatScreen(
         }
     }
 
-    // Recording duration timer
-    LaunchedEffect(isRecording) {
-        if (isRecording) {
+    // Recording duration timer with amplitude tracking
+    LaunchedEffect(isRecording, mediaRecorder) {
+        if (isRecording && mediaRecorder != null) {
             recordingDuration = 0L
+            amplitudeHistory = List(20) { 0f }
             while (isRecording) {
                 kotlinx.coroutines.delay(100L)
                 recordingDuration += 100L
+                // Capture amplitude for waveform visualization
+                try {
+                    val amplitude = mediaRecorder?.maxAmplitude ?: 0
+                    // Normalize to 0-1 range (maxAmplitude can be up to 32767)
+                    val normalized = (amplitude / 32767f).coerceIn(0f, 1f)
+                    amplitudeHistory = amplitudeHistory.drop(1) + normalized
+                } catch (_: Exception) {
+                    // Recorder may have been released
+                }
             }
         }
     }
 
-    // Cleanup recording on dispose
+    // Playback position tracker
+    LaunchedEffect(isPlayingVoiceMemo, mediaPlayer) {
+        if (isPlayingVoiceMemo && mediaPlayer != null) {
+            while (isPlayingVoiceMemo) {
+                try {
+                    playbackPosition = mediaPlayer?.currentPosition?.toLong() ?: 0L
+                    if (mediaPlayer?.isPlaying == false) {
+                        isPlayingVoiceMemo = false
+                        playbackPosition = 0L
+                    }
+                } catch (_: Exception) {
+                    isPlayingVoiceMemo = false
+                }
+                kotlinx.coroutines.delay(50L)
+            }
+        }
+    }
+
+    // Cleanup recording and playback on dispose
     DisposableEffect(Unit) {
         onDispose {
             mediaRecorder?.release()
+            mediaPlayer?.release()
         }
     }
 
@@ -169,6 +241,7 @@ fun ChatScreen(
         }
     }
 
+    Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -290,12 +363,28 @@ fun ChatScreen(
                 if (isRecording) {
                     VoiceMemoRecordingBar(
                         duration = recordingDuration,
+                        amplitudeHistory = amplitudeHistory,
                         onCancel = {
+                            // Stop recording and enter preview mode
+                            try {
+                                mediaRecorder?.stop()
+                            } catch (_: Exception) {
+                                // May throw if no audio was recorded
+                            }
                             mediaRecorder?.release()
                             mediaRecorder = null
-                            recordingFile?.delete()
-                            recordingFile = null
                             isRecording = false
+
+                            // Enter preview mode
+                            recordingFile?.let { file ->
+                                if (file.exists() && file.length() > 0) {
+                                    isPreviewingVoiceMemo = true
+                                    playbackDuration = recordingDuration
+                                } else {
+                                    file.delete()
+                                    recordingFile = null
+                                }
+                            }
                         },
                         onSend = {
                             mediaRecorder?.stop()
@@ -312,6 +401,76 @@ fun ChatScreen(
                             recordingFile = null
                         }
                     )
+                } else if (isPreviewingVoiceMemo) {
+                    VoiceMemoPreviewBar(
+                        duration = playbackDuration,
+                        playbackPosition = playbackPosition,
+                        isPlaying = isPlayingVoiceMemo,
+                        onPlayPause = {
+                            if (isPlayingVoiceMemo) {
+                                // Pause playback
+                                mediaPlayer?.pause()
+                                isPlayingVoiceMemo = false
+                            } else {
+                                // Start or resume playback
+                                if (mediaPlayer == null) {
+                                    recordingFile?.let { file ->
+                                        mediaPlayer = MediaPlayer().apply {
+                                            setDataSource(file.absolutePath)
+                                            prepare()
+                                            start()
+                                        }
+                                        playbackDuration = mediaPlayer?.duration?.toLong() ?: recordingDuration
+                                    }
+                                } else {
+                                    mediaPlayer?.start()
+                                }
+                                isPlayingVoiceMemo = true
+                            }
+                        },
+                        onReRecord = {
+                            // Stop and release player
+                            mediaPlayer?.release()
+                            mediaPlayer = null
+                            isPlayingVoiceMemo = false
+                            playbackPosition = 0L
+
+                            // Delete old recording
+                            recordingFile?.delete()
+                            recordingFile = null
+                            isPreviewingVoiceMemo = false
+
+                            // Start new recording
+                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                        onSend = {
+                            // Stop player if playing
+                            mediaPlayer?.release()
+                            mediaPlayer = null
+                            isPlayingVoiceMemo = false
+                            playbackPosition = 0L
+                            isPreviewingVoiceMemo = false
+
+                            recordingFile?.let { file ->
+                                val uri = Uri.fromFile(file)
+                                pendingAttachments = pendingAttachments + uri
+                                viewModel.addAttachment(uri)
+                                viewModel.sendMessage()
+                                pendingAttachments = emptyList()
+                            }
+                            recordingFile = null
+                        },
+                        onCancel = {
+                            // Exit preview mode and delete recording
+                            mediaPlayer?.release()
+                            mediaPlayer = null
+                            isPlayingVoiceMemo = false
+                            playbackPosition = 0L
+                            isPreviewingVoiceMemo = false
+                            recordingFile?.delete()
+                            recordingFile = null
+                        }
+                    )
                 } else {
                     MessageInputArea(
                         text = uiState.draftText,
@@ -321,10 +480,56 @@ fun ChatScreen(
                             pendingAttachments = emptyList()
                             showAttachmentPicker = false
                         },
+                        onSendLongPress = {
+                            // Open effect picker on long press (iMessage only)
+                            if (!uiState.isLocalSmsChat) {
+                                showEffectPicker = true
+                            }
+                        },
                         onAttachClick = { showAttachmentPicker = !showAttachmentPicker },
                         onImageClick = { imagePickerLauncher.launch("image/*") },
                         onVoiceMemoClick = {
                             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                        onVoiceMemoPressStart = {
+                            // Start recording on press (if permission granted)
+                            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                                startVoiceMemoRecording(
+                                    context = context,
+                                    onRecorderCreated = { recorder, file ->
+                                        mediaRecorder = recorder
+                                        recordingFile = file
+                                        isRecording = true
+                                    },
+                                    onError = { error ->
+                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                        },
+                        onVoiceMemoPressEnd = {
+                            // Stop recording on release and enter preview mode
+                            if (isRecording) {
+                                try {
+                                    mediaRecorder?.stop()
+                                } catch (_: Exception) {
+                                    // May throw if no audio was recorded
+                                }
+                                mediaRecorder?.release()
+                                mediaRecorder = null
+                                isRecording = false
+
+                                // Enter preview mode
+                                recordingFile?.let { file ->
+                                    if (file.exists() && file.length() > 0) {
+                                        isPreviewingVoiceMemo = true
+                                        playbackDuration = recordingDuration
+                                    } else {
+                                        file.delete()
+                                        recordingFile = null
+                                    }
+                                }
+                            }
                         },
                         isSending = uiState.isSending,
                         isLocalSmsChat = uiState.isLocalSmsChat,
@@ -333,6 +538,10 @@ fun ChatScreen(
                         onRemoveAttachment = { uri ->
                             pendingAttachments = pendingAttachments - uri
                             viewModel.removeAttachment(uri)
+                        },
+                        onClearAllAttachments = {
+                            pendingAttachments = emptyList()
+                            viewModel.clearAttachments()
                         },
                         isPickerExpanded = showAttachmentPicker
                     )
@@ -369,13 +578,20 @@ fun ChatScreen(
             // iOS-style sending indicator bar
             SendingIndicatorBar(
                 isVisible = uiState.isSending,
-                isLocalSmsChat = uiState.isLocalSmsChat
+                isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode
+            )
+
+            // SMS fallback mode banner
+            SmsFallbackBanner(
+                visible = uiState.isInSmsFallbackMode && !uiState.isLocalSmsChat,
+                isServerConnected = uiState.isServerConnected
             )
 
             // Save contact banner for unsaved senders
             SaveContactBanner(
                 visible = uiState.showSaveContactBanner,
                 senderAddress = uiState.unsavedSenderAddress ?: "",
+                inferredName = uiState.inferredSenderName,
                 onAddContact = {
                     context.startActivity(viewModel.getAddToContactsIntent())
                     viewModel.dismissSaveContactBanner()
@@ -425,34 +641,80 @@ fun ChatScreen(
                                 uiState.currentSearchMatchIndex >= 0 &&
                                 uiState.searchMatchIndices.getOrNull(uiState.currentSearchMatchIndex) == index
 
-                            Box {
-                                MessageBubble(
-                                    message = message,
-                                    onLongPress = {
-                                        if (canTapback) {
-                                            selectedMessageForTapback = message
-                                        }
-                                    },
-                                    onMediaClick = onMediaClick,
-                                    searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
-                                    isCurrentSearchMatch = isCurrentSearchMatch
-                                )
+                            // Check for time gap with next visible message (previous in chronological order)
+                            // Since list is reversed, next index = earlier message
+                            // Skip reaction messages (they're hidden) when finding next message
+                            // Also don't show separators for reaction messages themselves
+                            val nextVisibleMessage = uiState.messages
+                                .drop(index + 1)
+                                .firstOrNull { !it.isReaction }
+                            val showTimeSeparator = !message.isReaction && nextVisibleMessage?.let {
+                                shouldShowTimeSeparator(message.dateCreated, it.dateCreated)
+                            } ?: false
 
-                                // Show tapback menu for this message (positioned above)
-                                if (selectedMessageForTapback?.guid == message.guid) {
-                                    TapbackMenu(
-                                        visible = true,
-                                        onDismiss = { selectedMessageForTapback = null },
-                                        onReactionSelected = { tapback ->
-                                            viewModel.toggleReaction(message.guid, tapback)
+                            Column {
+                                Box {
+                                    MessageBubble(
+                                        message = message,
+                                        onLongPress = {
+                                            if (message.hasError && message.isFromMe) {
+                                                // For failed messages, show retry menu
+                                                selectedMessageForRetry = message
+                                                // Check if SMS retry is available
+                                                retryMenuScope.launch {
+                                                    canRetrySmsForMessage = viewModel.canRetryAsSms(message.guid)
+                                                }
+                                            } else if (canTapback) {
+                                                selectedMessageForTapback = message
+                                            }
                                         },
-                                        myReactions = message.myReactions,
-                                        isFromMe = message.isFromMe,
-                                        onEmojiPickerClick = {
-                                            // TODO: Show emoji picker for custom reactions
-                                            selectedMessageForTapback = null
-                                            Toast.makeText(context, "Custom emoji reactions coming soon!", Toast.LENGTH_SHORT).show()
-                                        }
+                                        onMediaClick = onMediaClick,
+                                        searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
+                                        isCurrentSearchMatch = isCurrentSearchMatch
+                                    )
+
+                                    // Show tapback menu for this message (positioned above)
+                                    if (selectedMessageForTapback?.guid == message.guid) {
+                                        TapbackMenu(
+                                            visible = true,
+                                            onDismiss = { selectedMessageForTapback = null },
+                                            onReactionSelected = { tapback ->
+                                                viewModel.toggleReaction(message.guid, tapback)
+                                            },
+                                            myReactions = message.myReactions,
+                                            isFromMe = message.isFromMe,
+                                            onEmojiPickerClick = {
+                                                // TODO: Show emoji picker for custom reactions
+                                                selectedMessageForTapback = null
+                                                Toast.makeText(context, "Custom emoji reactions coming soon!", Toast.LENGTH_SHORT).show()
+                                            }
+                                        )
+                                    }
+
+                                    // Show retry menu for failed messages
+                                    if (selectedMessageForRetry?.guid == message.guid) {
+                                        FailedMessageMenu(
+                                            visible = true,
+                                            onDismiss = { selectedMessageForRetry = null },
+                                            onRetry = {
+                                                viewModel.retryMessage(message.guid)
+                                                selectedMessageForRetry = null
+                                            },
+                                            onRetryAsSms = if (canRetrySmsForMessage) {
+                                                {
+                                                    viewModel.retryMessageAsSms(message.guid)
+                                                    selectedMessageForRetry = null
+                                                }
+                                            } else null,
+                                            isFromMe = message.isFromMe
+                                        )
+                                    }
+                                }
+
+                                // Show centered time separator if there's a significant gap
+                                if (showTimeSeparator) {
+                                    DateSeparator(
+                                        date = formatTimeSeparator(message.dateCreated)
                                     )
                                 }
                             }
@@ -461,6 +723,40 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // Screen effect overlay (above all other content)
+    ScreenEffectOverlay(
+        effect = activeScreenEffect,
+        messageText = activeScreenEffectMessageText,
+        onEffectComplete = {
+            activeScreenEffect = null
+            activeScreenEffectMessageText = null
+        }
+    )
+    } // End of outer Box
+
+    // Effect picker bottom sheet
+    if (showEffectPicker) {
+        EffectPickerSheet(
+            messageText = uiState.draftText,
+            onEffectSelected = { effect ->
+                showEffectPicker = false
+                if (effect != null) {
+                    // Send message with effect
+                    viewModel.sendMessage(effect.appleId)
+                    pendingAttachments = emptyList()
+                    showAttachmentPicker = false
+
+                    // Trigger screen effect if it's a screen effect
+                    if (effect is MessageEffect.Screen) {
+                        activeScreenEffect = effect
+                        activeScreenEffectMessageText = uiState.draftText
+                    }
+                }
+            },
+            onDismiss = { showEffectPicker = false }
+        )
     }
 
     // Confirmation dialogs
@@ -531,14 +827,18 @@ private fun MessageInputArea(
     text: String,
     onTextChange: (String) -> Unit,
     onSendClick: () -> Unit,
+    onSendLongPress: () -> Unit = {},
     onAttachClick: () -> Unit,
     onImageClick: () -> Unit,
     onVoiceMemoClick: () -> Unit,
+    onVoiceMemoPressStart: () -> Unit,
+    onVoiceMemoPressEnd: () -> Unit,
     isSending: Boolean,
     isLocalSmsChat: Boolean,
     hasAttachments: Boolean,
     attachments: List<Uri>,
     onRemoveAttachment: (Uri) -> Unit,
+    onClearAllAttachments: () -> Unit,
     isPickerExpanded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -556,17 +856,50 @@ private fun MessageInputArea(
         ) {
             // Attachment previews
             if (attachments.isNotEmpty()) {
-                LazyRow(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                Column(
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    items(attachments) { uri ->
-                        AttachmentPreview(
-                            uri = uri,
-                            onRemove = { onRemoveAttachment(uri) }
+                    // Header with count and Clear All button
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${attachments.size} attachment${if (attachments.size > 1) "s" else ""}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = inputColors.inputText.copy(alpha = 0.7f)
                         )
+
+                        if (attachments.size > 1) {
+                            TextButton(
+                                onClick = onClearAllAttachments,
+                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                            ) {
+                                Text(
+                                    text = "Clear All",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+
+                    // Attachment thumbnails
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        items(attachments) { uri ->
+                            AttachmentPreview(
+                                uri = uri,
+                                onRemove = { onRemoveAttachment(uri) }
+                            )
+                        }
                     }
                 }
             }
@@ -665,17 +998,30 @@ private fun MessageInputArea(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Voice memo button (iMessage only) or Send button
-                if (hasContent) {
-                    // Show send button when there's content
-                    SendButton(
-                        onClick = onSendClick,
-                        isSending = isSending,
-                        isMmsMode = isMmsMode
-                    )
-                } else if (!isLocalSmsChat) {
-                    // Show voice memo button for iMessage when no content
-                    VoiceMemoButton(onClick = onVoiceMemoClick)
+                // Voice memo button or Send button (animated transition)
+                Crossfade(
+                    targetState = hasContent,
+                    label = "input_action_button"
+                ) { showSend ->
+                    if (showSend) {
+                        // Show send button when there's content
+                        SendButton(
+                            onClick = onSendClick,
+                            onLongPress = onSendLongPress,
+                            isSending = isSending,
+                            isSmsMode = isLocalSmsChat,
+                            isMmsMode = isMmsMode,
+                            showEffectHint = !isLocalSmsChat
+                        )
+                    } else {
+                        // Show voice memo button for all threads when no content
+                        VoiceMemoButton(
+                            onClick = onVoiceMemoClick,
+                            onPressStart = onVoiceMemoPressStart,
+                            onPressEnd = onVoiceMemoPressEnd,
+                            isSmsMode = isLocalSmsChat
+                        )
+                    }
                 }
             }
         }
@@ -683,7 +1029,7 @@ private fun MessageInputArea(
 }
 
 /**
- * Attachment preview thumbnail with remove button
+ * Attachment preview thumbnail with remove button, file size, and video duration.
  */
 @Composable
 private fun AttachmentPreview(
@@ -692,6 +1038,11 @@ private fun AttachmentPreview(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    // Get file info
+    val fileInfo = remember(uri) {
+        getAttachmentInfo(context, uri)
+    }
 
     Box(
         modifier = modifier
@@ -707,6 +1058,55 @@ private fun AttachmentPreview(
             modifier = Modifier.fillMaxSize(),
             contentScale = ContentScale.Crop
         )
+
+        // Semi-transparent gradient overlay at bottom for text visibility
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(28.dp)
+                .background(
+                    brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.Black.copy(alpha = 0.7f)
+                        )
+                    )
+                )
+        )
+
+        // File size at bottom left
+        Text(
+            text = fileInfo.formattedSize,
+            style = MaterialTheme.typography.labelSmall,
+            color = Color.White,
+            modifier = Modifier
+                .align(Alignment.BottomStart)
+                .padding(start = 6.dp, bottom = 4.dp)
+        )
+
+        // Video duration badge at bottom right (for videos)
+        if (fileInfo.isVideo && fileInfo.durationFormatted != null) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 6.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = fileInfo.durationFormatted,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White
+                )
+            }
+        }
 
         // Remove button overlay
         IconButton(
@@ -731,38 +1131,129 @@ private fun AttachmentPreview(
 }
 
 /**
- * Send button with optional MMS indicator.
- * Uses MD3 FilledIconButton styling with contextual colors.
+ * Information about an attachment (file size, video duration, etc.)
  */
+private data class AttachmentInfo(
+    val sizeBytes: Long,
+    val formattedSize: String,
+    val isVideo: Boolean,
+    val durationMs: Long? = null,
+    val durationFormatted: String? = null
+)
+
+/**
+ * Get attachment info from a URI (file size, video duration, etc.)
+ */
+private fun getAttachmentInfo(context: android.content.Context, uri: Uri): AttachmentInfo {
+    var sizeBytes = 0L
+    var isVideo = false
+    var durationMs: Long? = null
+
+    try {
+        // Get MIME type
+        val mimeType = context.contentResolver.getType(uri)
+        isVideo = mimeType?.startsWith("video/") == true
+
+        // Get file size
+        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
+                if (sizeIndex >= 0) {
+                    sizeBytes = cursor.getLong(sizeIndex)
+                }
+            }
+        }
+
+        // Get video duration if it's a video
+        if (isVideo) {
+            try {
+                val retriever = android.media.MediaMetadataRetriever()
+                retriever.setDataSource(context, uri)
+                val durationStr = retriever.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)
+                durationMs = durationStr?.toLongOrNull()
+                retriever.release()
+            } catch (e: Exception) {
+                // Ignore errors getting video duration
+            }
+        }
+    } catch (e: Exception) {
+        // Ignore errors
+    }
+
+    return AttachmentInfo(
+        sizeBytes = sizeBytes,
+        formattedSize = formatFileSize(sizeBytes),
+        isVideo = isVideo,
+        durationMs = durationMs,
+        durationFormatted = durationMs?.let { formatDuration(it) }
+    )
+}
+
+/**
+ * Format file size for display (e.g., "1.5 MB")
+ */
+private fun formatFileSize(bytes: Long): String {
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> String.format("%.1f KB", bytes / 1024.0)
+        bytes < 1024 * 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+        else -> String.format("%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    }
+}
+
+/**
+ * Format duration in milliseconds to a readable string (e.g., "1:30")
+ */
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = ms / 1000
+    val minutes = totalSeconds / 60
+    val seconds = totalSeconds % 60
+    return String.format("%d:%02d", minutes, seconds)
+}
+
+/**
+ * Send button with protocol-based coloring.
+ * Green background for SMS/MMS, blue for iMessage.
+ * Long press opens the effect picker for iMessage.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun SendButton(
     onClick: () -> Unit,
+    onLongPress: () -> Unit = {},
     isSending: Boolean,
+    isSmsMode: Boolean,
     isMmsMode: Boolean,
+    showEffectHint: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val containerColor = if (isMmsMode) {
+    // Protocol-based coloring: green for SMS, blue for iMessage
+    val containerColor = if (isSmsMode) {
         Color(0xFF34C759) // Green for SMS/MMS
     } else {
-        MaterialTheme.colorScheme.primary
+        MaterialTheme.colorScheme.primary // Blue for iMessage
     }
+    val contentColor = Color.White
 
-    FilledIconButton(
-        onClick = onClick,
-        enabled = !isSending,
-        modifier = modifier.size(48.dp),
-        colors = IconButtonDefaults.filledIconButtonColors(
-            containerColor = containerColor,
-            contentColor = Color.White,
-            disabledContainerColor = containerColor.copy(alpha = 0.38f),
-            disabledContentColor = Color.White.copy(alpha = 0.38f)
-        )
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(
+                if (isSending) containerColor.copy(alpha = 0.38f) else containerColor
+            )
+            .combinedClickable(
+                enabled = !isSending,
+                onClick = onClick,
+                onLongClick = onLongPress
+            ),
+        contentAlignment = Alignment.Center
     ) {
         if (isSending) {
             CircularProgressIndicator(
                 modifier = Modifier.size(20.dp),
                 strokeWidth = 2.dp,
-                color = Color.White
+                color = contentColor
             )
         } else {
             if (isMmsMode) {
@@ -774,11 +1265,13 @@ private fun SendButton(
                     Icon(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = stringResource(R.string.send_message),
+                        tint = contentColor,
                         modifier = Modifier.size(18.dp)
                     )
                     Text(
                         text = "MMS",
                         style = MaterialTheme.typography.labelSmall,
+                        color = contentColor,
                         modifier = Modifier.padding(top = 1.dp)
                     )
                 }
@@ -786,6 +1279,7 @@ private fun SendButton(
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.send_message),
+                    tint = contentColor,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -794,22 +1288,47 @@ private fun SendButton(
 }
 
 /**
- * Voice memo button for iMessage sessions.
- * Uses MD3 FilledTonalIconButton for secondary action styling.
+ * Voice memo button with soundwave icon.
+ * Protocol-colored: green for SMS, blue for iMessage.
+ * Supports tap-to-record and hold-to-record gestures.
  */
 @Composable
 private fun VoiceMemoButton(
     onClick: () -> Unit,
+    onPressStart: () -> Unit,
+    onPressEnd: () -> Unit,
+    isSmsMode: Boolean,
     modifier: Modifier = Modifier
 ) {
-    FilledTonalIconButton(
-        onClick = onClick,
-        modifier = modifier.size(44.dp)
+    // Protocol-based coloring: green for SMS, blue for iMessage
+    val containerColor = if (isSmsMode) {
+        Color(0xFF34C759) // Green for SMS/MMS
+    } else {
+        MaterialTheme.colorScheme.primary // Blue for iMessage
+    }
+
+    Box(
+        modifier = modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .background(containerColor)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onPress = {
+                        onPressStart()
+                        tryAwaitRelease()
+                        onPressEnd()
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
     ) {
         Icon(
-            Icons.Outlined.Mic,
+            Icons.Filled.GraphicEq,
             contentDescription = stringResource(R.string.voice_memo),
-            modifier = Modifier.size(24.dp)
+            modifier = Modifier.size(24.dp),
+            tint = Color.White
         )
     }
 }
@@ -917,6 +1436,7 @@ private fun SendingIndicatorBar(
 private fun SaveContactBanner(
     visible: Boolean,
     senderAddress: String,
+    inferredName: String? = null,
     onAddContact: () -> Unit,
     onReportSpam: () -> Unit,
     onDismiss: () -> Unit,
@@ -965,12 +1485,20 @@ private fun SaveContactBanner(
                     // Text content
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Save $senderAddress?",
+                            text = if (inferredName != null) {
+                                "Save $inferredName?"
+                            } else {
+                                "Save ${PhoneNumberFormatter.format(senderAddress)}?"
+                            },
                             style = MaterialTheme.typography.titleSmall,
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Saving this number will add a new contact",
+                            text = if (inferredName != null) {
+                                "Add ${PhoneNumberFormatter.format(senderAddress)} as a contact"
+                            } else {
+                                "Saving this number will add a new contact"
+                            },
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1011,12 +1539,62 @@ private fun SaveContactBanner(
 }
 
 /**
+ * Banner shown when chat is in SMS fallback mode (iMessage unavailable).
+ */
+@Composable
+private fun SmsFallbackBanner(
+    visible: Boolean,
+    isServerConnected: Boolean,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(),
+        exit = shrinkVertically()
+    ) {
+        Surface(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            shape = RoundedCornerShape(8.dp),
+            color = Color(0xFFFFF8E1), // Amber 50
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Warning,
+                    contentDescription = null,
+                    tint = Color(0xFFF57C00), // Orange 700
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = if (!isServerConnected) {
+                        "Server disconnected - Sending as SMS"
+                    } else {
+                        "iMessage unavailable - Sending as SMS"
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color(0xFF5D4037) // Brown 600
+                )
+            }
+        }
+    }
+}
+
+/**
  * Voice memo recording bar that replaces the input area during recording.
- * Shows animated waveform, duration, and cancel/send buttons.
+ * Shows real-time waveform based on audio amplitude, duration, and cancel/send buttons.
  */
 @Composable
 private fun VoiceMemoRecordingBar(
     duration: Long,
+    amplitudeHistory: List<Float>,
     onCancel: () -> Unit,
     onSend: () -> Unit,
     modifier: Modifier = Modifier
@@ -1051,7 +1629,7 @@ private fun VoiceMemoRecordingBar(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Cancel button
+            // Cancel button (stops recording and enters preview mode)
             IconButton(onClick = onCancel) {
                 Icon(
                     Icons.Default.Close,
@@ -1062,7 +1640,7 @@ private fun VoiceMemoRecordingBar(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Recording indicator with waveform animation
+            // Recording indicator with real-time waveform
             Row(
                 modifier = Modifier.weight(1f),
                 verticalAlignment = Alignment.CenterVertically
@@ -1079,29 +1657,24 @@ private fun VoiceMemoRecordingBar(
 
                 Spacer(modifier = Modifier.width(12.dp))
 
-                // Waveform bars
+                // Real-time waveform bars based on audio amplitude
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(2.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    repeat(20) { index ->
-                        val barHeight by infiniteTransition.animateFloat(
-                            initialValue = 4f,
-                            targetValue = 20f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(
-                                    durationMillis = 300 + (index * 50) % 200,
-                                    easing = LinearEasing
-                                ),
-                                repeatMode = RepeatMode.Reverse
-                            ),
+                    amplitudeHistory.forEachIndexed { index, amplitude ->
+                        // Animate height changes smoothly
+                        val targetHeight = (4f + amplitude * 20f).coerceIn(4f, 24f)
+                        val animatedHeight by animateFloatAsState(
+                            targetValue = targetHeight,
+                            animationSpec = tween(durationMillis = 100, easing = LinearEasing),
                             label = "bar_$index"
                         )
 
                         Box(
                             modifier = Modifier
                                 .width(3.dp)
-                                .height(barHeight.dp)
+                                .height(animatedHeight.dp)
                                 .background(
                                     color = MaterialTheme.colorScheme.primary,
                                     shape = RoundedCornerShape(1.5.dp)
@@ -1123,6 +1696,124 @@ private fun VoiceMemoRecordingBar(
             Spacer(modifier = Modifier.width(8.dp))
 
             // Send button - uses MD3 FilledIconButton
+            FilledIconButton(
+                onClick = onSend,
+                modifier = Modifier.size(44.dp),
+                colors = IconButtonDefaults.filledIconButtonColors(
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = MaterialTheme.colorScheme.onPrimary
+                )
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = stringResource(R.string.send_message),
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Voice memo preview bar that allows playback, re-record, or send.
+ * Shown after the user stops recording (X button while recording).
+ */
+@Composable
+private fun VoiceMemoPreviewBar(
+    duration: Long,
+    playbackPosition: Long,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onReRecord: () -> Unit,
+    onSend: () -> Unit,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val formattedDuration = remember(duration) {
+        val seconds = (duration / 1000) % 60
+        val minutes = (duration / 1000) / 60
+        String.format("%d:%02d", minutes, seconds)
+    }
+
+    val formattedPosition = remember(playbackPosition) {
+        val seconds = (playbackPosition / 1000) % 60
+        val minutes = (playbackPosition / 1000) / 60
+        String.format("%d:%02d", minutes, seconds)
+    }
+
+    val progress = if (duration > 0) (playbackPosition.toFloat() / duration).coerceIn(0f, 1f) else 0f
+
+    val inputColors = BlueBubblesTheme.bubbleColors
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        tonalElevation = 0.dp,
+        color = inputColors.inputBackground
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Cancel button (exits preview mode and deletes recording)
+            IconButton(onClick = onCancel) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = stringResource(R.string.action_cancel),
+                    tint = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Spacer(modifier = Modifier.width(4.dp))
+
+            // Play/Pause button
+            IconButton(onClick = onPlayPause) {
+                Icon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.primary
+                )
+            }
+
+            // Progress bar and time
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Progress bar
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                )
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                // Time display
+                Text(
+                    text = if (isPlaying) formattedPosition else formattedDuration,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = inputColors.inputText
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Re-record button
+            IconButton(onClick = onReRecord) {
+                Icon(
+                    Icons.Default.RestartAlt,
+                    contentDescription = "Re-record",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Send button
             FilledIconButton(
                 onClick = onSend,
                 modifier = Modifier.size(44.dp),
@@ -1290,6 +1981,152 @@ private fun InlineSearchBar(
                         contentDescription = "Close search",
                         tint = MaterialTheme.colorScheme.onSurface
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Determines if a time separator should be shown between two messages.
+ * Shows separator if there's a gap of 15+ minutes between messages.
+ */
+private fun shouldShowTimeSeparator(currentTimestamp: Long, previousTimestamp: Long): Boolean {
+    val gapMillis = currentTimestamp - previousTimestamp
+    val gapMinutes = TimeUnit.MILLISECONDS.toMinutes(gapMillis)
+    return gapMinutes >= 15
+}
+
+/**
+ * Formats a timestamp for the centered time separator.
+ * Uses relative formatting like "Today 2:30 PM", "Yesterday", "Monday", or full date.
+ */
+private fun formatTimeSeparator(timestamp: Long): String {
+    val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
+    val today = Calendar.getInstance()
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    val weekAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
+
+    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    val dayOfWeekFormat = SimpleDateFormat("EEEE", Locale.getDefault())
+    val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+
+    return when {
+        isSameDay(messageDate, today) -> {
+            "Today ${timeFormat.format(Date(timestamp))}"
+        }
+        isSameDay(messageDate, yesterday) -> {
+            "Yesterday ${timeFormat.format(Date(timestamp))}"
+        }
+        messageDate.after(weekAgo) -> {
+            "${dayOfWeekFormat.format(Date(timestamp))} ${timeFormat.format(Date(timestamp))}"
+        }
+        else -> {
+            "${dateFormat.format(Date(timestamp))} ${timeFormat.format(Date(timestamp))}"
+        }
+    }
+}
+
+/**
+ * Checks if two Calendar instances represent the same day.
+ */
+private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
+    return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
+           cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
+
+/**
+ * Menu shown for failed messages with retry options.
+ * Positioned above the message bubble like TapbackMenu.
+ */
+@Composable
+private fun FailedMessageMenu(
+    visible: Boolean,
+    onDismiss: () -> Unit,
+    onRetry: () -> Unit,
+    onRetryAsSms: (() -> Unit)?,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier
+) {
+    if (!visible) return
+
+    androidx.compose.ui.window.Popup(
+        alignment = if (isFromMe) Alignment.TopEnd else Alignment.TopStart,
+        offset = androidx.compose.ui.unit.IntOffset(0, -100),
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.PopupProperties(
+            focusable = true,
+            clippingEnabled = false
+        )
+    ) {
+        Surface(
+            modifier = modifier.padding(4.dp),
+            shape = RoundedCornerShape(12.dp),
+            tonalElevation = 6.dp,
+            shadowElevation = 4.dp,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(
+                modifier = Modifier.padding(vertical = 4.dp),
+                verticalArrangement = Arrangement.spacedBy(0.dp)
+            ) {
+                // Retry button
+                Surface(
+                    onClick = onRetry,
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text(
+                            text = "Retry",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+
+                // Retry as SMS button (if available)
+                if (onRetryAsSms != null) {
+                    HorizontalDivider(
+                        color = MaterialTheme.colorScheme.outlineVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+
+                    Surface(
+                        onClick = onRetryAsSms,
+                        color = Color.Transparent,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Sms,
+                                contentDescription = null,
+                                tint = Color(0xFF34C759), // SMS green
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Text(
+                                text = "Send as SMS",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
                 }
             }
         }

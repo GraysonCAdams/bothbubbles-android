@@ -30,6 +30,7 @@ class SmsPermissionHelper @Inject constructor(
             Manifest.permission.RECEIVE_SMS,
             Manifest.permission.READ_SMS,
             Manifest.permission.RECEIVE_MMS,
+            Manifest.permission.RECEIVE_WAP_PUSH,
             Manifest.permission.READ_PHONE_STATE,
             Manifest.permission.READ_PHONE_NUMBERS,
             Manifest.permission.READ_CONTACTS
@@ -163,6 +164,7 @@ class SmsPermissionHelper @Inject constructor(
             Manifest.permission.RECEIVE_SMS -> "Receive incoming text messages"
             Manifest.permission.READ_SMS -> "Read existing text messages"
             Manifest.permission.RECEIVE_MMS -> "Receive multimedia messages"
+            Manifest.permission.RECEIVE_WAP_PUSH -> "Receive MMS download notifications"
             Manifest.permission.READ_PHONE_STATE -> "Access phone state for dual SIM support"
             Manifest.permission.READ_PHONE_NUMBERS -> "Read your phone number"
             Manifest.permission.READ_CONTACTS -> "Show contact names in conversations"
@@ -211,7 +213,7 @@ data class SmsCapabilityStatus(
     /**
      * Can we receive new SMS messages?
      */
-    val canReceiveSms: Boolean get() = deviceSupportsSms && hasReceivePermission && isDefaultSmsApp
+    val canReceiveSms: Boolean get() = deviceSupportsSms && hasReceivePermission
 
     /**
      * Is SMS fully functional (read, write, receive)?

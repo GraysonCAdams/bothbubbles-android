@@ -59,6 +59,9 @@ interface HandleDao {
     @Query("UPDATE handles SET default_email = :email WHERE id = :id")
     suspend fun updateDefaultEmail(id: Long, email: String?)
 
+    @Query("UPDATE handles SET inferred_name = :inferredName WHERE id = :id")
+    suspend fun updateInferredName(id: Long, inferredName: String?)
+
     // ===== Deletes =====
 
     @Query("DELETE FROM handles WHERE id = :id")

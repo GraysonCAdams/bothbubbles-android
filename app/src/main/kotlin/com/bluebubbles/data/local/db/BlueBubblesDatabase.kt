@@ -43,7 +43,7 @@ import com.bluebubbles.data.local.db.entity.MessageEntity
         AttachmentEntity::class,
         ChatHandleCrossRef::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class BlueBubblesDatabase : RoomDatabase() {
@@ -116,6 +116,16 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 3 to 4: Add inferred_name column to handles table
+         * for storing names detected from self-introduction messages (e.g., "Hey it's John")
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE handles ADD COLUMN inferred_name TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -123,7 +133,8 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
          */
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2,
-            MIGRATION_2_3
+            MIGRATION_2_3,
+            MIGRATION_3_4
         )
     }
 }

@@ -1,5 +1,9 @@
 package com.bluebubbles.ui.chat.details
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.provider.ContactsContract
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,6 +23,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.layout.ContentScale
@@ -40,6 +45,7 @@ fun ConversationDetailsScreen(
     onSearchClick: () -> Unit = {},
     onMediaGalleryClick: (mediaType: String) -> Unit = {},
     onNotificationSettingsClick: () -> Unit = {},
+    onCreateGroupClick: (address: String, displayName: String, service: String, avatarPath: String?) -> Unit = { _, _, _, _ -> },
     viewModel: ConversationDetailsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -105,10 +111,17 @@ fun ConversationDetailsScreen(
 
                 // Action buttons row
                 item {
+                    val context = LocalContext.current
                     ActionButtonsRow(
+                        hasContact = uiState.hasContact,
                         onCallClick = { /* TODO */ },
                         onVideoClick = { /* TODO */ },
-                        onContactInfoClick = { /* TODO */ },
+                        onContactInfoClick = {
+                            viewContact(context, uiState.firstParticipantAddress)
+                        },
+                        onAddContactClick = {
+                            launchAddContact(context, uiState.firstParticipantAddress, uiState.displayName)
+                        },
                         onSearchClick = onSearchClick
                     )
                 }
@@ -140,7 +153,18 @@ fun ConversationDetailsScreen(
                     ParticipantsSection(
                         participants = uiState.participants,
                         isGroup = uiState.chat?.isGroup == true,
-                        onCreateGroupClick = { /* TODO */ },
+                        onCreateGroupClick = {
+                            // Pass the first participant's info for pre-selection
+                            val participant = uiState.participants.firstOrNull()
+                            if (participant != null) {
+                                onCreateGroupClick(
+                                    participant.address,
+                                    participant.displayName,
+                                    participant.service,
+                                    participant.cachedAvatarPath
+                                )
+                            }
+                        },
                         onParticipantClick = { /* TODO */ }
                     )
                 }
@@ -234,9 +258,11 @@ private fun ConversationHeader(
 
 @Composable
 private fun ActionButtonsRow(
+    hasContact: Boolean,
     onCallClick: () -> Unit,
     onVideoClick: () -> Unit,
     onContactInfoClick: () -> Unit,
+    onAddContactClick: () -> Unit,
     onSearchClick: () -> Unit
 ) {
     Row(
@@ -256,9 +282,9 @@ private fun ActionButtonsRow(
             onClick = onVideoClick
         )
         ActionButton(
-            icon = Icons.Outlined.Person,
-            label = "Contact info",
-            onClick = onContactInfoClick
+            icon = if (hasContact) Icons.Outlined.Person else Icons.Outlined.PersonAdd,
+            label = if (hasContact) "Contact info" else "Add contact",
+            onClick = if (hasContact) onContactInfoClick else onAddContactClick
         )
         ActionButton(
             icon = Icons.Outlined.Search,
@@ -655,5 +681,70 @@ private fun DangerZoneSection(
                 tint = MaterialTheme.colorScheme.error
             )
         }
+    }
+}
+
+/**
+ * Launch the add contact screen with pre-filled info
+ */
+private fun launchAddContact(context: Context, address: String, name: String) {
+    val intent = Intent(ContactsContract.Intents.Insert.ACTION).apply {
+        type = ContactsContract.RawContacts.CONTENT_TYPE
+
+        // Check if address looks like a phone number or email
+        if (address.contains("@")) {
+            putExtra(ContactsContract.Intents.Insert.EMAIL, address)
+        } else {
+            putExtra(ContactsContract.Intents.Insert.PHONE, address)
+        }
+
+        // Only set name if it's different from the address (i.e., not just a number)
+        if (name != address) {
+            putExtra(ContactsContract.Intents.Insert.NAME, name)
+        }
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        // Handle case where no contacts app is available
+    }
+}
+
+/**
+ * View an existing contact by looking up their phone number or email
+ */
+private fun viewContact(context: Context, address: String) {
+    try {
+        // Look up contact by phone number or email
+        val contactUri = if (address.contains("@")) {
+            // Email lookup
+            Uri.withAppendedPath(
+                ContactsContract.CommonDataKinds.Email.CONTENT_FILTER_URI,
+                Uri.encode(address)
+            )
+        } else {
+            // Phone number lookup
+            Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(address)
+            )
+        }
+
+        val projection = arrayOf(ContactsContract.Contacts._ID)
+        val cursor = context.contentResolver.query(contactUri, projection, null, null, null)
+
+        cursor?.use {
+            if (it.moveToFirst()) {
+                val contactId = it.getLong(it.getColumnIndexOrThrow(ContactsContract.Contacts._ID))
+                val contactViewUri = Uri.withAppendedPath(
+                    ContactsContract.Contacts.CONTENT_URI,
+                    contactId.toString()
+                )
+                val intent = Intent(Intent.ACTION_VIEW, contactViewUri)
+                context.startActivity(intent)
+            }
+        }
+    } catch (e: Exception) {
+        // Handle case where contact lookup fails or no contacts app is available
     }
 }

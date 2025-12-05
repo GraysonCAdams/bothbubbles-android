@@ -76,11 +76,10 @@ fun ProfileHeader(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
-            val (statusColor, statusText) = when (connectionState) {
-                ConnectionState.CONNECTED -> ConnectedGreen to "Connected"
-                ConnectionState.CONNECTING -> ConnectingOrange to "Connecting..."
-                ConnectionState.DISCONNECTED -> DisconnectedRed to "Disconnected"
-                ConnectionState.ERROR -> DisconnectedRed to "Connection error"
+            val statusColor = when (connectionState) {
+                ConnectionState.CONNECTED -> ConnectedGreen
+                ConnectionState.CONNECTING -> ConnectingOrange
+                ConnectionState.DISCONNECTED, ConnectionState.ERROR, ConnectionState.NOT_CONFIGURED -> DisconnectedRed
             }
 
             Box(
@@ -93,7 +92,7 @@ fun ProfileHeader(
             Spacer(modifier = Modifier.width(6.dp))
 
             Text(
-                text = statusText,
+                text = "iMessage",
                 style = MaterialTheme.typography.bodyMedium,
                 color = statusColor
             )

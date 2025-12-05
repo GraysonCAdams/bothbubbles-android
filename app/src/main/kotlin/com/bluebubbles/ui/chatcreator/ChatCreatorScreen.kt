@@ -7,9 +7,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Message
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -22,6 +27,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -116,6 +123,17 @@ fun ChatCreatorScreen(
                         ),
                         cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                         singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                // If a manual address entry is detected, start the conversation
+                                uiState.manualAddressEntry?.let { entry ->
+                                    viewModel.startConversationWithAddress(entry.address, entry.service)
+                                }
+                            }
+                        ),
                         decorationBox = { innerTextField ->
                             Box {
                                 if (uiState.searchQuery.isEmpty()) {
@@ -182,6 +200,20 @@ fun ChatCreatorScreen(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(bottom = 16.dp)
             ) {
+                // Manual address entry option (when a valid phone number or email is typed)
+                uiState.manualAddressEntry?.let { entry ->
+                    item(key = "manual_address_${entry.address}") {
+                        ManualAddressTile(
+                            address = entry.address,
+                            service = entry.service,
+                            isCheckingAvailability = uiState.isCheckingAvailability,
+                            onClick = {
+                                viewModel.startConversationWithAddress(entry.address, entry.service)
+                            }
+                        )
+                    }
+                }
+
                 // Favorites section (if any)
                 if (uiState.favoriteContacts.isNotEmpty() && uiState.searchQuery.isEmpty()) {
                     item {
@@ -351,6 +383,112 @@ private fun GroupChatTile(
     }
 }
 
+/**
+ * Tile for starting a conversation with a manually entered address
+ */
+@Composable
+private fun ManualAddressTile(
+    address: String,
+    service: String,
+    isCheckingAvailability: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(enabled = !isCheckingAvailability, onClick = onClick),
+        color = MaterialTheme.colorScheme.surface
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Icon
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(
+                        if (service == "iMessage") {
+                            MaterialTheme.colorScheme.primaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.secondaryContainer
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = null,
+                    tint = if (service == "iMessage") {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    },
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(16.dp))
+
+            // Text content
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Send to $address",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Text(
+                    text = if (isCheckingAvailability) {
+                        "Checking availability..."
+                    } else {
+                        "Start new conversation"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            // Service indicator or loading spinner
+            if (isCheckingAvailability) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+            } else {
+                val isIMessage = service == "iMessage"
+                Surface(
+                    color = if (isIMessage) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = service,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isIMessage) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ContactTile(
     contact: ContactUiModel,
@@ -431,13 +569,29 @@ private fun ContactTile(
                 )
             }
 
-            // Service indicator (RCS, SMS, etc.)
-            if (contact.serviceLabel != null) {
-                Text(
-                    text = contact.serviceLabel,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // Service indicator with color coding
+            val isIMessage = contact.service.equals("iMessage", ignoreCase = true)
+            val serviceText = contact.serviceLabel ?: if (isIMessage) "" else "SMS"
+            if (serviceText.isNotEmpty()) {
+                Surface(
+                    color = if (isIMessage) {
+                        MaterialTheme.colorScheme.primaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.secondaryContainer
+                    },
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = serviceText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isIMessage) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onSecondaryContainer
+                        },
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
             }
         }
     }

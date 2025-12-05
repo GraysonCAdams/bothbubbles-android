@@ -3,10 +3,12 @@ package com.bluebubbles.ui.components
 import android.content.Intent
 import android.provider.CalendarContract
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
@@ -14,16 +16,17 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.Event
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -34,7 +37,10 @@ import androidx.compose.ui.unit.dp
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.ui.theme.BlueBubblesTheme
 import com.bluebubbles.ui.theme.MessageShapes
+import kotlinx.coroutines.launch
 import java.util.Calendar
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
 
 /**
  * UI model for a message bubble
@@ -54,7 +60,9 @@ data class MessageUiModel(
     val senderName: String?,
     val messageSource: String,
     val reactions: List<ReactionUiModel> = emptyList(),
-    val myReactions: Set<Tapback> = emptySet()
+    val myReactions: Set<Tapback> = emptySet(),
+    val expressiveSendStyleId: String? = null,
+    val effectPlayed: Boolean = false
 )
 
 data class AttachmentUiModel(
@@ -79,19 +87,122 @@ fun MessageBubble(
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
     val hapticFeedback = LocalHapticFeedback.current
     val context = LocalContext.current
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
-    // Detect dates in message text
+    // Swipe-to-reveal timestamp state
+    val dragOffset = remember { Animatable(0f) }
+    val maxDragPx = with(density) { 80.dp.toPx() }
+
+    // Tap-to-show timestamp state (default hidden)
+    var showTimestamp by remember { mutableStateOf(false) }
+
+    // Detect dates in message text for underlining
     val detectedDates = remember(message.text) {
         if (message.text.isNullOrBlank()) emptyList()
         else DateParsingUtils.detectDates(message.text)
     }
-    val hasCalendarDates = detectedDates.isNotEmpty()
 
-    // Get first detected date for the calendar button
-    val firstDetectedDate = detectedDates.firstOrNull()
+    // Determine message type label for swipe reveal
+    val messageTypeLabel = when (message.messageSource) {
+        MessageSource.LOCAL_SMS.name -> "SMS"
+        MessageSource.LOCAL_MMS.name -> "MMS"
+        MessageSource.SERVER_SMS.name -> "SMS"
+        else -> "iMessage"
+    }
+
+    // Swipe-to-reveal timestamp container
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // Sliding timestamp from the edge (same side as bubble)
+        val timestampAlpha = (dragOffset.value.absoluteValue / maxDragPx).coerceIn(0f, 1f)
+
+        // Timestamp positioned at the edge - slides in from outside screen edge
+        if (message.isFromMe) {
+            // Right-side timestamp for sent messages (slides in from right)
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .offset(x = (80 - (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
+                    .alpha(timestampAlpha)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    text = message.formattedTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = messageTypeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        } else {
+            // Left-side timestamp for received messages (slides in from left)
+            Column(
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = (-80 + (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
+                    .alpha(timestampAlpha)
+                    .padding(start = 8.dp)
+            ) {
+                Text(
+                    text = message.formattedTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = messageTypeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
 
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .offset { IntOffset(dragOffset.value.roundToInt(), 0) }
+            .pointerInput(message.guid) {
+                detectDragGestures(
+                    onDragStart = { },
+                    onDragEnd = {
+                        // Animate back to original position
+                        coroutineScope.launch {
+                            dragOffset.animateTo(
+                                0f,
+                                animationSpec = spring(
+                                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                                    stiffness = Spring.StiffnessLow
+                                )
+                            )
+                        }
+                    },
+                    onDragCancel = {
+                        coroutineScope.launch {
+                            dragOffset.animateTo(0f)
+                        }
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        coroutineScope.launch {
+                            // For sent messages (right side): allow drag left (negative)
+                            // For received messages (left side): allow drag right (positive)
+                            val newOffset = if (message.isFromMe) {
+                                (dragOffset.value + dragAmount.x).coerceIn(-maxDragPx, 0f)
+                            } else {
+                                (dragOffset.value + dragAmount.x).coerceIn(0f, maxDragPx)
+                            }
+                            dragOffset.snapTo(newOffset)
+                        }
+                    }
+                )
+            },
         horizontalArrangement = if (message.isFromMe) {
             Arrangement.End
         } else {
@@ -99,19 +210,6 @@ fun MessageBubble(
         },
         verticalAlignment = Alignment.Top
     ) {
-        // Calendar button on left side for received messages
-        if (!message.isFromMe && hasCalendarDates) {
-            CalendarEventButton(
-                onClick = {
-                    firstDetectedDate?.let { date ->
-                        openCalendarIntent(context, date, message.text ?: "")
-                    }
-                },
-                modifier = Modifier.padding(top = 8.dp)
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-        }
-
         Column(
             horizontalAlignment = if (message.isFromMe) {
                 Alignment.End
@@ -161,6 +259,9 @@ fun MessageBubble(
                         )
                         .pointerInput(message.guid) {
                             detectTapGestures(
+                                onTap = {
+                                    showTimestamp = !showTimestamp
+                                },
                                 onLongPress = {
                                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onLongPress()
@@ -220,7 +321,8 @@ fun MessageBubble(
                                                 openCalendarIntent(
                                                     context,
                                                     detectedDates[dateIndex],
-                                                    message.text
+                                                    message.text,
+                                                    detectedDates
                                                 )
                                             }
                                         }
@@ -237,47 +339,46 @@ fun MessageBubble(
                     }
                 }
 
-                // Display reactions floating at bottom corner outside the bubble
-                // For outbound messages: bottom-left; for received: bottom-right
+                // Display reactions floating at top corner outside the bubble
+                // For outbound messages: top-left; for received: top-right
                 if (message.reactions.isNotEmpty()) {
                     ReactionsDisplay(
                         reactions = message.reactions,
                         isFromMe = message.isFromMe,
                         modifier = Modifier
-                            .align(if (message.isFromMe) Alignment.BottomStart else Alignment.BottomEnd)
+                            .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
                             .offset(
-                                x = if (message.isFromMe) (-16).dp else 16.dp,
-                                y = 18.dp
+                                x = if (message.isFromMe) (-20).dp else 20.dp,
+                                y = (-14).dp
                             )
                     )
                 }
             }
 
-            // Timestamp, message type, and status
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-            ) {
+            // Tap-to-reveal timestamp and message type below the bubble
+            if (showTimestamp) {
                 Text(
-                    text = message.formattedTime,
+                    text = "${message.formattedTime} · $messageTypeLabel",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .padding(
+                            start = if (message.isFromMe) 0.dp else 12.dp,
+                            end = if (message.isFromMe) 12.dp else 0.dp,
+                            top = 2.dp
+                        )
                 )
+            }
 
-                // Show message type indicator (SMS/MMS)
-                if (message.messageSource == MessageSource.LOCAL_SMS.name ||
-                    message.messageSource == MessageSource.LOCAL_MMS.name
+            // Delivery status indicator for outbound messages
+            if (message.isFromMe) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(end = 4.dp, top = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = if (message.messageSource == MessageSource.LOCAL_MMS.name) "MMS" else "SMS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                if (message.isFromMe) {
-                    Spacer(modifier = Modifier.width(4.dp))
                     DeliveryIndicator(
                         isSent = message.isSent,
                         isDelivered = message.isDelivered,
@@ -288,19 +389,8 @@ fun MessageBubble(
             }
         }
 
-        // Calendar button on right side for sent messages
-        if (message.isFromMe && hasCalendarDates) {
-            Spacer(modifier = Modifier.width(4.dp))
-            CalendarEventButton(
-                onClick = {
-                    firstDetectedDate?.let { date ->
-                        openCalendarIntent(context, date, message.text ?: "")
-                    }
-                },
-                modifier = Modifier.padding(top = 8.dp)
-            )
-        }
     }
+    } // Close Box
 }
 
 /**
@@ -391,41 +481,13 @@ private fun buildSearchHighlightedText(
 }
 
 /**
- * Calendar event button that appears beside messages with dates
- */
-@Composable
-private fun CalendarEventButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.size(36.dp),
-        shape = RoundedCornerShape(18.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 1.dp
-    ) {
-        Box(
-            contentAlignment = Alignment.Center,
-            modifier = Modifier.fillMaxSize()
-        ) {
-            Icon(
-                imageVector = Icons.Outlined.Event,
-                contentDescription = "Add to calendar",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-    }
-}
-
-/**
  * Opens the calendar app to add a new event
  */
 private fun openCalendarIntent(
     context: android.content.Context,
     detectedDate: DetectedDate,
-    messageText: String
+    messageText: String,
+    allDetectedDates: List<DetectedDate> = emptyList()
 ) {
     val calendar = detectedDate.parsedDate
 
@@ -441,14 +503,17 @@ private fun openCalendarIntent(
         }.timeInMillis
     }
 
-    // Try to extract event title from message (text before "starts" or use full text)
-    val eventTitle = extractEventTitle(messageText)
+    // Extract event title by removing date parts and prepositions
+    val eventTitle = extractEventTitle(messageText, allDetectedDates.ifEmpty { listOf(detectedDate) })
 
     val intent = Intent(Intent.ACTION_INSERT).apply {
         data = CalendarContract.Events.CONTENT_URI
         putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, startMillis)
         putExtra(CalendarContract.EXTRA_EVENT_END_TIME, endMillis)
-        putExtra(CalendarContract.Events.TITLE, eventTitle)
+        // Only set title if we extracted something meaningful
+        if (eventTitle.isNotBlank()) {
+            putExtra(CalendarContract.Events.TITLE, eventTitle)
+        }
         putExtra(CalendarContract.Events.DESCRIPTION, messageText)
         if (!detectedDate.hasTime) {
             putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, true)
@@ -463,32 +528,52 @@ private fun openCalendarIntent(
 }
 
 /**
- * Attempts to extract a meaningful event title from the message text
+ * Extracts event title by removing date parts and common prepositions from the message.
+ * Returns empty string if no meaningful title can be extracted.
  */
-private fun extractEventTitle(messageText: String): String {
-    // Common patterns like "New calendar event: Event Name starts..."
-    val patterns = listOf(
-        Regex("(?:New calendar event:|Event:)\\s*(.+?)\\s+starts", RegexOption.IGNORE_CASE),
-        Regex("(.+?)\\s+(?:starts|begins|on|at)\\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)", RegexOption.IGNORE_CASE),
-        Regex("(.+?)\\s+(?:starts|begins|on|at)\\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)", RegexOption.IGNORE_CASE)
+private fun extractEventTitle(messageText: String, detectedDates: List<DetectedDate>): String {
+    var result = messageText
+
+    // Remove all detected date substrings from the message
+    // Process in reverse order to maintain correct indices
+    detectedDates.sortedByDescending { it.startIndex }.forEach { date ->
+        result = result.removeRange(date.startIndex, date.endIndex)
+    }
+
+    // Remove common prepositions and connecting words that precede/follow dates
+    val prepositionsToRemove = listOf(
+        "\\bat\\b", "\\bon\\b", "\\bfor\\b", "\\bto\\b", "\\bfrom\\b",
+        "\\buntil\\b", "\\bby\\b", "\\bstarting\\b", "\\bbegins\\b",
+        "\\bstarts\\b", "\\bscheduled\\b", "\\bset\\b", "\\bplanned\\b",
+        "\\bthe\\b", "\\bis\\b", "\\bare\\b",
+        // Relative date words that might remain after date removal
+        "\\btomorrow\\b", "\\btoday\\b", "\\bnext\\b", "\\bthis\\b",
+        "\\bweek\\b", "\\bmonth\\b", "\\byear\\b", "\\bweekend\\b",
+        "\\bmonday\\b", "\\btuesday\\b", "\\bwednesday\\b", "\\bthursday\\b",
+        "\\bfriday\\b", "\\bsaturday\\b", "\\bsunday\\b"
     )
 
-    for (pattern in patterns) {
-        val match = pattern.find(messageText)
-        if (match != null && match.groupValues.size > 1) {
-            val title = match.groupValues[1].trim()
-            if (title.isNotBlank() && title.length <= 100) {
-                return title
-            }
-        }
+    for (prep in prepositionsToRemove) {
+        result = result.replace(Regex(prep, RegexOption.IGNORE_CASE), " ")
     }
 
-    // Fallback: use first 50 chars of message
-    return if (messageText.length > 50) {
-        messageText.take(50) + "..."
-    } else {
-        messageText
+    // Clean up the result
+    result = result
+        // Remove multiple spaces
+        .replace(Regex("\\s+"), " ")
+        // Remove leading/trailing punctuation and whitespace
+        .trim()
+        .trimStart(':', '-', ',', '.', '!', '?', ';')
+        .trimEnd(':', '-', ',', '.', '!', '?', ';')
+        .trim()
+
+    // If the result is too short or just punctuation/whitespace, return empty
+    if (result.length < 2 || result.all { !it.isLetterOrDigit() }) {
+        return ""
     }
+
+    // Capitalize first letter if needed
+    return result.replaceFirstChar { if (it.isLowerCase()) it.titlecase() else it.toString() }
 }
 
 @Composable
@@ -591,17 +676,11 @@ fun DateSeparator(
             .padding(vertical = 16.dp),
         contentAlignment = Alignment.Center
     ) {
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Text(
-                text = date,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-            )
-        }
+        Text(
+            text = date,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 
