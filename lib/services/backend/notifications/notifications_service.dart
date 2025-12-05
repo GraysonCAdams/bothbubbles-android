@@ -440,7 +440,7 @@ class NotificationsService extends GetxService {
         if (ChatManager().activeChat?.chat.guid != guid && Get.context != null) {
           ns.pushAndRemoveUntil(
             Get.context!,
-            ConversationView(chat: chat),
+            ConversationView(chatGuid: chat),
             (route) => route.isFirst,
           );
         }
@@ -557,7 +557,7 @@ class NotificationsService extends GetxService {
         if (ChatManager().activeChat?.chat.guid != guid && Get.context != null) {
           ns.pushAndRemoveUntil(
             Get.context!,
-            ConversationView(chat: chat),
+            ConversationView(chatGuid: chat),
             (route) => route.isFirst,
           );
         }
@@ -793,7 +793,7 @@ class NotificationsService extends GetxService {
             ns.pushAndRemoveUntil(
               Get.context!,
               ConversationView(
-                chat: chat,
+                chatGuid: chat,
               ),
               (route) => route.isFirst,
             );

@@ -38,7 +38,7 @@ class OpenSettingsAction extends Action<OpenSettingsIntent> {
           ns.pushAndRemoveUntil(
             context,
             ConversationView(
-              chat: currentChat,
+              chatGuid: currentChat,
             ),
                 (route) => route.isFirst,
           );
@@ -248,7 +248,7 @@ class OpenNextChatAction extends Action<OpenNextChatIntent> {
         ns.pushAndRemoveUntil(
           context,
           ConversationView(
-            chat: _chat,
+            chatGuid: _chat,
           ),
           (route) => route.isFirst,
         );
@@ -277,7 +277,7 @@ class OpenPreviousChatAction extends Action<OpenPreviousChatIntent> {
         ns.pushAndRemoveUntil(
           context,
           ConversationView(
-            chat: _chat,
+            chatGuid: _chat,
           ),
           (route) => route.isFirst,
         );

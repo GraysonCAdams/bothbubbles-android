@@ -309,23 +309,16 @@ class Chat {
   bool? autoSendTypingIndicators;
   String? textFieldText;
   List<String> textFieldAttachments = [];
+
+  // Last Message Info
   Message? _latestMessage;
-  Message get latestMessage {
-    if (_latestMessage != null) return _latestMessage!;
-    _latestMessage = Chat.getMessages(this, limit: 1, getDetails: true).firstOrNull ?? Message(
-      dateCreated: DateTime.fromMillisecondsSinceEpoch(0),
-      guid: guid,
-    );
-    return _latestMessage!;
+  Message? get latestMessage {
+    if (_latestMessage != null) return _latestMessage;
+    _latestMessage = Chat.getMessages(this, limit: 1, getDetails: true).firstOrNull;
+    return _latestMessage;
   }
-  Message get dbLatestMessage {
-    _latestMessage = Chat.getMessages(this, limit: 1, getDetails: true).firstOrNull ?? Message(
-      dateCreated: DateTime.fromMillisecondsSinceEpoch(0),
-      guid: guid,
-    );
-    return _latestMessage!;
-  }
-  set latestMessage(Message m) => _latestMessage = m;
+  set latestMessage(Message? m) => _latestMessage = m;
+
   @Property(uid: 526293286661780207)
   DateTime? dbOnlyLatestMessageDate;
   DateTime? dateDeleted;
@@ -418,108 +411,30 @@ class Chat {
   }
 
   /// Save a chat to the DB
-  Chat save({
-    bool updateMuteType = false,
-    bool updateMuteArgs = false,
-    bool updateIsPinned = false,
-    bool updatePinIndex = false,
-    bool updateIsArchived = false,
-    bool updateHasUnreadMessage = false,
-    bool updateAutoSendReadReceipts = false,
-    bool updateAutoSendTypingIndicators = false,
-    bool updateCustomAvatarPath = false,
-    bool updateTextFieldText = false,
-    bool updateTextFieldAttachments = false,
-    bool updateDisplayName = false,
-    bool updateDateDeleted = false,
-    bool updateLockChatName = false,
-    bool updateLockChatIcon = false,
-    bool updateLastReadMessageGuid = false,
-  }) {
+  Chat save() {
     if (kIsWeb) return this;
     Database.runInTransaction(TxMode.write, () {
       /// Find an existing, and update the ID to the existing ID if necessary
-      Chat? existing = Chat.findOne(guid: guid);
-      id = existing?.id ?? id;
-      if (!updateMuteType) {
-        muteType = existing?.muteType ?? muteType;
-      }
-      if (!updateMuteArgs) {
-        muteArgs = existing?.muteArgs ?? muteArgs;
-      }
-      if (!updateIsPinned) {
-        isPinned = existing?.isPinned ?? isPinned;
-      }
-      if (!updatePinIndex) {
-        pinIndex = existing?.pinIndex ?? pinIndex;
-      }
-      if (!updateIsArchived) {
-        isArchived = existing?.isArchived ?? isArchived;
-      }
-      if (!updateHasUnreadMessage) {
-        hasUnreadMessage = existing?.hasUnreadMessage ?? hasUnreadMessage;
-      }
-      if (!updateAutoSendReadReceipts) {
-        autoSendReadReceipts = existing?.autoSendReadReceipts;
-      }
-      if (!updateAutoSendTypingIndicators) {
-        autoSendTypingIndicators = existing?.autoSendTypingIndicators;
-      }
-      if (!updateCustomAvatarPath) {
-        customAvatarPath = existing?.customAvatarPath ?? customAvatarPath;
-      }
-      if (!updateTextFieldText) {
-        textFieldText = existing?.textFieldText ?? textFieldText;
-      }
-      if (!updateTextFieldAttachments) {
-        textFieldAttachments = existing?.textFieldAttachments ?? textFieldAttachments;
-      }
-      if (!updateDisplayName) {
-        displayName = existing?.displayName ?? displayName;
-      }
-      if (!updateDateDeleted) {
-        dateDeleted = existing?.dateDeleted;
-      }
-      if (!updateLockChatName) {
-        lockChatName = existing?.lockChatName ?? false;
-      }
-      if (!updateLockChatIcon) {
-        lockChatIcon = existing?.lockChatIcon ?? false;
-      }
-      if (!updateLastReadMessageGuid) {
-        lastReadMessageGuid = existing?.lastReadMessageGuid ?? lastReadMessageGuid;
-      }
+      id ??= Chat.findOne(guid: guid)?.id;
 
-      /// Save the chat and add the participants
-      for (int i = 0; i < participants.length; i++) {
-        participants[i] = participants[i].save();
-        _deduplicateParticipants();
-      }
-      dbOnlyLatestMessageDate = dbLatestMessage.dateCreated!;
       try {
-        id = Database.chats.put(this);
-        // make sure to add participant relation if its a new chat
-        if (existing == null && participants.isNotEmpty) {
-          final toSave = Database.chats.get(id!);
-          toSave!.handles.clear();
-          toSave.handles.addAll(participants);
-          toSave.handles.applyToDb();
-        } else if (existing == null && participants.isEmpty) {
-          cm.fetchChat(guid);
-        }
-      } on UniqueViolationException catch (_) {}
+        id = Database.chats.put(this, mode: PutMode.put);
+      } on UniqueViolationException catch (error) {
+        Logger.error("Failed to save chat with GUID: $guid", error: error);
+      }
     });
+
     return this;
   }
 
   /// Change a chat's display name
-  Chat changeName(String? name) {
+  Chat changeName(String? name, {bool save = true}) {
     if (kIsWeb) {
       displayName = name;
       return this;
     }
     displayName = name;
-    save(updateDisplayName: true);
+    if (save) this.save();
     return this;
   }
 
@@ -635,20 +550,17 @@ class Chat {
       await cm.setAllInactive();
       await Future.delayed(const Duration(milliseconds: 500));
     }
-    Database.runInTransaction(TxMode.write, () {
-      chat.dateDeleted = DateTime.now().toUtc();
-      chat.hasUnreadMessage = false;
-      chat.save(updateDateDeleted: true, updateHasUnreadMessage: true);
-      chat.clearTranscript();
-    });
+
+    chat.dateDeleted = DateTime.now().toUtc();
+    chat.hasUnreadMessage = false;
+    chat.save();
+    chat.clearTranscript();
   }
 
   static void unDelete(Chat chat) async {
     if (kIsWeb) return;
-    Database.runInTransaction(TxMode.write, () {
-      chat.dateDeleted = null;
-      chat.save(updateDateDeleted: true);
-    });
+    chat.dateDeleted = null;
+    chat.save();
   }
 
   Chat toggleHasUnread(bool hasUnread, {bool force = false, bool clearLocalNotifications = true, bool privateMark = true}) {
@@ -659,7 +571,7 @@ class Chat {
     if (hasUnreadMessage == hasUnread && !force) return this;
     if (!cm.isChatActive(guid) || !hasUnread || force) {
       hasUnreadMessage = hasUnread;
-      save(updateHasUnreadMessage: true);
+      save();
     }
     if (cm.isChatActive(guid) && hasUnread && !force) {
       hasUnread = false;
@@ -721,15 +633,19 @@ class Chat {
     // If the message was saved correctly, update this chat's latestMessage info,
     // but only if the incoming message's date is newer
     if ((newMessage?.id != null || kIsWeb) && checkForMessageText) {
-      isNewer = message.dateCreated!.isAfter(latest.dateCreated!)
+      isNewer = latest == null || message.dateCreated!.isAfter(latest.dateCreated!)
           || (message.guid != latest.guid && message.dateCreated == latest.dateCreated);
       if (isNewer) {
         _latestMessage = message;
+
+        // TODO: This should not be handled here... It should be handled in the chat service or something
+        // If the chat was deleted, undelete it
         if (dateDeleted != null) {
           dateDeleted = null;
-          save(updateDateDeleted: true);
+          save();
           await chats.addChat(this);
         }
+
         if (isArchived! && !_latestMessage!.isFromMe! && ss.settings.unarchiveOnNewMessage.value) {
           toggleArchived(false);
         }
@@ -866,7 +782,7 @@ class Chat {
     if (id == null) return this;
     this.isPinned = isPinned;
     _pinIndex.value = null;
-    save(updateIsPinned: true, updatePinIndex: true);
+    save();
     chats.updateChat(this);
     chats.sort();
     return this;
@@ -876,7 +792,7 @@ class Chat {
     if (id == null) return this;
     muteType = isMuted ? "mute" : null;
     muteArgs = null;
-    save(updateMuteType: true, updateMuteArgs: true);
+    save();
     return this;
   }
 
@@ -884,7 +800,7 @@ class Chat {
     if (id == null) return this;
     isPinned = false;
     this.isArchived = isArchived;
-    save(updateIsPinned: true, updateIsArchived: true);
+    save();
     chats.updateChat(this);
     chats.sort();
     return this;
@@ -893,7 +809,7 @@ class Chat {
   Chat toggleAutoRead(bool? autoSendReadReceipts) {
     if (id == null) return this;
     this.autoSendReadReceipts = autoSendReadReceipts;
-    save(updateAutoSendReadReceipts: true);
+    save();
     if (autoSendReadReceipts ?? ss.settings.privateMarkChatAsRead.value) {
       http.markChatRead(guid);
     }
@@ -903,7 +819,7 @@ class Chat {
   Chat toggleAutoType(bool? autoSendTypingIndicators) {
     if (id == null) return this;
     this.autoSendTypingIndicators = autoSendTypingIndicators;
-    save(updateAutoSendTypingIndicators: true);
+    save();
     if (!(autoSendTypingIndicators ?? ss.settings.privateSendTypingIndicators.value)) {
       socket.sendMessage("stopped-typing", {"chatGuid": guid});
     }
@@ -1022,8 +938,12 @@ class Chat {
     if (!a.isPinned! && b.isPinned!) return 1;
     if (a.isPinned! && !b.isPinned!) return -1;
 
+    if (a.latestMessage == null && b.latestMessage == null) return 0;
+    if (a.latestMessage == null) return 1;
+    if (b.latestMessage == null) return -1;
+
     // Compare the last message dates
-    return -(a.latestMessage.dateCreated)!.compareTo(b.latestMessage.dateCreated!);
+    return -(a.latestMessage!.dateCreated)!.compareTo(b.latestMessage!.dateCreated!);
   }
 
   static Future<void> getIcon(Chat c, {bool force = false}) async {
@@ -1036,7 +956,7 @@ class Chat {
       if (c.customAvatarPath != null) {
         await File(c.customAvatarPath!).delete(recursive: true);
         c.customAvatarPath = null;
-        c.save(updateCustomAvatarPath: true);
+        c.save();
       }
     } else {
       Logger.debug("Got chat icon for chat ${c.getTitle()}");
@@ -1049,7 +969,7 @@ class Chat {
       }
       await file.writeAsBytes(response.data);
       c.customAvatarPath = file.path;
-      c.save(updateCustomAvatarPath: true);
+      c.save();
     }
   }
 

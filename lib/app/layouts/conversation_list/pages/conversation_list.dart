@@ -152,7 +152,7 @@ class _ConversationListState extends CustomState<ConversationList, void, Convers
           ns.pushAndRemoveUntil(
             context,
             ConversationView(
-                chat: kIsWeb
+                chatGuid: kIsWeb
                     ? (await Chat.findOneWeb(guid: ss.prefs.getString('lastOpenedChat')))!
                     : Chat.findOne(guid: ss.prefs.getString('lastOpenedChat'))!),
             (route) => route.isFirst,

@@ -7,7 +7,9 @@ import 'package:bluebubbles/helpers/helpers.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/pages/messages_view.dart';
 import 'package:bluebubbles/app/layouts/conversation_view/widgets/effects/screen_effects_widget.dart';
 import 'package:bluebubbles/database/models.dart';
+import 'package:bluebubbles/helpers/types/classes/aliases.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/services/states/chat_state.dart';
 import 'package:bluebubbles/utils/logger/logger.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -18,13 +20,13 @@ import 'package:get/get.dart';
 class ConversationView extends StatefulWidget {
   ConversationView({
     super.key,
-    required this.chat,
+    required this.chatGuid,
     this.customService,
     this.fromChatCreator = false,
     this.onInit,
   });
 
-  final Chat chat;
+  final ChatGuid chatGuid;
   final MessagesService? customService;
   final bool fromChatCreator;
   final void Function()? onInit;
@@ -36,17 +38,17 @@ class ConversationView extends StatefulWidget {
 class ConversationViewState extends OptimizedState<ConversationView> {
   late final ConversationViewController controller = cvc(chat, tag: widget.customService?.tag);
 
-  Chat get chat => widget.chat;
+  ChatState get chat => GlobalChatService.getChat(widget.chatGuid)!;
 
   @override
   void initState() {
     super.initState();
 
-    Logger.debug("Initializing Conversation View for ${chat.guid}");
+    Logger.debug("Initializing Conversation View for ${chat.model.guid}");
     controller.fromChatCreator = widget.fromChatCreator;
-    cm.setActiveChatSync(chat);
+    cm.setActiveChatSync(chat.model);
     cm.activeChat!.controller = controller;
-    Logger.debug("Conversation View initialized for ${chat.guid}");
+    Logger.debug("Conversation View initialized for ${chat.model.guid}");
 
     if (widget.onInit != null) {
       Future.delayed(Duration.zero, widget.onInit!);
@@ -75,10 +77,10 @@ class ConversationViewState extends OptimizedState<ConversationView> {
       child: Theme(
         data: context.theme.copyWith(
           // in case some components still use legacy theming
-          primaryColor: context.theme.colorScheme.bubble(context, chat.isIMessage),
+          primaryColor: context.theme.colorScheme.bubble(context, chat.model.isIMessage),
           colorScheme: context.theme.colorScheme.copyWith(
-            primary: context.theme.colorScheme.bubble(context, chat.isIMessage),
-            onPrimary: context.theme.colorScheme.onBubble(context, chat.isIMessage),
+            primary: context.theme.colorScheme.bubble(context, chat.model.isIMessage),
+            onPrimary: context.theme.colorScheme.onBubble(context, chat.model.isIMessage),
             surface: ss.settings.monetTheming.value == Monet.full
                 ? null
                 : (context.theme.extensions[BubbleColors] as BubbleColors?)?.receivedBubbleColor,
@@ -122,20 +124,20 @@ class ConversationViewState extends OptimizedState<ConversationView> {
               body: Actions(
                 actions: {
                   if (ss.settings.enablePrivateAPI.value)
-                    ReplyRecentIntent: ReplyRecentAction(widget.chat),
+                    ReplyRecentIntent: ReplyRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    HeartRecentIntent: HeartRecentAction(widget.chat),
+                    HeartRecentIntent: HeartRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    LikeRecentIntent: LikeRecentAction(widget.chat),
+                    LikeRecentIntent: LikeRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    DislikeRecentIntent: DislikeRecentAction(widget.chat),
+                    DislikeRecentIntent: DislikeRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    LaughRecentIntent: LaughRecentAction(widget.chat),
+                    LaughRecentIntent: LaughRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    EmphasizeRecentIntent: EmphasizeRecentAction(widget.chat),
+                    EmphasizeRecentIntent: EmphasizeRecentAction(chat.model),
                   if (ss.settings.enablePrivateAPI.value)
-                    QuestionRecentIntent: QuestionRecentAction(widget.chat),
-                  OpenChatDetailsIntent: OpenChatDetailsAction(context, widget.chat),
+                    QuestionRecentIntent: QuestionRecentAction(chat.model),
+                  OpenChatDetailsIntent: OpenChatDetailsAction(context, chat.model),
                 },
                 child: GradientBackground(
                   controller: controller,
@@ -152,7 +154,7 @@ class ConversationViewState extends OptimizedState<ConversationView> {
                               child: Stack(
                                 children: [
                                   MessagesView(
-                                    key: Key(chat.guid),
+                                    key: Key(chat.model.guid),
                                     customService: widget.customService,
                                     controller: controller,
                                   ),

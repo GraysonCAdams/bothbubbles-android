@@ -5,7 +5,9 @@ import 'package:audio_waveforms/audio_waveforms.dart';
 import 'package:bluebubbles/app/components/custom_text_editing_controllers.dart';
 import 'package:bluebubbles/app/wrappers/stateful_boilerplate.dart';
 import 'package:bluebubbles/database/models.dart';
+import 'package:bluebubbles/helpers/types/classes/aliases.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/services/states/chat_state.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_keyboard_visibility/flutter_keyboard_visibility.dart';
@@ -17,19 +19,21 @@ import 'package:tuple/tuple.dart';
 import 'package:unicode_emojis/unicode_emojis.dart';
 import 'package:universal_io/io.dart';
 
-ConversationViewController cvc(Chat chat, {String? tag}) => Get.isRegistered<ConversationViewController>(tag: tag ?? chat.guid)
-? Get.find<ConversationViewController>(tag: tag ?? chat.guid) : Get.put(ConversationViewController(chat, tag_: tag), tag: tag ?? chat.guid);
+ConversationViewController cvc(ChatGuid chatGuid, {String? tag}) => Get.isRegistered<ConversationViewController>(tag: tag ?? chatGuid)
+? Get.find<ConversationViewController>(tag: tag ?? chatGuid) : Get.put(ConversationViewController(chatGuid, tag_: tag), tag: tag ?? chatGuid);
 
 class ConversationViewController extends StatefulController with GetSingleTickerProviderStateMixin {
-  final Chat chat;
+  final ChatGuid chatGuid;
   late final String tag;
   bool fromChatCreator = false;
   bool addedRecentPhotoReply = false;
   final AutoScrollController scrollController = AutoScrollController();
 
-  ConversationViewController(this.chat, {String? tag_}) {
-    tag = tag_ ?? chat.guid;
+  ConversationViewController(this.chatGuid, {String? tag_}) {
+    tag = tag_ ?? chatGuid;
   }
+
+  ChatState get chat => GlobalChatService.getChat(chatGuid)!;
 
   // caching items
   final Map<String, Uint8List> imageData = {};
@@ -80,7 +84,7 @@ class ConversationViewController extends StatefulController with GetSingleTicker
       lastFocusedNode.requestFocus();
     }
   }
-  late final mentionables = chat.participants.map((e) => Mentionable(
+  late final mentionables = chat.model.participants.map((e) => Mentionable(
     handle: e,
   )).toList();
 
@@ -235,17 +239,17 @@ class ConversationViewController extends StatefulController with GetSingleTicker
 
   Future<void> saveReplyToMessageState() async {
     if (replyToMessage != null) {
-      await ss.prefs.setString('replyToMessage_${chat.guid}', replyToMessage!.item1.guid!);
-      await ss.prefs.setInt('replyToMessagePart_${chat.guid}', replyToMessage!.item2);
+      await ss.prefs.setString('replyToMessage_$chatGuid', replyToMessage!.item1.guid!);
+      await ss.prefs.setInt('replyToMessagePart$chatGuid', replyToMessage!.item2);
     } else {
-      await ss.prefs.remove('replyToMessage_${chat.guid}');
-      await ss.prefs.remove('replyToMessagePart_${chat.guid}');
+      await ss.prefs.remove('replyToMessage_$chatGuid');
+      await ss.prefs.remove('replyToMessagePart_$chatGuid');
     }
   }
 
   Future<void> loadReplyToMessageState() async {
-    final replyToMessageGuid = ss.prefs.getString('replyToMessage_${chat.guid}');
-    final replyToMessagePart = ss.prefs.getInt('replyToMessagePart_${chat.guid}');
+    final replyToMessageGuid = ss.prefs.getString('replyToMessage_$chatGuid');
+    final replyToMessagePart = ss.prefs.getInt('replyToMessagePart_$chatGuid');
     if (replyToMessageGuid != null && replyToMessagePart != null) {
       final message = Message.findOne(guid: replyToMessageGuid);
       if (message != null) {

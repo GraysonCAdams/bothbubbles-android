@@ -222,7 +222,7 @@ class IntentsService extends GetxService {
         await ns.pushAndRemoveUntil(
           Get.context!,
           ConversationView(
-            chat: chat,
+            chatGuid: chat,
             onInit: () => setPickedAttachments(),
           ),
           (route) => route.isFirst,

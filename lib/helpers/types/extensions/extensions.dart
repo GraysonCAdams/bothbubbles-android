@@ -1,6 +1,6 @@
 import 'package:bluebubbles/helpers/helpers.dart';
-import 'package:bluebubbles/database/models.dart';
 import 'package:bluebubbles/services/services.dart';
+import 'package:bluebubbles/services/states/chat_state.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:get/get.dart';
@@ -95,32 +95,32 @@ extension FriendlySize on double {
   }
 }
 
-extension ChatListHelpers on RxList<Chat> {
+extension ChatListHelpers on RxList<ChatState> {
   /// Helper to return archived chats or all chats depending on the bool passed to it
   /// This helps reduce a vast amount of code in build methods so the widgets can
   /// update without StreamBuilders
-  RxList<Chat> archivedHelper(bool archived) {
+  RxList<ChatState> archivedHelper(bool archived) {
     if (archived) {
-      return where((e) => e.isArchived ?? false).toList().obs;
+      return where((e) => e.model.isArchived ?? false).toList().obs;
     } else {
-      return where((e) => !(e.isArchived ?? false)).toList().obs;
+      return where((e) => !(e.model.isArchived ?? false)).toList().obs;
     }
   }
 
-  RxList<Chat> bigPinHelper(bool pinned) {
+  RxList<ChatState> bigPinHelper(bool pinned) {
     if (pinned) {
-      return where((e) => e.isPinned ?? false).toList().obs;
+      return where((e) => e.model.isPinned ?? false).toList().obs;
     } else {
-      return where((e) => !(e.isPinned ?? false)).toList().obs;
+      return where((e) => !(e.model.isPinned ?? false)).toList().obs;
     }
   }
 
-  RxList<Chat> unknownSendersHelper(bool unknown) {
+  RxList<ChatState> unknownSendersHelper(bool unknown) {
     if (!ss.settings.filterUnknownSenders.value) return this;
     if (unknown) {
-      return where((e) => !e.isGroup && e.participants.firstOrNull?.contact == null).toList().obs;
+      return where((e) => !e.model.isGroup && e.model.participants.firstOrNull?.contact == null).toList().obs;
     } else {
-      return where((e) => e.isGroup || (!e.isGroup && e.participants.firstOrNull?.contact != null)).toList().obs;
+      return where((e) => e.model.isGroup || (!e.model.isGroup && e.model.participants.firstOrNull?.contact != null)).toList().obs;
     }
   }
 }

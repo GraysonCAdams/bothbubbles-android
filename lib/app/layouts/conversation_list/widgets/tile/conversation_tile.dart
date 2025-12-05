@@ -49,7 +49,7 @@ class ConversationTileController extends StatefulController {
       ns.pushAndRemoveUntil(
         context,
         ConversationView(
-          chat: chat,
+          chatGuid: chat,
         ),
         (route) => route.isFirst,
       );

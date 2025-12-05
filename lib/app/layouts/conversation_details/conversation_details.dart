@@ -88,9 +88,9 @@ class _ConversationDetailsState extends OptimizedState<ConversationDetails> with
   @override
   void dispose() {
     sub.cancel();
-    if (cm.activeChat != null) {
+    if (GlobalChatService.activeChat != null) {
       cm.setActiveToAlive();
-      cvc(cm.activeChat!.chat).lastFocusedNode.requestFocus();
+      cvc(GlobalChatService.activeChat?.model.guid).lastFocusedNode.requestFocus();
     }
     super.dispose();
   }

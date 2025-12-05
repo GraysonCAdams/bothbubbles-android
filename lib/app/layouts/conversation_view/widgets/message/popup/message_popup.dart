@@ -649,7 +649,7 @@ class _MessagePopupState extends OptimizedState<MessagePopup> with SingleTickerP
       cupertino.CupertinoPageRoute(
         builder: (BuildContext context) {
           return ConversationView(
-            chat: dmChat!,
+            chatGuid: dmChat!,
           );
         },
       ),

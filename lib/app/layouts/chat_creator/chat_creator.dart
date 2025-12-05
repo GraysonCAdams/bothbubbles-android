@@ -235,7 +235,7 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
     if (update) {
       if (existingChat != null) {
         await cm.setActiveChat(existingChat, clearNotifications: false);
-        cm.activeChat!.controller = cvc(existingChat);
+        cm.activeChat!.controller = cvc(existingChat.guid);
 
         if (widget.initialAttachments.isNotEmpty) {
           cm.activeChat!.controller!.pickedAttachments.value = widget.initialAttachments;
@@ -717,7 +717,7 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
                         sendMessage: ({String? effect}) async {
                           addressOnSubmitted();
                           final chat =
-                              fakeController.value?.chat ?? await findExistingChat(checkDeleted: true, update: false);
+                              fakeController.value?.chat.model ?? await findExistingChat(checkDeleted: true, update: false);
                           bool existsOnServer = false;
                           if (chat != null) {
                             // if we don't error, then the chat exists
@@ -730,7 +730,7 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
                             sendInitialMessage() async {
                               if (fakeController.value == null) {
                                 await cm.setActiveChat(chat, clearNotifications: false);
-                                cm.activeChat!.controller = cvc(chat);
+                                cm.activeChat!.controller = cvc(chat.guid);
                                 cm.activeChat!.controller!.pickedAttachments.value = [];
                                 fakeController.value = cm.activeChat!.controller;
                               } else {
@@ -757,14 +757,14 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
 
                             ns.pushAndRemoveUntil(
                               Get.context!,
-                              ConversationView(chat: chat, fromChatCreator: true, onInit: sendInitialMessage),
+                              ConversationView(chatGuid: chat.guid, fromChatCreator: true, onInit: sendInitialMessage),
                               (route) => route.isFirst,
                               // don't force close the active chat in tablet mode
                               closeActiveChat: false,
                               // only used in non-tablet mode context
                               customRoute: PageRouteBuilder(
                                 pageBuilder: (_, __, ___) =>
-                                    TitleBarWrapper(child: ConversationView(chat: chat, fromChatCreator: true, onInit: sendInitialMessage)),
+                                    TitleBarWrapper(child: ConversationView(chatGuid: chat.guid, fromChatCreator: true, onInit: sendInitialMessage)),
                                 transitionDuration: Duration.zero,
                               ),
                             );
@@ -834,7 +834,7 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
                               // Force close the message service for the chat so it can be reloaded.
                               // If this isn't done, new messages will not show.
                               ms(newChat.guid).close(force: true);
-                              cvc(newChat).close();
+                              cvc(newChat.guid).close();
 
                               // Let awaiters know we completed
                               createCompleter?.complete();
@@ -843,12 +843,12 @@ class ChatCreatorState extends OptimizedState<ChatCreator> {
                               Navigator.of(context).pop();
                               ns.pushAndRemoveUntil(
                                 Get.context!,
-                                ConversationView(chat: newChat),
+                                ConversationView(chatGuid: newChat.guid),
                                 (route) => route.isFirst,
                                 customRoute: PageRouteBuilder(
                                   pageBuilder: (_, __, ___) => TitleBarWrapper(
                                     child: ConversationView(
-                                      chat: newChat,
+                                      chatGuid: newChat.guid,
                                       fromChatCreator: true,
                                     ),
                                   ),

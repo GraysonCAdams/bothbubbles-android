@@ -351,7 +351,7 @@ Future<void> goToFindMy(BuildContext context) async {
       ns.pushAndRemoveUntil(
         context,
         ConversationView(
-          chat: currentChat,
+          chatGuid: currentChat,
         ),
             (route) => route.isFirst,
       );
@@ -428,7 +428,7 @@ Future<void> goToSettings(BuildContext context) async {
         ns.pushAndRemoveUntil(
           context,
           ConversationView(
-            chat: currentChat,
+            chatGuid: currentChat,
           ),
               (route) => route.isFirst,
         ).onError((error, stackTrace) => cm.setAllInactiveSync());

@@ -160,7 +160,7 @@ class _ConversationPeekViewState extends OptimizedState<ConversationPeekView> wi
                               ns.pushAndRemoveUntil(
                                 Get.context!,
                                 ConversationView(
-                                  chat: widget.chat,
+                                  chatGuid: widget.chat,
                                 ),
                                 (route) => route.isFirst,
                               );
