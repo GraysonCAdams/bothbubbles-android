@@ -1,48 +1,32 @@
 package com.bluebubbles.ui.chat
 
-import androidx.compose.foundation.layout.Box
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Archive
-import androidx.compose.material.icons.outlined.Block
-import androidx.compose.material.icons.outlined.Delete
-import androidx.compose.material.icons.outlined.HelpOutline
-import androidx.compose.material.icons.outlined.Info
-import androidx.compose.material.icons.outlined.PersonAdd
-import androidx.compose.material.icons.outlined.Search
-import androidx.compose.material.icons.outlined.Star
-import androidx.compose.material.icons.outlined.Subject
-import androidx.compose.material.icons.outlined.Unarchive
-import androidx.compose.material.icons.outlined.Videocam
-import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.dp
 
 /**
  * Enum representing all available chat menu actions
  */
 enum class ChatMenuAction(
     val label: String,
-    val icon: ImageVector,
     val isDestructive: Boolean = false
 ) {
-    ADD_PEOPLE("Add people", Icons.Outlined.PersonAdd),
-    DETAILS("Details", Icons.Outlined.Info),
-    STARRED("Starred", Icons.Outlined.Star),
-    SEARCH("Search", Icons.Outlined.Search),
-    ARCHIVE("Archive", Icons.Outlined.Archive),
-    UNARCHIVE("Unarchive", Icons.Outlined.Unarchive),
-    DELETE("Delete", Icons.Outlined.Delete, isDestructive = true),
-    VIDEO("Video", Icons.Outlined.Videocam),
-    BLOCK_AND_REPORT("Block & report spam", Icons.Outlined.Block, isDestructive = true),
-    SHOW_SUBJECT_FIELD("Show subject field", Icons.Outlined.Subject),
-    HELP_AND_FEEDBACK("Help & feedback", Icons.Outlined.HelpOutline)
+    ADD_PEOPLE("Add people"),
+    DETAILS("Details"),
+    STARRED("Starred"),
+    SEARCH("Search"),
+    CHANGE_COLORS("Change colors"),
+    ARCHIVE("Archive"),
+    UNARCHIVE("Unarchive"),
+    DELETE("Delete", isDestructive = true),
+    BLOCK_AND_REPORT("Block & report spam", isDestructive = true),
+    HELP_AND_FEEDBACK("Help & feedback")
 }
 
 /**
@@ -58,6 +42,7 @@ data class ChatMenuState(
 
 /**
  * Chat overflow menu composable that displays the dropdown menu
+ * Styled to match Google Messages
  */
 @Composable
 fun ChatOverflowMenu(
@@ -70,6 +55,8 @@ fun ChatOverflowMenu(
     DropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
+        offset = DpOffset(x = (-8).dp, y = 0.dp),
+        shape = RoundedCornerShape(28.dp),
         modifier = modifier
     ) {
         // Add people - only for group chats
@@ -81,10 +68,8 @@ fun ChatOverflowMenu(
                     onDismissRequest()
                 }
             )
-            HorizontalDivider()
         }
 
-        // Details, Starred, Search
         ChatMenuItem(
             action = ChatMenuAction.DETAILS,
             onClick = {
@@ -95,7 +80,6 @@ fun ChatOverflowMenu(
 
         ChatMenuItem(
             action = ChatMenuAction.STARRED,
-            icon = if (menuState.isStarred) Icons.Filled.Star else Icons.Outlined.Star,
             onClick = {
                 onAction(ChatMenuAction.STARRED)
                 onDismissRequest()
@@ -110,9 +94,14 @@ fun ChatOverflowMenu(
             }
         )
 
-        HorizontalDivider()
+        ChatMenuItem(
+            action = ChatMenuAction.CHANGE_COLORS,
+            onClick = {
+                onAction(ChatMenuAction.CHANGE_COLORS)
+                onDismissRequest()
+            }
+        )
 
-        // Archive / Unarchive, Delete
         if (menuState.isArchived) {
             ChatMenuItem(
                 action = ChatMenuAction.UNARCHIVE,
@@ -139,20 +128,6 @@ fun ChatOverflowMenu(
             }
         )
 
-        HorizontalDivider()
-
-        // Video
-        ChatMenuItem(
-            action = ChatMenuAction.VIDEO,
-            onClick = {
-                onAction(ChatMenuAction.VIDEO)
-                onDismissRequest()
-            }
-        )
-
-        HorizontalDivider()
-
-        // Block & report spam, Show subject field
         ChatMenuItem(
             action = ChatMenuAction.BLOCK_AND_REPORT,
             onClick = {
@@ -161,18 +136,6 @@ fun ChatOverflowMenu(
             }
         )
 
-        ChatMenuItem(
-            action = ChatMenuAction.SHOW_SUBJECT_FIELD,
-            label = if (menuState.showSubjectField) "Hide subject field" else "Show subject field",
-            onClick = {
-                onAction(ChatMenuAction.SHOW_SUBJECT_FIELD)
-                onDismissRequest()
-            }
-        )
-
-        HorizontalDivider()
-
-        // Help & feedback
         ChatMenuItem(
             action = ChatMenuAction.HELP_AND_FEEDBACK,
             onClick = {
@@ -184,14 +147,13 @@ fun ChatOverflowMenu(
 }
 
 /**
- * Individual menu item composable
+ * Individual menu item composable styled to match Google Messages (text only, no icons)
  */
 @Composable
 private fun ChatMenuItem(
     action: ChatMenuAction,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    icon: ImageVector = action.icon,
     label: String = action.label
 ) {
     val contentColor = if (action.isDestructive) {
@@ -208,13 +170,6 @@ private fun ChatMenuItem(
             )
         },
         onClick = onClick,
-        leadingIcon = {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = contentColor
-            )
-        },
         modifier = modifier
     )
 }

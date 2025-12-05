@@ -116,6 +116,8 @@ fun ConversationsScreen(
     val listState = rememberLazyListState()
     val coroutineScope = rememberCoroutineScope()
     var pullOffset by remember { mutableFloatStateOf(0f) }
+    // Track if the current gesture started at the top (prevents flings from triggering pull-to-search)
+    var gestureStartedAtTop by remember { mutableStateOf(false) }
 
     // Scroll-to-top button visibility - show when scrolled past first item
     val showScrollToTop by remember {
@@ -137,8 +139,17 @@ fun ConversationsScreen(
     val nestedScrollConnection = remember {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
+                val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+
+                // Only allow pull-to-search if it's a drag that started at the top
+                // This prevents flings from below carrying through and triggering pull-to-search
+                if (source == NestedScrollSource.UserInput && isAtTop && !gestureStartedAtTop) {
+                    gestureStartedAtTop = true
+                }
+
                 // When scrolling up (pulling down) at the top of the list
-                if (available.y > 0 && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                // Only allow if the gesture started at the top (not from a fling)
+                if (available.y > 0 && isAtTop && gestureStartedAtTop && source == NestedScrollSource.UserInput) {
                     pullOffset = (pullOffset + available.y * 0.5f).coerceIn(0f, pullThreshold * 1.5f)
                     return Offset(0f, available.y)
                 }
@@ -152,8 +163,10 @@ fun ConversationsScreen(
             }
 
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // Handle overscroll at top
-                if (available.y > 0 && listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0) {
+                val isAtTop = listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0
+
+                // Handle overscroll at top - only for user input when gesture started at top
+                if (available.y > 0 && isAtTop && gestureStartedAtTop && source == NestedScrollSource.UserInput) {
                     pullOffset = (pullOffset + available.y * 0.5f).coerceIn(0f, pullThreshold * 1.5f)
                     return available
                 }
@@ -170,10 +183,13 @@ fun ConversationsScreen(
         }
     }
 
-    // Reset pull offset when finger is released (detected via lack of scrolling)
+    // Reset pull offset and gesture state when finger is released (detected via lack of scrolling)
     LaunchedEffect(listState.isScrollInProgress) {
-        if (!listState.isScrollInProgress && pullOffset > 0 && pullOffset < pullThreshold) {
-            pullOffset = 0f
+        if (!listState.isScrollInProgress) {
+            if (pullOffset > 0 && pullOffset < pullThreshold) {
+                pullOffset = 0f
+            }
+            gestureStartedAtTop = false
         }
     }
 
@@ -184,12 +200,20 @@ fun ConversationsScreen(
     // Contact quick actions popup state
     var quickActionsContact by remember { mutableStateOf<ContactInfo?>(null) }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Slightly darker background that shows behind the header and card
+    val darkerBackground = MaterialTheme.colorScheme.surfaceContainerLow
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(darkerBackground)
+    ) {
         // Main content
         Scaffold(
+            containerColor = Color.Transparent,
             topBar = {
                 Surface(
-                    color = MaterialTheme.colorScheme.surface,
+                    color = darkerBackground,
                     tonalElevation = 0.dp
                 ) {
                     Column(
@@ -331,12 +355,21 @@ fun ConversationsScreen(
                 )
             }
         ) { padding ->
+            // Rounded card shape for the conversation list - rounded at top, meets edges
+            val cardShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = padding.calculateTopPadding()),
+                shape = cardShape,
+                color = MaterialTheme.colorScheme.surface
+            ) {
         when {
             uiState.isLoading -> {
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
+                        .fillMaxSize(),
                     contentAlignment = Alignment.Center
                 ) {
                     CircularProgressIndicator()
@@ -345,8 +378,7 @@ fun ConversationsScreen(
             uiState.conversations.isEmpty() -> {
                 EmptyConversationsState(
                     modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
+                        .fillMaxSize(),
                     isSearching = uiState.searchQuery.isNotBlank()
                 )
             }
@@ -363,7 +395,6 @@ fun ConversationsScreen(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(padding)
                         .nestedScroll(nestedScrollConnection)
                 ) {
                     // Pull-to-search indicator
@@ -521,6 +552,7 @@ fun ConversationsScreen(
                 }
             }
         }
+            }
         }
 
         // Full-screen search overlay
@@ -1087,7 +1119,7 @@ private fun ProfileAvatarWithRing(
             modifier = Modifier
                 .size(40.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                .background(iMessageBlue.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
         ) {
             if (userAvatarPath != null) {
@@ -1220,12 +1252,6 @@ private fun SelectionModeHeader(
                     onClick = {
                         showMoreMenu = false
                         onMarkAsUnread()
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Outlined.MarkChatUnread,
-                            contentDescription = null
-                        )
                     }
                 )
 
@@ -1236,12 +1262,6 @@ private fun SelectionModeHeader(
                         onClick = {
                             showMoreMenu = false
                             onAddContact()
-                        },
-                        leadingIcon = {
-                            Icon(
-                                Icons.Outlined.PersonAdd,
-                                contentDescription = null
-                            )
                         }
                     )
                 }
@@ -1251,12 +1271,6 @@ private fun SelectionModeHeader(
                     onClick = {
                         showMoreMenu = false
                         onBlock()
-                    },
-                    leadingIcon = {
-                        Icon(
-                            Icons.Default.Block,
-                            contentDescription = null
-                        )
                     }
                 )
             }
@@ -1277,10 +1291,12 @@ private fun GoogleStyleConversationTile(
     Surface(
         modifier = modifier
             .fillMaxWidth()
+            .then(if (isSelectionMode) Modifier.padding(vertical = 4.dp) else Modifier)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
+        shape = if (isSelectionMode) RoundedCornerShape(50) else RoundedCornerShape(0.dp),
         color = if (isSelected) {
             MaterialTheme.colorScheme.surfaceContainerHighest
         } else {
@@ -1296,9 +1312,9 @@ private fun GoogleStyleConversationTile(
             // Avatar with selection checkmark or regular avatar
             Box(modifier = Modifier.size(56.dp)) {
                 if (isSelected) {
-                    // Show checkmark when selected
+                    // Show checkmark when selected - use muted color instead of saturated primary
                     Surface(
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.outline,
                         shape = CircleShape,
                         modifier = Modifier.size(56.dp)
                     ) {
@@ -1309,7 +1325,7 @@ private fun GoogleStyleConversationTile(
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = "Selected",
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                tint = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
@@ -1401,7 +1417,7 @@ private fun GoogleStyleConversationTile(
                             conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
                             else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                         },
-                        maxLines = 2,
+                        maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
@@ -1462,7 +1478,7 @@ private fun UnreadBadge(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+        color = MaterialTheme.colorScheme.inverseSurface,
         shape = CircleShape,
         modifier = modifier.defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
     ) {
@@ -1476,7 +1492,7 @@ private fun UnreadBadge(
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+                color = MaterialTheme.colorScheme.inverseOnSurface
             )
         }
     }
@@ -1555,9 +1571,9 @@ private fun PinnedConversationItem(
                     )
             ) {
                 if (isSelected) {
-                    // Show checkmark when selected
+                    // Show checkmark when selected - use muted color
                     Surface(
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.outline,
                         shape = CircleShape,
                         modifier = Modifier.fillMaxSize()
                     ) {
@@ -1568,7 +1584,7 @@ private fun PinnedConversationItem(
                             Icon(
                                 Icons.Default.Check,
                                 contentDescription = "Selected",
-                                tint = MaterialTheme.colorScheme.onPrimary,
+                                tint = MaterialTheme.colorScheme.surface,
                                 modifier = Modifier.size(28.dp)
                             )
                         }
@@ -1599,10 +1615,10 @@ private fun PinnedConversationItem(
                 ) {
                     // Inner badge with padding to create border thickness
                     Surface(
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        color = MaterialTheme.colorScheme.inverseSurface,
                         shape = CircleShape,
                         modifier = Modifier
-                            .padding(2.dp)
+                            .padding(3.dp)
                             .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                     ) {
                         Box(
@@ -1615,7 +1631,7 @@ private fun PinnedConversationItem(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.sp
                                 ),
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.inverseOnSurface
                             )
                         }
                     }
@@ -1666,13 +1682,6 @@ private fun PinnedConversationItem(
                 onClick = {
                     showContextMenu = false
                     onUnpin()
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.PushPin,
-                        contentDescription = null,
-                        modifier = Modifier.rotate(45f)
-                    )
                 }
             )
         }
@@ -1818,18 +1827,26 @@ private fun PullToSearchIndicator(
 
 /**
  * Scroll to top button that appears when scrolled down.
- * Uses MD3 SmallFloatingActionButton for proper elevation and styling.
+ * Uses MD3 SmallFloatingActionButton with reduced elevation and theme-aware colors.
  */
 @Composable
 private fun ScrollToTopButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isLightTheme = !androidx.compose.foundation.isSystemInDarkTheme()
     SmallFloatingActionButton(
         onClick = onClick,
         modifier = modifier,
-        containerColor = MaterialTheme.colorScheme.primaryContainer,
-        contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+        shape = CircleShape,
+        containerColor = if (isLightTheme) Color.White else Color(0xFF3C3C3C),
+        contentColor = if (isLightTheme) Color(0xFF1C1C1C) else Color.White,
+        elevation = FloatingActionButtonDefaults.elevation(
+            defaultElevation = 2.dp,
+            pressedElevation = 4.dp,
+            hoveredElevation = 3.dp,
+            focusedElevation = 3.dp
+        )
     ) {
         Icon(
             imageVector = Icons.Default.KeyboardArrowUp,

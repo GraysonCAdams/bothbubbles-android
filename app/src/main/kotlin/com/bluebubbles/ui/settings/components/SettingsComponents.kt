@@ -4,6 +4,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.*
@@ -102,6 +103,7 @@ fun ProfileHeader(
 
 /**
  * Card container for settings items matching Google Messages design.
+ * Uses 28dp corner radius to match Google's design language.
  */
 @Composable
 fun SettingsCard(
@@ -110,7 +112,7 @@ fun SettingsCard(
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.large,
+        shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
         )
@@ -121,7 +123,7 @@ fun SettingsCard(
 
 /**
  * Individual settings menu item matching Google Messages design.
- * Features a circular icon container, title, subtitle, and optional trailing content.
+ * Features a simple icon, title, subtitle, and optional trailing content.
  */
 @Composable
 fun SettingsMenuItem(
@@ -150,20 +152,12 @@ fun SettingsMenuItem(
             }
         },
         leadingContent = {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = icon,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp),
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                )
-            }
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(24.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         },
         trailingContent = trailingContent,
         modifier = modifier.clickable(enabled = enabled, onClick = onClick),

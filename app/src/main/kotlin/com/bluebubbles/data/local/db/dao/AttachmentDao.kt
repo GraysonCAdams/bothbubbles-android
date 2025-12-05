@@ -46,6 +46,33 @@ interface AttachmentDao {
     """)
     fun getVideosForChat(chatGuid: String): Flow<List<AttachmentEntity>>
 
+    @Query("""
+        SELECT COUNT(*) FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid AND a.mime_type LIKE 'image/%'
+    """)
+    fun observeImageCountForChat(chatGuid: String): Flow<Int>
+
+    @Query("""
+        SELECT COUNT(*) FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid AND (
+            a.mime_type LIKE 'video/%' OR
+            a.mime_type LIKE 'audio/%' OR
+            a.mime_type LIKE 'application/%'
+        )
+    """)
+    fun observeOtherMediaCountForChat(chatGuid: String): Flow<Int>
+
+    @Query("""
+        SELECT a.* FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid AND a.mime_type LIKE 'image/%'
+        ORDER BY m.date_created DESC
+        LIMIT :limit
+    """)
+    fun observeRecentImagesForChat(chatGuid: String, limit: Int = 5): Flow<List<AttachmentEntity>>
+
     @Query("SELECT * FROM attachments WHERE local_path IS NULL ORDER BY id DESC LIMIT :limit")
     suspend fun getPendingDownloads(limit: Int = 50): List<AttachmentEntity>
 

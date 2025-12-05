@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,7 +27,11 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PersonAddAlt
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
@@ -47,11 +52,14 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.bluebubbles.util.PhoneNumberFormatter
 import com.bluebubbles.R
 import com.bluebubbles.ui.components.AttachmentPickerPanel
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.MessageBubble
+import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ScheduleMessageDialog
+import com.bluebubbles.ui.components.TapbackMenu
 import com.bluebubbles.ui.theme.BlueBubblesTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -61,7 +69,6 @@ fun ChatScreen(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onMediaClick: (String) -> Unit,
-    onSearchClick: () -> Unit = {},
     onCameraClick: () -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
@@ -80,6 +87,9 @@ fun ChatScreen(
     // Attachment picker state
     var showAttachmentPicker by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
+
+    // Tapback menu state
+    var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
 
     // Track pending attachments locally for UI
     var pendingAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -160,6 +170,7 @@ fun ChatScreen(
     }
 
     Scaffold(
+        containerColor = Color.Transparent,
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -182,7 +193,11 @@ fun ChatScreen(
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = uiState.chatTitle,
+                                text = if (PhoneNumberFormatter.isPhoneNumber(uiState.chatTitle)) {
+                                    PhoneNumberFormatter.format(uiState.chatTitle)
+                                } else {
+                                    uiState.chatTitle
+                                },
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 style = MaterialTheme.typography.titleMedium
@@ -226,13 +241,14 @@ fun ChatScreen(
                                     }
                                     ChatMenuAction.DETAILS -> onDetailsClick()
                                     ChatMenuAction.STARRED -> viewModel.toggleStarred()
-                                    ChatMenuAction.SEARCH -> onSearchClick()
+                                    ChatMenuAction.SEARCH -> viewModel.activateSearch()
+                                    ChatMenuAction.CHANGE_COLORS -> {
+                                        // TODO: Implement change colors functionality
+                                    }
                                     ChatMenuAction.ARCHIVE -> viewModel.archiveChat()
                                     ChatMenuAction.UNARCHIVE -> viewModel.unarchiveChat()
                                     ChatMenuAction.DELETE -> showDeleteDialog = true
-                                    ChatMenuAction.VIDEO -> showVideoCallDialog = true
                                     ChatMenuAction.BLOCK_AND_REPORT -> showBlockDialog = true
-                                    ChatMenuAction.SHOW_SUBJECT_FIELD -> viewModel.toggleSubjectField()
                                     ChatMenuAction.HELP_AND_FEEDBACK -> {
                                         context.startActivity(viewModel.getHelpIntent())
                                     }
@@ -244,7 +260,7 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            Column(modifier = Modifier.imePadding()) {
+            Column(modifier = Modifier.navigationBarsPadding().imePadding()) {
                 // Attachment picker panel (slides up above input)
                 AttachmentPickerPanel(
                     visible = showAttachmentPicker,
@@ -324,15 +340,52 @@ fun ChatScreen(
             }
         }
     ) { padding ->
+        // Auto-scroll to search result when navigating
+        LaunchedEffect(uiState.currentSearchMatchIndex) {
+            if (uiState.currentSearchMatchIndex >= 0 && uiState.searchMatchIndices.isNotEmpty()) {
+                val messageIndex = uiState.searchMatchIndices[uiState.currentSearchMatchIndex]
+                listState.animateScrollToItem(messageIndex)
+            }
+        }
+
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding)
+                .background(MaterialTheme.colorScheme.background)
         ) {
+            // Inline search bar
+            InlineSearchBar(
+                visible = uiState.isSearchActive,
+                query = uiState.searchQuery,
+                onQueryChange = viewModel::updateSearchQuery,
+                onClose = viewModel::closeSearch,
+                onNavigateUp = viewModel::navigateSearchUp,
+                onNavigateDown = viewModel::navigateSearchDown,
+                currentMatch = if (uiState.searchMatchIndices.isNotEmpty()) uiState.currentSearchMatchIndex + 1 else 0,
+                totalMatches = uiState.searchMatchIndices.size
+            )
+
             // iOS-style sending indicator bar
             SendingIndicatorBar(
                 isVisible = uiState.isSending,
                 isLocalSmsChat = uiState.isLocalSmsChat
+            )
+
+            // Save contact banner for unsaved senders
+            SaveContactBanner(
+                visible = uiState.showSaveContactBanner,
+                senderAddress = uiState.unsavedSenderAddress ?: "",
+                onAddContact = {
+                    context.startActivity(viewModel.getAddToContactsIntent())
+                    viewModel.dismissSaveContactBanner()
+                },
+                onReportSpam = {
+                    // Block the contact and dismiss
+                    viewModel.blockContact(context)
+                    viewModel.dismissSaveContactBanner()
+                },
+                onDismiss = viewModel::dismissSaveContactBanner
             )
 
             when {
@@ -357,15 +410,52 @@ fun ChatScreen(
                         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        items(
+                        itemsIndexed(
                             items = uiState.messages,
-                            key = { it.guid }
-                        ) { message ->
-                            MessageBubble(
-                                message = message,
-                                onLongPress = { /* TODO: Message popup */ },
-                                onMediaClick = onMediaClick
-                            )
+                            key = { _, message -> message.guid }
+                        ) { index, message ->
+                            // Enable tapback for all messages with text content
+                            // For iMessage: uses native tapback API
+                            // For SMS/MMS: sends translated text like 'Loved "message"'
+                            val canTapback = !message.text.isNullOrBlank()
+
+                            // Check if this message is a search match or the current match
+                            val isSearchMatch = uiState.isSearchActive && index in uiState.searchMatchIndices
+                            val isCurrentSearchMatch = uiState.isSearchActive &&
+                                uiState.currentSearchMatchIndex >= 0 &&
+                                uiState.searchMatchIndices.getOrNull(uiState.currentSearchMatchIndex) == index
+
+                            Box {
+                                MessageBubble(
+                                    message = message,
+                                    onLongPress = {
+                                        if (canTapback) {
+                                            selectedMessageForTapback = message
+                                        }
+                                    },
+                                    onMediaClick = onMediaClick,
+                                    searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
+                                    isCurrentSearchMatch = isCurrentSearchMatch
+                                )
+
+                                // Show tapback menu for this message (positioned above)
+                                if (selectedMessageForTapback?.guid == message.guid) {
+                                    TapbackMenu(
+                                        visible = true,
+                                        onDismiss = { selectedMessageForTapback = null },
+                                        onReactionSelected = { tapback ->
+                                            viewModel.toggleReaction(message.guid, tapback)
+                                        },
+                                        myReactions = message.myReactions,
+                                        isFromMe = message.isFromMe,
+                                        onEmojiPickerClick = {
+                                            // TODO: Show emoji picker for custom reactions
+                                            selectedMessageForTapback = null
+                                            Toast.makeText(context, "Custom emoji reactions coming soon!", Toast.LENGTH_SHORT).show()
+                                        }
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -820,6 +910,107 @@ private fun SendingIndicatorBar(
 }
 
 /**
+ * Banner prompting user to save an unknown sender as a contact.
+ * Shows for 1-on-1 chats with unsaved contacts, dismissible once per address.
+ */
+@Composable
+private fun SaveContactBanner(
+    visible: Boolean,
+    senderAddress: String,
+    onAddContact: () -> Unit,
+    onReportSpam: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(),
+        exit = shrinkVertically()
+    ) {
+        Surface(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 2.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Add contact icon
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.PersonAddAlt,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(12.dp))
+
+                    // Text content
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Save $senderAddress?",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Saving this number will add a new contact",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    // Dismiss button
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Dismiss",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onReportSpam) {
+                        Text("Report spam")
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    TextButton(onClick = onAddContact) {
+                        Text("Add contact")
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Voice memo recording bar that replaces the input area during recording.
  * Shows animated waveform, duration, and cancel/send buttons.
  */
@@ -989,3 +1180,118 @@ private fun startVoiceMemoRecording(
     }
 }
 
+/**
+ * Inline search bar with navigation arrows, styled like Ctrl+F in browsers.
+ * Shows at the top of the chat when search is active.
+ */
+@Composable
+private fun InlineSearchBar(
+    visible: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    onNavigateUp: () -> Unit,
+    onNavigateDown: () -> Unit,
+    currentMatch: Int,
+    totalMatches: Int,
+    modifier: Modifier = Modifier
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(),
+        exit = shrinkVertically()
+    ) {
+        Surface(
+            modifier = modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainer,
+            tonalElevation = 2.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Search icon
+                Icon(
+                    imageVector = Icons.Default.Search,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(8.dp)
+                )
+
+                // Search text field
+                TextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = {
+                        Text(
+                            text = "Search messages",
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    },
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    singleLine = true
+                )
+
+                // Match count indicator
+                if (query.isNotBlank()) {
+                    Text(
+                        text = if (totalMatches > 0) "$currentMatch/$totalMatches" else "0/0",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp)
+                    )
+                }
+
+                // Navigate up button
+                IconButton(
+                    onClick = onNavigateUp,
+                    enabled = totalMatches > 0
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowUp,
+                        contentDescription = "Previous match",
+                        tint = if (totalMatches > 0) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        }
+                    )
+                }
+
+                // Navigate down button
+                IconButton(
+                    onClick = onNavigateDown,
+                    enabled = totalMatches > 0
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.KeyboardArrowDown,
+                        contentDescription = "Next match",
+                        tint = if (totalMatches > 0) {
+                            MaterialTheme.colorScheme.onSurface
+                        } else {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        }
+                    )
+                }
+
+                // Close button
+                IconButton(onClick = onClose) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "Close search",
+                        tint = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}

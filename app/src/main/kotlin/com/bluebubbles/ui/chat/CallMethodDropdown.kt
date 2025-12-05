@@ -5,7 +5,6 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.ripple
 import androidx.compose.material3.DropdownMenu
@@ -105,32 +104,14 @@ fun CallMethodDropdown(
         // Google Meet option (always available)
         DropdownMenuItem(
             text = { Text(CallMethod.GOOGLE_MEET.displayName) },
-            onClick = { onMethodSelected(CallMethod.GOOGLE_MEET) },
-            leadingIcon = {
-                if (preferredMethod == CallMethod.GOOGLE_MEET) {
-                    Icon(
-                        imageVector = Icons.Filled.Check,
-                        contentDescription = "Selected",
-                        tint = MaterialTheme.colorScheme.primary
-                    )
-                }
-            }
+            onClick = { onMethodSelected(CallMethod.GOOGLE_MEET) }
         )
 
         // WhatsApp option (only if available)
         if (isWhatsAppAvailable) {
             DropdownMenuItem(
                 text = { Text(CallMethod.WHATSAPP.displayName) },
-                onClick = { onMethodSelected(CallMethod.WHATSAPP) },
-                leadingIcon = {
-                    if (preferredMethod == CallMethod.WHATSAPP) {
-                        Icon(
-                            imageVector = Icons.Filled.Check,
-                            contentDescription = "Selected",
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                    }
-                }
+                onClick = { onMethodSelected(CallMethod.WHATSAPP) }
             )
         }
     }

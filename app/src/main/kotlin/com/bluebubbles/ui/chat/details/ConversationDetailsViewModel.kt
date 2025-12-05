@@ -4,7 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.bluebubbles.data.local.db.dao.AttachmentDao
 import com.bluebubbles.data.local.db.dao.ChatDao
+import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.repository.ChatRepository
@@ -21,6 +23,9 @@ import javax.inject.Inject
 data class ConversationDetailsUiState(
     val chat: ChatEntity? = null,
     val participants: List<HandleEntity> = emptyList(),
+    val imageCount: Int = 0,
+    val otherMediaCount: Int = 0,
+    val recentImages: List<AttachmentEntity> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
 ) {
@@ -57,7 +62,8 @@ data class ConversationDetailsUiState(
 class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    private val attachmentDao: AttachmentDao
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -68,11 +74,17 @@ class ConversationDetailsViewModel @Inject constructor(
 
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
-        chatDao.observeParticipantsForChat(chatGuid)
-    ) { chat, participants ->
+        chatDao.observeParticipantsForChat(chatGuid),
+        attachmentDao.observeImageCountForChat(chatGuid),
+        attachmentDao.observeOtherMediaCountForChat(chatGuid),
+        attachmentDao.observeRecentImagesForChat(chatGuid, 5)
+    ) { chat, participants, imageCount, otherMediaCount, recentImages ->
         ConversationDetailsUiState(
             chat = chat,
             participants = participants,
+            imageCount = imageCount,
+            otherMediaCount = otherMediaCount,
+            recentImages = recentImages,
             isLoading = false
         )
     }.stateIn(

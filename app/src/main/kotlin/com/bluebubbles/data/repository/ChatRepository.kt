@@ -42,6 +42,9 @@ class ChatRepository @Inject constructor(
 
     fun observeUnreadChatCount(): Flow<Int> = chatDao.getUnreadChatCount()
 
+    fun observeParticipantsForChat(chatGuid: String): Flow<List<HandleEntity>> =
+        chatDao.observeParticipantsForChat(chatGuid)
+
     // ===== Remote Operations =====
 
     /**

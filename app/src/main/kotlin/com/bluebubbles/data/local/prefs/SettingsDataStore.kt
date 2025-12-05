@@ -149,6 +149,15 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.PREFERRED_CALL_METHOD] ?: "google_meet"
     }
 
+    // ===== Dismissed Banners =====
+
+    val dismissedSaveContactBanners: Flow<Set<String>> = dataStore.data.map { prefs ->
+        (prefs[Keys.DISMISSED_SAVE_CONTACT_BANNERS] ?: "")
+            .split(",")
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
     // ===== Setters =====
 
     suspend fun setServerAddress(address: String) {
@@ -310,6 +319,17 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun dismissSaveContactBanner(address: String) {
+        dataStore.edit { prefs ->
+            val current = (prefs[Keys.DISMISSED_SAVE_CONTACT_BANNERS] ?: "")
+                .split(",")
+                .filter { it.isNotEmpty() }
+                .toMutableSet()
+            current.add(address)
+            prefs[Keys.DISMISSED_SAVE_CONTACT_BANNERS] = current.joinToString(",")
+        }
+    }
+
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
     }
@@ -372,5 +392,8 @@ class SettingsDataStore @Inject constructor(
 
         // Call Settings
         val PREFERRED_CALL_METHOD = stringPreferencesKey("preferred_call_method")
+
+        // Dismissed Banners
+        val DISMISSED_SAVE_CONTACT_BANNERS = stringPreferencesKey("dismissed_save_contact_banners")
     }
 }

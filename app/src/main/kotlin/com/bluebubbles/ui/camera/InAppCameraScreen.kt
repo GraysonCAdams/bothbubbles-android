@@ -304,16 +304,48 @@ private fun CameraPreview(
             .build()
     }
 
-    LaunchedEffect(lensFacing, flashMode) {
-        val cameraProvider = context.getCameraProvider()
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            cameraSelector,
-            preview,
-            imageCapture
-        )
-        onImageCaptureReady(imageCapture)
+    // Track the PreviewView so we can ensure surface is ready before binding
+    var previewView by remember { mutableStateOf<PreviewView?>(null) }
+
+    // Bind camera only after PreviewView is ready
+    LaunchedEffect(lensFacing, flashMode, previewView) {
+        val view = previewView ?: return@LaunchedEffect
+
+        try {
+            val cameraProvider = context.getCameraProvider()
+            cameraProvider.unbindAll()
+
+            // Set surface provider before binding
+            preview.setSurfaceProvider(view.surfaceProvider)
+
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                cameraSelector,
+                preview,
+                imageCapture
+            )
+            onImageCaptureReady(imageCapture)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to bind camera", e)
+        }
+    }
+
+    // Cleanup on dispose
+    DisposableEffect(Unit) {
+        onDispose {
+            try {
+                val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
+                cameraProviderFuture.addListener({
+                    try {
+                        cameraProviderFuture.get().unbindAll()
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Failed to unbind camera on dispose", e)
+                    }
+                }, ContextCompat.getMainExecutor(context))
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to get camera provider on dispose", e)
+            }
+        }
     }
 
     AndroidView(
@@ -325,10 +357,7 @@ private fun CameraPreview(
                 )
                 scaleType = PreviewView.ScaleType.FILL_CENTER
                 implementationMode = PreviewView.ImplementationMode.COMPATIBLE
-            }
-        },
-        update = { previewView ->
-            preview.setSurfaceProvider(previewView.surfaceProvider)
+            }.also { previewView = it }
         },
         modifier = modifier
     )

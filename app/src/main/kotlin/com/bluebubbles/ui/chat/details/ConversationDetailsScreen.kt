@@ -21,12 +21,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import coil.compose.AsyncImage
+import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.ConversationAvatar
 import com.bluebubbles.util.PhoneNumberFormatter
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -112,7 +116,9 @@ fun ConversationDetailsScreen(
                 // Media section
                 item {
                     MediaSection(
-                        imageCount = "99+",
+                        imageCount = uiState.imageCount,
+                        otherMediaCount = uiState.otherMediaCount,
+                        recentImages = uiState.recentImages,
                         onImagesClick = { onMediaGalleryClick("images") },
                         onVideosLinksClick = { onMediaGalleryClick("all") }
                     )
@@ -207,14 +213,17 @@ private fun ConversationHeader(
         Spacer(modifier = Modifier.height(16.dp))
 
         Text(
-            text = displayName,
+            text = PhoneNumberFormatter.format(displayName),
             style = MaterialTheme.typography.headlineSmall,
             textAlign = TextAlign.Center
         )
 
-        if (subtitle.isNotBlank() && subtitle != displayName) {
+        // Show subtitle only if it's different from the display name (after formatting)
+        val formattedSubtitle = PhoneNumberFormatter.format(subtitle)
+        val formattedDisplayName = PhoneNumberFormatter.format(displayName)
+        if (subtitle.isNotBlank() && formattedSubtitle != formattedDisplayName) {
             Text(
-                text = subtitle,
+                text = formattedSubtitle,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -296,10 +305,23 @@ private fun ActionButton(
 
 @Composable
 private fun MediaSection(
-    imageCount: String,
+    imageCount: Int,
+    otherMediaCount: Int,
+    recentImages: List<AttachmentEntity>,
     onImagesClick: () -> Unit,
     onVideosLinksClick: () -> Unit
 ) {
+    val formattedImageCount = when {
+        imageCount > 99 -> "99+"
+        imageCount > 0 -> imageCount.toString()
+        else -> ""
+    }
+    val formattedOtherCount = when {
+        otherMediaCount > 99 -> "99+"
+        otherMediaCount > 0 -> otherMediaCount.toString()
+        else -> ""
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -329,11 +351,13 @@ private fun MediaSection(
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = imageCount,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (formattedImageCount.isNotEmpty()) {
+                    Text(
+                        text = formattedImageCount,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,
@@ -341,31 +365,42 @@ private fun MediaSection(
                 )
             }
 
-            // Image thumbnails placeholder
-            LazyRow(
-                modifier = Modifier.padding(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                items(3) { index ->
-                    Surface(
-                        modifier = Modifier
-                            .size(100.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = Icons.Outlined.Image,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                modifier = Modifier.size(32.dp)
-                            )
+            // Image thumbnails - show actual images or placeholder
+            if (recentImages.isNotEmpty()) {
+                LazyRow(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    items(recentImages) { attachment ->
+                        Surface(
+                            modifier = Modifier
+                                .size(100.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable(onClick = onImagesClick),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest
+                        ) {
+                            if (attachment.localPath != null) {
+                                AsyncImage(
+                                    model = File(attachment.localPath),
+                                    contentDescription = null,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            } else {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Image,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(32.dp)
+                                    )
+                                }
+                            }
                         }
                     }
                 }
+                Spacer(modifier = Modifier.height(8.dp))
             }
-
-            Spacer(modifier = Modifier.height(8.dp))
 
             HorizontalDivider(
                 modifier = Modifier.padding(horizontal = 16.dp),
@@ -391,6 +426,13 @@ private fun MediaSection(
                     style = MaterialTheme.typography.bodyLarge,
                     modifier = Modifier.weight(1f)
                 )
+                if (formattedOtherCount.isNotEmpty()) {
+                    Text(
+                        text = formattedOtherCount,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Icon(
                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                     contentDescription = null,

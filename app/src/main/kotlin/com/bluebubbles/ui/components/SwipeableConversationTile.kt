@@ -379,7 +379,7 @@ private fun ConversationTileContent(
                             else
                                 MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                             fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 2,
+                            maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     }
