@@ -47,6 +47,9 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- FaceTime incoming call full-screen display -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
+
     <application
         android:name=".BlueBubblesApp"
         android:allowBackup="true"
@@ -87,6 +90,21 @@
                 <data android:scheme="mmsto" />
             </intent-filter>
         </activity>
+
+        <!-- FaceTime Incoming Call Activity -->
+        <activity
+            android:name=".ui.call.IncomingCallActivity"
+            android:exported="false"
+            android:showOnLockScreen="true"
+            android:turnScreenOn="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@style/Theme.BlueBubbles" />
+
+        <!-- Notification Receiver -->
+        <receiver
+            android:name=".services.notifications.NotificationReceiver"
+            android:exported="false" />
 
         <!-- Firebase Messaging -->
         <service

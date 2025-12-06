@@ -213,6 +213,27 @@ interface ChatDao {
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_starred = 1")
     fun getStarredChatCount(): Flow<Int>
 
+    // ===== Spam =====
+
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_spam = 1
+        ORDER BY latest_message_date DESC
+    """)
+    fun getSpamChats(): Flow<List<ChatEntity>>
+
+    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_spam = 1")
+    fun getSpamChatCount(): Flow<Int>
+
+    @Query("UPDATE chats SET is_spam = :isSpam, spam_score = :score WHERE guid = :guid")
+    suspend fun updateSpamStatus(guid: String, isSpam: Boolean, score: Int)
+
+    @Query("UPDATE chats SET spam_reported_to_carrier = 1 WHERE guid = :guid")
+    suspend fun markAsReportedToCarrier(guid: String)
+
+    @Query("UPDATE chats SET is_spam = 0, spam_score = 0 WHERE guid = :guid")
+    suspend fun clearSpamStatus(guid: String)
+
     // ===== Transactions =====
 
     @Transaction

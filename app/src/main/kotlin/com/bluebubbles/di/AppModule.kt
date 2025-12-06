@@ -6,6 +6,7 @@ import com.bluebubbles.data.local.db.BlueBubblesDatabase
 import com.bluebubbles.data.local.db.dao.AttachmentDao
 import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
+import com.bluebubbles.data.local.db.dao.LinkPreviewDao
 import com.bluebubbles.data.local.db.dao.MessageDao
 import dagger.Module
 import dagger.Provides
@@ -67,5 +68,11 @@ object AppModule {
     @Singleton
     fun provideAttachmentDao(database: BlueBubblesDatabase): AttachmentDao {
         return database.attachmentDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLinkPreviewDao(database: BlueBubblesDatabase): LinkPreviewDao {
+        return database.linkPreviewDao()
     }
 }

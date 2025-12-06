@@ -85,7 +85,7 @@ class SoundManager @Inject constructor(
      */
     fun playSendSound() {
         scope.launch {
-            if (settingsDataStore.sendSoundEnabled.first()) {
+            if (settingsDataStore.messageSoundsEnabled.first()) {
                 playSound(sendSoundId)
             }
         }
@@ -97,7 +97,7 @@ class SoundManager @Inject constructor(
      */
     fun playReceiveSound() {
         scope.launch {
-            if (settingsDataStore.receiveSoundEnabled.first()) {
+            if (settingsDataStore.messageSoundsEnabled.first()) {
                 playSound(receiveSoundId)
             }
         }

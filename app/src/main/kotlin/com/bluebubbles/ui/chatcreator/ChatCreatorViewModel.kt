@@ -12,6 +12,7 @@ import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.remote.api.dto.CreateChatRequest
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketService
+import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -223,8 +224,10 @@ class ChatCreatorViewModel @Inject constructor(
             try {
                 // For SMS mode or when iMessage is not available, create a local SMS chat
                 if (service == "SMS") {
+                    // Normalize address to prevent duplicate conversations
+                    val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
                     // Create local SMS chat GUID
-                    val chatGuid = "sms;-;$address"
+                    val chatGuid = "sms;-;$normalizedAddress"
 
                     // Try to find or create the chat in the local database
                     val existingChat = chatDao.getChatByGuid(chatGuid)
@@ -232,7 +235,7 @@ class ChatCreatorViewModel @Inject constructor(
                         // Create a minimal chat entry for local SMS
                         val newChat = ChatEntity(
                             guid = chatGuid,
-                            chatIdentifier = address,
+                            chatIdentifier = normalizedAddress,
                             displayName = null,
                             isArchived = false,
                             isPinned = false,
@@ -347,6 +350,118 @@ class ChatCreatorViewModel @Inject constructor(
         // Navigate directly to existing group chat
         _uiState.update { it.copy(createdChatGuid = groupChat.guid) }
     }
+
+    /**
+     * Add a recipient from contact selection
+     */
+    fun addRecipient(contact: ContactUiModel) {
+        val recipient = SelectedRecipient(
+            address = contact.address,
+            displayName = contact.displayName,
+            service = contact.service,
+            avatarPath = contact.avatarPath,
+            isManualEntry = false
+        )
+        addRecipientInternal(recipient)
+    }
+
+    /**
+     * Add a recipient from manual address entry (phone number or email)
+     */
+    fun addManualRecipient(address: String, service: String) {
+        val recipient = SelectedRecipient(
+            address = address,
+            displayName = address,
+            service = service,
+            avatarPath = null,
+            isManualEntry = true
+        )
+        addRecipientInternal(recipient)
+    }
+
+    private fun addRecipientInternal(recipient: SelectedRecipient) {
+        val currentRecipients = _uiState.value.selectedRecipients.toMutableList()
+        // Don't add duplicates
+        if (currentRecipients.none { it.address == recipient.address }) {
+            currentRecipients.add(recipient)
+            _uiState.update {
+                it.copy(
+                    selectedRecipients = currentRecipients,
+                    searchQuery = "",
+                    manualAddressEntry = null
+                )
+            }
+            _searchQuery.value = ""
+        }
+    }
+
+    /**
+     * Remove a recipient by address
+     */
+    fun removeRecipient(address: String) {
+        val currentRecipients = _uiState.value.selectedRecipients.toMutableList()
+        currentRecipients.removeAll { it.address == address }
+        _uiState.update { it.copy(selectedRecipients = currentRecipients) }
+    }
+
+    /**
+     * Remove the last recipient (for backspace handling when input is empty)
+     */
+    fun removeLastRecipient() {
+        val currentRecipients = _uiState.value.selectedRecipients.toMutableList()
+        if (currentRecipients.isNotEmpty()) {
+            currentRecipients.removeAt(currentRecipients.lastIndex)
+            _uiState.update { it.copy(selectedRecipients = currentRecipients) }
+        }
+    }
+
+    /**
+     * Continue action - handles 1 recipient vs multiple recipients
+     */
+    fun onContinue() {
+        val recipients = _uiState.value.selectedRecipients
+        when {
+            recipients.isEmpty() -> {
+                _uiState.update { it.copy(error = "Please add at least one recipient") }
+            }
+            recipients.size == 1 -> {
+                // Single recipient - create direct chat
+                val recipient = recipients.first()
+                startConversationWithAddress(recipient.address, recipient.service)
+            }
+            else -> {
+                // Multiple recipients - navigate to group setup
+                val participantsJson = kotlinx.serialization.json.Json.encodeToString(
+                    kotlinx.serialization.builtins.ListSerializer(GroupParticipant.serializer()),
+                    recipients.map { recipient ->
+                        GroupParticipant(
+                            address = recipient.address,
+                            displayName = recipient.displayName,
+                            service = recipient.service,
+                            avatarPath = recipient.avatarPath,
+                            isManualEntry = recipient.isManualEntry
+                        )
+                    }
+                )
+                // Determine group service type
+                val allIMessage = recipients.all { it.service.equals("iMessage", ignoreCase = true) }
+                val groupService = if (allIMessage) "IMESSAGE" else "MMS"
+
+                _uiState.update {
+                    it.copy(
+                        navigateToGroupSetup = GroupSetupNavigation(
+                            participantsJson = participantsJson,
+                            groupService = groupService
+                        )
+                    )
+                }
+            }
+        }
+    }
+
+    fun resetGroupSetupNavigation() {
+        _uiState.update { it.copy(navigateToGroupSetup = null) }
+    }
 }
 
 data class ChatCreatorUiState(
@@ -354,11 +469,32 @@ data class ChatCreatorUiState(
     val groupedContacts: Map<String, List<ContactUiModel>> = emptyMap(),
     val favoriteContacts: List<ContactUiModel> = emptyList(),
     val groupChats: List<GroupChatUiModel> = emptyList(),
+    val selectedRecipients: List<SelectedRecipient> = emptyList(),
     val isLoading: Boolean = false,
     val isCheckingAvailability: Boolean = false,
     val manualAddressEntry: ManualAddressEntry? = null,
     val error: String? = null,
-    val createdChatGuid: String? = null
+    val createdChatGuid: String? = null,
+    val navigateToGroupSetup: GroupSetupNavigation? = null
+)
+
+/**
+ * Data for navigating to group setup screen
+ */
+data class GroupSetupNavigation(
+    val participantsJson: String,
+    val groupService: String
+)
+
+/**
+ * Represents a selected recipient in the To bar
+ */
+data class SelectedRecipient(
+    val address: String,
+    val displayName: String,
+    val service: String,
+    val avatarPath: String? = null,
+    val isManualEntry: Boolean = false
 )
 
 /**

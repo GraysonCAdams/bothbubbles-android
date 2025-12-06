@@ -1,32 +1,36 @@
 package com.bluebubbles.ui.settings
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BatterySaver
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -57,14 +61,43 @@ fun EffectsSettingsScreen(
                 .padding(paddingValues)
                 .verticalScroll(rememberScrollState())
         ) {
-            // Master toggle section
-            SettingsSection(title = null) {
-                SettingsToggleItem(
-                    title = "Enable message effects",
-                    subtitle = "Show animations for special messages",
-                    checked = uiState.effectsEnabled,
-                    onCheckedChange = viewModel::setEffectsEnabled
-                )
+            // Power saver mode banner
+            if (uiState.isPowerSaveMode) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .background(
+                            color = MaterialTheme.colorScheme.secondaryContainer,
+                            shape = RoundedCornerShape(12.dp)
+                        )
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BatterySaver,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Column(
+                        modifier = Modifier
+                            .padding(start = 12.dp)
+                            .weight(1f)
+                    ) {
+                        Text(
+                            text = "Power saver is on",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = "Message effects are temporarily disabled",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f)
+                        )
+                    }
+                }
             }
 
             // Playback section
@@ -73,7 +106,7 @@ fun EffectsSettingsScreen(
                     title = "Auto-play effects",
                     subtitle = "Play effects automatically when messages arrive",
                     checked = uiState.autoPlayEffects,
-                    enabled = uiState.effectsEnabled,
+                    enabled = !uiState.isPowerSaveMode,
                     onCheckedChange = viewModel::setAutoPlayEffects
                 )
 
@@ -81,29 +114,9 @@ fun EffectsSettingsScreen(
                     title = "Replay effects on scroll",
                     subtitle = "Show effects again when scrolling to old messages",
                     checked = uiState.replayEffectsOnScroll,
-                    enabled = uiState.effectsEnabled,
+                    enabled = !uiState.isPowerSaveMode,
                     onCheckedChange = viewModel::setReplayEffectsOnScroll
                 )
-            }
-
-            // Performance section
-            SettingsSection(title = "Performance") {
-                SettingsToggleItem(
-                    title = "Disable on low battery",
-                    subtitle = "Turn off effects below ${uiState.lowBatteryThreshold}%",
-                    checked = uiState.disableOnLowBattery,
-                    enabled = uiState.effectsEnabled,
-                    onCheckedChange = viewModel::setDisableOnLowBattery
-                )
-
-                if (uiState.disableOnLowBattery && uiState.effectsEnabled) {
-                    SettingsSliderItem(
-                        title = "Battery threshold",
-                        value = uiState.lowBatteryThreshold,
-                        valueRange = 5..50,
-                        onValueChange = viewModel::setLowBatteryThreshold
-                    )
-                }
             }
 
             // Accessibility section
@@ -112,7 +125,7 @@ fun EffectsSettingsScreen(
                     title = "Reduce motion",
                     subtitle = "Show simplified effect indicators instead of animations",
                     checked = uiState.reduceMotion,
-                    enabled = uiState.effectsEnabled,
+                    enabled = !uiState.isPowerSaveMode,
                     onCheckedChange = viewModel::setReduceMotion
                 )
             }
@@ -189,28 +202,3 @@ private fun SettingsToggleItem(
     }
 }
 
-@Composable
-private fun SettingsSliderItem(
-    title: String,
-    value: Int,
-    valueRange: IntRange,
-    onValueChange: (Int) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp)
-    ) {
-        Text(
-            text = "$title: $value%",
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-        Slider(
-            value = value.toFloat(),
-            onValueChange = { onValueChange(it.roundToInt()) },
-            valueRange = valueRange.first.toFloat()..valueRange.last.toFloat(),
-            steps = (valueRange.last - valueRange.first) / 5 - 1
-        )
-    }
-}

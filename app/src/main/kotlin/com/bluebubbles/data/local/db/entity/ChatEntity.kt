@@ -11,7 +11,8 @@ import androidx.room.PrimaryKey
         Index(value = ["guid"], unique = true),
         Index(value = ["is_pinned"]),
         Index(value = ["is_starred"]),
-        Index(value = ["latest_message_date"])
+        Index(value = ["latest_message_date"]),
+        Index(value = ["is_spam"])
     ]
 )
 data class ChatEntity(
@@ -113,7 +114,17 @@ data class ChatEntity(
     val dateCreated: Long = System.currentTimeMillis(),
 
     @ColumnInfo(name = "date_deleted")
-    val dateDeleted: Long? = null
+    val dateDeleted: Long? = null,
+
+    // Spam detection
+    @ColumnInfo(name = "is_spam", defaultValue = "0")
+    val isSpam: Boolean = false,
+
+    @ColumnInfo(name = "spam_score", defaultValue = "0")
+    val spamScore: Int = 0,
+
+    @ColumnInfo(name = "spam_reported_to_carrier", defaultValue = "0")
+    val spamReportedToCarrier: Boolean = false
 ) {
     /**
      * Whether this chat uses SMS text forwarding

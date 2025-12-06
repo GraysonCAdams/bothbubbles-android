@@ -153,20 +153,9 @@ class AttachmentRepository @Inject constructor(
         attachmentsDir.listFiles()?.sumOf { it.length() } ?: 0L
     }
 
-    // ===== Upload Operations (for sending attachments) =====
-
-    /**
-     * Upload a file to send as an attachment
-     */
-    suspend fun uploadAttachment(
-        file: File,
-        chatGuid: String,
-        mimeType: String,
-        onProgress: ((Float) -> Unit)? = null
-    ): Result<String> = runCatching {
-        // TODO: Implement file upload via multipart form
-        throw NotImplementedError("Attachment upload not yet implemented")
-    }
+    // ===== Upload Operations =====
+    // Note: Attachment uploads are handled by MessageRepository.sendUnified()
+    // which provides progress tracking via MessageRepository.uploadProgress StateFlow
 
     // ===== Private Helpers =====
 

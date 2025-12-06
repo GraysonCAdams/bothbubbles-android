@@ -15,6 +15,8 @@ import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
 import com.bluebubbles.MainActivity
 import com.bluebubbles.R
+import com.bluebubbles.ui.call.IncomingCallActivity
+import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -30,12 +32,14 @@ class NotificationService @Inject constructor(
 
         const val ACTION_REPLY = "com.bluebubbles.action.REPLY"
         const val ACTION_MARK_READ = "com.bluebubbles.action.MARK_READ"
+        const val ACTION_COPY_CODE = "com.bluebubbles.action.COPY_CODE"
         const val ACTION_ANSWER_FACETIME = "com.bluebubbles.action.ANSWER_FACETIME"
         const val ACTION_DECLINE_FACETIME = "com.bluebubbles.action.DECLINE_FACETIME"
 
         const val EXTRA_CHAT_GUID = "chat_guid"
         const val EXTRA_MESSAGE_GUID = "message_guid"
         const val EXTRA_REPLY_TEXT = "reply_text"
+        const val EXTRA_CODE_TO_COPY = "code_to_copy"
         const val EXTRA_CALL_UUID = "call_uuid"
 
         private const val GROUP_MESSAGES = "messages_group"
@@ -91,7 +95,9 @@ class NotificationService @Inject constructor(
         messageGuid: String,
         senderName: String?,
         isGroup: Boolean = false,
-        avatarUri: String? = null
+        avatarUri: String? = null,
+        linkPreviewTitle: String? = null,
+        linkPreviewDomain: String? = null
     ) {
         if (!hasNotificationPermission()) return
 
@@ -147,6 +153,17 @@ class NotificationService @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
+        // Check for verification code in message
+        val detectedCode = PhoneAndCodeParsingUtils.detectFirstCode(messageText)
+
+        // Format display text with link preview if available
+        val displayText = when {
+            linkPreviewTitle != null && linkPreviewDomain != null -> "$linkPreviewTitle ($linkPreviewDomain)"
+            linkPreviewTitle != null -> linkPreviewTitle
+            linkPreviewDomain != null -> linkPreviewDomain
+            else -> messageText
+        }
+
         // Create messaging style for conversation-like appearance
         val sender = Person.Builder()
             .setName(senderName ?: chatTitle)
@@ -156,12 +173,12 @@ class NotificationService @Inject constructor(
             Person.Builder().setName("Me").build()
         )
             .setConversationTitle(if (isGroup) chatTitle else null)
-            .addMessage(messageText, System.currentTimeMillis(), sender)
+            .addMessage(displayText, System.currentTimeMillis(), sender)
 
-        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+        val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(chatTitle)
-            .setContentText(messageText)
+            .setContentText(displayText)
             .setStyle(messagingStyle)
             .setContentIntent(contentPendingIntent)
             .addAction(replyAction)
@@ -170,6 +187,28 @@ class NotificationService @Inject constructor(
                 "Mark as Read",
                 markReadPendingIntent
             )
+
+        // Add copy code action if a verification code was detected
+        if (detectedCode != null) {
+            val copyCodeIntent = Intent(context, NotificationReceiver::class.java).apply {
+                action = ACTION_COPY_CODE
+                putExtra(EXTRA_CHAT_GUID, chatGuid)
+                putExtra(EXTRA_CODE_TO_COPY, detectedCode.code)
+            }
+            val copyCodePendingIntent = PendingIntent.getBroadcast(
+                context,
+                notificationId + 3,
+                copyCodeIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            notificationBuilder.addAction(
+                android.R.drawable.ic_menu_edit,
+                "Copy Code: ${detectedCode.code}",
+                copyCodePendingIntent
+            )
+        }
+
+        val notification = notificationBuilder
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setGroup(GROUP_MESSAGES)
@@ -208,7 +247,7 @@ class NotificationService @Inject constructor(
     }
 
     /**
-     * Show incoming FaceTime call notification
+     * Show incoming FaceTime call notification with full-screen intent
      */
     fun showFaceTimeCallNotification(
         callUuid: String,
@@ -218,6 +257,19 @@ class NotificationService @Inject constructor(
         if (!hasNotificationPermission()) return
 
         val notificationId = FACETIME_NOTIFICATION_ID_PREFIX + callUuid.hashCode()
+
+        // Full-screen intent for locked device
+        val fullScreenIntent = Intent(context, IncomingCallActivity::class.java).apply {
+            putExtra(IncomingCallActivity.EXTRA_CALL_UUID, callUuid)
+            putExtra(IncomingCallActivity.EXTRA_CALLER_NAME, callerName)
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val fullScreenPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            fullScreenIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
 
         // Answer action - opens browser with FaceTime link
         val answerIntent = Intent(context, NotificationReceiver::class.java).apply {
@@ -247,6 +299,8 @@ class NotificationService @Inject constructor(
             .setSmallIcon(android.R.drawable.ic_menu_call)
             .setContentTitle("Incoming FaceTime Call")
             .setContentText("$callerName is calling...")
+            .setFullScreenIntent(fullScreenPendingIntent, true)
+            .setContentIntent(fullScreenPendingIntent)
             .addAction(
                 android.R.drawable.ic_menu_call,
                 "Answer",
@@ -258,10 +312,11 @@ class NotificationService @Inject constructor(
                 declinePendingIntent
             )
             .setCategory(NotificationCompat.CATEGORY_CALL)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(NotificationCompat.PRIORITY_MAX)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .setOngoing(true)
             .setAutoCancel(false)
+            .setTimeoutAfter(60000) // Auto-dismiss after 60 seconds
             .build()
 
         notificationManager.notify(notificationId, notification)

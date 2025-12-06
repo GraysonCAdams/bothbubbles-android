@@ -22,57 +22,88 @@ val Shapes = Shapes(
 )
 
 /**
- * Message bubble shapes following Google Messages design
- * - Standard bubble: 20dp all corners
- * - Tail bubble: 20dp except 4dp on tail corner
+ * Message bubble shapes following Google Messages design.
+ * Grouped messages use tight corners (4dp) on the sender's side to create
+ * visual continuity, with the tail only appearing on the last message.
+ *
+ * For sent messages (right-aligned): tight corners on the right
+ * For received messages (left-aligned): tight corners on the left
  */
 object MessageShapes {
-    // Standard bubble (no tail, middle of group)
+    // Standard bubble (no tail, all corners rounded)
     val bubble = RoundedCornerShape(20.dp)
 
-    // Sent message with tail (bottom-right corner small)
-    val sentWithTail = RoundedCornerShape(
+    // ===== SINGLE MESSAGE (standalone, not grouped) =====
+    // Same as "last" - has the tail, fully rounded top
+
+    // Sent single: tail on bottom-right
+    val sentSingle = RoundedCornerShape(
         topStart = 20.dp,
         topEnd = 20.dp,
         bottomStart = 20.dp,
         bottomEnd = 4.dp
     )
 
-    // Received message with tail (bottom-left corner small)
-    val receivedWithTail = RoundedCornerShape(
+    // Received single: tail on bottom-left
+    val receivedSingle = RoundedCornerShape(
         topStart = 20.dp,
         topEnd = 20.dp,
         bottomStart = 4.dp,
         bottomEnd = 20.dp
     )
 
-    // First in group (larger top corners)
+    // ===== FIRST IN GROUP (visually at top of group) =====
+    // Rounded top corners, tight bottom corner on sender's side
+
     val sentFirst = RoundedCornerShape(
         topStart = 20.dp,
         topEnd = 20.dp,
         bottomStart = 20.dp,
-        bottomEnd = 4.dp
+        bottomEnd = 4.dp  // tight on sender's side (right)
     )
 
     val receivedFirst = RoundedCornerShape(
         topStart = 20.dp,
         topEnd = 20.dp,
-        bottomStart = 4.dp,
+        bottomStart = 4.dp,  // tight on sender's side (left)
         bottomEnd = 20.dp
     )
 
-    // Middle of group (small corners on grouping side)
+    // ===== MIDDLE OF GROUP =====
+    // Tight corners on both top and bottom on sender's side
+
     val sentMiddle = RoundedCornerShape(
         topStart = 20.dp,
-        topEnd = 4.dp,
+        topEnd = 4.dp,       // tight top on sender's side
         bottomStart = 20.dp,
-        bottomEnd = 4.dp
+        bottomEnd = 4.dp     // tight bottom on sender's side
     )
 
     val receivedMiddle = RoundedCornerShape(
-        topStart = 4.dp,
+        topStart = 4.dp,     // tight top on sender's side
         topEnd = 20.dp,
-        bottomStart = 4.dp,
+        bottomStart = 4.dp,  // tight bottom on sender's side
         bottomEnd = 20.dp
     )
+
+    // ===== LAST IN GROUP (visually at bottom of group) =====
+    // Tight top corner on sender's side, tail at bottom
+
+    val sentLast = RoundedCornerShape(
+        topStart = 20.dp,
+        topEnd = 4.dp,       // tight top on sender's side
+        bottomStart = 20.dp,
+        bottomEnd = 4.dp     // tail corner
+    )
+
+    val receivedLast = RoundedCornerShape(
+        topStart = 4.dp,     // tight top on sender's side
+        topEnd = 20.dp,
+        bottomStart = 4.dp,  // tail corner
+        bottomEnd = 20.dp
+    )
+
+    // Legacy aliases for backward compatibility
+    val sentWithTail = sentSingle
+    val receivedWithTail = receivedSingle
 }

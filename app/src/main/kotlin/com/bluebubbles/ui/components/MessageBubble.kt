@@ -1,14 +1,20 @@
 package com.bluebubbles.ui.components
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.provider.CalendarContract
+import android.provider.ContactsContract
+import android.widget.Toast
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
@@ -33,6 +39,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.ui.theme.BlueBubblesTheme
@@ -41,6 +48,21 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+
+/**
+ * Position of a message within a consecutive group from the same sender.
+ * Used to determine bubble shape and spacing for visual grouping.
+ */
+enum class MessageGroupPosition {
+    /** Standalone message - not grouped with adjacent messages */
+    SINGLE,
+    /** First message in a group - rounded top, tight bottom corners */
+    FIRST,
+    /** Middle message in a group - tight corners on both ends */
+    MIDDLE,
+    /** Last message in a group - tight top corners, tail at bottom */
+    LAST
+}
 
 /**
  * UI model for a message bubble
@@ -80,6 +102,7 @@ fun MessageBubble(
     onLongPress: () -> Unit,
     onMediaClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
     searchQuery: String? = null,
     isCurrentSearchMatch: Boolean = false
 ) {
@@ -102,6 +125,28 @@ fun MessageBubble(
         if (message.text.isNullOrBlank()) emptyList()
         else DateParsingUtils.detectDates(message.text)
     }
+
+    // Detect phone numbers in message text for underlining
+    val detectedPhoneNumbers = remember(message.text) {
+        if (message.text.isNullOrBlank()) emptyList()
+        else PhoneAndCodeParsingUtils.detectPhoneNumbers(message.text)
+    }
+
+    // Detect verification codes in message text for underlining
+    val detectedCodes = remember(message.text) {
+        if (message.text.isNullOrBlank()) emptyList()
+        else PhoneAndCodeParsingUtils.detectCodes(message.text)
+    }
+
+    // Detect first URL in message text for link preview
+    val firstUrl = remember(message.text) {
+        UrlParsingUtils.getFirstUrl(message.text)
+    }
+
+    // Phone number context menu state
+    var showPhoneMenu by remember { mutableStateOf(false) }
+    var selectedPhoneNumber by remember { mutableStateOf<DetectedPhoneNumber?>(null) }
+    var phoneMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
 
     // Determine message type label for swipe reveal
     val messageTypeLabel = when (message.messageSource) {
@@ -167,42 +212,7 @@ fun MessageBubble(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .offset { IntOffset(dragOffset.value.roundToInt(), 0) }
-            .pointerInput(message.guid) {
-                detectDragGestures(
-                    onDragStart = { },
-                    onDragEnd = {
-                        // Animate back to original position
-                        coroutineScope.launch {
-                            dragOffset.animateTo(
-                                0f,
-                                animationSpec = spring(
-                                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                                    stiffness = Spring.StiffnessLow
-                                )
-                            )
-                        }
-                    },
-                    onDragCancel = {
-                        coroutineScope.launch {
-                            dragOffset.animateTo(0f)
-                        }
-                    },
-                    onDrag = { change, dragAmount ->
-                        change.consume()
-                        coroutineScope.launch {
-                            // For sent messages (right side): allow drag left (negative)
-                            // For received messages (left side): allow drag right (positive)
-                            val newOffset = if (message.isFromMe) {
-                                (dragOffset.value + dragAmount.x).coerceIn(-maxDragPx, 0f)
-                            } else {
-                                (dragOffset.value + dragAmount.x).coerceIn(0f, maxDragPx)
-                            }
-                            dragOffset.snapTo(newOffset)
-                        }
-                    }
-                )
-            },
+            .offset { IntOffset(dragOffset.value.roundToInt(), 0) },
         horizontalArrangement = if (message.isFromMe) {
             Arrangement.End
         } else {
@@ -231,10 +241,28 @@ fun MessageBubble(
             // Message bubble with floating reactions overlay
             Box {
                 // Message bubble with long-press gesture
-                val bubbleShape = if (message.isFromMe) {
-                    MessageShapes.sentWithTail
-                } else {
-                    MessageShapes.receivedWithTail
+                // Select shape based on group position for visual grouping
+                val bubbleShape = when (groupPosition) {
+                    MessageGroupPosition.SINGLE -> if (message.isFromMe) {
+                        MessageShapes.sentSingle
+                    } else {
+                        MessageShapes.receivedSingle
+                    }
+                    MessageGroupPosition.FIRST -> if (message.isFromMe) {
+                        MessageShapes.sentFirst
+                    } else {
+                        MessageShapes.receivedFirst
+                    }
+                    MessageGroupPosition.MIDDLE -> if (message.isFromMe) {
+                        MessageShapes.sentMiddle
+                    } else {
+                        MessageShapes.receivedMiddle
+                    }
+                    MessageGroupPosition.LAST -> if (message.isFromMe) {
+                        MessageShapes.sentLast
+                    } else {
+                        MessageShapes.receivedLast
+                    }
                 }
 
                 Surface(
@@ -258,6 +286,39 @@ fun MessageBubble(
                             }
                         )
                         .pointerInput(message.guid) {
+                            detectHorizontalDragGestures(
+                                onDragEnd = {
+                                    // Animate back to original position
+                                    coroutineScope.launch {
+                                        dragOffset.animateTo(
+                                            0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
+                                        )
+                                    }
+                                },
+                                onDragCancel = {
+                                    coroutineScope.launch {
+                                        dragOffset.animateTo(0f)
+                                    }
+                                },
+                                onHorizontalDrag = { _, dragAmount ->
+                                    coroutineScope.launch {
+                                        // For sent messages (right side): allow drag left (negative)
+                                        // For received messages (left side): allow drag right (positive)
+                                        val newOffset = if (message.isFromMe) {
+                                            (dragOffset.value + dragAmount).coerceIn(-maxDragPx, 0f)
+                                        } else {
+                                            (dragOffset.value + dragAmount).coerceIn(0f, maxDragPx)
+                                        }
+                                        dragOffset.snapTo(newOffset)
+                                    }
+                                }
+                            )
+                        }
+                        .pointerInput(message.guid) {
                             detectTapGestures(
                                 onTap = {
                                     showTimestamp = !showTimestamp
@@ -280,26 +341,39 @@ fun MessageBubble(
                             // TODO: Render attachments
                         }
 
-                        // Text content with clickable dates and search highlighting
-                        if (!message.text.isNullOrBlank()) {
+                        // Text content with clickable dates, phone numbers, codes, and search highlighting
+                        // If there's a link preview, strip the URL from the displayed text
+                        val displayText = if (firstUrl != null && !message.text.isNullOrBlank()) {
+                            message.text.replace(firstUrl.matchedText, "").trim()
+                        } else {
+                            message.text
+                        }
+
+                        if (!displayText.isNullOrBlank()) {
                             val textColor = when {
                                 message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
                                 message.isFromMe -> bubbleColors.smsSentText
                                 else -> bubbleColors.receivedText
                             }
 
+                            val hasClickableContent = detectedDates.isNotEmpty() ||
+                                    detectedPhoneNumbers.isNotEmpty() ||
+                                    detectedCodes.isNotEmpty()
+
                             // Build annotated string with search highlighting
-                            val annotatedText = if (!searchQuery.isNullOrBlank() && message.text.contains(searchQuery, ignoreCase = true)) {
+                            val annotatedText = if (!searchQuery.isNullOrBlank() && displayText.contains(searchQuery, ignoreCase = true)) {
                                 buildSearchHighlightedText(
-                                    text = message.text,
+                                    text = displayText,
                                     searchQuery = searchQuery,
                                     textColor = textColor,
                                     detectedDates = detectedDates
                                 )
-                            } else if (detectedDates.isNotEmpty()) {
-                                buildAnnotatedStringWithDates(
-                                    text = message.text,
+                            } else if (hasClickableContent) {
+                                buildAnnotatedStringWithClickables(
+                                    text = displayText,
                                     detectedDates = detectedDates,
+                                    detectedPhoneNumbers = detectedPhoneNumbers,
+                                    detectedCodes = detectedCodes,
                                     textColor = textColor
                                 )
                             } else {
@@ -311,6 +385,7 @@ fun MessageBubble(
                                     text = annotatedText,
                                     style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
                                     onClick = { offset ->
+                                        // Check for date clicks
                                         annotatedText.getStringAnnotations(
                                             tag = "DATE",
                                             start = offset,
@@ -321,20 +396,122 @@ fun MessageBubble(
                                                 openCalendarIntent(
                                                     context,
                                                     detectedDates[dateIndex],
-                                                    message.text,
+                                                    message.text ?: "",
                                                     detectedDates
                                                 )
                                             }
+                                            return@ClickableText
                                         }
+
+                                        // Check for phone number clicks - show context menu
+                                        annotatedText.getStringAnnotations(
+                                            tag = "PHONE",
+                                            start = offset,
+                                            end = offset
+                                        ).firstOrNull()?.let { annotation ->
+                                            val phoneIndex = annotation.item.toIntOrNull()
+                                            if (phoneIndex != null && phoneIndex < detectedPhoneNumbers.size) {
+                                                selectedPhoneNumber = detectedPhoneNumbers[phoneIndex]
+                                                showPhoneMenu = true
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            }
+                                            return@ClickableText
+                                        }
+
+                                        // Check for code clicks - copy to clipboard
+                                        annotatedText.getStringAnnotations(
+                                            tag = "CODE",
+                                            start = offset,
+                                            end = offset
+                                        ).firstOrNull()?.let { annotation ->
+                                            val codeIndex = annotation.item.toIntOrNull()
+                                            if (codeIndex != null && codeIndex < detectedCodes.size) {
+                                                copyToClipboard(
+                                                    context,
+                                                    detectedCodes[codeIndex].code,
+                                                    "Code copied"
+                                                )
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            }
+                                            return@ClickableText
+                                        }
+
+                                        // Default tap behavior - toggle timestamp
+                                        showTimestamp = !showTimestamp
                                     }
                                 )
+
+                                // Phone number context menu
+                                DropdownMenu(
+                                    expanded = showPhoneMenu,
+                                    onDismissRequest = {
+                                        showPhoneMenu = false
+                                        selectedPhoneNumber = null
+                                    },
+                                    offset = phoneMenuOffset
+                                ) {
+                                    selectedPhoneNumber?.let { phone ->
+                                        DropdownMenuItem(
+                                            text = { Text("Send message") },
+                                            onClick = {
+                                                openSmsIntent(context, phone.normalizedNumber)
+                                                showPhoneMenu = false
+                                                selectedPhoneNumber = null
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Message, contentDescription = null)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Call") },
+                                            onClick = {
+                                                openDialerIntent(context, phone.normalizedNumber)
+                                                showPhoneMenu = false
+                                                selectedPhoneNumber = null
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Phone, contentDescription = null)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Add to contacts") },
+                                            onClick = {
+                                                openAddContactIntent(context, phone.normalizedNumber)
+                                                showPhoneMenu = false
+                                                selectedPhoneNumber = null
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.PersonAdd, contentDescription = null)
+                                            }
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Copy") },
+                                            onClick = {
+                                                copyToClipboard(context, phone.matchedText, "Phone number copied")
+                                                showPhoneMenu = false
+                                                selectedPhoneNumber = null
+                                            },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.ContentCopy, contentDescription = null)
+                                            }
+                                        )
+                                    }
+                                }
                             } else {
                                 Text(
-                                    text = message.text,
+                                    text = displayText ?: "",
                                     style = MaterialTheme.typography.bodyLarge,
                                     color = textColor
                                 )
                             }
+                        }
+
+                        // Link preview for the first URL in the message
+                        firstUrl?.let { detectedUrl ->
+                            LinkPreview(
+                                url = detectedUrl.url,
+                                isFromMe = message.isFromMe
+                            )
                         }
                     }
                 }
@@ -430,6 +607,163 @@ private fun buildAnnotatedStringWithDates(
         if (lastIndex < text.length) {
             append(text.substring(lastIndex))
         }
+    }
+}
+
+/**
+ * Represents a clickable span with its position and type
+ */
+private sealed class ClickableSpan(
+    open val startIndex: Int,
+    open val endIndex: Int,
+    open val matchedText: String,
+    open val index: Int
+) {
+    data class DateSpan(
+        override val startIndex: Int,
+        override val endIndex: Int,
+        override val matchedText: String,
+        override val index: Int
+    ) : ClickableSpan(startIndex, endIndex, matchedText, index)
+
+    data class PhoneSpan(
+        override val startIndex: Int,
+        override val endIndex: Int,
+        override val matchedText: String,
+        override val index: Int
+    ) : ClickableSpan(startIndex, endIndex, matchedText, index)
+
+    data class CodeSpan(
+        override val startIndex: Int,
+        override val endIndex: Int,
+        override val matchedText: String,
+        override val index: Int
+    ) : ClickableSpan(startIndex, endIndex, matchedText, index)
+}
+
+/**
+ * Builds an AnnotatedString with all clickable elements: dates, phone numbers, and codes
+ */
+@Composable
+private fun buildAnnotatedStringWithClickables(
+    text: String,
+    detectedDates: List<DetectedDate>,
+    detectedPhoneNumbers: List<DetectedPhoneNumber>,
+    detectedCodes: List<DetectedCode>,
+    textColor: Color
+): AnnotatedString {
+    // Combine all clickable spans and sort by position
+    val allSpans = mutableListOf<ClickableSpan>()
+
+    detectedDates.forEachIndexed { index, date ->
+        allSpans.add(ClickableSpan.DateSpan(date.startIndex, date.endIndex, date.matchedText, index))
+    }
+    detectedPhoneNumbers.forEachIndexed { index, phone ->
+        allSpans.add(ClickableSpan.PhoneSpan(phone.startIndex, phone.endIndex, phone.matchedText, index))
+    }
+    detectedCodes.forEachIndexed { index, code ->
+        allSpans.add(ClickableSpan.CodeSpan(code.startIndex, code.endIndex, code.matchedText, index))
+    }
+
+    // Sort by start index and filter overlapping spans (prefer dates > phones > codes)
+    val sortedSpans = allSpans.sortedBy { it.startIndex }
+    val filteredSpans = mutableListOf<ClickableSpan>()
+    var lastEndIndex = 0
+
+    for (span in sortedSpans) {
+        if (span.startIndex >= lastEndIndex) {
+            filteredSpans.add(span)
+            lastEndIndex = span.endIndex
+        }
+    }
+
+    return buildAnnotatedString {
+        var currentIndex = 0
+
+        for (span in filteredSpans) {
+            // Add text before the clickable element
+            if (span.startIndex > currentIndex) {
+                append(text.substring(currentIndex, span.startIndex))
+            }
+
+            // Add the clickable element with underline style and annotation
+            val tag = when (span) {
+                is ClickableSpan.DateSpan -> "DATE"
+                is ClickableSpan.PhoneSpan -> "PHONE"
+                is ClickableSpan.CodeSpan -> "CODE"
+            }
+
+            pushStringAnnotation(tag = tag, annotation = span.index.toString())
+            withStyle(
+                SpanStyle(
+                    textDecoration = TextDecoration.Underline,
+                    color = textColor
+                )
+            ) {
+                append(span.matchedText)
+            }
+            pop()
+
+            currentIndex = span.endIndex
+        }
+
+        // Add remaining text after last clickable element
+        if (currentIndex < text.length) {
+            append(text.substring(currentIndex))
+        }
+    }
+}
+
+/**
+ * Copies text to clipboard and shows a toast
+ */
+private fun copyToClipboard(context: Context, text: String, toastMessage: String) {
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val clip = ClipData.newPlainText("Copied text", text)
+    clipboard.setPrimaryClip(clip)
+    Toast.makeText(context, toastMessage, Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * Opens SMS app to compose a message to the given phone number
+ */
+private fun openSmsIntent(context: Context, phoneNumber: String) {
+    val intent = Intent(Intent.ACTION_SENDTO).apply {
+        data = Uri.parse("smsto:$phoneNumber")
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "No SMS app found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Opens the phone dialer with the given phone number
+ */
+private fun openDialerIntent(context: Context, phoneNumber: String) {
+    val intent = Intent(Intent.ACTION_DIAL).apply {
+        data = Uri.parse("tel:$phoneNumber")
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "No dialer app found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Opens the add contact screen with the given phone number pre-filled
+ */
+private fun openAddContactIntent(context: Context, phoneNumber: String) {
+    val intent = Intent(Intent.ACTION_INSERT).apply {
+        type = ContactsContract.Contacts.CONTENT_TYPE
+        putExtra(ContactsContract.Intents.Insert.PHONE, phoneNumber)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "No contacts app found", Toast.LENGTH_SHORT).show()
     }
 }
 

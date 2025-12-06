@@ -9,6 +9,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -38,6 +39,15 @@ fun BlueBubblesNavHost(
 ) {
     // TODO: Check if setup is complete to determine start destination
     val startDestination: Screen = Screen.Conversations
+
+    fun popBackStackReturningToSettings(returnToSettings: Boolean) {
+        if (returnToSettings) {
+            navController.previousBackStackEntry
+                ?.savedStateHandle
+                ?.set("open_settings_panel", true)
+        }
+        navController.popBackStack()
+    }
 
     NavHost(
         navController = navController,
@@ -72,7 +82,12 @@ fun BlueBubblesNavHost(
         }
     ) {
         // Conversations list (home)
-        composable<Screen.Conversations> {
+        composable<Screen.Conversations> { backStackEntry ->
+            val reopenSettingsPanelFlow = remember(backStackEntry) {
+                backStackEntry.savedStateHandle.getStateFlow("open_settings_panel", false)
+            }
+            val reopenSettingsPanel by reopenSettingsPanelFlow.collectAsState(initial = false)
+
             ConversationsScreen(
                 onConversationClick = { chatGuid ->
                     navController.navigate(Screen.Chat(chatGuid))
@@ -83,19 +98,25 @@ fun BlueBubblesNavHost(
                 onSettingsClick = {
                     // No longer used - settings panel slides in from right
                 },
-                onSettingsNavigate = { destination ->
-                    // Handle navigation from the sliding settings panel
-                    when (destination) {
-                        "server" -> navController.navigate(Screen.ServerSettings)
-                        "archived" -> navController.navigate(Screen.ArchivedChats)
-                        "blocked" -> navController.navigate(Screen.BlockedContacts)
-                        "sync" -> navController.navigate(Screen.SyncSettings)
-                        "sms" -> navController.navigate(Screen.SmsSettings)
-                        "notifications" -> navController.navigate(Screen.NotificationSettings)
-                        "swipe" -> navController.navigate(Screen.SwipeSettings)
-                        "effects" -> navController.navigate(Screen.EffectsSettings)
-                        "about" -> navController.navigate(Screen.About)
+                onSettingsNavigate = { destination, returnToSettings ->
+                    val screen = when (destination) {
+                        "server" -> Screen.ServerSettings(returnToSettings)
+                        "archived" -> Screen.ArchivedChats(returnToSettings)
+                        "blocked" -> Screen.BlockedContacts(returnToSettings)
+                        "sync" -> Screen.SyncSettings(returnToSettings)
+                        "sms" -> Screen.SmsSettings(returnToSettings)
+                        "notifications" -> Screen.NotificationSettings(returnToSettings)
+                        "swipe" -> Screen.SwipeSettings(returnToSettings)
+                        "effects" -> Screen.EffectsSettings(returnToSettings)
+                        "about" -> Screen.About(returnToSettings)
+                        else -> null
                     }
+
+                    screen?.let { navController.navigate(it) }
+                },
+                reopenSettingsPanel = reopenSettingsPanel,
+                onSettingsPanelHandled = {
+                    backStackEntry.savedStateHandle["open_settings_panel"] = false
                 }
             )
         }
@@ -138,8 +159,8 @@ fun BlueBubblesNavHost(
                         popUpTo(Screen.Conversations) { inclusive = false }
                     }
                 },
-                onCreateGroupClick = {
-                    navController.navigate(Screen.GroupCreator())
+                onNavigateToGroupSetup = { participantsJson, groupService ->
+                    navController.navigate(Screen.GroupSetup(participantsJson, groupService))
                 }
             )
         }
@@ -206,36 +227,45 @@ fun BlueBubblesNavHost(
         composable<Screen.Settings> {
             SettingsScreen(
                 onBackClick = { navController.popBackStack() },
-                onServerSettingsClick = { navController.navigate(Screen.ServerSettings) },
-                onArchivedClick = { navController.navigate(Screen.ArchivedChats) },
-                onBlockedClick = { navController.navigate(Screen.BlockedContacts) },
-                onSyncSettingsClick = { navController.navigate(Screen.SyncSettings) },
-                onSmsSettingsClick = { navController.navigate(Screen.SmsSettings) },
-                onNotificationsClick = { navController.navigate(Screen.NotificationSettings) },
-                onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings) },
-                onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings) },
-                onAboutClick = { navController.navigate(Screen.About) }
+                onServerSettingsClick = { navController.navigate(Screen.ServerSettings(returnToSettings = true)) },
+                onArchivedClick = { navController.navigate(Screen.ArchivedChats(returnToSettings = true)) },
+                onBlockedClick = { navController.navigate(Screen.BlockedContacts(returnToSettings = true)) },
+                onSyncSettingsClick = { navController.navigate(Screen.SyncSettings(returnToSettings = true)) },
+                onSmsSettingsClick = { navController.navigate(Screen.SmsSettings(returnToSettings = true)) },
+                onNotificationsClick = { navController.navigate(Screen.NotificationSettings(returnToSettings = true)) },
+                onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings(returnToSettings = true)) },
+                onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
+                onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
             )
         }
 
         // SMS Settings
-        composable<Screen.SmsSettings> {
+        composable<Screen.SmsSettings> { backStackEntry ->
+            val route: Screen.SmsSettings = backStackEntry.toRoute()
             SmsSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Server Settings
-        composable<Screen.ServerSettings> {
+        composable<Screen.ServerSettings> { backStackEntry ->
+            val route: Screen.ServerSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.server.ServerSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Archived Chats
-        composable<Screen.ArchivedChats> {
+        composable<Screen.ArchivedChats> { backStackEntry ->
+            val route: Screen.ArchivedChats = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.archived.ArchivedChatsScreen(
-                onNavigateBack = { navController.popBackStack() },
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                },
                 onChatClick = { chatGuid ->
                     navController.navigate(Screen.Chat(chatGuid))
                 }
@@ -243,44 +273,62 @@ fun BlueBubblesNavHost(
         }
 
         // Blocked Contacts
-        composable<Screen.BlockedContacts> {
+        composable<Screen.BlockedContacts> { backStackEntry ->
+            val route: Screen.BlockedContacts = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.blocked.BlockedContactsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Sync Settings
-        composable<Screen.SyncSettings> {
+        composable<Screen.SyncSettings> { backStackEntry ->
+            val route: Screen.SyncSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.sync.SyncSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Notification Settings
-        composable<Screen.NotificationSettings> {
+        composable<Screen.NotificationSettings> { backStackEntry ->
+            val route: Screen.NotificationSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.notifications.NotificationSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // About
-        composable<Screen.About> {
+        composable<Screen.About> { backStackEntry ->
+            val route: Screen.About = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.about.AboutScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Swipe Settings
-        composable<Screen.SwipeSettings> {
+        composable<Screen.SwipeSettings> { backStackEntry ->
+            val route: Screen.SwipeSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.swipe.SwipeSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 
         // Effects Settings
-        composable<Screen.EffectsSettings> {
+        composable<Screen.EffectsSettings> { backStackEntry ->
+            val route: Screen.EffectsSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.EffectsSettingsScreen(
-                onNavigateBack = { navController.popBackStack() }
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
             )
         }
 

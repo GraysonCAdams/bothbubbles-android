@@ -83,31 +83,15 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeSoundSettings() {
         viewModelScope.launch {
-            combine(
-                settingsDataStore.sendSoundEnabled,
-                settingsDataStore.receiveSoundEnabled
-            ) { sendSound, receiveSound ->
-                Pair(sendSound, receiveSound)
-            }.collect { (sendSound, receiveSound) ->
-                _uiState.update {
-                    it.copy(
-                        sendSoundEnabled = sendSound,
-                        receiveSoundEnabled = receiveSound
-                    )
-                }
+            settingsDataStore.messageSoundsEnabled.collect { enabled ->
+                _uiState.update { it.copy(messageSoundsEnabled = enabled) }
             }
         }
     }
 
-    fun setSendSoundEnabled(enabled: Boolean) {
+    fun setMessageSoundsEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            settingsDataStore.setSendSoundEnabled(enabled)
-        }
-    }
-
-    fun setReceiveSoundEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.setReceiveSoundEnabled(enabled)
+            settingsDataStore.setMessageSoundsEnabled(enabled)
         }
     }
 
@@ -122,7 +106,12 @@ class SettingsViewModel @Inject constructor(
     private fun observeServerSettings() {
         viewModelScope.launch {
             settingsDataStore.serverAddress.collect { address ->
-                _uiState.update { it.copy(serverUrl = address) }
+                _uiState.update {
+                    it.copy(
+                        serverUrl = address,
+                        isServerConfigured = address.isNotBlank()
+                    )
+                }
             }
         }
     }
@@ -228,6 +217,7 @@ data class SettingsUiState(
     val enablePrivateApi: Boolean = false,
     val sendTypingIndicators: Boolean = true,
     // Sound settings
-    val sendSoundEnabled: Boolean = true,
-    val receiveSoundEnabled: Boolean = true
+    val messageSoundsEnabled: Boolean = true,
+    // Server configuration state
+    val isServerConfigured: Boolean = false
 )

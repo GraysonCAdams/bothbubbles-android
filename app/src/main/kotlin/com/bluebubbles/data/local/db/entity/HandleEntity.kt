@@ -48,7 +48,14 @@ data class HandleEntity(
 
     // Inferred name from self-introduction messages (e.g., "Hey it's John")
     @ColumnInfo(name = "inferred_name")
-    val inferredName: String? = null
+    val inferredName: String? = null,
+
+    // Spam tracking
+    @ColumnInfo(name = "spam_report_count", defaultValue = "0")
+    val spamReportCount: Int = 0,
+
+    @ColumnInfo(name = "is_whitelisted", defaultValue = "0")
+    val isWhitelisted: Boolean = false
 ) {
     /**
      * Unique identifier for this handle (address + service)
@@ -84,11 +91,12 @@ data class HandleEntity(
         get() = cachedDisplayName == null && inferredName != null
 
     /**
-     * Generate initials from display name
+     * Generate initials from the actual name (without "Maybe: " prefix)
      */
     val initials: String
         get() {
-            val name = displayName
+            // Use actual name without "Maybe: " prefix for initials
+            val name = cachedDisplayName ?: inferredName ?: formattedAddress ?: address
             val parts = name.split(" ").filter { it.isNotBlank() }
             return when {
                 parts.size >= 2 -> "${parts.first().first()}${parts.last().first()}"

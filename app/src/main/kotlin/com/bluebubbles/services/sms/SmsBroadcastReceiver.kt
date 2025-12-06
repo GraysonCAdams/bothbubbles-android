@@ -14,12 +14,15 @@ import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
 import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.ChatEntity
+import com.bluebubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.services.nameinference.NameInferenceService
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.services.notifications.NotificationService
 import com.bluebubbles.services.sound.SoundManager
+import com.bluebubbles.services.spam.SpamRepository
+import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -61,6 +64,9 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var soundManager: SoundManager
+
+    @Inject
+    lateinit var spamRepository: SpamRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -121,8 +127,12 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         // Group message parts by originating address (for multipart SMS)
         val messagesByAddress = messages.groupBy { it.originatingAddress ?: "" }
 
-        messagesByAddress.forEach { (address, parts) ->
-            if (address.isBlank()) return@forEach
+        messagesByAddress.forEach { (rawAddress, parts) ->
+            if (rawAddress.isBlank()) return@forEach
+
+            // Normalize address to prevent duplicate conversations for same phone number
+            // e.g., "+16505551229", "6505551229", "(650) 555-1229" all become "+16505551229"
+            val address = PhoneAndCodeParsingUtils.normalizePhoneNumber(rawAddress)
 
             // Combine message body from parts
             val fullBody = parts.sortedBy { it.timestampMillis }
@@ -152,7 +162,8 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 chatDao.updateUnreadCount(chatGuid, chat.unreadCount + 1)
             }
 
-            val providerResult = maybeInsertIntoSystemProvider(context, address, fullBody, timestamp)
+            // Use raw address for system provider compatibility
+            val providerResult = maybeInsertIntoSystemProvider(context, rawAddress, fullBody, timestamp)
 
             val messageGuid = providerResult?.let { "sms-${it.id}" }
                 ?: "sms-incoming-${System.currentTimeMillis()}-${address.hashCode()}"
@@ -170,10 +181,17 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             )
             messageDao.insertMessage(message)
 
-            // Try to infer sender name from self-introduction patterns (e.g., "Hey it's John")
-            tryInferSenderName(address, fullBody)
+            // Ensure handle exists, link to chat, and try to infer sender name
+            ensureHandleAndInferName(chatGuid, address, fullBody)
 
-            // Show notification
+            // Check for spam - if spam, skip notification
+            val spamResult = spamRepository.evaluateAndMarkSpam(chatGuid, address, fullBody)
+            if (spamResult.isSpam) {
+                Log.i(TAG, "SMS from $address detected as spam (score: ${spamResult.score}), skipping notification")
+                return@forEach
+            }
+
+            // Show notification (only for non-spam messages)
             notificationService.showMessageNotification(
                 chatGuid = chatGuid,
                 chatTitle = chat.displayName ?: address,
@@ -241,10 +259,10 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     )
 
     /**
-     * Try to infer sender name from message content.
-     * Gets or creates a handle for the address and processes for name inference.
+     * Ensure handle exists for this address, link it to the chat, and try to infer sender name.
+     * This is necessary for the conversation list to show "Maybe: [Name]" for inferred names.
      */
-    private suspend fun tryInferSenderName(address: String, messageText: String) {
+    private suspend fun ensureHandleAndInferName(chatGuid: String, address: String, messageText: String) {
         try {
             // Get or create handle for this address
             var handle = handleDao.getHandleByAddressAndService(address, "SMS")
@@ -256,10 +274,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             }
 
             handle?.let {
+                // Link handle to chat (required for conversation list to use handle's displayName)
+                chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, it.id))
+
+                // Try to infer sender name from message
                 nameInferenceService.processIncomingMessage(it.id, messageText)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error inferring sender name", e)
+            Log.e(TAG, "Error ensuring handle and inferring sender name", e)
         }
     }
 }

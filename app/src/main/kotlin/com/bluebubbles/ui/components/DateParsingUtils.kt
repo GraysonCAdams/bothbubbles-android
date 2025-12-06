@@ -509,8 +509,8 @@ object DateParsingUtils {
                 }.applyTime()
             }
 
-            // "next week/month/year"
-            lower.startsWith("next week") -> {
+            // "next week/month/year" (or "at X next week")
+            lower.contains("next week") -> {
                 Calendar.getInstance().apply {
                     add(Calendar.WEEK_OF_YEAR, 1)
                     // Set to Monday of next week
@@ -518,14 +518,14 @@ object DateParsingUtils {
                 }.applyTime()
             }
 
-            lower.startsWith("next month") -> {
+            lower.contains("next month") -> {
                 Calendar.getInstance().apply {
                     add(Calendar.MONTH, 1)
                     set(Calendar.DAY_OF_MONTH, 1)
                 }.applyTime()
             }
 
-            lower.startsWith("next year") -> {
+            lower.contains("next year") -> {
                 Calendar.getInstance().apply {
                     add(Calendar.YEAR, 1)
                     set(Calendar.MONTH, Calendar.JANUARY)
@@ -533,8 +533,8 @@ object DateParsingUtils {
                 }.applyTime()
             }
 
-            // "next Monday/Tuesday/etc."
-            lower.startsWith("next ") && lower.contains(Regex("next\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)")) -> {
+            // "next Monday/Tuesday/etc." (or "at X next Monday")
+            lower.contains(Regex("next\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)")) -> {
                 val dayMatch = Regex("next\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)").find(lower)
                 dayMatch?.let {
                     val targetDay = dayNameToCalendarDay(it.groupValues[1])
@@ -546,8 +546,8 @@ object DateParsingUtils {
                 }
             }
 
-            // "this Monday/Tuesday/etc."
-            lower.startsWith("this ") && lower.contains(Regex("this\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)")) -> {
+            // "this Monday/Tuesday/etc." (or "at X this Monday")
+            lower.contains(Regex("this\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)")) -> {
                 val dayMatch = Regex("this\\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)").find(lower)
                 dayMatch?.let {
                     val targetDay = dayNameToCalendarDay(it.groupValues[1])
@@ -561,7 +561,7 @@ object DateParsingUtils {
             }
 
             // "this weekend"
-            lower == "this weekend" -> {
+            lower.contains("this weekend") -> {
                 Calendar.getInstance().apply {
                     val currentDay = get(Calendar.DAY_OF_WEEK)
                     val daysUntilSaturday = (Calendar.SATURDAY - currentDay + 7) % 7
@@ -570,15 +570,15 @@ object DateParsingUtils {
             }
 
             // "next weekend"
-            lower == "next weekend" -> {
+            lower.contains("next weekend") -> {
                 Calendar.getInstance().apply {
                     add(Calendar.WEEK_OF_YEAR, 1)
                     set(Calendar.DAY_OF_WEEK, Calendar.SATURDAY)
                 }
             }
 
-            // "in X days/weeks/months/years"
-            lower.startsWith("in ") -> {
+            // "in X days/weeks/months/years" (or "at X in Y days")
+            lower.contains(Regex("in\\s+\\d+\\s+(days?|weeks?|months?|years?)")) -> {
                 val inMatch = Regex("in\\s+(\\d+)\\s+(days?|weeks?|months?|years?)").find(lower)
                 inMatch?.let {
                     val amount = it.groupValues[1].toInt()

@@ -12,6 +12,7 @@ import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.services.notifications.NotificationService
+import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -154,9 +155,11 @@ class SmsContentObserver @Inject constructor(
                             type == Telephony.Sms.MESSAGE_TYPE_OUTBOX ||
                             type == Telephony.Sms.MESSAGE_TYPE_QUEUED
 
+                    // Normalize address to prevent duplicate conversations
+                    val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
                     // Get or create chat
-                    val chatGuid = "sms;-;$address"
-                    ensureChatExists(chatGuid, address, date, body)
+                    val chatGuid = "sms;-;$normalizedAddress"
+                    ensureChatExists(chatGuid, normalizedAddress, date, body)
 
                     // Create message entity
                     val message = com.bluebubbles.data.local.db.entity.MessageEntity(
@@ -226,22 +229,40 @@ class SmsContentObserver @Inject constructor(
                     val mmsMessage = mmsMessages.find { it.id == id } ?: continue
 
                     // Get primary address (for chat creation)
-                    val primaryAddress = if (isFromMe) {
+                    val rawPrimaryAddress = if (isFromMe) {
                         mmsMessage.addresses.find { it.type == 151 }?.address // TO
                     } else {
                         mmsMessage.addresses.find { it.type == 137 }?.address // FROM
                     } ?: continue
+                    // Normalize to prevent duplicate conversations
+                    val primaryAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(rawPrimaryAddress)
 
                     // Determine chat GUID based on participants
                     val isGroup = mmsMessage.addresses.size > 2
                     val chatGuid = if (isGroup) {
-                        "mms;-;${mmsMessage.addresses.map { it.address }.sorted().joinToString(",")}"
+                        "mms;-;${mmsMessage.addresses.map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it.address) }.sorted().joinToString(",")}"
                     } else {
                         "sms;-;$primaryAddress"
                     }
 
                     // Get text content
                     val textContent = mmsMessage.textParts.joinToString("\n").takeIf { it.isNotBlank() }
+
+                    // Check for duplicate SMS message with matching content and timestamp
+                    // This prevents the same message from appearing twice when recorded as both SMS and MMS
+                    if (textContent != null) {
+                        val matchingMessage = messageDao.findMatchingMessage(
+                            chatGuid = chatGuid,
+                            text = textContent,
+                            isFromMe = isFromMe,
+                            dateCreated = date,
+                            toleranceMs = 10000 // 10 second window for MMS which can have delayed timestamps
+                        )
+                        if (matchingMessage != null) {
+                            Log.d(TAG, "Skipping duplicate MMS $id - matches existing message ${matchingMessage.guid}")
+                            continue
+                        }
+                    }
 
                     // Ensure chat exists
                     ensureChatExists(chatGuid, primaryAddress, date, textContent, isGroup)

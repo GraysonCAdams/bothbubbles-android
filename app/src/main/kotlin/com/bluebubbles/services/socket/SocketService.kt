@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import org.json.JSONObject
+import dagger.Lazy
 import java.net.URI
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -80,7 +81,7 @@ enum class FaceTimeCallStatus {
 class SocketService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val moshi: Moshi,
-    private val soundManager: SoundManager
+    private val soundManager: Lazy<SoundManager>
 ) {
     companion object {
         private const val TAG = "SocketService"
@@ -340,7 +341,7 @@ class SocketService @Inject constructor(
 
                 // Play receive sound for messages from others (not from me)
                 if (message.isFromMe != true) {
-                    soundManager.playReceiveSound()
+                    soundManager.get().playReceiveSound()
                 }
             }
         } catch (e: Exception) {

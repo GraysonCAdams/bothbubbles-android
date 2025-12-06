@@ -2,17 +2,21 @@ package com.bluebubbles.ui.chatcreator
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Star
@@ -25,6 +29,12 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -41,7 +51,7 @@ import com.bluebubbles.ui.components.Avatar
 fun ChatCreatorScreen(
     onBackClick: () -> Unit,
     onChatCreated: (String) -> Unit,
-    onCreateGroupClick: () -> Unit = {},
+    onNavigateToGroupSetup: (participantsJson: String, groupService: String) -> Unit = { _, _ -> },
     viewModel: ChatCreatorViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -56,6 +66,14 @@ fun ChatCreatorScreen(
         uiState.createdChatGuid?.let { chatGuid ->
             onChatCreated(chatGuid)
             viewModel.resetCreatedChatGuid()
+        }
+    }
+
+    // Handle navigation to group setup
+    LaunchedEffect(uiState.navigateToGroupSetup) {
+        uiState.navigateToGroupSetup?.let { nav ->
+            onNavigateToGroupSetup(nav.participantsJson, nav.groupService)
+            viewModel.resetGroupSetupNavigation()
         }
     }
 
@@ -78,6 +96,23 @@ fun ChatCreatorScreen(
                         )
                     }
                 },
+                actions = {
+                    // Show Continue button when recipients are selected
+                    if (uiState.selectedRecipients.isNotEmpty()) {
+                        TextButton(
+                            onClick = { viewModel.onContinue() },
+                            enabled = !uiState.isLoading
+                        ) {
+                            Text("Continue")
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
@@ -89,6 +124,24 @@ fun ChatCreatorScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
+            // Selected recipients chips row
+            if (uiState.selectedRecipients.isNotEmpty()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    uiState.selectedRecipients.forEach { recipient ->
+                        RecipientChip(
+                            recipient = recipient,
+                            onRemove = { viewModel.removeRecipient(recipient.address) }
+                        )
+                    }
+                }
+            }
+
             // Search/To field
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -111,12 +164,38 @@ fun ChatCreatorScreen(
 
                     Spacer(modifier = Modifier.width(12.dp))
 
+                    // Track previous query for soft keyboard backspace detection
+                    var previousQuery by remember { mutableStateOf("") }
+
                     BasicTextField(
                         value = uiState.searchQuery,
-                        onValueChange = { viewModel.updateSearchQuery(it) },
+                        onValueChange = { newValue ->
+                            // Detect backspace when previous was empty and still empty (soft keyboard workaround)
+                            // This triggers when cursor is at position 0 and backspace is pressed
+                            if (previousQuery.isEmpty() && newValue.isEmpty() && uiState.selectedRecipients.isNotEmpty()) {
+                                // Soft keyboard sent empty -> empty, which can happen on some keyboards
+                                // We'll rely on the onKeyEvent for this case
+                            }
+                            previousQuery = newValue
+                            viewModel.updateSearchQuery(newValue)
+                        },
                         modifier = Modifier
                             .weight(1f)
-                            .focusRequester(focusRequester),
+                            .focusRequester(focusRequester)
+                            .onKeyEvent { event ->
+                                // Handle backspace when input is empty to remove last recipient
+                                // Only trigger on KeyDown to avoid double-firing
+                                if (event.type == KeyEventType.KeyDown &&
+                                    event.key == Key.Backspace &&
+                                    uiState.searchQuery.isEmpty() &&
+                                    uiState.selectedRecipients.isNotEmpty()
+                                ) {
+                                    viewModel.removeLastRecipient()
+                                    true
+                                } else {
+                                    false
+                                }
+                            },
                         textStyle = TextStyle(
                             color = MaterialTheme.colorScheme.onSurface,
                             fontSize = 16.sp
@@ -128,9 +207,9 @@ fun ChatCreatorScreen(
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = {
-                                // If a manual address entry is detected, start the conversation
+                                // If a manual address entry is detected, add as recipient
                                 uiState.manualAddressEntry?.let { entry ->
-                                    viewModel.startConversationWithAddress(entry.address, entry.service)
+                                    viewModel.addManualRecipient(entry.address, entry.service)
                                 }
                             }
                         ),
@@ -138,7 +217,11 @@ fun ChatCreatorScreen(
                             Box {
                                 if (uiState.searchQuery.isEmpty()) {
                                     Text(
-                                        text = "Type name, phone number, or email",
+                                        text = if (uiState.selectedRecipients.isEmpty()) {
+                                            "Type name, phone number, or email"
+                                        } else {
+                                            "Add another recipient..."
+                                        },
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         fontSize = 16.sp
                                     )
@@ -150,34 +233,37 @@ fun ChatCreatorScreen(
                 }
             }
 
-            // Create group button
-            Surface(
-                onClick = onCreateGroupClick,
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Row(
+            // Create group button - only show when 2+ recipients, or when no recipients selected (to discover feature)
+            val showCreateGroupButton = uiState.selectedRecipients.size >= 2
+            if (showCreateGroupButton) {
+                Surface(
+                    onClick = { viewModel.onContinue() },
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    shape = RoundedCornerShape(28.dp),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
+                        .padding(horizontal = 16.dp, vertical = 4.dp)
                 ) {
-                    Icon(
-                        Icons.Default.GroupAdd,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Create group",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.GroupAdd,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Create group (${uiState.selectedRecipients.size} people)",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
                 }
             }
 
@@ -208,7 +294,7 @@ fun ChatCreatorScreen(
                             service = entry.service,
                             isCheckingAvailability = uiState.isCheckingAvailability,
                             onClick = {
-                                viewModel.startConversationWithAddress(entry.address, entry.service)
+                                viewModel.addManualRecipient(entry.address, entry.service)
                             }
                         )
                     }
@@ -229,9 +315,11 @@ fun ChatCreatorScreen(
                         items = uiState.favoriteContacts,
                         key = { "${it.address}_${it.service}_fav" }
                     ) { contact ->
+                        val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
                         ContactTile(
                             contact = contact,
-                            onClick = { viewModel.selectContact(contact) }
+                            isSelected = isSelected,
+                            onClick = { viewModel.addRecipient(contact) }
                         )
                     }
                 }
@@ -253,9 +341,11 @@ fun ChatCreatorScreen(
                         items = contacts,
                         key = { "${it.address}_${it.service}" }
                     ) { contact ->
+                        val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
                         ContactTile(
                             contact = contact,
-                            onClick = { viewModel.selectContact(contact) }
+                            isSelected = isSelected,
+                            onClick = { viewModel.addRecipient(contact) }
                         )
                     }
                 }
@@ -492,14 +582,25 @@ private fun ManualAddressTile(
 @Composable
 private fun ContactTile(
     contact: ContactUiModel,
+    isSelected: Boolean = false,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val isIMessage = contact.service.equals("iMessage", ignoreCase = true)
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        color = MaterialTheme.colorScheme.surface
+        color = if (isSelected) {
+            if (isIMessage) {
+                MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+            } else {
+                MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.3f)
+            }
+        } else {
+            MaterialTheme.colorScheme.surface
+        }
     ) {
         Row(
             modifier = Modifier
@@ -570,7 +671,6 @@ private fun ContactTile(
             }
 
             // Service indicator with color coding
-            val isIMessage = contact.service.equals("iMessage", ignoreCase = true)
             val serviceText = contact.serviceLabel ?: if (isIMessage) "" else "SMS"
             if (serviceText.isNotEmpty()) {
                 Surface(
@@ -592,6 +692,61 @@ private fun ContactTile(
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Chip displaying a selected recipient with platform color-coding
+ */
+@Composable
+private fun RecipientChip(
+    recipient: SelectedRecipient,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isIMessage = recipient.service.equals("iMessage", ignoreCase = true)
+
+    Surface(
+        color = if (isIMessage) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.secondaryContainer
+        },
+        shape = RoundedCornerShape(16.dp),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 12.dp, end = 4.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = recipient.displayName,
+                style = MaterialTheme.typography.labelLarge,
+                color = if (isIMessage) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            IconButton(
+                onClick = onRemove,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Remove ${recipient.displayName}",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isIMessage) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    }
+                )
             }
         }
     }

@@ -1,9 +1,12 @@
 package com.bluebubbles.ui.settings
 
+import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -12,46 +15,36 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 data class EffectsSettingsUiState(
-    val effectsEnabled: Boolean = true,
     val autoPlayEffects: Boolean = true,
     val replayEffectsOnScroll: Boolean = false,
     val reduceMotion: Boolean = false,
-    val disableOnLowBattery: Boolean = true,
-    val lowBatteryThreshold: Int = 20
+    val isPowerSaveMode: Boolean = false
 )
 
 @HiltViewModel
 class EffectsSettingsViewModel @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore
 ) : ViewModel() {
 
+    private val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+
     val uiState: StateFlow<EffectsSettingsUiState> = combine(
-        settingsDataStore.effectsEnabled,
         settingsDataStore.autoPlayEffects,
         settingsDataStore.replayEffectsOnScroll,
-        settingsDataStore.reduceMotion,
-        settingsDataStore.disableEffectsOnLowBattery,
-        settingsDataStore.lowBatteryThreshold
-    ) { values ->
+        settingsDataStore.reduceMotion
+    ) { autoPlay, replayOnScroll, reduceMotion ->
         EffectsSettingsUiState(
-            effectsEnabled = values[0] as Boolean,
-            autoPlayEffects = values[1] as Boolean,
-            replayEffectsOnScroll = values[2] as Boolean,
-            reduceMotion = values[3] as Boolean,
-            disableOnLowBattery = values[4] as Boolean,
-            lowBatteryThreshold = values[5] as Int
+            autoPlayEffects = autoPlay,
+            replayEffectsOnScroll = replayOnScroll,
+            reduceMotion = reduceMotion,
+            isPowerSaveMode = powerManager.isPowerSaveMode
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = EffectsSettingsUiState()
+        initialValue = EffectsSettingsUiState(isPowerSaveMode = powerManager.isPowerSaveMode)
     )
-
-    fun setEffectsEnabled(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.setEffectsEnabled(enabled)
-        }
-    }
 
     fun setAutoPlayEffects(enabled: Boolean) {
         viewModelScope.launch {
@@ -68,18 +61,6 @@ class EffectsSettingsViewModel @Inject constructor(
     fun setReduceMotion(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setReduceMotion(enabled)
-        }
-    }
-
-    fun setDisableOnLowBattery(enabled: Boolean) {
-        viewModelScope.launch {
-            settingsDataStore.setDisableEffectsOnLowBattery(enabled)
-        }
-    }
-
-    fun setLowBatteryThreshold(threshold: Int) {
-        viewModelScope.launch {
-            settingsDataStore.setLowBatteryThreshold(threshold)
         }
     }
 }

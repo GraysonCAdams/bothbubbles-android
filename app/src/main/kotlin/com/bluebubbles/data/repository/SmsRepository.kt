@@ -11,6 +11,7 @@ import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.services.sms.*
+import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -95,8 +96,11 @@ class SmsRepository @Inject constructor(
      * Import a single SMS thread
      */
     private suspend fun importThread(thread: SmsThread) {
-        val addresses = thread.recipientAddresses
-        if (addresses.isEmpty()) return
+        val rawAddresses = thread.recipientAddresses
+        if (rawAddresses.isEmpty()) return
+
+        // Normalize addresses to prevent duplicate conversations
+        val addresses = rawAddresses.map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
 
         val isGroup = addresses.size > 1
         val chatGuid = if (isGroup) {
@@ -162,6 +166,24 @@ class SmsRepository @Inject constructor(
                 val guid = "mms-${mms.id}"
                 if (messageDao.getMessageByGuid(guid) == null) {
                     val entity = mms.toMessageEntity(chatGuid)
+
+                    // Check for duplicate SMS message with matching content and timestamp
+                    // This prevents the same message from appearing twice when recorded as both SMS and MMS
+                    val textContent = entity.text
+                    if (textContent != null) {
+                        val matchingMessage = messageDao.findMatchingMessage(
+                            chatGuid = chatGuid,
+                            text = textContent,
+                            isFromMe = entity.isFromMe,
+                            dateCreated = entity.dateCreated,
+                            toleranceMs = 10000 // 10 second window for MMS which can have delayed timestamps
+                        )
+                        if (matchingMessage != null) {
+                            // Skip this MMS as it duplicates an existing SMS message
+                            return@forEach
+                        }
+                    }
+
                     messageDao.insertMessage(entity)
                     imported++
                 }
@@ -181,8 +203,10 @@ class SmsRepository @Inject constructor(
         text: String,
         subscriptionId: Int = -1
     ): Result<MessageEntity> {
-        val chatGuid = "sms;-;$address"
-        ensureChatExists(chatGuid, address, isGroup = false)
+        // Normalize address to prevent duplicate conversations
+        val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
+        val chatGuid = "sms;-;$normalizedAddress"
+        ensureChatExists(chatGuid, normalizedAddress, isGroup = false)
         return smsSendService.sendSms(address, text, chatGuid, subscriptionId)
     }
 
@@ -196,13 +220,15 @@ class SmsRepository @Inject constructor(
         subject: String? = null,
         subscriptionId: Int = -1
     ): Result<MessageEntity> {
-        val chatGuid = if (recipients.size == 1 && attachments.isEmpty()) {
-            "sms;-;${recipients.first()}"
+        // Normalize addresses to prevent duplicate conversations
+        val normalizedRecipients = recipients.map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
+        val chatGuid = if (normalizedRecipients.size == 1 && attachments.isEmpty()) {
+            "sms;-;${normalizedRecipients.first()}"
         } else {
-            "mms;-;${recipients.sorted().joinToString(",")}"
+            "mms;-;${normalizedRecipients.sorted().joinToString(",")}"
         }
 
-        ensureChatExists(chatGuid, recipients.firstOrNull() ?: "", isGroup = recipients.size > 1)
+        ensureChatExists(chatGuid, normalizedRecipients.firstOrNull() ?: "", isGroup = normalizedRecipients.size > 1)
         return mmsSendService.sendMms(recipients, text, attachments, chatGuid, subject, subscriptionId)
     }
 

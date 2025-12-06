@@ -7,11 +7,13 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bluebubbles.data.local.db.dao.AttachmentDao
 import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
+import com.bluebubbles.data.local.db.dao.LinkPreviewDao
 import com.bluebubbles.data.local.db.dao.MessageDao
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bluebubbles.data.local.db.entity.HandleEntity
+import com.bluebubbles.data.local.db.entity.LinkPreviewEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 
 /**
@@ -41,9 +43,10 @@ import com.bluebubbles.data.local.db.entity.MessageEntity
         MessageEntity::class,
         HandleEntity::class,
         AttachmentEntity::class,
-        ChatHandleCrossRef::class
+        ChatHandleCrossRef::class,
+        LinkPreviewEntity::class
     ],
-    version = 4,
+    version = 8,
     exportSchema = true
 )
 abstract class BlueBubblesDatabase : RoomDatabase() {
@@ -52,6 +55,7 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
     abstract fun handleDao(): HandleDao
     abstract fun attachmentDao(): AttachmentDao
+    abstract fun linkPreviewDao(): LinkPreviewDao
 
     companion object {
         const val DATABASE_NAME = "bluebubbles.db"
@@ -126,6 +130,95 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 4 to 5: Add link_previews table for caching URL metadata
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS link_previews (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        url TEXT NOT NULL,
+                        url_hash TEXT NOT NULL,
+                        domain TEXT NOT NULL,
+                        title TEXT DEFAULT NULL,
+                        description TEXT DEFAULT NULL,
+                        image_url TEXT DEFAULT NULL,
+                        favicon_url TEXT DEFAULT NULL,
+                        site_name TEXT DEFAULT NULL,
+                        content_type TEXT DEFAULT NULL,
+                        video_url TEXT DEFAULT NULL,
+                        video_duration INTEGER DEFAULT NULL,
+                        fetch_status TEXT NOT NULL DEFAULT 'PENDING',
+                        created_at INTEGER NOT NULL,
+                        last_accessed INTEGER NOT NULL,
+                        expires_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_link_previews_url_hash ON link_previews(url_hash)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_link_previews_last_accessed ON link_previews(last_accessed)")
+            }
+        }
+
+        /**
+         * Migration from version 5 to 6: Add oEmbed-specific columns to link_previews table
+         */
+        val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE link_previews ADD COLUMN embed_html TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE link_previews ADD COLUMN author_name TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE link_previews ADD COLUMN author_url TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Migration from version 6 to 7: Add spam detection columns to chats and handles tables
+         */
+        val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Spam columns for chats table
+                db.execSQL("ALTER TABLE chats ADD COLUMN is_spam INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chats ADD COLUMN spam_score INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chats ADD COLUMN spam_reported_to_carrier INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_spam ON chats(is_spam)")
+
+                // Spam columns for handles table
+                db.execSQL("ALTER TABLE handles ADD COLUMN spam_report_count INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE handles ADD COLUMN is_whitelisted INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * Migration from version 7 to 8: Remove duplicate MMS messages that match existing SMS messages.
+         * Some phones record the same message as both SMS and MMS with different IDs, causing duplicates.
+         * This migration finds MMS messages that have a matching SMS message (same chat, text, sender,
+         * and timestamp within 10 seconds) and removes the MMS duplicates.
+         */
+        val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Delete MMS messages that have a matching SMS message with:
+                // - Same chat_guid
+                // - Same text content
+                // - Same is_from_me value
+                // - Timestamp within 10 seconds (10000ms)
+                db.execSQL("""
+                    DELETE FROM messages
+                    WHERE guid LIKE 'mms-%'
+                    AND id IN (
+                        SELECT mms.id
+                        FROM messages mms
+                        INNER JOIN messages sms ON
+                            sms.guid LIKE 'sms-%'
+                            AND sms.chat_guid = mms.chat_guid
+                            AND sms.text = mms.text
+                            AND sms.is_from_me = mms.is_from_me
+                            AND ABS(sms.date_created - mms.date_created) <= 10000
+                        WHERE mms.guid LIKE 'mms-%'
+                    )
+                """.trimIndent())
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -134,7 +227,11 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
         val ALL_MIGRATIONS = arrayOf(
             MIGRATION_1_2,
             MIGRATION_2_3,
-            MIGRATION_3_4
+            MIGRATION_3_4,
+            MIGRATION_4_5,
+            MIGRATION_5_6,
+            MIGRATION_6_7,
+            MIGRATION_7_8
         )
     }
 }

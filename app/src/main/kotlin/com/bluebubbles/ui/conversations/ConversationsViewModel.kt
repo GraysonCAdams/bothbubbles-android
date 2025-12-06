@@ -11,15 +11,20 @@ import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.repository.ChatRepository
+import com.bluebubbles.data.repository.LinkPreviewRepository
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sync.SyncService
 import com.bluebubbles.services.sync.SyncState
 import com.bluebubbles.ui.components.ConnectionBannerState
+import com.bluebubbles.ui.components.SmsBannerState
 import com.bluebubbles.ui.components.SwipeActionType
 import com.bluebubbles.ui.components.SwipeConfig
 import com.bluebubbles.ui.components.determineConnectionBannerState
+import com.bluebubbles.ui.components.determineSmsBannerState
+import com.bluebubbles.ui.components.UrlParsingUtils
+import com.bluebubbles.services.sms.SmsPermissionHelper
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -41,7 +46,9 @@ class ConversationsViewModel @Inject constructor(
     private val socketService: SocketService,
     private val syncService: SyncService,
     private val settingsDataStore: SettingsDataStore,
-    private val api: BlueBubblesApi
+    private val api: BlueBubblesApi,
+    private val smsPermissionHelper: SmsPermissionHelper,
+    private val linkPreviewRepository: LinkPreviewRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConversationsUiState())
@@ -49,6 +56,7 @@ class ConversationsViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     private val _typingChats = MutableStateFlow<Set<String>>(emptySet())
+    private val _smsStateRefreshTrigger = MutableStateFlow(0)
 
     // Track if we've ever successfully connected (for banner logic)
     private var wasEverConnected = false
@@ -57,6 +65,7 @@ class ConversationsViewModel @Inject constructor(
         loadConversations()
         observeConnectionState()
         observeConnectionBannerState()
+        observeSmsBannerState()
         observeTypingIndicators()
         observeSyncState()
         observeSwipeSettings()
@@ -225,6 +234,45 @@ class ConversationsViewModel @Inject constructor(
     fun retryConnection() {
         socketService.retryNow()
     }
+
+    private fun observeSmsBannerState() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.smsEnabled,
+                settingsDataStore.dismissedSmsBanner,
+                _smsStateRefreshTrigger
+            ) { smsEnabled, isSmsBannerDismissed, _ ->
+                determineSmsBannerState(
+                    smsEnabled = smsEnabled,
+                    isDefaultSmsApp = smsPermissionHelper.isDefaultSmsApp(),
+                    hasAllPermissions = smsPermissionHelper.hasAllSmsPermissions(),
+                    isSmsBannerDismissed = isSmsBannerDismissed
+                )
+            }.collect { bannerState ->
+                _uiState.update { it.copy(smsBannerState = bannerState) }
+            }
+        }
+    }
+
+    fun dismissSmsBanner() {
+        viewModelScope.launch {
+            settingsDataStore.setDismissedSmsBanner(true)
+        }
+    }
+
+    /**
+     * Refresh SMS banner state. Call this when returning to the screen
+     * to re-check default app and permission status.
+     */
+    fun refreshSmsState() {
+        _smsStateRefreshTrigger.value++
+    }
+
+    /**
+     * Create intent to request becoming the default SMS app.
+     * Returns the intent for the activity to launch.
+     */
+    fun getSmsDefaultAppIntent() = smsPermissionHelper.createDefaultSmsAppIntent()
 
     private fun observeTypingIndicators() {
         viewModelScope.launch {
@@ -398,6 +446,14 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    fun markChatsAsRead(chatGuids: Set<String>) {
+        viewModelScope.launch {
+            chatGuids.forEach { chatGuid ->
+                chatRepository.markChatAsRead(chatGuid)
+            }
+        }
+    }
+
     fun blockChats(chatGuids: Set<String>) {
         viewModelScope.launch {
             chatGuids.forEach { chatGuid ->
@@ -456,6 +512,21 @@ class ConversationsViewModel @Inject constructor(
             displayName ?: chatIdentifier ?: "Unknown"
         }
 
+        // Fetch link preview data for LINK type messages
+        val (linkTitle, linkDomain) = if (messageType == MessageType.LINK) {
+            val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
+            if (detectedUrl != null) {
+                val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
+                val title = preview?.title?.takeIf { it.isNotBlank() }
+                val domain = preview?.domain ?: detectedUrl.domain
+                title to domain
+            } else {
+                null to null
+            }
+        } else {
+            null to null
+        }
+
         return ConversationUiModel(
             guid = guid,
             displayName = resolvedDisplayName,
@@ -476,7 +547,10 @@ class ConversationsViewModel @Inject constructor(
             participantNames = participantNames,
             address = address,
             hasInferredName = primaryParticipant?.hasInferredName == true,
-            inferredName = primaryParticipant?.inferredName
+            inferredName = primaryParticipant?.inferredName,
+            lastMessageLinkTitle = linkTitle,
+            lastMessageLinkDomain = linkDomain,
+            isSpam = isSpam
         )
     }
 
@@ -516,6 +590,7 @@ data class ConversationsUiState(
     val isConnected: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
+    val smsBannerState: SmsBannerState = SmsBannerState.Disabled,
     val conversations: List<ConversationUiModel> = emptyList(),
     val searchQuery: String = "",
     val error: String? = null,
@@ -558,7 +633,10 @@ data class ConversationUiModel(
     val participantNames: List<String> = emptyList(),
     val address: String = "", // Primary address (phone/email) for the chat
     val hasInferredName: Boolean = false, // True if displaying an inferred "Maybe: X" name
-    val inferredName: String? = null // Raw inferred name without "Maybe:" prefix (for add contact)
+    val inferredName: String? = null, // Raw inferred name without "Maybe:" prefix (for add contact)
+    val lastMessageLinkTitle: String? = null, // Link preview title for LINK type messages
+    val lastMessageLinkDomain: String? = null, // Link domain for LINK type messages
+    val isSpam: Boolean = false // Whether this conversation is marked as spam
 ) {
     /**
      * Returns true if this conversation has a saved contact.
@@ -588,5 +666,6 @@ enum class MessageStatus {
     SENDING,    // Message is being sent (temp guid)
     SENT,       // Message sent but not delivered
     DELIVERED,  // Message delivered to recipient
-    READ        // Message read by recipient
+    READ,       // Message read by recipient
+    FAILED      // Message failed to send
 }

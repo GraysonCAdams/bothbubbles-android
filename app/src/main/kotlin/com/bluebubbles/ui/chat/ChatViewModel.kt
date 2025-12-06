@@ -21,6 +21,8 @@ import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sound.SoundManager
+import com.bluebubbles.services.spam.SpamReportingService
+import com.bluebubbles.services.spam.SpamRepository
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ReactionUiModel
 import com.bluebubbles.ui.components.Tapback
@@ -42,7 +44,9 @@ class ChatViewModel @Inject constructor(
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val soundManager: SoundManager
+    private val soundManager: SoundManager,
+    private val spamRepository: SpamRepository,
+    private val spamReportingService: SpamReportingService
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -197,7 +201,9 @@ class ChatViewModel @Inject constructor(
                             isGroup = it.isGroup,
                             isArchived = it.isArchived,
                             isStarred = it.isStarred,
-                            participantPhone = it.chatIdentifier
+                            participantPhone = it.chatIdentifier,
+                            isSpam = it.isSpam,
+                            isReportedToCarrier = it.spamReportedToCarrier
                         )
                     }
                 }
@@ -916,6 +922,52 @@ class ChatViewModel @Inject constructor(
     private fun formatTime(timestamp: Long): String {
         return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
     }
+
+    /**
+     * Mark the current chat as safe (not spam).
+     * This clears the spam flag and whitelists all participants.
+     */
+    fun markAsSafe() {
+        viewModelScope.launch {
+            spamRepository.markAsSafe(chatGuid)
+        }
+    }
+
+    /**
+     * Report the current chat as spam.
+     * This marks the chat as spam and increments the spam count for all participants.
+     */
+    fun reportAsSpam() {
+        viewModelScope.launch {
+            spamRepository.reportAsSpam(chatGuid)
+        }
+    }
+
+    /**
+     * Report the spam to carrier via 7726.
+     * Only works for SMS chats.
+     */
+    fun reportToCarrier(): Boolean {
+        if (!uiState.value.isLocalSmsChat) return false
+
+        viewModelScope.launch {
+            val result = spamReportingService.reportToCarrier(chatGuid)
+            if (result is SpamReportingService.ReportResult.Success) {
+                _uiState.update { it.copy(isReportedToCarrier = true) }
+            }
+        }
+        return true
+    }
+
+    /**
+     * Check if the chat has already been reported to carrier.
+     */
+    fun checkReportedToCarrier() {
+        viewModelScope.launch {
+            val isReported = spamReportingService.isReportedToCarrier(chatGuid)
+            _uiState.update { it.copy(isReportedToCarrier = isReported) }
+        }
+    }
 }
 
 data class ChatUiState(
@@ -948,5 +1000,8 @@ data class ChatUiState(
     val currentSearchMatchIndex: Int = -1,
     // SMS fallback mode
     val isInSmsFallbackMode: Boolean = false,
-    val isServerConnected: Boolean = true
+    val isServerConnected: Boolean = true,
+    // Spam detection
+    val isSpam: Boolean = false,
+    val isReportedToCarrier: Boolean = false
 )

@@ -25,6 +25,9 @@ interface HandleDao {
     @Query("SELECT * FROM handles WHERE address = :address")
     suspend fun getHandlesByAddress(address: String): List<HandleEntity>
 
+    @Query("SELECT * FROM handles WHERE address = :address LIMIT 1")
+    suspend fun getHandleByAddressAny(address: String): HandleEntity?
+
     @Query("""
         SELECT * FROM handles
         WHERE address LIKE '%' || :query || '%'
@@ -61,6 +64,23 @@ interface HandleDao {
 
     @Query("UPDATE handles SET inferred_name = :inferredName WHERE id = :id")
     suspend fun updateInferredName(id: Long, inferredName: String?)
+
+    // ===== Spam =====
+
+    @Query("UPDATE handles SET spam_report_count = spam_report_count + 1 WHERE id = :id")
+    suspend fun incrementSpamReportCount(id: Long)
+
+    @Query("UPDATE handles SET spam_report_count = spam_report_count + 1 WHERE address = :address")
+    suspend fun incrementSpamReportCountByAddress(address: String)
+
+    @Query("UPDATE handles SET is_whitelisted = :isWhitelisted WHERE id = :id")
+    suspend fun updateWhitelisted(id: Long, isWhitelisted: Boolean)
+
+    @Query("UPDATE handles SET is_whitelisted = :isWhitelisted WHERE address = :address")
+    suspend fun updateWhitelistedByAddress(address: String, isWhitelisted: Boolean)
+
+    @Query("UPDATE handles SET spam_report_count = 0, is_whitelisted = 0 WHERE id = :id")
+    suspend fun resetSpamStatus(id: Long)
 
     // ===== Deletes =====
 

@@ -13,6 +13,7 @@ import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
+import com.bluebubbles.data.remote.api.ProgressRequestBody
 import com.bluebubbles.data.remote.api.dto.EditMessageRequest
 import com.bluebubbles.data.remote.api.dto.MessageDto
 import com.bluebubbles.data.remote.api.dto.SendMessageRequest
@@ -27,6 +28,9 @@ import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
@@ -63,6 +67,19 @@ class MessageRepository @Inject constructor(
     companion object {
         private const val TAG = "MessageRepository"
     }
+
+    // ===== Upload Progress Tracking =====
+
+    private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
+    val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
+
+    /**
+     * Reset upload progress state
+     */
+    fun resetUploadProgress() {
+        _uploadProgress.value = null
+    }
+
     // ===== Local Operations =====
 
     fun observeMessagesForChat(chatGuid: String, limit: Int, offset: Int): Flow<List<MessageEntity>> =
@@ -464,16 +481,27 @@ class MessageRepository @Inject constructor(
 
         var lastResponse: MessageDto? = null
 
-        // Upload each attachment
+        // Upload each attachment with progress tracking
+        val totalAttachments = attachments.size
         attachments.forEachIndexed { index, uri ->
-            val attachmentResult = uploadAttachment(chatGuid, "$tempGuid-att-$index", uri)
+            val attachmentResult = uploadAttachment(
+                chatGuid = chatGuid,
+                tempGuid = "$tempGuid-att-$index",
+                uri = uri,
+                attachmentIndex = index,
+                totalAttachments = totalAttachments
+            )
             if (attachmentResult.isFailure) {
-                // Mark message as failed
+                // Mark message as failed and reset progress
                 messageDao.updateErrorStatus(tempGuid, 1)
+                _uploadProgress.value = null
                 throw attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
             }
             lastResponse = attachmentResult.getOrNull()
         }
+
+        // Reset progress after all attachments uploaded
+        _uploadProgress.value = null
 
         // Send text message if present
         if (text.isNotBlank()) {
@@ -507,12 +535,14 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Upload a single attachment to BlueBubbles server
+     * Upload a single attachment to BlueBubbles server with progress tracking
      */
     private suspend fun uploadAttachment(
         chatGuid: String,
         tempGuid: String,
-        uri: Uri
+        uri: Uri,
+        attachmentIndex: Int = 0,
+        totalAttachments: Int = 1
     ): Result<MessageDto> = runCatching {
         val contentResolver = context.contentResolver
 
@@ -528,9 +558,19 @@ class MessageRepository @Inject constructor(
 
         Log.d(TAG, "Uploading attachment: $fileName ($mimeType, ${bytes.size} bytes)")
 
-        // Create multipart request
-        val requestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
-        val filePart = MultipartBody.Part.createFormData("attachment", fileName, requestBody)
+        // Create progress-tracking request body
+        val baseRequestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+        val progressRequestBody = ProgressRequestBody(baseRequestBody) { bytesWritten, contentLength ->
+            _uploadProgress.value = UploadProgress(
+                fileName = fileName,
+                bytesUploaded = bytesWritten,
+                totalBytes = contentLength,
+                attachmentIndex = attachmentIndex,
+                totalAttachments = totalAttachments
+            )
+        }
+
+        val filePart = MultipartBody.Part.createFormData("attachment", fileName, progressRequestBody)
 
         val response = api.sendAttachment(
             chatGuid = chatGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
@@ -820,4 +860,21 @@ class MessageRepository @Inject constructor(
             messageSource = MessageSource.IMESSAGE.name
         )
     }
+}
+
+/**
+ * Represents the progress of an attachment upload
+ */
+data class UploadProgress(
+    val fileName: String,
+    val bytesUploaded: Long,
+    val totalBytes: Long,
+    val attachmentIndex: Int,
+    val totalAttachments: Int
+) {
+    val progress: Float
+        get() = if (totalBytes > 0) bytesUploaded.toFloat() / totalBytes else 0f
+
+    val isComplete: Boolean
+        get() = bytesUploaded >= totalBytes
 }

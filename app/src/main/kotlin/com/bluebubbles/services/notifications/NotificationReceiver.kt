@@ -1,10 +1,15 @@
 package com.bluebubbles.services.notifications
 
 import android.content.BroadcastReceiver
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.core.app.RemoteInput
 import com.bluebubbles.data.repository.ChatRepository
+import com.bluebubbles.data.repository.FaceTimeRepository
 import com.bluebubbles.data.repository.MessageRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +31,9 @@ class NotificationReceiver : BroadcastReceiver() {
     lateinit var chatRepository: ChatRepository
 
     @Inject
+    lateinit var faceTimeRepository: FaceTimeRepository
+
+    @Inject
     lateinit var notificationService: NotificationService
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -34,6 +42,9 @@ class NotificationReceiver : BroadcastReceiver() {
         when (intent.action) {
             NotificationService.ACTION_REPLY -> handleReply(intent)
             NotificationService.ACTION_MARK_READ -> handleMarkRead(intent)
+            NotificationService.ACTION_COPY_CODE -> handleCopyCode(context, intent)
+            NotificationService.ACTION_ANSWER_FACETIME -> handleAnswerFaceTime(context, intent)
+            NotificationService.ACTION_DECLINE_FACETIME -> handleDeclineFaceTime(intent)
         }
     }
 
@@ -69,6 +80,55 @@ class NotificationReceiver : BroadcastReceiver() {
             } catch (e: Exception) {
                 e.printStackTrace()
             }
+        }
+    }
+
+    private fun handleCopyCode(context: Context, intent: Intent) {
+        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
+        val code = intent.getStringExtra(NotificationService.EXTRA_CODE_TO_COPY) ?: return
+
+        // Copy code to clipboard
+        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = ClipData.newPlainText("Verification Code", code)
+        clipboard.setPrimaryClip(clip)
+
+        // Show toast and dismiss notification
+        Toast.makeText(context, "Code copied: $code", Toast.LENGTH_SHORT).show()
+        notificationService.cancelNotification(chatGuid)
+    }
+
+    private fun handleAnswerFaceTime(context: Context, intent: Intent) {
+        val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
+
+        scope.launch {
+            faceTimeRepository.answerCall(callUuid).fold(
+                onSuccess = { link ->
+                    // Dismiss notification
+                    notificationService.dismissFaceTimeCallNotification(callUuid)
+
+                    // Open FaceTime link in browser
+                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply {
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    }
+                    context.startActivity(browserIntent)
+                },
+                onFailure = { e ->
+                    Toast.makeText(
+                        context,
+                        "Failed to answer: ${e.message}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            )
+        }
+    }
+
+    private fun handleDeclineFaceTime(intent: Intent) {
+        val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
+
+        scope.launch {
+            faceTimeRepository.declineCall(callUuid)
+            notificationService.dismissFaceTimeCallNotification(callUuid)
         }
     }
 }

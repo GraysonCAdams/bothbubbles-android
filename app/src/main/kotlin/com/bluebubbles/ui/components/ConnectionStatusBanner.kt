@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SignalCellularOff
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.CircularProgressIndicator
@@ -46,7 +47,7 @@ import androidx.compose.ui.unit.dp
 import com.bluebubbles.services.socket.ConnectionState
 
 /**
- * Connection status banner types
+ * Connection status banner types for iMessage
  */
 sealed class ConnectionBannerState {
     /** Server not configured - show setup CTA (dismissible) */
@@ -60,6 +61,23 @@ sealed class ConnectionBannerState {
 
     /** Banner dismissed by user (for NotConfigured state only) */
     object Dismissed : ConnectionBannerState()
+}
+
+/**
+ * SMS status banner types
+ */
+sealed class SmsBannerState {
+    /** SMS is enabled but app is not the default SMS app (dismissible) */
+    object NotDefaultApp : SmsBannerState()
+
+    /** SMS is working normally - hide banner */
+    object Connected : SmsBannerState()
+
+    /** Banner dismissed by user */
+    object Dismissed : SmsBannerState()
+
+    /** SMS is not enabled - hide banner */
+    object Disabled : SmsBannerState()
 }
 
 /**
@@ -107,7 +125,6 @@ fun ConnectionStatusBanner(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .navigationBarsPadding()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             shape = RoundedCornerShape(16.dp),
             color = when (state) {
@@ -297,6 +314,139 @@ fun determineConnectionBannerState(
                 } else {
                     ConnectionBannerState.NotConfigured
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Helper function to determine the SMS banner state
+ */
+fun determineSmsBannerState(
+    smsEnabled: Boolean,
+    isDefaultSmsApp: Boolean,
+    hasAllPermissions: Boolean,
+    isSmsBannerDismissed: Boolean
+): SmsBannerState {
+    return when {
+        !smsEnabled -> SmsBannerState.Disabled
+        isDefaultSmsApp && hasAllPermissions -> SmsBannerState.Connected
+        isSmsBannerDismissed -> SmsBannerState.Dismissed
+        else -> SmsBannerState.NotDefaultApp
+    }
+}
+
+/**
+ * Bottom banner that displays SMS status with appropriate actions.
+ *
+ * Behavior:
+ * - When SMS is enabled but app is not default: Shows dismissible banner with "Set as default" CTA
+ * - When SMS is disabled or app is default: Banner is hidden
+ * - Dismissed state persists until app becomes/stops being the default SMS app
+ *
+ * @param state The current SMS banner state
+ * @param onSetAsDefaultClick Called when user taps "Set as default" CTA
+ * @param onDismiss Called when user dismisses the banner
+ * @param modifier Modifier for the banner
+ */
+@Composable
+fun SmsStatusBanner(
+    state: SmsBannerState,
+    onSetAsDefaultClick: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isVisible = state is SmsBannerState.NotDefaultApp
+
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = slideInVertically(
+            initialOffsetY = { it },
+            animationSpec = tween(durationMillis = 300)
+        ),
+        exit = slideOutVertically(
+            targetOffsetY = { it },
+            animationSpec = tween(durationMillis = 300)
+        ),
+        modifier = modifier
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            tonalElevation = 2.dp,
+            shadowElevation = 4.dp
+        ) {
+            SmsNotDefaultBanner(
+                onSetAsDefaultClick = onSetAsDefaultClick,
+                onDismiss = onDismiss
+            )
+        }
+    }
+}
+
+@Composable
+private fun SmsNotDefaultBanner(
+    onSetAsDefaultClick: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.weight(1f)
+        ) {
+            Icon(
+                imageVector = Icons.Default.SignalCellularOff,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Text(
+                text = "SMS not connected",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                fontWeight = FontWeight.Medium
+            )
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onSetAsDefaultClick) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "Set up",
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Dismiss",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }

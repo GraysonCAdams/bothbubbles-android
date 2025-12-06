@@ -46,31 +46,31 @@ sealed interface Screen {
     data object Settings : Screen
 
     @Serializable
-    data object SmsSettings : Screen
+    data class SmsSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object ServerSettings : Screen
+    data class ServerSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object ArchivedChats : Screen
+    data class ArchivedChats(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object BlockedContacts : Screen
+    data class BlockedContacts(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object SyncSettings : Screen
+    data class SyncSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object NotificationSettings : Screen
+    data class NotificationSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object About : Screen
+    data class About(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object SwipeSettings : Screen
+    data class SwipeSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
-    data object EffectsSettings : Screen
+    data class EffectsSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
     data class MediaViewer(

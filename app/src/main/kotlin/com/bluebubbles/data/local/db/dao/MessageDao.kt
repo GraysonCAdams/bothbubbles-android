@@ -97,6 +97,27 @@ interface MessageDao {
     @Query("SELECT COUNT(*) FROM messages WHERE date_deleted IS NULL")
     suspend fun getTotalMessageCount(): Int
 
+    /**
+     * Find a matching message by content and timestamp within a tolerance window.
+     * Used to detect duplicate SMS/MMS messages that may have different GUIDs.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid
+        AND date_deleted IS NULL
+        AND text = :text
+        AND is_from_me = :isFromMe
+        AND ABS(date_created - :dateCreated) <= :toleranceMs
+        LIMIT 1
+    """)
+    suspend fun findMatchingMessage(
+        chatGuid: String,
+        text: String?,
+        isFromMe: Boolean,
+        dateCreated: Long,
+        toleranceMs: Long = 5000
+    ): MessageEntity?
+
     // ===== Inserts/Updates =====
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)

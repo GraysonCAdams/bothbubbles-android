@@ -170,11 +170,11 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.DISMISSED_SETUP_BANNER] ?: false
     }
 
-    // ===== Message Effects =====
-
-    val effectsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.EFFECTS_ENABLED] ?: true
+    val dismissedSmsBanner: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DISMISSED_SMS_BANNER] ?: false
     }
+
+    // ===== Message Effects =====
 
     val autoPlayEffects: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.AUTO_PLAY_EFFECTS] ?: true
@@ -188,22 +188,10 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.REDUCE_MOTION] ?: false
     }
 
-    val disableEffectsOnLowBattery: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.DISABLE_EFFECTS_LOW_BATTERY] ?: true
-    }
-
-    val lowBatteryThreshold: Flow<Int> = dataStore.data.map { prefs ->
-        prefs[Keys.LOW_BATTERY_THRESHOLD] ?: 20
-    }
-
     // ===== Sound Settings =====
 
-    val sendSoundEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.SEND_SOUND_ENABLED] ?: true
-    }
-
-    val receiveSoundEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.RECEIVE_SOUND_ENABLED] ?: true
+    val messageSoundsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.MESSAGE_SOUNDS_ENABLED] ?: true
     }
 
     // ===== Setters =====
@@ -402,9 +390,15 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
-    suspend fun setEffectsEnabled(enabled: Boolean) {
+    suspend fun setDismissedSmsBanner(dismissed: Boolean) {
         dataStore.edit { prefs ->
-            prefs[Keys.EFFECTS_ENABLED] = enabled
+            prefs[Keys.DISMISSED_SMS_BANNER] = dismissed
+        }
+    }
+
+    suspend fun resetSmsBannerDismissal() {
+        dataStore.edit { prefs ->
+            prefs[Keys.DISMISSED_SMS_BANNER] = false
         }
     }
 
@@ -426,27 +420,9 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
-    suspend fun setDisableEffectsOnLowBattery(enabled: Boolean) {
+    suspend fun setMessageSoundsEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
-            prefs[Keys.DISABLE_EFFECTS_LOW_BATTERY] = enabled
-        }
-    }
-
-    suspend fun setLowBatteryThreshold(threshold: Int) {
-        dataStore.edit { prefs ->
-            prefs[Keys.LOW_BATTERY_THRESHOLD] = threshold
-        }
-    }
-
-    suspend fun setSendSoundEnabled(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[Keys.SEND_SOUND_ENABLED] = enabled
-        }
-    }
-
-    suspend fun setReceiveSoundEnabled(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[Keys.RECEIVE_SOUND_ENABLED] = enabled
+            prefs[Keys.MESSAGE_SOUNDS_ENABLED] = enabled
         }
     }
 
@@ -518,17 +494,14 @@ class SettingsDataStore @Inject constructor(
         // Dismissed Banners
         val DISMISSED_SAVE_CONTACT_BANNERS = stringPreferencesKey("dismissed_save_contact_banners")
         val DISMISSED_SETUP_BANNER = booleanPreferencesKey("dismissed_setup_banner")
+        val DISMISSED_SMS_BANNER = booleanPreferencesKey("dismissed_sms_banner")
 
         // Message Effects
-        val EFFECTS_ENABLED = booleanPreferencesKey("effects_enabled")
         val AUTO_PLAY_EFFECTS = booleanPreferencesKey("auto_play_effects")
         val REPLAY_EFFECTS_ON_SCROLL = booleanPreferencesKey("replay_effects_on_scroll")
         val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
-        val DISABLE_EFFECTS_LOW_BATTERY = booleanPreferencesKey("disable_effects_low_battery")
-        val LOW_BATTERY_THRESHOLD = intPreferencesKey("low_battery_threshold")
 
         // Sound Settings
-        val SEND_SOUND_ENABLED = booleanPreferencesKey("send_sound_enabled")
-        val RECEIVE_SOUND_ENABLED = booleanPreferencesKey("receive_sound_enabled")
+        val MESSAGE_SOUNDS_ENABLED = booleanPreferencesKey("message_sounds_enabled")
     }
 }

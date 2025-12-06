@@ -567,6 +567,14 @@ fun MessageStatusIndicator(
                 modifier = modifier.size(16.dp)
             )
         }
+        MessageStatus.FAILED -> {
+            Icon(
+                imageVector = Icons.Default.ErrorOutline,
+                contentDescription = "Failed",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = modifier.size(16.dp)
+            )
+        }
         MessageStatus.NONE -> { /* No indicator */ }
     }
 }

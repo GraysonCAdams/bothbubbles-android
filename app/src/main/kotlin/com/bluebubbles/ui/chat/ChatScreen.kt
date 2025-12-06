@@ -1,6 +1,7 @@
 package com.bluebubbles.ui.chat
 
 import android.Manifest
+import android.media.MediaActionSound
 import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
@@ -13,6 +14,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.imePadding
@@ -25,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.material.icons.Icons
@@ -53,6 +57,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -66,14 +71,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import com.bluebubbles.util.PhoneNumberFormatter
 import com.bluebubbles.R
 import com.bluebubbles.ui.components.AttachmentPickerPanel
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.DateSeparator
 import com.bluebubbles.ui.components.MessageBubble
+import com.bluebubbles.ui.components.MessageGroupPosition
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ScheduleMessageDialog
+import com.bluebubbles.ui.components.SpamSafetyBanner
 import com.bluebubbles.ui.components.TapbackMenu
 import com.bluebubbles.ui.effects.EffectPickerSheet
 import com.bluebubbles.ui.effects.MessageEffect
@@ -143,6 +151,14 @@ fun ChatScreen(
     // Audio amplitude history for waveform visualization (stores last 20 amplitude values)
     var amplitudeHistory by remember { mutableStateOf(List(20) { 0f }) }
 
+    // Recording feedback sounds
+    val mediaActionSound = remember {
+        MediaActionSound().apply {
+            load(MediaActionSound.START_VIDEO_RECORDING)
+            load(MediaActionSound.STOP_VIDEO_RECORDING)
+        }
+    }
+
     // Check WhatsApp availability
     val isWhatsAppAvailable = remember { viewModel.isWhatsAppAvailable(context) }
 
@@ -158,6 +174,7 @@ fun ChatScreen(
                     mediaRecorder = recorder
                     recordingFile = file
                     isRecording = true
+                    mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
                 },
                 onError = { error ->
                     Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
@@ -212,6 +229,7 @@ fun ChatScreen(
         onDispose {
             mediaRecorder?.release()
             mediaPlayer?.release()
+            mediaActionSound.release()
         }
     }
 
@@ -368,6 +386,7 @@ fun ChatScreen(
                             // Stop recording and enter preview mode
                             try {
                                 mediaRecorder?.stop()
+                                mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
                             } catch (_: Exception) {
                                 // May throw if no audio was recorded
                             }
@@ -388,6 +407,7 @@ fun ChatScreen(
                         },
                         onSend = {
                             mediaRecorder?.stop()
+                            mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
                             mediaRecorder?.release()
                             mediaRecorder = null
                             isRecording = false
@@ -500,6 +520,7 @@ fun ChatScreen(
                                         mediaRecorder = recorder
                                         recordingFile = file
                                         isRecording = true
+                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
                                     },
                                     onError = { error ->
                                         Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
@@ -512,6 +533,7 @@ fun ChatScreen(
                             if (isRecording) {
                                 try {
                                     mediaRecorder?.stop()
+                                    mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
                                 } catch (_: Exception) {
                                     // May throw if no audio was recorded
                                 }
@@ -554,6 +576,17 @@ fun ChatScreen(
             if (uiState.currentSearchMatchIndex >= 0 && uiState.searchMatchIndices.isNotEmpty()) {
                 val messageIndex = uiState.searchMatchIndices[uiState.currentSearchMatchIndex]
                 listState.animateScrollToItem(messageIndex)
+            }
+        }
+
+        // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
+        // This ensures tall content like link previews isn't clipped by the keyboard
+        LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
+            val isNearBottom = listState.firstVisibleItemIndex <= 2
+            if (uiState.messages.isNotEmpty() && isNearBottom) {
+                // Small delay to let the message render and calculate its height
+                kotlinx.coroutines.delay(100)
+                listState.animateScrollToItem(0)
             }
         }
 
@@ -619,13 +652,42 @@ fun ChatScreen(
                     )
                 }
                 else -> {
+                    // Animate top padding when save contact banner is shown
+                    // Extra padding accounts for reaction badges that extend above messages
+                    val bannerTopPadding by animateDpAsState(
+                        targetValue = if (uiState.showSaveContactBanner) 24.dp else 8.dp,
+                        animationSpec = tween(durationMillis = 300),
+                        label = "banner_padding"
+                    )
+
+                    // Get IME (keyboard) height to add extra scroll space when keyboard is visible
+                    val imeInsets = WindowInsets.ime
+                    val density = androidx.compose.ui.platform.LocalDensity.current
+                    val imeHeight = with(density) { imeInsets.getBottom(density).toDp() }
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
                         reverseLayout = true,
-                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        contentPadding = PaddingValues(
+                            start = 16.dp,
+                            end = 16.dp,
+                            top = bannerTopPadding,
+                            // Add IME height to ensure content can scroll above keyboard
+                            bottom = 8.dp + imeHeight
+                        )
+                        // Spacing is handled per-item based on group position
                     ) {
+                        // Spam safety banner - shows at the bottom when chat is marked as spam
+                        // Since reverseLayout=true, adding at start puts it at visual bottom
+                        if (uiState.isSpam) {
+                            item(key = "spam_safety_banner") {
+                                SpamSafetyBanner(
+                                    onMarkAsSafe = { viewModel.markAsSafe() }
+                                )
+                            }
+                        }
+
                         itemsIndexed(
                             items = uiState.messages,
                             key = { _, message -> message.guid }
@@ -648,11 +710,40 @@ fun ChatScreen(
                             val nextVisibleMessage = uiState.messages
                                 .drop(index + 1)
                                 .firstOrNull { !it.isReaction }
-                            val showTimeSeparator = !message.isReaction && nextVisibleMessage?.let {
+                            // Show separator if:
+                            // 1. There's a 15+ minute gap with the next message, OR
+                            // 2. This is the oldest message in the list (no next message) - always show a separator
+                            val showTimeSeparator = !message.isReaction && (nextVisibleMessage?.let {
                                 shouldShowTimeSeparator(message.dateCreated, it.dateCreated)
-                            } ?: false
+                            } ?: true)
 
-                            Column {
+                            // Calculate group position for visual message grouping
+                            // In reversed layout: index 0 = newest (bottom), higher index = older (top)
+                            val groupPosition = calculateGroupPosition(
+                                messages = uiState.messages,
+                                index = index,
+                                message = message
+                            )
+
+                            // Spacing based on group position:
+                            // - SINGLE/FIRST: 6dp top (gap between groups)
+                            // - MIDDLE/LAST: 2dp top (tight within group)
+                            val topPadding = when (groupPosition) {
+                                MessageGroupPosition.SINGLE, MessageGroupPosition.FIRST -> 6.dp
+                                MessageGroupPosition.MIDDLE, MessageGroupPosition.LAST -> 2.dp
+                            }
+
+                            Column(
+                                modifier = Modifier.padding(top = topPadding)
+                            ) {
+                                // Show centered time separator BEFORE the message
+                                // In reversed layout, this makes it appear above the message visually
+                                if (showTimeSeparator) {
+                                    DateSeparator(
+                                        date = formatTimeSeparator(message.dateCreated)
+                                    )
+                                }
+
                                 Box {
                                     MessageBubble(
                                         message = message,
@@ -669,6 +760,7 @@ fun ChatScreen(
                                             }
                                         },
                                         onMediaClick = onMediaClick,
+                                        groupPosition = groupPosition,
                                         searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
                                         isCurrentSearchMatch = isCurrentSearchMatch
                                     )
@@ -709,13 +801,6 @@ fun ChatScreen(
                                             isFromMe = message.isFromMe
                                         )
                                     }
-                                }
-
-                                // Show centered time separator if there's a significant gap
-                                if (showTimeSeparator) {
-                                    DateSeparator(
-                                        date = formatTimeSeparator(message.dateCreated)
-                                    )
                                 }
                             }
                         }
@@ -775,13 +860,31 @@ fun ChatScreen(
         BlockAndReportDialog(
             chatDisplayName = uiState.chatTitle,
             isSmsChat = uiState.isLocalSmsChat,
-            onConfirm = {
-                if (viewModel.blockContact(context)) {
-                    Toast.makeText(context, "Contact blocked", Toast.LENGTH_SHORT).show()
+            onConfirm = { options ->
+                // Handle block contact
+                if (options.blockContact) {
+                    if (viewModel.blockContact(context)) {
+                        Toast.makeText(context, "Contact blocked", Toast.LENGTH_SHORT).show()
+                    }
                 }
+
+                // Handle mark as spam
+                if (options.markAsSpam) {
+                    viewModel.reportAsSpam()
+                    Toast.makeText(context, "Marked as spam", Toast.LENGTH_SHORT).show()
+                }
+
+                // Handle report to carrier
+                if (options.reportToCarrier) {
+                    if (viewModel.reportToCarrier()) {
+                        Toast.makeText(context, "Reporting to carrier...", Toast.LENGTH_SHORT).show()
+                    }
+                }
+
                 showBlockDialog = false
             },
-            onDismiss = { showBlockDialog = false }
+            onDismiss = { showBlockDialog = false },
+            alreadyReportedToCarrier = uiState.isReportedToCarrier
         )
     }
 
@@ -1290,7 +1393,7 @@ private fun SendButton(
 /**
  * Voice memo button with soundwave icon.
  * Protocol-colored: green for SMS, blue for iMessage.
- * Supports tap-to-record and hold-to-record gestures.
+ * Hold to record, release to stop. Tap requests permission only.
  */
 @Composable
 private fun VoiceMemoButton(
@@ -1307,20 +1410,53 @@ private fun VoiceMemoButton(
         MaterialTheme.colorScheme.primary // Blue for iMessage
     }
 
+    // Track if recording was started during this press gesture
+    var recordingStarted by remember { mutableStateOf(false) }
+
     Box(
         modifier = modifier
             .size(48.dp)
             .clip(CircleShape)
             .background(containerColor)
             .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onClick() },
-                    onPress = {
+                awaitEachGesture {
+                    // Wait for initial press
+                    awaitFirstDown()
+                    recordingStarted = false
+
+                    // Wait a brief moment to distinguish tap from hold (200ms)
+                    val holdThresholdReached = withTimeoutOrNull(200L) {
+                        // Keep checking if finger is still down
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            if (event.changes.none { it.pressed }) {
+                                // Finger lifted before threshold - this is a tap
+                                return@withTimeoutOrNull false
+                            }
+                        }
+                        @Suppress("UNREACHABLE_CODE")
+                        true
+                    } ?: true // Timeout reached = hold detected
+
+                    if (holdThresholdReached) {
+                        // Hold detected - start recording
+                        recordingStarted = true
                         onPressStart()
-                        tryAwaitRelease()
+
+                        // Wait for finger to lift
+                        while (true) {
+                            val event = awaitPointerEvent(PointerEventPass.Main)
+                            if (event.changes.none { it.pressed }) {
+                                break
+                            }
+                        }
+                        // Finger lifted - stop recording
                         onPressEnd()
+                    } else {
+                        // Tap detected - just request permission
+                        onClick()
                     }
-                )
+                }
             },
         contentAlignment = Alignment.Center
     ) {
@@ -2033,6 +2169,62 @@ private fun formatTimeSeparator(timestamp: Long): String {
 private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
     return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
+}
+
+/**
+ * Time threshold for grouping consecutive messages (2 minutes).
+ * Messages from the same sender within this window will be visually grouped.
+ */
+private const val GROUP_TIME_THRESHOLD_MS = 2 * 60 * 1000L // 2 minutes
+
+/**
+ * Calculates the group position for a message based on adjacent messages.
+ * Messages are grouped when they:
+ * - Are from the same sender (isFromMe matches)
+ * - Are within the time threshold
+ * - Are not reaction messages
+ *
+ * In reversed layout (newest at index 0):
+ * - Lower index = newer message (appears lower on screen)
+ * - Higher index = older message (appears higher on screen)
+ *
+ * @return The MessageGroupPosition for visual bubble styling
+ */
+private fun calculateGroupPosition(
+    messages: List<MessageUiModel>,
+    index: Int,
+    message: MessageUiModel
+): MessageGroupPosition {
+    // Reaction messages are always single (they're typically hidden anyway)
+    if (message.isReaction) {
+        return MessageGroupPosition.SINGLE
+    }
+
+    // Get adjacent non-reaction messages
+    val previousMessage = messages.getOrNull(index - 1)?.takeIf { !it.isReaction }
+    val nextMessage = messages.getOrNull(index + 1)?.takeIf { !it.isReaction }
+
+    // Check if this message groups with the message below it (visually)
+    // In reversed layout, index - 1 is the newer message that appears below
+    val groupsWithBelow = previousMessage?.let { prev ->
+        prev.isFromMe == message.isFromMe &&
+                kotlin.math.abs(message.dateCreated - prev.dateCreated) <= GROUP_TIME_THRESHOLD_MS
+    } ?: false
+
+    // Check if this message groups with the message above it (visually)
+    // In reversed layout, index + 1 is the older message that appears above
+    val groupsWithAbove = nextMessage?.let { next ->
+        next.isFromMe == message.isFromMe &&
+                kotlin.math.abs(next.dateCreated - message.dateCreated) <= GROUP_TIME_THRESHOLD_MS
+    } ?: false
+
+    return when {
+        !groupsWithAbove && !groupsWithBelow -> MessageGroupPosition.SINGLE
+        !groupsWithAbove && groupsWithBelow -> MessageGroupPosition.FIRST  // Top of visual group
+        groupsWithAbove && groupsWithBelow -> MessageGroupPosition.MIDDLE
+        groupsWithAbove && !groupsWithBelow -> MessageGroupPosition.LAST   // Bottom of visual group
+        else -> MessageGroupPosition.SINGLE
+    }
 }
 
 /**

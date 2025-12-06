@@ -24,6 +24,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.InlineTextContent
+import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.*
@@ -52,12 +54,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.Placeholder
+import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -66,6 +71,8 @@ import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.ConnectionBannerState
 import com.bluebubbles.ui.components.ConnectionStatusBanner
+import com.bluebubbles.ui.components.SmsBannerState
+import com.bluebubbles.ui.components.SmsStatusBanner
 import com.bluebubbles.ui.components.ContactInfo
 import com.bluebubbles.ui.components.ContactQuickActionsPopup
 import com.bluebubbles.ui.components.GroupAvatar
@@ -73,16 +80,22 @@ import com.bluebubbles.ui.components.SwipeActionType
 import com.bluebubbles.ui.components.SwipeConfig
 import com.bluebubbles.ui.components.SwipeableConversationTile
 import com.bluebubbles.ui.components.MessageStatusIndicator
+import com.bluebubbles.ui.settings.SettingsContent
 import com.bluebubbles.ui.settings.SettingsViewModel
-import com.bluebubbles.ui.settings.components.ProfileHeader
-import com.bluebubbles.ui.settings.components.SettingsCard
-import com.bluebubbles.ui.settings.components.SettingsMenuItem
-import com.bluebubbles.ui.settings.components.SettingsSectionTitle
 import com.bluebubbles.ui.theme.KumbhSansFamily
 
 // iMessage and SMS colors for split profile ring
 private val iMessageBlue = Color(0xFF007AFF)
 private val smsGreen = Color(0xFF34C759)
+
+// Conversation list filter options (shown in top bar dropdown)
+enum class ConversationFilter(val label: String, val icon: ImageVector) {
+    ALL("All", Icons.Outlined.Inbox),
+    UNREAD("Unread", Icons.Outlined.MarkChatUnread),
+    SPAM("Spam", Icons.Outlined.Report),
+    UNKNOWN_SENDERS("Unknown Senders", Icons.Outlined.PersonSearch),
+    KNOWN_SENDERS("Known Senders", Icons.Outlined.Person)
+}
 
 // Search filter options
 enum class SearchFilter(val label: String, val icon: ImageVector) {
@@ -102,28 +115,60 @@ fun ConversationsScreen(
     onConversationClick: (String) -> Unit,
     onNewMessageClick: () -> Unit,
     onSettingsClick: () -> Unit,
-    onSettingsNavigate: (String) -> Unit = {},
+    onSettingsNavigate: (String, Boolean) -> Unit = { _, _ -> },
     onSetupServerClick: () -> Unit = {},
+    reopenSettingsPanel: Boolean = false,
+    onSettingsPanelHandled: () -> Unit = {},
     viewModel: ConversationsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
-    // Determine if connection banner should be visible (for padding calculation)
-    val isBannerVisible = when (uiState.connectionBannerState) {
+    // Refresh SMS state when screen resumes (to catch permission/default app changes)
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshSmsState()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
+    // Determine if banners should be visible (for padding calculation)
+    val isConnectionBannerVisible = when (uiState.connectionBannerState) {
         is ConnectionBannerState.NotConfigured,
         is ConnectionBannerState.Reconnecting -> true
         else -> false
     }
-    // Banner height for padding (approximate: 56dp content + 16dp padding + nav bar)
-    val bannerPadding = if (isBannerVisible) 72.dp else 0.dp
+    val isSmsBannerVisible = uiState.smsBannerState is SmsBannerState.NotDefaultApp
+
+    // Banner height for padding (approximate: 56dp content + 16dp padding per banner + nav bar)
+    val singleBannerHeight = 72.dp
+    val bannerPadding = when {
+        isConnectionBannerVisible && isSmsBannerVisible -> singleBannerHeight * 2
+        isConnectionBannerVisible || isSmsBannerVisible -> singleBannerHeight
+        else -> 0.dp
+    }
 
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
+    var conversationFilter by remember { mutableStateOf(ConversationFilter.ALL) }
+    var showFilterDropdown by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
 
     // Settings panel state
     var isSettingsOpen by remember { mutableStateOf(false) }
+
+    LaunchedEffect(reopenSettingsPanel) {
+        if (reopenSettingsPanel) {
+            isSettingsOpen = true
+            onSettingsPanelHandled()
+        }
+    }
 
     // Pull-to-search state
     val listState = rememberLazyListState()
@@ -144,6 +189,18 @@ fun ConversationsScreen(
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 50
         }
+    }
+
+    // Auto-scroll to top when new conversations are created
+    val conversationCount = uiState.conversations.size
+    var previousConversationCount by remember { mutableStateOf(conversationCount) }
+
+    LaunchedEffect(conversationCount) {
+        // Only scroll if a new conversation was added (count increased)
+        if (conversationCount > previousConversationCount && previousConversationCount > 0) {
+            listState.animateScrollToItem(0)
+        }
+        previousConversationCount = conversationCount
     }
     val density = LocalDensity.current
     val pullThreshold = with(density) { 80.dp.toPx() } // Distance to pull before triggering search
@@ -247,12 +304,31 @@ fun ConversationsScreen(
                             val selectedConvos = uiState.conversations.filter { it.guid in selectedConversations }
                             val canPinAny = selectedConvos.any { it.hasContact || it.isPinned }
 
+                            // Calculate total selectable count (only non-pinned conversations are selectable)
+                            val selectableConversations = uiState.conversations.filter { !it.isPinned }
+                            val totalSelectableCount = selectableConversations.size
+
+                            // Determine if majority of selected conversations are unread
+                            val unreadCount = selectedConvos.count { it.unreadCount > 0 }
+                            val majorityUnread = unreadCount > selectedConvos.size / 2
+
                             val context = LocalContext.current
 
                             // Selection mode header
                             SelectionModeHeader(
                                 selectedCount = selectedConversations.size,
+                                totalSelectableCount = totalSelectableCount,
+                                majorityUnread = majorityUnread,
                                 onClose = { selectedConversations = emptySet() },
+                                onSelectAll = {
+                                    // Toggle between select all and deselect all
+                                    val allSelectableGuids = selectableConversations.map { it.guid }.toSet()
+                                    selectedConversations = if (selectedConversations.size >= totalSelectableCount) {
+                                        emptySet() // Deselect all
+                                    } else {
+                                        allSelectableGuids // Select all
+                                    }
+                                },
                                 onPin = {
                                     selectedConversations.forEach { viewModel.togglePin(it) }
                                     selectedConversations = emptySet()
@@ -264,6 +340,10 @@ fun ConversationsScreen(
                                 },
                                 onDelete = {
                                     selectedConversations.forEach { viewModel.deleteChat(it) }
+                                    selectedConversations = emptySet()
+                                },
+                                onMarkAsRead = {
+                                    viewModel.markChatsAsRead(selectedConversations)
                                     selectedConversations = emptySet()
                                 },
                                 onMarkAsUnread = {
@@ -321,6 +401,69 @@ fun ConversationsScreen(
                                 )
 
                                 Spacer(modifier = Modifier.weight(1f))
+
+                                // Filter dropdown
+                                Box {
+                                    IconButton(onClick = { showFilterDropdown = true }) {
+                                        Icon(
+                                            imageVector = if (conversationFilter != ConversationFilter.ALL) {
+                                                Icons.Default.FilterList
+                                            } else {
+                                                Icons.Outlined.FilterList
+                                            },
+                                            contentDescription = "Filter conversations",
+                                            tint = if (conversationFilter != ConversationFilter.ALL) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                            }
+                                        )
+                                    }
+
+                                    DropdownMenu(
+                                        expanded = showFilterDropdown,
+                                        onDismissRequest = { showFilterDropdown = false }
+                                    ) {
+                                        ConversationFilter.entries.forEach { filter ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = filter.icon,
+                                                            contentDescription = null,
+                                                            tint = if (conversationFilter == filter) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                                            },
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Text(
+                                                            text = filter.label,
+                                                            color = if (conversationFilter == filter) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurface
+                                                            },
+                                                            fontWeight = if (conversationFilter == filter) {
+                                                                FontWeight.Medium
+                                                            } else {
+                                                                FontWeight.Normal
+                                                            }
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    conversationFilter = filter
+                                                    showFilterDropdown = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
 
                                 // Search button
                                 IconButton(onClick = {
@@ -396,8 +539,30 @@ fun ConversationsScreen(
                 )
             }
             else -> {
-                val pinnedConversations = uiState.conversations.filter { it.isPinned }
-                val regularConversations = uiState.conversations.filter { !it.isPinned }
+                // Apply conversation filter
+                // By default, hide spam conversations unless the SPAM filter is active
+                val filteredConversations = uiState.conversations.filter { conv ->
+                    when (conversationFilter) {
+                        ConversationFilter.ALL -> !conv.isSpam
+                        ConversationFilter.UNREAD -> !conv.isSpam && conv.unreadCount > 0
+                        ConversationFilter.SPAM -> conv.isSpam
+                        ConversationFilter.UNKNOWN_SENDERS -> !conv.isSpam && !conv.hasContact
+                        ConversationFilter.KNOWN_SENDERS -> !conv.isSpam && conv.hasContact
+                    }
+                }
+
+                // Show empty state if filter returns no results
+                if (filteredConversations.isEmpty() && conversationFilter != ConversationFilter.ALL) {
+                    EmptyFilterState(
+                        filter = conversationFilter,
+                        onClearFilter = { conversationFilter = ConversationFilter.ALL },
+                        modifier = Modifier.fillMaxSize()
+                    )
+                    return@Surface
+                }
+
+                val pinnedConversations = filteredConversations.filter { it.isPinned }
+                val regularConversations = filteredConversations.filter { !it.isPinned }
 
                 // Animated pull indicator offset
                 val animatedPullOffset by animateFloatAsState(
@@ -660,21 +825,41 @@ fun ConversationsScreen(
             )
         }
 
-        // Connection status banner at the bottom
-        ConnectionStatusBanner(
-            state = uiState.connectionBannerState,
-            onSetupClick = {
-                // Navigate to server settings
-                onSettingsNavigate("server")
-            },
-            onDismiss = {
-                viewModel.dismissSetupBanner()
-            },
-            onRetryClick = {
-                viewModel.retryConnection()
-            },
-            modifier = Modifier.align(Alignment.BottomCenter)
-        )
+        // Stacked status banners at the bottom
+        // SMS banner stacks on top of the iMessage banner
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding(),
+            verticalArrangement = Arrangement.Bottom
+        ) {
+            // SMS status banner (on top when both visible)
+            SmsStatusBanner(
+                state = uiState.smsBannerState,
+                onSetAsDefaultClick = {
+                    // Navigate to SMS settings
+                    onSettingsNavigate("sms", false)
+                },
+                onDismiss = {
+                    viewModel.dismissSmsBanner()
+                }
+            )
+
+            // Connection status banner (at the bottom)
+            ConnectionStatusBanner(
+                state = uiState.connectionBannerState,
+                onSetupClick = {
+                    // Navigate to server settings
+                    onSettingsNavigate("server", false)
+                },
+                onDismiss = {
+                    viewModel.dismissSetupBanner()
+                },
+                onRetryClick = {
+                    viewModel.retryConnection()
+                }
+            )
+        }
     }
 }
 
@@ -1184,17 +1369,22 @@ private fun ProfileAvatarWithRing(
 @Composable
 private fun SelectionModeHeader(
     selectedCount: Int,
+    totalSelectableCount: Int,
+    majorityUnread: Boolean, // true if majority of selected conversations are unread
     onClose: () -> Unit,
+    onSelectAll: () -> Unit,
     onPin: () -> Unit,
     onSnooze: () -> Unit,
     onArchive: () -> Unit,
     onDelete: () -> Unit,
+    onMarkAsRead: () -> Unit,
     onMarkAsUnread: () -> Unit,
     onBlock: () -> Unit,
     onAddContact: (() -> Unit)? = null, // null means "Add contact" option should be hidden
     isPinEnabled: Boolean = true, // false when none of the selected conversations can be pinned
     modifier: Modifier = Modifier
 ) {
+    val allSelected = selectedCount >= totalSelectableCount && totalSelectableCount > 0
     var showMoreMenu by remember { mutableStateOf(false) }
 
     Row(
@@ -1276,11 +1466,21 @@ private fun SelectionModeHeader(
                 expanded = showMoreMenu,
                 onDismissRequest = { showMoreMenu = false }
             ) {
+                // Select all / Deselect all option
                 DropdownMenuItem(
-                    text = { Text("Mark as unread") },
+                    text = { Text(if (allSelected) "Deselect all" else "Select all") },
                     onClick = {
                         showMoreMenu = false
-                        onMarkAsUnread()
+                        onSelectAll()
+                    }
+                )
+
+                // Dynamic mark as read/unread based on majority state
+                DropdownMenuItem(
+                    text = { Text(if (majorityUnread) "Mark as read" else "Mark as unread") },
+                    onClick = {
+                        showMoreMenu = false
+                        if (majorityUnread) onMarkAsRead() else onMarkAsUnread()
                     }
                 )
 
@@ -1428,29 +1628,68 @@ private fun GoogleStyleConversationTile(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Message preview with status indicator
-                Row(
-                    verticalAlignment = Alignment.Top,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    if (conversation.lastMessageStatus != MessageStatus.NONE) {
-                        MessageStatusIndicator(status = conversation.lastMessageStatus)
-                    }
-                    Text(
-                        text = formatMessagePreview(conversation),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            lineHeight = 18.sp
-                        ),
-                        color = when {
-                            conversation.hasDraft -> MaterialTheme.colorScheme.error
-                            conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                        },
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Message preview with inline status indicator
+                val textColor = when {
+                    conversation.hasDraft -> MaterialTheme.colorScheme.error
+                    conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 }
+                val statusTint = when (conversation.lastMessageStatus) {
+                    MessageStatus.READ -> MaterialTheme.colorScheme.primary
+                    MessageStatus.FAILED -> MaterialTheme.colorScheme.error
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                }
+                val statusIcon = when (conversation.lastMessageStatus) {
+                    MessageStatus.SENDING -> Icons.Default.Send
+                    MessageStatus.SENT -> Icons.Default.Check
+                    MessageStatus.DELIVERED -> Icons.Default.DoneAll
+                    MessageStatus.READ -> Icons.Default.DoneAll
+                    MessageStatus.FAILED -> Icons.Default.ErrorOutline
+                    MessageStatus.NONE -> null
+                }
+
+                val messagePreview = formatMessagePreview(conversation)
+                val annotatedText = buildAnnotatedString {
+                    if (statusIcon != null) {
+                        appendInlineContent("icon", "[icon]")
+                    }
+                    append(messagePreview)
+                }
+
+                val inlineContent = if (statusIcon != null) {
+                    mapOf(
+                        "icon" to InlineTextContent(
+                            placeholder = Placeholder(
+                                width = 1.2.em,
+                                height = 1.em,
+                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
+                            )
+                        ) {
+                            Icon(
+                                imageVector = statusIcon,
+                                contentDescription = null,
+                                tint = statusTint,
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .aspectRatio(1f)
+                            )
+                        }
+                    )
+                } else {
+                    emptyMap()
+                }
+
+                Text(
+                    text = annotatedText,
+                    inlineContent = inlineContent,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                        lineHeight = 18.sp
+                    ),
+                    color = textColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -1753,6 +1992,44 @@ private fun EmptyConversationsState(
     }
 }
 
+@Composable
+private fun EmptyFilterState(
+    filter: ConversationFilter,
+    onClearFilter: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = filter.icon,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            Text(
+                text = when (filter) {
+                    ConversationFilter.ALL -> "No conversations"
+                    ConversationFilter.UNREAD -> "No unread messages"
+                    ConversationFilter.SPAM -> "No spam messages"
+                    ConversationFilter.UNKNOWN_SENDERS -> "No unknown senders"
+                    ConversationFilter.KNOWN_SENDERS -> "No known senders"
+                },
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            TextButton(onClick = onClearFilter) {
+                Text("Show all conversations")
+            }
+        }
+    }
+}
+
 private fun formatMessagePreview(conversation: ConversationUiModel): String {
     return when {
         conversation.hasDraft -> conversation.draftText ?: ""
@@ -1762,13 +2039,32 @@ private fun formatMessagePreview(conversation: ConversationUiModel): String {
                 MessageType.IMAGE -> "Image"
                 MessageType.VIDEO -> "Video"
                 MessageType.AUDIO -> "Audio"
-                MessageType.LINK -> conversation.lastMessageText.take(50)
+                MessageType.LINK -> formatLinkPreview(conversation)
                 MessageType.ATTACHMENT -> "Attachment"
                 else -> conversation.lastMessageText
             }
             prefix + content
         }
-        else -> conversation.lastMessageText
+        else -> when (conversation.lastMessageType) {
+            MessageType.LINK -> formatLinkPreview(conversation)
+            else -> conversation.lastMessageText
+        }
+    }
+}
+
+/**
+ * Formats a link preview for display in the conversation list.
+ * Shows "Title (domain)" if title is available, otherwise shows the URL.
+ */
+private fun formatLinkPreview(conversation: ConversationUiModel): String {
+    val title = conversation.lastMessageLinkTitle
+    val domain = conversation.lastMessageLinkDomain
+
+    return when {
+        title != null && domain != null -> "$title ($domain)"
+        title != null -> title
+        domain != null -> domain
+        else -> conversation.lastMessageText.take(50)
     }
 }
 
@@ -1893,7 +2189,7 @@ private fun ScrollToTopButton(
 @Composable
 private fun SettingsPanel(
     onClose: () -> Unit,
-    onNavigate: (String) -> Unit,
+    onNavigate: (String, Boolean) -> Unit,
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -1920,202 +2216,27 @@ private fun SettingsPanel(
                 )
             }
         ) { padding ->
-            LazyColumn(
+            val navigateFromDrawer: (String) -> Unit = { destination ->
+                onClose()
+                onNavigate(destination, true)
+            }
+
+            SettingsContent(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                contentPadding = PaddingValues(bottom = 16.dp)
-            ) {
-                // Profile Header
-                item {
-                    ProfileHeader(
-                        serverUrl = uiState.serverUrl,
-                        connectionState = uiState.connectionState,
-                        onManageServerClick = { onNavigate("server") }
-                    )
-                }
-
-                // Quick Actions Card
-                item {
-                    SettingsCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                    ) {
-                        // Mark all as read (most common action first)
-                        SettingsMenuItem(
-                            icon = Icons.Default.DoneAll,
-                            title = "Mark all as read",
-                            subtitle = if (uiState.unreadCount > 0) {
-                                "${uiState.unreadCount} unread conversation${if (uiState.unreadCount > 1) "s" else ""}"
-                            } else {
-                                "All caught up!"
-                            },
-                            onClick = { viewModel.markAllAsRead() },
-                            enabled = !uiState.isMarkingAllRead && uiState.unreadCount > 0,
-                            trailingContent = if (uiState.isMarkingAllRead) {
-                                {
-                                    CircularProgressIndicator(
-                                        modifier = Modifier.size(24.dp),
-                                        strokeWidth = 2.dp
-                                    )
-                                }
-                            } else null
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 56.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        // Archived
-                        SettingsMenuItem(
-                            icon = Icons.Outlined.Archive,
-                            title = "Archived",
-                            onClick = { onNavigate("archived") },
-                            trailingContent = if (uiState.archivedCount > 0) {
-                                {
-                                    Text(
-                                        text = uiState.archivedCount.toString(),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            } else null
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 56.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        // Blocked contacts
-                        SettingsMenuItem(
-                            icon = Icons.Default.Block,
-                            title = "Blocked contacts",
-                            onClick = { onNavigate("blocked") }
-                        )
-                    }
-                }
-
-                // Messaging Section
-                item {
-                    SettingsSectionTitle(title = "Messaging")
-                }
-
-                item {
-                    SettingsCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        // Notifications
-                        SettingsMenuItem(
-                            icon = Icons.Default.Notifications,
-                            title = stringResource(R.string.settings_notifications),
-                            subtitle = "Sound, vibration, and display",
-                            onClick = { onNavigate("notifications") }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 56.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        // SMS/MMS settings
-                        SettingsMenuItem(
-                            icon = Icons.Default.Sms,
-                            title = stringResource(R.string.settings_sms),
-                            subtitle = "Local SMS messaging options",
-                            onClick = { onNavigate("sms") }
-                        )
-                    }
-                }
-
-                // Appearance & Behavior Section
-                item {
-                    SettingsSectionTitle(title = "Appearance & behavior")
-                }
-
-                item {
-                    SettingsCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        // Simple app title toggle
-                        SettingsMenuItem(
-                            icon = Icons.Default.TextFields,
-                            title = "Simple app title",
-                            subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
-                            onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
-                            trailingContent = {
-                                Switch(
-                                    checked = uiState.useSimpleAppTitle,
-                                    onCheckedChange = { viewModel.setUseSimpleAppTitle(it) }
-                                )
-                            }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 56.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        // Swipe gestures
-                        SettingsMenuItem(
-                            icon = Icons.Default.SwipeRight,
-                            title = "Swipe actions",
-                            subtitle = "Customize conversation swipe gestures",
-                            onClick = { onNavigate("swipe") }
-                        )
-                    }
-                }
-
-                // Connection & Data Section
-                item {
-                    SettingsSectionTitle(title = "Connection & data")
-                }
-
-                item {
-                    SettingsCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        // Server pairing
-                        SettingsMenuItem(
-                            icon = Icons.Default.QrCodeScanner,
-                            title = "Server pairing",
-                            subtitle = "Reconnect or pair new server",
-                            onClick = { onNavigate("server") }
-                        )
-
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 56.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant
-                        )
-
-                        // Sync settings
-                        SettingsMenuItem(
-                            icon = Icons.Default.Sync,
-                            title = "Sync settings",
-                            subtitle = "Last synced: ${uiState.lastSyncFormatted}",
-                            onClick = { onNavigate("sync") }
-                        )
-                    }
-                }
-
-                // About (always at bottom)
-                item {
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-
-                item {
-                    SettingsCard(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                    ) {
-                        SettingsMenuItem(
-                            icon = Icons.Default.Info,
-                            title = stringResource(R.string.settings_about),
-                            subtitle = "Version, licenses, and help",
-                            onClick = { onNavigate("about") }
-                        )
-                    }
-                }
-            }
+                uiState = uiState,
+                onServerSettingsClick = { navigateFromDrawer("server") },
+                onArchivedClick = { navigateFromDrawer("archived") },
+                onBlockedClick = { navigateFromDrawer("blocked") },
+                onSyncSettingsClick = { navigateFromDrawer("sync") },
+                onSmsSettingsClick = { navigateFromDrawer("sms") },
+                onNotificationsClick = { navigateFromDrawer("notifications") },
+                onSwipeSettingsClick = { navigateFromDrawer("swipe") },
+                onEffectsSettingsClick = { navigateFromDrawer("effects") },
+                onAboutClick = { navigateFromDrawer("about") },
+                viewModel = viewModel
+            )
         }
     }
 }

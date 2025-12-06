@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.bluebubbles.services.socket.SocketConnectionManager
 import com.bluebubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
@@ -16,6 +17,9 @@ class BlueBubblesApp : Application(), Configuration.Provider {
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
 
+    @Inject
+    lateinit var socketConnectionManager: SocketConnectionManager
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -25,6 +29,9 @@ class BlueBubblesApp : Application(), Configuration.Provider {
         super.onCreate()
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
+
+        // Initialize socket connection manager for auto-connect
+        socketConnectionManager.initialize()
     }
 
     private fun createNotificationChannels() {

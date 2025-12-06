@@ -2,9 +2,14 @@ package com.bluebubbles.services.socket
 
 import android.util.Log
 import com.bluebubbles.data.local.db.dao.ChatDao
+import com.bluebubbles.data.local.db.dao.HandleDao
+import com.bluebubbles.data.remote.api.dto.MessageDto
 import com.bluebubbles.data.repository.ChatRepository
+import com.bluebubbles.data.repository.LinkPreviewRepository
 import com.bluebubbles.data.repository.MessageRepository
 import com.bluebubbles.services.notifications.NotificationService
+import com.bluebubbles.services.spam.SpamRepository
+import com.bluebubbles.ui.components.UrlParsingUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -21,7 +26,10 @@ class SocketEventHandler @Inject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
-    private val notificationService: NotificationService
+    private val handleDao: HandleDao,
+    private val notificationService: NotificationService,
+    private val linkPreviewRepository: LinkPreviewRepository,
+    private val spamRepository: SpamRepository
 ) {
     companion object {
         private const val TAG = "SocketEventHandler"
@@ -81,14 +89,68 @@ class SocketEventHandler @Inject constructor(
         // Show notification if not from me
         if (!savedMessage.isFromMe) {
             val chat = chatDao.getChatByGuid(event.chatGuid)
+            val senderAddress = event.message.handle?.address ?: ""
+            val messageText = savedMessage.text ?: ""
+
+            // Check for spam - if spam, skip notification
+            val spamResult = spamRepository.evaluateAndMarkSpam(event.chatGuid, senderAddress, messageText)
+            if (spamResult.isSpam) {
+                Log.i(TAG, "iMessage from $senderAddress detected as spam (score: ${spamResult.score}), skipping notification")
+                return
+            }
+
+            val senderName = resolveSenderName(event.message)
+
+            // Fetch link preview data if message contains a URL
+            val (linkTitle, linkDomain) = if (messageText.contains("http://") || messageText.contains("https://")) {
+                val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
+                if (detectedUrl != null) {
+                    val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
+                    val title = preview?.title?.takeIf { it.isNotBlank() }
+                    val domain = preview?.domain ?: detectedUrl.domain
+                    title to domain
+                } else {
+                    null to null
+                }
+            } else {
+                null to null
+            }
+
             notificationService.showMessageNotification(
                 chatGuid = event.chatGuid,
                 chatTitle = chat?.displayName ?: chat?.chatIdentifier ?: "Unknown",
-                messageText = savedMessage.text ?: "",
+                messageText = messageText,
                 messageGuid = savedMessage.guid,
-                senderName = null // TODO: Get from handle
+                senderName = senderName,
+                linkPreviewTitle = linkTitle,
+                linkPreviewDomain = linkDomain
             )
         }
+    }
+
+    /**
+     * Resolve the sender's display name from the message.
+     * Priority: local cached contact name > inferred name > formatted address > raw address
+     */
+    private suspend fun resolveSenderName(message: MessageDto): String? {
+        // Try to get from embedded handle
+        message.handle?.let { handleDto ->
+            // Look up local handle entity for cached contact name
+            val localHandle = handleDao.getHandlesByAddress(handleDto.address).firstOrNull()
+            if (localHandle != null) {
+                return localHandle.displayName
+            }
+            // Fall back to server-provided formatted address or raw address
+            return handleDto.formattedAddress ?: handleDto.address
+        }
+
+        // No embedded handle - try by handleId if available
+        message.handleId?.let { handleId ->
+            val handle = handleDao.getHandleById(handleId)
+            return handle?.displayName
+        }
+
+        return null
     }
 
     private suspend fun handleMessageUpdated(event: SocketEvent.MessageUpdated) {
