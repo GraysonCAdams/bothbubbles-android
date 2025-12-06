@@ -40,6 +40,12 @@ coil = "2.7.0"
 # CameraX
 cameraX = "1.4.0"
 
+# Media3 (ExoPlayer)
+media3 = "1.5.0"
+
+# ML Kit
+mlkitBarcodeScanning = "17.3.0"
+
 # Background
 workRuntimeKtx = "2.10.0"
 
@@ -125,6 +131,14 @@ camerax-core = { group = "androidx.camera", name = "camera-core", version.ref = 
 camerax-camera2 = { group = "androidx.camera", name = "camera-camera2", version.ref = "cameraX" }
 camerax-lifecycle = { group = "androidx.camera", name = "camera-lifecycle", version.ref = "cameraX" }
 camerax-view = { group = "androidx.camera", name = "camera-view", version.ref = "cameraX" }
+
+# Media3 (ExoPlayer)
+media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
+media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
+media3-session = { group = "androidx.media3", name = "media3-session", version.ref = "media3" }
+
+# ML Kit
+mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning", version.ref = "mlkitBarcodeScanning" }
 
 # WorkManager
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntimeKtx" }

@@ -101,6 +101,15 @@
             android:excludeFromRecents="true"
             android:theme="@style/Theme.BlueBubbles" />
 
+        <!-- Chat Bubble Activity -->
+        <activity
+            android:name=".ui.bubble.BubbleActivity"
+            android:exported="false"
+            android:allowEmbedded="true"
+            android:documentLaunchMode="always"
+            android:resizeableActivity="true"
+            android:theme="@style/Theme.BlueBubbles" />
+
         <!-- Notification Receiver -->
         <receiver
             android:name=".services.notifications.NotificationReceiver"

@@ -93,8 +93,32 @@ data class AttachmentUiModel(
     val localPath: String?,
     val webUrl: String?,
     val width: Int?,
-    val height: Int?
-)
+    val height: Int?,
+    val transferName: String? = null,
+    val totalBytes: Long? = null,
+    val isSticker: Boolean = false
+) {
+    val isImage: Boolean
+        get() = mimeType?.startsWith("image/") == true
+
+    val isVideo: Boolean
+        get() = mimeType?.startsWith("video/") == true
+
+    val isAudio: Boolean
+        get() = mimeType?.startsWith("audio/") == true
+
+    val friendlySize: String
+        get() = when {
+            totalBytes == null -> ""
+            totalBytes < 1024 -> "$totalBytes B"
+            totalBytes < 1024 * 1024 -> "${totalBytes / 1024} KB"
+            totalBytes < 1024 * 1024 * 1024 -> "${totalBytes / (1024 * 1024)} MB"
+            else -> "${totalBytes / (1024 * 1024 * 1024)} GB"
+        }
+
+    val fileExtension: String?
+        get() = transferName?.substringAfterLast('.', "")?.takeIf { it.isNotEmpty() }
+}
 
 @Composable
 fun MessageBubble(
@@ -337,8 +361,19 @@ fun MessageBubble(
                         )
                     ) {
                         // Attachments
-                        message.attachments.forEach { attachment ->
-                            // TODO: Render attachments
+                        if (message.attachments.isNotEmpty()) {
+                            Column(
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier.padding(bottom = if (message.text.isNullOrBlank()) 0.dp else 8.dp)
+                            ) {
+                                message.attachments.forEach { attachment ->
+                                    AttachmentContent(
+                                        attachment = attachment,
+                                        isFromMe = message.isFromMe,
+                                        onMediaClick = onMediaClick
+                                    )
+                                }
+                            }
                         }
 
                         // Text content with clickable dates, phone numbers, codes, and search highlighting

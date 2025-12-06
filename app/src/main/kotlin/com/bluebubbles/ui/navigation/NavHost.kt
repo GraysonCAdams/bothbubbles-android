@@ -30,15 +30,19 @@ import com.bluebubbles.ui.settings.sms.SmsSettingsScreen
 import com.bluebubbles.ui.chatcreator.ChatCreatorScreen
 import com.bluebubbles.ui.chatcreator.GroupCreatorScreen
 import com.bluebubbles.ui.camera.InAppCameraScreen
+import com.bluebubbles.ui.media.MediaViewerScreen
+import com.bluebubbles.ui.setup.SetupScreen
+import com.bluebubbles.data.local.prefs.SettingsDataStore
 
 private const val TRANSITION_DURATION = 300
 
 @Composable
 fun BlueBubblesNavHost(
-    navController: NavHostController = rememberNavController()
+    navController: NavHostController = rememberNavController(),
+    isSetupComplete: Boolean = true
 ) {
-    // TODO: Check if setup is complete to determine start destination
-    val startDestination: Screen = Screen.Conversations
+    // Determine start destination based on setup status
+    val startDestination: Screen = if (isSetupComplete) Screen.Conversations else Screen.Setup
 
     fun popBackStackReturningToSettings(returnToSettings: Boolean) {
         if (returnToSettings) {
@@ -334,9 +338,9 @@ fun BlueBubblesNavHost(
 
         // Media viewer
         composable<Screen.MediaViewer> { backStackEntry ->
-            val route: Screen.MediaViewer = backStackEntry.toRoute()
-            // TODO: MediaViewerScreen
-            SettingsScreen(onBackClick = { navController.popBackStack() })
+            MediaViewerScreen(
+                onNavigateBack = { navController.popBackStack() }
+            )
         }
 
         // Media gallery (images/videos grid or links overview)
@@ -407,8 +411,13 @@ fun BlueBubblesNavHost(
 
         // Setup (onboarding)
         composable<Screen.Setup> {
-            // TODO: SetupScreen - temporary placeholder
-            SettingsScreen(onBackClick = { navController.popBackStack() })
+            SetupScreen(
+                onSetupComplete = {
+                    navController.navigate(Screen.Conversations) {
+                        popUpTo(Screen.Setup) { inclusive = true }
+                    }
+                }
+            )
         }
 
         // In-app camera

@@ -117,6 +117,14 @@ dependencies {
     implementation(libs.camerax.lifecycle)
     implementation(libs.camerax.view)
 
+    // Media3 (ExoPlayer)
+    implementation(libs.media3.exoplayer)
+    implementation(libs.media3.ui)
+    implementation(libs.media3.session)
+
+    // ML Kit (Barcode Scanning)
+    implementation(libs.mlkit.barcode.scanning)
+
     // WorkManager
     implementation(libs.work.runtime.ktx)
 

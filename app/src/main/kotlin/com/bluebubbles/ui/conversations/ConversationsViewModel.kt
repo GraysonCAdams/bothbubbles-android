@@ -156,7 +156,7 @@ class ConversationsViewModel @Inject constructor(
     private fun loadConversations() {
         viewModelScope.launch {
             combine(
-                chatRepository.observeAllChats(),
+                chatRepository.observeActiveChats(),
                 _searchQuery,
                 _typingChats
             ) { chats, query, typingChats ->

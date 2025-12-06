@@ -630,8 +630,11 @@ fun ChatScreen(
                     viewModel.dismissSaveContactBanner()
                 },
                 onReportSpam = {
-                    // Block the contact and dismiss
-                    viewModel.blockContact(context)
+                    // Report as spam and optionally block the contact
+                    viewModel.reportAsSpam()
+                    if (uiState.isLocalSmsChat) {
+                        viewModel.blockContact(context)
+                    }
                     viewModel.dismissSaveContactBanner()
                 },
                 onDismiss = viewModel::dismissSaveContactBanner

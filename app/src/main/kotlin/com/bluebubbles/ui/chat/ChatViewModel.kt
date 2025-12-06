@@ -8,6 +8,8 @@ import android.provider.BlockedNumberContract
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bluebubbles.data.local.db.dao.AttachmentDao
+import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
@@ -23,6 +25,7 @@ import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sound.SoundManager
 import com.bluebubbles.services.spam.SpamReportingService
 import com.bluebubbles.services.spam.SpamRepository
+import com.bluebubbles.ui.components.AttachmentUiModel
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ReactionUiModel
 import com.bluebubbles.ui.components.Tapback
@@ -46,7 +49,8 @@ class ChatViewModel @Inject constructor(
     private val chatFallbackTracker: ChatFallbackTracker,
     private val soundManager: SoundManager,
     private val spamRepository: SpamRepository,
-    private val spamReportingService: SpamReportingService
+    private val spamReportingService: SpamReportingService,
+    private val attachmentDao: AttachmentDao
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -119,8 +123,8 @@ class ChatViewModel @Inject constructor(
 
     private fun observeParticipantsForSaveContactBanner() {
         viewModelScope.launch {
-            // Combine chat info, participants, and dismissed banners
-            // This ensures we have the correct isGroup state before checking
+            // Combine chat info, participants, dismissed banners, and messages
+            // This ensures we have the correct state before checking
             chatRepository.observeChat(chatGuid)
                 .filterNotNull()
                 .combine(chatRepository.observeParticipantsForChat(chatGuid)) { chat, participants ->
@@ -129,9 +133,19 @@ class ChatViewModel @Inject constructor(
                 .combine(settingsDataStore.dismissedSaveContactBanners) { (chat, participants, isGroup), dismissed ->
                     Triple(participants, isGroup, dismissed)
                 }
-                .collect { (participants, isGroup, dismissedAddresses) ->
-                    // Only show banner for 1-on-1 chats with unsaved contacts
-                    if (isGroup) {
+                .combine(messageRepository.observeMessagesForChat(chatGuid, limit = 1, offset = 0)) { (participants, isGroup, dismissed), messages ->
+                    // Check if there are any messages received from the other party (not from me)
+                    val hasReceivedMessages = messages.any { !it.isFromMe }
+                    object {
+                        val participants = participants
+                        val isGroup = isGroup
+                        val dismissed = dismissed
+                        val hasReceivedMessages = hasReceivedMessages
+                    }
+                }
+                .collect { state ->
+                    // Only show banner for 1-on-1 chats with unsaved contacts that have received messages
+                    if (state.isGroup || !state.hasReceivedMessages) {
                         _uiState.update { it.copy(showSaveContactBanner = false, unsavedSenderAddress = null) }
                         return@collect
                     }
@@ -142,17 +156,17 @@ class ChatViewModel @Inject constructor(
                     val participantPhone = _uiState.value.participantPhone
 
                     // Find the first unsaved participant (no cached display name)
-                    val unsavedParticipant = participants.firstOrNull { participant ->
+                    val unsavedParticipant = state.participants.firstOrNull { participant ->
                         participant.cachedDisplayName == null &&
-                            participant.address !in dismissedAddresses
+                            participant.address !in state.dismissed
                     }
 
                     // If we have an unsaved participant from the DB, use that
                     // Otherwise, check if the chat title looks like a phone/address (no contact name)
                     val unsavedAddress = when {
                         unsavedParticipant != null -> unsavedParticipant.address
-                        participants.isEmpty() && participantPhone != null &&
-                            participantPhone !in dismissedAddresses &&
+                        state.participants.isEmpty() && participantPhone != null &&
+                            participantPhone !in state.dismissed &&
                             looksLikePhoneOrAddress(chatTitle) -> participantPhone
                         else -> null
                     }
@@ -260,7 +274,9 @@ class ChatViewModel @Inject constructor(
                     regularMessages.map { message ->
                         val messageReactions = reactionsByMessage[message.guid].orEmpty()
                         val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
-                        message.toUiModel(messageReactions, messageSmsReactions)
+                        // Fetch attachments for this message
+                        val attachments = attachmentDao.getAttachmentsForMessage(message.guid)
+                        message.toUiModel(messageReactions, messageSmsReactions, attachments)
                     }
                 }
                 .collect { messageModels ->
@@ -835,17 +851,34 @@ class ChatViewModel @Inject constructor(
 
     private fun MessageEntity.toUiModel(
         reactions: List<MessageEntity> = emptyList(),
-        smsReactions: List<SyntheticReaction> = emptyList()
+        smsReactions: List<SyntheticReaction> = emptyList(),
+        attachments: List<AttachmentEntity> = emptyList()
     ): MessageUiModel {
-        // Parse iMessage reactions into UI models
+        // Build a set of removed reactions: (isFromMe, tapbackType)
+        // These are reactions that have been explicitly removed (3xxx codes)
+        val removedReactions = reactions
+            .filter { isReactionRemoval(it.associatedMessageType) }
+            .mapNotNull { reaction ->
+                val tapbackType = parseRemovalType(reaction.associatedMessageType)
+                tapbackType?.let { Pair(reaction.isFromMe, it) }
+            }
+            .toSet()
+
+        // Parse iMessage reactions into UI models, filtering out any that have been removed
         val iMessageReactionUiModels = reactions.mapNotNull { reaction ->
             val tapbackType = parseReactionType(reaction.associatedMessageType)
             tapbackType?.let {
-                ReactionUiModel(
-                    tapback = it,
-                    isFromMe = reaction.isFromMe,
-                    senderName = null // TODO: Get from handle
-                )
+                // Check if this reaction was later removed by the same sender
+                val removalKey = Pair(reaction.isFromMe, it)
+                if (removalKey in removedReactions) {
+                    null // This reaction was removed, don't show it
+                } else {
+                    ReactionUiModel(
+                        tapback = it,
+                        isFromMe = reaction.isFromMe,
+                        senderName = null // TODO: Get from handle
+                    )
+                }
             }
         }
 
@@ -867,6 +900,23 @@ class ChatViewModel @Inject constructor(
             .map { it.tapback }
             .toSet()
 
+        // Map attachments to UI models
+        val attachmentUiModels = attachments
+            .filter { !it.hideAttachment }
+            .map { attachment ->
+                AttachmentUiModel(
+                    guid = attachment.guid,
+                    mimeType = attachment.mimeType,
+                    localPath = attachment.localPath,
+                    webUrl = attachment.webUrl,
+                    width = attachment.width,
+                    height = attachment.height,
+                    transferName = attachment.transferName,
+                    totalBytes = attachment.totalBytes,
+                    isSticker = attachment.isSticker
+                )
+            }
+
         return MessageUiModel(
             guid = guid,
             text = text,
@@ -878,7 +928,7 @@ class ChatViewModel @Inject constructor(
             isRead = dateRead != null,
             hasError = error != 0,
             isReaction = associatedMessageType?.contains("reaction") == true,
-            attachments = emptyList(), // TODO: Load attachments
+            attachments = attachmentUiModels,
             senderName = null, // TODO: Get from handle
             messageSource = messageSource,
             reactions = allReactions,
@@ -897,24 +947,67 @@ class ChatViewModel @Inject constructor(
         if (associatedMessageType == null) return null
 
         // Try parsing as API name first (text format)
+        // Note: "-love" indicates removal, so check for that first
+        if (associatedMessageType.startsWith("-")) {
+            return null // This is a removal, handled separately
+        }
         Tapback.fromApiName(associatedMessageType)?.let { return it }
 
         // Parse numeric codes (iMessage internal format)
         // 2000 = love, 2001 = like, 2002 = dislike, 2003 = laugh, 2004 = emphasize, 2005 = question
-        // 3000-3005 = removal of reactions
+        // 3000-3005 = removal of reactions (should not be counted as active reactions)
         return when {
-            associatedMessageType.contains("2000") || associatedMessageType.contains("3000") -> Tapback.LOVE
-            associatedMessageType.contains("2001") || associatedMessageType.contains("3001") -> Tapback.LIKE
-            associatedMessageType.contains("2002") || associatedMessageType.contains("3002") -> Tapback.DISLIKE
-            associatedMessageType.contains("2003") || associatedMessageType.contains("3003") -> Tapback.LAUGH
-            associatedMessageType.contains("2004") || associatedMessageType.contains("3004") -> Tapback.EMPHASIZE
-            associatedMessageType.contains("2005") || associatedMessageType.contains("3005") -> Tapback.QUESTION
+            associatedMessageType.contains("3000") -> null // love removal
+            associatedMessageType.contains("3001") -> null // like removal
+            associatedMessageType.contains("3002") -> null // dislike removal
+            associatedMessageType.contains("3003") -> null // laugh removal
+            associatedMessageType.contains("3004") -> null // emphasize removal
+            associatedMessageType.contains("3005") -> null // question removal
+            associatedMessageType.contains("2000") -> Tapback.LOVE
+            associatedMessageType.contains("2001") -> Tapback.LIKE
+            associatedMessageType.contains("2002") -> Tapback.DISLIKE
+            associatedMessageType.contains("2003") -> Tapback.LAUGH
+            associatedMessageType.contains("2004") -> Tapback.EMPHASIZE
+            associatedMessageType.contains("2005") -> Tapback.QUESTION
             associatedMessageType.contains("love") -> Tapback.LOVE
             associatedMessageType.contains("like") -> Tapback.LIKE
             associatedMessageType.contains("dislike") -> Tapback.DISLIKE
             associatedMessageType.contains("laugh") -> Tapback.LAUGH
             associatedMessageType.contains("emphasize") -> Tapback.EMPHASIZE
             associatedMessageType.contains("question") -> Tapback.QUESTION
+            else -> null
+        }
+    }
+
+    /**
+     * Check if the reaction code indicates a removal (3000-3005 range).
+     */
+    private fun isReactionRemoval(associatedMessageType: String?): Boolean {
+        if (associatedMessageType == null) return false
+        if (associatedMessageType.startsWith("-")) return true
+        return associatedMessageType.contains("3000") ||
+                associatedMessageType.contains("3001") ||
+                associatedMessageType.contains("3002") ||
+                associatedMessageType.contains("3003") ||
+                associatedMessageType.contains("3004") ||
+                associatedMessageType.contains("3005")
+    }
+
+    /**
+     * Parse the reaction type from a removal code (3xxx range).
+     */
+    private fun parseRemovalType(associatedMessageType: String?): Tapback? {
+        if (associatedMessageType == null) return null
+        if (associatedMessageType.startsWith("-")) {
+            return Tapback.fromApiName(associatedMessageType.removePrefix("-"))
+        }
+        return when {
+            associatedMessageType.contains("3000") -> Tapback.LOVE
+            associatedMessageType.contains("3001") -> Tapback.LIKE
+            associatedMessageType.contains("3002") -> Tapback.DISLIKE
+            associatedMessageType.contains("3003") -> Tapback.LAUGH
+            associatedMessageType.contains("3004") -> Tapback.EMPHASIZE
+            associatedMessageType.contains("3005") -> Tapback.QUESTION
             else -> null
         }
     }

@@ -7,14 +7,21 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.pm.ShortcutInfo
+import android.content.pm.ShortcutManager
+import android.graphics.drawable.Icon
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.bluebubbles.MainActivity
 import com.bluebubbles.R
+import com.bluebubbles.ui.bubble.BubbleActivity
 import com.bluebubbles.ui.call.IncomingCallActivity
 import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -61,6 +68,10 @@ class NotificationService @Inject constructor(
             description = context.getString(R.string.notification_channel_messages_desc)
             enableVibration(true)
             enableLights(true)
+            // Enable conversation bubbles for this channel
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setAllowBubbles(true)
+            }
         }
 
         val serviceChannel = NotificationChannel(
@@ -83,6 +94,88 @@ class NotificationService @Inject constructor(
         }
 
         notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel, faceTimeChannel))
+    }
+
+    /**
+     * Creates or updates a dynamic shortcut for a conversation.
+     * This is required for bubble notifications to work properly.
+     *
+     * @param chatGuid Unique identifier for the chat
+     * @param chatTitle Display name of the conversation
+     * @param isGroup Whether this is a group conversation
+     * @return The shortcut ID
+     */
+    private fun createConversationShortcut(
+        chatGuid: String,
+        chatTitle: String,
+        isGroup: Boolean
+    ): String {
+        val shortcutId = "chat_$chatGuid"
+
+        // Create intent for the shortcut
+        val intent = Intent(context, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            putExtra(EXTRA_CHAT_GUID, chatGuid)
+        }
+
+        // Create person for the conversation
+        val person = Person.Builder()
+            .setName(chatTitle)
+            .setKey(chatGuid)
+            .build()
+
+        // Build the shortcut
+        val shortcut = ShortcutInfoCompat.Builder(context, shortcutId)
+            .setShortLabel(chatTitle)
+            .setLongLabel(chatTitle)
+            .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+            .setIntent(intent)
+            .setLongLived(true)
+            .setPerson(person)
+            .setCategories(setOf("com.bluebubbles.category.SHARE_TARGET"))
+            .build()
+
+        // Push the shortcut
+        ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
+
+        return shortcutId
+    }
+
+    /**
+     * Creates bubble metadata for a conversation notification.
+     * This enables the notification to be displayed as a floating bubble.
+     *
+     * @param chatGuid Unique identifier for the chat
+     * @param chatTitle Display name of the conversation
+     * @return BubbleMetadata for the notification, or null if bubbles aren't supported
+     */
+    private fun createBubbleMetadata(
+        chatGuid: String,
+        chatTitle: String
+    ): NotificationCompat.BubbleMetadata? {
+        // Bubbles require Android Q (API 29) or higher
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return null
+        }
+
+        // Create intent for the bubble activity
+        val bubbleIntent = BubbleActivity.createIntent(context, chatGuid, chatTitle)
+        val bubblePendingIntent = PendingIntent.getActivity(
+            context,
+            chatGuid.hashCode() + 100, // Different request code than main intent
+            bubbleIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        // Build bubble metadata
+        return NotificationCompat.BubbleMetadata.Builder(
+            bubblePendingIntent,
+            IconCompat.createWithResource(context, R.mipmap.ic_launcher)
+        )
+            .setDesiredHeight(600)
+            .setAutoExpandBubble(false)
+            .setSuppressNotification(false)
+            .build()
     }
 
     /**
@@ -175,6 +268,12 @@ class NotificationService @Inject constructor(
             .setConversationTitle(if (isGroup) chatTitle else null)
             .addMessage(displayText, System.currentTimeMillis(), sender)
 
+        // Create conversation shortcut for bubble support
+        val shortcutId = createConversationShortcut(chatGuid, chatTitle, isGroup)
+
+        // Create bubble metadata
+        val bubbleMetadata = createBubbleMetadata(chatGuid, chatTitle)
+
         val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(chatTitle)
@@ -187,6 +286,13 @@ class NotificationService @Inject constructor(
                 "Mark as Read",
                 markReadPendingIntent
             )
+            // Enable bubble support
+            .setShortcutId(shortcutId)
+
+        // Add bubble metadata if available (Android Q+)
+        if (bubbleMetadata != null) {
+            notificationBuilder.setBubbleMetadata(bubbleMetadata)
+        }
 
         // Add copy code action if a verification code was detected
         if (detectedCode != null) {

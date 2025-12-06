@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -16,6 +17,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.GroupAdd
 import androidx.compose.material.icons.filled.Person
@@ -207,10 +209,8 @@ fun ChatCreatorScreen(
                         ),
                         keyboardActions = KeyboardActions(
                             onDone = {
-                                // If a manual address entry is detected, add as recipient
-                                uiState.manualAddressEntry?.let { entry ->
-                                    viewModel.addManualRecipient(entry.address, entry.service)
-                                }
+                                // Add current query as recipient if it's a valid phone/email
+                                viewModel.onDonePressed()
                             }
                         ),
                         decorationBox = { innerTextField ->
@@ -319,7 +319,7 @@ fun ChatCreatorScreen(
                         ContactTile(
                             contact = contact,
                             isSelected = isSelected,
-                            onClick = { viewModel.addRecipient(contact) }
+                            onClick = { viewModel.toggleRecipient(contact) }
                         )
                     }
                 }
@@ -345,7 +345,7 @@ fun ChatCreatorScreen(
                         ContactTile(
                             contact = contact,
                             isSelected = isSelected,
-                            onClick = { viewModel.addRecipient(contact) }
+                            onClick = { viewModel.toggleRecipient(contact) }
                         )
                     }
                 }
@@ -616,8 +616,37 @@ private fun ContactTile(
                     size = 48.dp
                 )
 
+                // Selection checkmark indicator
+                if (isSelected) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isIMessage) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.secondary
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "Selected",
+                            tint = if (isIMessage) {
+                                MaterialTheme.colorScheme.onPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSecondary
+                            },
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                }
+
                 // Favorite indicator
-                if (contact.isFavorite) {
+                if (contact.isFavorite && !isSelected) {
                     Surface(
                         color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(50),

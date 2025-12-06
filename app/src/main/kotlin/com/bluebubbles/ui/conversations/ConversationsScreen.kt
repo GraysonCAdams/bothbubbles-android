@@ -59,6 +59,7 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -1628,7 +1629,7 @@ private fun GoogleStyleConversationTile(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Message preview with inline status indicator
+                // Message preview with status indicator
                 val textColor = when {
                     conversation.hasDraft -> MaterialTheme.colorScheme.error
                     conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
@@ -1648,48 +1649,35 @@ private fun GoogleStyleConversationTile(
                     MessageStatus.NONE -> null
                 }
 
-                val messagePreview = formatMessagePreview(conversation)
-                val annotatedText = buildAnnotatedString {
+                val iconSize = 14.dp
+                val iconSpacing = 4.dp
+                val firstLineIndent = if (statusIcon != null) (iconSize + iconSpacing).value.sp else 0.sp
+
+                Box {
+                    // Icon positioned at top-left, aligned with first line of text
                     if (statusIcon != null) {
-                        appendInlineContent("icon", "[icon]")
+                        Icon(
+                            imageVector = statusIcon,
+                            contentDescription = null,
+                            tint = statusTint,
+                            modifier = Modifier
+                                .size(iconSize)
+                                .offset(y = 1.dp) // Align with text baseline
+                        )
                     }
-                    append(messagePreview)
-                }
 
-                val inlineContent = if (statusIcon != null) {
-                    mapOf(
-                        "icon" to InlineTextContent(
-                            placeholder = Placeholder(
-                                width = 1.2.em,
-                                height = 1.em,
-                                placeholderVerticalAlign = PlaceholderVerticalAlign.TextCenter
-                            )
-                        ) {
-                            Icon(
-                                imageVector = statusIcon,
-                                contentDescription = null,
-                                tint = statusTint,
-                                modifier = Modifier
-                                    .fillMaxHeight()
-                                    .aspectRatio(1f)
-                            )
-                        }
+                    Text(
+                        text = formatMessagePreview(conversation),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                            lineHeight = 18.sp,
+                            textIndent = TextIndent(firstLine = firstLineIndent)
+                        ),
+                        color = textColor,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
                     )
-                } else {
-                    emptyMap()
                 }
-
-                Text(
-                    text = annotatedText,
-                    inlineContent = inlineContent,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                        lineHeight = 18.sp
-                    ),
-                    color = textColor,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
             }
 
             Spacer(modifier = Modifier.width(12.dp))

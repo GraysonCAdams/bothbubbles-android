@@ -154,8 +154,8 @@ fun SwipeableConversationTile(
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onSwipeAction(leftAction)
                     }
-                    // Dismiss for delete/archive, reset for others
-                    leftAction == SwipeActionType.DELETE || leftAction == SwipeActionType.ARCHIVE
+                    // Always reset - the action is already triggered, let the list update naturally
+                    false
                 }
                 SwipeToDismissBoxValue.Settled -> false
             }

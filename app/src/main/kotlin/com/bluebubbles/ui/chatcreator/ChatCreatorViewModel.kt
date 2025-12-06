@@ -155,15 +155,20 @@ class ChatCreatorViewModel @Inject constructor(
                 // Convert group chats to UI model
                 val groupChatModels = groupChats.map { it.toGroupChatUiModel() }
 
-                ChatCreatorUiState(
-                    searchQuery = query,
-                    groupedContacts = grouped,
-                    favoriteContacts = favorites,
-                    groupChats = groupChatModels,
-                    isLoading = false
-                )
-            }.collect { state ->
-                _uiState.value = state
+                // Return data that needs to be merged into state
+                Triple(grouped, favorites, groupChatModels) to query
+            }.collect { (data, query) ->
+                val (grouped, favorites, groupChatModels) = data
+                // Preserve existing state fields that shouldn't be overwritten
+                _uiState.update { currentState ->
+                    currentState.copy(
+                        searchQuery = query,
+                        groupedContacts = grouped,
+                        favoriteContacts = favorites,
+                        groupChats = groupChatModels,
+                        isLoading = false
+                    )
+                }
             }
         }
     }
@@ -352,6 +357,29 @@ class ChatCreatorViewModel @Inject constructor(
     }
 
     /**
+     * Toggle a recipient from contact selection (add if not selected, remove if selected)
+     */
+    fun toggleRecipient(contact: ContactUiModel) {
+        val currentRecipients = _uiState.value.selectedRecipients
+        val existingIndex = currentRecipients.indexOfFirst { it.address == contact.address }
+
+        if (existingIndex >= 0) {
+            // Already selected - remove it
+            removeRecipient(contact.address)
+        } else {
+            // Not selected - add it
+            val recipient = SelectedRecipient(
+                address = contact.address,
+                displayName = contact.displayName,
+                service = contact.service,
+                avatarPath = contact.avatarPath,
+                isManualEntry = false
+            )
+            addRecipientInternal(recipient)
+        }
+    }
+
+    /**
      * Add a recipient from contact selection
      */
     fun addRecipient(contact: ContactUiModel) {
@@ -377,6 +405,42 @@ class ChatCreatorViewModel @Inject constructor(
             isManualEntry = true
         )
         addRecipientInternal(recipient)
+    }
+
+    /**
+     * Called when user presses Done on keyboard. Adds the current query as a recipient
+     * if it's a valid phone number or email, even if the debounced check hasn't completed.
+     */
+    fun onDonePressed() {
+        // First check if we already have a validated manual entry
+        val manualEntry = _uiState.value.manualAddressEntry
+        if (manualEntry != null) {
+            addManualRecipient(manualEntry.address, manualEntry.service)
+            return
+        }
+
+        // Otherwise check if the current query looks like a valid address
+        val query = _uiState.value.searchQuery.trim()
+        if (query.isEmpty()) return
+
+        when {
+            query.isPhoneNumber() -> {
+                // Check cached handle for last known service, then add recipient
+                viewModelScope.launch {
+                    // Try exact match first, then normalized format
+                    val cachedHandle = handleDao.getHandleByAddressAny(query)
+                        ?: handleDao.getHandleByAddressAny(
+                            PhoneAndCodeParsingUtils.normalizePhoneNumber(query)
+                        )
+                    val service = cachedHandle?.service ?: "SMS"
+                    addManualRecipient(query, service)
+                }
+            }
+            query.isEmail() -> {
+                // Emails are typically iMessage
+                addManualRecipient(query, "iMessage")
+            }
+        }
     }
 
     private fun addRecipientInternal(recipient: SelectedRecipient) {
