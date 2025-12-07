@@ -100,7 +100,7 @@ adb devices
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 # Launch the app
-adb shell am start -n com.bluebubbles/.MainActivity
+adb shell am start -n com.bothbubbles/.MainActivity
 ```
 
 ### Building in Android Studio
@@ -230,13 +230,13 @@ Add `@OptIn(ExperimentalFoundationApi::class)` to functions using experimental A
 
 Uninstall existing app first:
 ```bash
-adb uninstall com.bluebubbles
+adb uninstall com.bothbubbles
 adb install app/build/outputs/apk/debug/app-debug.apk
 ```
 
 ### Force stop and restart app
 
 ```bash
-adb shell am force-stop com.bluebubbles
-adb shell am start -n com.bluebubbles/.MainActivity
+adb shell am force-stop com.bothbubbles
+adb shell am start -n com.bothbubbles/.MainActivity
 ```

@@ -1,0 +1,206 @@
+package com.bothbubbles.data.local.db.dao
+
+import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
+import androidx.room.Query
+import androidx.room.Transaction
+import androidx.room.Update
+import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import kotlinx.coroutines.flow.Flow
+
+@Dao
+interface UnifiedChatGroupDao {
+
+    // ===== Queries =====
+
+    @Query("""
+        SELECT * FROM unified_chat_groups
+        WHERE is_archived = 0
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+    """)
+    fun observeActiveGroups(): Flow<List<UnifiedChatGroupEntity>>
+
+    @Query("""
+        SELECT * FROM unified_chat_groups
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+    """)
+    fun observeAllGroups(): Flow<List<UnifiedChatGroupEntity>>
+
+    @Query("""
+        SELECT * FROM unified_chat_groups
+        WHERE is_archived = 1
+        ORDER BY latest_message_date DESC
+    """)
+    fun observeArchivedGroups(): Flow<List<UnifiedChatGroupEntity>>
+
+    @Query("""
+        SELECT * FROM unified_chat_groups
+        WHERE is_starred = 1
+        ORDER BY latest_message_date DESC
+    """)
+    fun observeStarredGroups(): Flow<List<UnifiedChatGroupEntity>>
+
+    @Query("SELECT * FROM unified_chat_groups WHERE id = :groupId")
+    suspend fun getGroupById(groupId: Long): UnifiedChatGroupEntity?
+
+    @Query("SELECT * FROM unified_chat_groups WHERE id = :groupId")
+    fun observeGroupById(groupId: Long): Flow<UnifiedChatGroupEntity?>
+
+    @Query("SELECT * FROM unified_chat_groups WHERE identifier = :identifier LIMIT 1")
+    suspend fun getGroupByIdentifier(identifier: String): UnifiedChatGroupEntity?
+
+    @Query("SELECT * FROM unified_chat_groups WHERE primary_chat_guid = :chatGuid LIMIT 1")
+    suspend fun getGroupByPrimaryChatGuid(chatGuid: String): UnifiedChatGroupEntity?
+
+    // ===== Member Queries =====
+
+    @Query("""
+        SELECT chat_guid FROM unified_chat_members
+        WHERE group_id = :groupId
+    """)
+    suspend fun getChatGuidsForGroup(groupId: Long): List<String>
+
+    @Query("""
+        SELECT chat_guid FROM unified_chat_members
+        WHERE group_id = :groupId
+    """)
+    fun observeChatGuidsForGroup(groupId: Long): Flow<List<String>>
+
+    @Query("""
+        SELECT ucg.* FROM unified_chat_groups ucg
+        INNER JOIN unified_chat_members ucm ON ucg.id = ucm.group_id
+        WHERE ucm.chat_guid = :chatGuid
+        LIMIT 1
+    """)
+    suspend fun getGroupForChat(chatGuid: String): UnifiedChatGroupEntity?
+
+    @Query("""
+        SELECT ucg.* FROM unified_chat_groups ucg
+        INNER JOIN unified_chat_members ucm ON ucg.id = ucm.group_id
+        WHERE ucm.chat_guid = :chatGuid
+        LIMIT 1
+    """)
+    fun observeGroupForChat(chatGuid: String): Flow<UnifiedChatGroupEntity?>
+
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM unified_chat_members
+            WHERE chat_guid = :chatGuid
+        )
+    """)
+    suspend fun isChatInUnifiedGroup(chatGuid: String): Boolean
+
+    @Query("SELECT COUNT(*) FROM unified_chat_members WHERE group_id = :groupId")
+    suspend fun getMemberCount(groupId: Long): Int
+
+    // ===== Inserts/Updates =====
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGroup(group: UnifiedChatGroupEntity): Long
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMember(member: UnifiedChatMember)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertMembers(members: List<UnifiedChatMember>)
+
+    @Update
+    suspend fun updateGroup(group: UnifiedChatGroupEntity)
+
+    @Query("""
+        UPDATE unified_chat_groups
+        SET latest_message_date = :date, latest_message_text = :text
+        WHERE id = :groupId
+    """)
+    suspend fun updateLatestMessage(groupId: Long, date: Long, text: String?)
+
+    @Query("UPDATE unified_chat_groups SET unread_count = :count WHERE id = :groupId")
+    suspend fun updateUnreadCount(groupId: Long, count: Int)
+
+    @Query("UPDATE unified_chat_groups SET display_name = :displayName WHERE id = :groupId")
+    suspend fun updateDisplayName(groupId: Long, displayName: String?)
+
+    @Query("UPDATE unified_chat_groups SET is_pinned = :isPinned, pin_index = :pinIndex WHERE id = :groupId")
+    suspend fun updatePinStatus(groupId: Long, isPinned: Boolean, pinIndex: Int?)
+
+    @Query("UPDATE unified_chat_groups SET is_archived = :isArchived WHERE id = :groupId")
+    suspend fun updateArchiveStatus(groupId: Long, isArchived: Boolean)
+
+    @Query("UPDATE unified_chat_groups SET is_starred = :isStarred WHERE id = :groupId")
+    suspend fun updateStarredStatus(groupId: Long, isStarred: Boolean)
+
+    @Query("UPDATE unified_chat_groups SET mute_type = :muteType WHERE id = :groupId")
+    suspend fun updateMuteStatus(groupId: Long, muteType: String?)
+
+    @Query("UPDATE unified_chat_groups SET snooze_until = :snoozeUntil WHERE id = :groupId")
+    suspend fun updateSnoozeUntil(groupId: Long, snoozeUntil: Long?)
+
+    @Query("UPDATE unified_chat_groups SET primary_chat_guid = :chatGuid WHERE id = :groupId")
+    suspend fun updatePrimaryChatGuid(groupId: Long, chatGuid: String)
+
+    // ===== Deletes =====
+
+    @Query("DELETE FROM unified_chat_groups WHERE id = :groupId")
+    suspend fun deleteGroup(groupId: Long)
+
+    @Query("DELETE FROM unified_chat_groups WHERE identifier = :identifier")
+    suspend fun deleteGroupByIdentifier(identifier: String)
+
+    @Query("DELETE FROM unified_chat_members WHERE group_id = :groupId AND chat_guid = :chatGuid")
+    suspend fun removeMember(groupId: Long, chatGuid: String)
+
+    @Query("DELETE FROM unified_chat_members WHERE chat_guid = :chatGuid")
+    suspend fun removeChatFromAllGroups(chatGuid: String)
+
+    @Query("DELETE FROM unified_chat_groups")
+    suspend fun deleteAllGroups()
+
+    @Query("DELETE FROM unified_chat_members")
+    suspend fun deleteAllMembers()
+
+    // ===== Counts =====
+
+    @Query("SELECT COUNT(*) FROM unified_chat_groups")
+    suspend fun getGroupCount(): Int
+
+    @Query("SELECT COUNT(*) FROM unified_chat_groups WHERE is_archived = 0")
+    fun observeActiveGroupCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM unified_chat_groups WHERE is_archived = 1")
+    fun observeArchivedGroupCount(): Flow<Int>
+
+    @Query("SELECT COUNT(*) FROM unified_chat_groups WHERE is_starred = 1")
+    fun observeStarredGroupCount(): Flow<Int>
+
+    @Query("SELECT SUM(unread_count) FROM unified_chat_groups WHERE is_archived = 0")
+    fun observeTotalUnreadCount(): Flow<Int?>
+
+    // ===== Transactions =====
+
+    @Transaction
+    suspend fun createGroupWithMembers(
+        group: UnifiedChatGroupEntity,
+        chatGuids: List<String>
+    ): Long {
+        val groupId = insertGroup(group)
+        val members = chatGuids.map { UnifiedChatMember(groupId, it) }
+        insertMembers(members)
+        return groupId
+    }
+
+    @Transaction
+    suspend fun addChatToGroup(groupId: Long, chatGuid: String) {
+        // First remove from any existing group
+        removeChatFromAllGroups(chatGuid)
+        // Then add to the new group
+        insertMember(UnifiedChatMember(groupId, chatGuid))
+    }
+
+    @Transaction
+    suspend fun deleteAllData() {
+        deleteAllMembers()
+        deleteAllGroups()
+    }
+}

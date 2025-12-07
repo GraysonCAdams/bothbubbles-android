@@ -1,0 +1,106 @@
+package com.bothbubbles.di
+
+import android.content.Context
+import androidx.room.Room
+import androidx.work.WorkManager
+import com.bothbubbles.data.local.db.BothBubblesDatabase
+import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.LinkPreviewDao
+import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
+import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+object AppModule {
+
+    /**
+     * Provides the Room database instance.
+     *
+     * Migration strategy:
+     * - All migrations are defined in [BothBubblesDatabase.ALL_MIGRATIONS]
+     * - On downgrade (rare), data is cleared as a safety measure
+     * - If a migration is missing, the app will crash - this is intentional
+     *   to catch migration issues during development rather than silently
+     *   destroying user data in production
+     */
+    @Provides
+    @Singleton
+    fun provideDatabase(
+        @ApplicationContext context: Context
+    ): BothBubblesDatabase {
+        return Room.databaseBuilder(
+            context,
+            BothBubblesDatabase::class.java,
+            BothBubblesDatabase.DATABASE_NAME
+        )
+            .addMigrations(*BothBubblesDatabase.ALL_MIGRATIONS)
+            // Only destroy data on downgrade (e.g., rolling back to older app version)
+            // Missing migrations will crash - this is intentional to catch issues early
+            .fallbackToDestructiveMigrationOnDowngrade()
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatDao(database: BothBubblesDatabase): ChatDao {
+        return database.chatDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideMessageDao(database: BothBubblesDatabase): MessageDao {
+        return database.messageDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideHandleDao(database: BothBubblesDatabase): HandleDao {
+        return database.handleDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideAttachmentDao(database: BothBubblesDatabase): AttachmentDao {
+        return database.attachmentDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLinkPreviewDao(database: BothBubblesDatabase): LinkPreviewDao {
+        return database.linkPreviewDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideQuickReplyTemplateDao(database: BothBubblesDatabase): QuickReplyTemplateDao {
+        return database.quickReplyTemplateDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideScheduledMessageDao(database: BothBubblesDatabase): ScheduledMessageDao {
+        return database.scheduledMessageDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideUnifiedChatGroupDao(database: BothBubblesDatabase): UnifiedChatGroupDao {
+        return database.unifiedChatGroupDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        return WorkManager.getInstance(context)
+    }
+}

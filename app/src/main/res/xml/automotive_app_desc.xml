@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android Auto app descriptor
+    Declares capabilities for Android Auto integration
+-->
+<automotiveApp>
+    <!-- Enable notification-based messaging in Android Auto -->
+    <uses name="notification" />
+
+    <!-- Enable SMS support when app is default SMS handler -->
+    <uses name="sms" />
+
+    <!-- Enable templated messaging UI (Car App Library) -->
+    <uses name="template" />
+</automotiveApp>

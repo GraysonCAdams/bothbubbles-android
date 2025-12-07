@@ -57,6 +57,9 @@ firebaseBom = "33.6.0"
 # Google Play Services
 playServicesLocation = "21.3.0"
 
+# Android Auto (Car App Library)
+carApp = "1.4.0"
+
 # Coroutines
 coroutines = "1.9.0"
 serialization = "1.7.3"
@@ -158,6 +161,10 @@ firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging
 
 # Google Play Services
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
+
+# Android Auto (Car App Library)
+car-app = { group = "androidx.car.app", name = "app", version.ref = "carApp" }
+car-app-projected = { group = "androidx.car.app", name = "app-projected", version.ref = "carApp" }
 
 # Phone Number
 libphonenumber = { group = "io.michaelrocks", name = "libphonenumber-android", version.ref = "libphonenumber" }

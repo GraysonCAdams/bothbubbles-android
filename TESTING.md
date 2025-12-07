@@ -21,7 +21,7 @@ flutter build apk --debug --flavor bothbubbles
 adb install -r build/app/outputs/flutter-apk/app-bothbubbles-debug.apk
 
 # Launch app (note: package is com.bothbubbles.messaging for bothbubbles flavor)
-adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainActivity
+adb shell am start -n com.bothbubbles.messaging/com.bothbubbles.messaging.MainActivity
 ```
 
 ## Prerequisites
@@ -110,14 +110,14 @@ adb install -r build/app/outputs/flutter-apk/app-bothbubbles-debug.apk
 ### Launch
 
 ```bash
-adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainActivity
+adb shell am start -n com.bothbubbles.messaging/com.bothbubbles.messaging.MainActivity
 ```
 
 ### Force Restart (after reinstall)
 
 ```bash
 adb shell am force-stop com.bothbubbles.messaging
-adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainActivity
+adb shell am start -n com.bothbubbles.messaging/com.bothbubbles.messaging.MainActivity
 ```
 
 ## Development Workflow
@@ -128,7 +128,7 @@ adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainAc
 flutter build apk --debug --flavor bothbubbles && \
 adb install -r build/app/outputs/flutter-apk/app-bothbubbles-debug.apk && \
 adb shell am force-stop com.bothbubbles.messaging && \
-adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainActivity
+adb shell am start -n com.bothbubbles.messaging/com.bothbubbles.messaging.MainActivity
 ```
 
 ### Hot Reload (Fastest)
@@ -171,7 +171,7 @@ adb logcat | grep -i "bluebubbles\|flutter"
 adb shell am force-stop com.bothbubbles.messaging
 adb uninstall com.bothbubbles.messaging
 adb install build/app/outputs/flutter-apk/app-bothbubbles-debug.apk
-adb shell am start -n com.bothbubbles.messaging/com.bluebubbles.messaging.MainActivity
+adb shell am start -n com.bothbubbles.messaging/com.bothbubbles.messaging.MainActivity
 ```
 
 ### Clear App Data
@@ -207,8 +207,8 @@ export JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home"
 
 | Flavor | Build Type | Package Name | Activity |
 |--------|------------|--------------|----------|
-| bothbubbles | Debug | `com.bothbubbles.messaging` | `com.bluebubbles.messaging.MainActivity` |
-| bothbubbles | Release | `com.bothbubbles.messaging` | `com.bluebubbles.messaging.MainActivity` |
+| bothbubbles | Debug | `com.bothbubbles.messaging` | `com.bothbubbles.messaging.MainActivity` |
+| bothbubbles | Release | `com.bothbubbles.messaging` | `com.bothbubbles.messaging.MainActivity` |
 
 **Note:** The `--flavor bothbubbles` flag is required for all builds.
 

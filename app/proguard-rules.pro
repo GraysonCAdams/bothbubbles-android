@@ -1,7 +1,7 @@
 # BlueBubbles Android ProGuard Rules
 
 # Keep Room entities
--keep class com.bluebubbles.data.local.db.entity.** { *; }
+-keep class com.bothbubbles.data.local.db.entity.** { *; }
 
 # Keep Moshi adapters
 -keep class com.squareup.moshi.** { *; }
@@ -39,10 +39,10 @@
 }
 
 # Keep serializable classes
--keep,includedescendorclasses class com.bluebubbles.**$$serializer { *; }
--keepclassmembers class com.bluebubbles.** {
+-keep,includedescendorclasses class com.bothbubbles.**$$serializer { *; }
+-keepclassmembers class com.bothbubbles.** {
     *** Companion;
 }
--keepclasseswithmembers class com.bluebubbles.** {
+-keepclasseswithmembers class com.bothbubbles.** {
     kotlinx.serialization.KSerializer serializer(...);
 }

@@ -51,20 +51,34 @@
     <!-- FaceTime incoming call full-screen display -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
+    <!-- Battery optimization exemption request -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <application
-        android:name=".BlueBubblesApp"
+        android:name=".BothBubblesApp"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.BlueBubbles"
+        android:theme="@style/Theme.BothBubbles"
         android:enableOnBackInvokedCallback="true">
+
+        <!-- Android Auto support -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
+
+        <!-- Car App Library minimum API level for ConversationItem support -->
+        <meta-data
+            android:name="androidx.car.app.minCarApiLevel"
+            android:value="7" />
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:theme="@style/Theme.BlueBubbles"
+            android:theme="@style/Theme.BothBubbles"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -76,7 +90,7 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="bluebubbles" />
+                <data android:scheme="bothbubbles" />
             </intent-filter>
 
             <!-- SMS default app intents -->
@@ -142,7 +156,7 @@
             android:turnScreenOn="true"
             android:taskAffinity=""
             android:excludeFromRecents="true"
-            android:theme="@style/Theme.BlueBubbles" />
+            android:theme="@style/Theme.BothBubbles" />
 
         <!-- Chat Bubble Activity -->
         <activity
@@ -151,7 +165,7 @@
             android:allowEmbedded="true"
             android:documentLaunchMode="always"
             android:resizeableActivity="true"
-            android:theme="@style/Theme.BlueBubbles" />
+            android:theme="@style/Theme.BothBubbles" />
 
         <!-- Notification Receiver -->
         <receiver
@@ -160,7 +174,7 @@
 
         <!-- Firebase Messaging -->
         <service
-            android:name=".services.fcm.BlueBubblesFirebaseService"
+            android:name=".services.fcm.BothBubblesFirebaseService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />
@@ -217,8 +231,8 @@
             android:name=".services.sms.SmsStatusReceiver"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.bluebubbles.SMS_SENT" />
-                <action android:name="com.bluebubbles.SMS_DELIVERED" />
+                <action android:name="com.bothbubbles.SMS_SENT" />
+                <action android:name="com.bothbubbles.SMS_DELIVERED" />
             </intent-filter>
         </receiver>
 

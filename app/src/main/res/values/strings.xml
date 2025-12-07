@@ -59,6 +59,26 @@
     <string name="error_send_message">Failed to send message</string>
     <string name="error_load_messages">Failed to load messages</string>
 
+    <!-- SMS Error Messages -->
+    <string name="sms_error_generic">Message could not be sent. Please try again.</string>
+    <string name="sms_error_no_service">No cellular service. Check your signal and try again.</string>
+    <string name="sms_error_invalid_message">Message format is invalid.</string>
+    <string name="sms_error_airplane_mode">Airplane mode is on. Disable it to send messages.</string>
+    <string name="sms_error_not_default_app">Set as default SMS app to send messages.</string>
+    <string name="sms_error_rate_limit">Too many messages sent. Please wait and try again.</string>
+    <string name="sms_error_short_code_blocked">Short code messages are blocked on this device.</string>
+    <string name="sms_error_fdn_check_failed">Number not in fixed dialing list.</string>
+    <string name="sms_error_encoding">Message contains unsupported characters.</string>
+    <string name="sms_error_content_too_large">Message or attachment is too large.</string>
+    <string name="sms_error_no_sim">No SIM card detected.</string>
+    <string name="sms_error_network_reject">Network rejected the message.</string>
+    <string name="sms_error_invalid_address">Invalid recipient number.</string>
+    <string name="sms_error_network_error">Network error. Check your connection.</string>
+    <string name="sms_error_unknown">Unknown error (code %1$d)</string>
+    <string name="sms_delivery_failed">Message was not delivered.</string>
+    <string name="sms_status_retrying">Retrying… (attempt %1$d of %2$d)</string>
+    <string name="sms_retry_failed">Message failed after %1$d retries.</string>
+
     <!-- Actions -->
     <string name="action_retry">Retry</string>
     <string name="action_cancel">Cancel</string>

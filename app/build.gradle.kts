@@ -8,11 +8,11 @@ plugins {
 }
 
 android {
-    namespace = "com.bluebubbles"
+    namespace = "com.bothbubbles"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.bluebubbles.messaging"
+        applicationId = "com.bothbubbles.messaging"
         minSdk = 26
         targetSdk = 35
         versionCode = 1
@@ -140,6 +140,10 @@ dependencies {
 
     // Google Play Services
     implementation(libs.play.services.location)
+
+    // Android Auto (Car App Library)
+    implementation(libs.car.app)
+    implementation(libs.car.app.projected)
 
     // Phone Number Formatting
     implementation(libs.libphonenumber)

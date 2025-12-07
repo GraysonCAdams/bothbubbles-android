@@ -305,7 +305,7 @@ class SmsService extends GetxService {
   final RxBool smsEnabled = false.obs;
 
   // Platform channel for SMS operations
-  static const MethodChannel _channel = MethodChannel('com.bluebubbles.messaging');
+  static const MethodChannel _channel = MethodChannel('com.bothbubbles.messaging');
 
   Future<void> init();
   Future<bool> requestDefaultSmsApp();
