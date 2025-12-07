@@ -72,7 +72,7 @@ class IncomingCallActivity : ComponentActivity() {
         }
 
         val callUuid = intent.getStringExtra(EXTRA_CALL_UUID)
-        val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: "Unknown"
+        val callerName = intent.getStringExtra(EXTRA_CALLER_NAME) ?: ""
 
         if (callUuid == null) {
             finish()

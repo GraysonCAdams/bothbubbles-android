@@ -333,7 +333,11 @@ fun ChatScreen(
         }
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
+    ) {
     Scaffold(
         containerColor = Color.Transparent,
         topBar = {
@@ -1141,7 +1145,7 @@ fun ChatScreen(
         chats = forwardableChats.map { chat ->
             ForwardableChatInfo(
                 guid = chat.guid,
-                displayName = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
                 isGroup = chat.isGroup
             )
         },
@@ -1680,9 +1684,6 @@ private fun VoiceMemoButton(
         MaterialTheme.colorScheme.primary // Blue for iMessage
     }
 
-    // Track if recording was started during this press gesture
-    var recordingStarted by remember { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .size(48.dp)
@@ -1691,39 +1692,35 @@ private fun VoiceMemoButton(
             .pointerInput(Unit) {
                 awaitEachGesture {
                     // Wait for initial press
-                    awaitFirstDown()
-                    recordingStarted = false
+                    val down = awaitFirstDown(requireUnconsumed = false)
+                    down.consume()
 
-                    // Wait a brief moment to distinguish tap from hold (200ms)
-                    val holdThresholdReached = withTimeoutOrNull(200L) {
-                        // Keep checking if finger is still down
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Main)
-                            if (event.changes.none { it.pressed }) {
-                                // Finger lifted before threshold - this is a tap
-                                return@withTimeoutOrNull false
-                            }
+                    // Track timing and state
+                    val holdThresholdMs = 200L
+                    val pressStartTime = System.currentTimeMillis()
+                    var recordingStarted = false
+
+                    // Wait for finger lift while tracking hold duration
+                    do {
+                        val event = awaitPointerEvent()
+                        val elapsed = System.currentTimeMillis() - pressStartTime
+
+                        // Start recording once hold threshold is reached
+                        if (elapsed >= holdThresholdMs && !recordingStarted) {
+                            recordingStarted = true
+                            onPressStart()
                         }
-                        @Suppress("UNREACHABLE_CODE")
-                        true
-                    } ?: true // Timeout reached = hold detected
 
-                    if (holdThresholdReached) {
-                        // Hold detected - start recording
-                        recordingStarted = true
-                        onPressStart()
+                        // Consume all changes to prevent event leaking
+                        event.changes.forEach { it.consume() }
+                    } while (event.changes.any { it.pressed })
 
-                        // Wait for finger to lift
-                        while (true) {
-                            val event = awaitPointerEvent(PointerEventPass.Main)
-                            if (event.changes.none { it.pressed }) {
-                                break
-                            }
-                        }
-                        // Finger lifted - stop recording
+                    // Finger lifted
+                    if (recordingStarted) {
+                        // Was recording - stop it
                         onPressEnd()
                     } else {
-                        // Tap detected - just request permission
+                        // Quick tap - just request permission
                         onClick()
                     }
                 }

@@ -44,6 +44,7 @@ import com.bothbubbles.ui.components.ReactionUiModel
 import com.bothbubbles.ui.components.SuggestionItem
 import com.bothbubbles.ui.components.Tapback
 import com.bothbubbles.ui.effects.MessageEffect
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -458,7 +459,7 @@ class ChatViewModel @Inject constructor(
                 chat?.let {
                     _uiState.update { state ->
                         state.copy(
-                            chatTitle = it.displayName ?: it.chatIdentifier ?: "Unknown",
+                            chatTitle = it.displayName ?: it.chatIdentifier?.let { id -> PhoneNumberFormatter.format(id) } ?: "",
                             isGroup = it.isGroup,
                             isArchived = it.isArchived,
                             isStarred = it.isStarred,

@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.*
@@ -48,7 +49,7 @@ class SharePickerViewModel @Inject constructor(
                         conversations = conversations.map { chat ->
                             ShareConversationUiModel(
                                 guid = chat.guid,
-                                displayName = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                                displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
                                 avatarPath = chat.customAvatarPath,
                                 isGroup = chat.isGroup,
                                 participantNames = emptyList() // Could be populated from join table

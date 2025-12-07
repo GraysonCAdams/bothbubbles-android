@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.components.Avatar
+import com.bothbubbles.util.PhoneNumberFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,10 +77,11 @@ fun ArchivedChatsScreen(
                     items = uiState.archivedChats,
                     key = { it.guid }
                 ) { chat ->
+                    val formattedIdentifier = chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
                     ListItem(
                         headlineContent = {
                             Text(
-                                text = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                                text = chat.displayName ?: formattedIdentifier ?: "",
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -96,7 +98,7 @@ fun ArchivedChatsScreen(
                         },
                         leadingContent = {
                             Avatar(
-                                name = chat.displayName ?: chat.chatIdentifier ?: "?",
+                                name = chat.displayName ?: formattedIdentifier ?: "?",
                                 size = 48.dp
                             )
                         },

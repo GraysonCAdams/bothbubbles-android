@@ -11,6 +11,7 @@ import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.components.UrlParsingUtils
+import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -129,7 +130,7 @@ class SocketEventHandler @Inject constructor(
 
             notificationService.showMessageNotification(
                 chatGuid = event.chatGuid,
-                chatTitle = chat?.displayName ?: chat?.chatIdentifier ?: "Unknown",
+                chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
                 messageText = messageText,
                 messageGuid = savedMessage.guid,
                 senderName = senderName,
@@ -224,7 +225,7 @@ class SocketEventHandler @Inject constructor(
         when (event.status) {
             FaceTimeCallStatus.INCOMING -> {
                 // Show incoming FaceTime call notification
-                val callerDisplay = event.callerName ?: event.callerAddress ?: "Unknown"
+                val callerDisplay = event.callerName ?: event.callerAddress?.let { PhoneNumberFormatter.format(it) } ?: ""
                 notificationService.showFaceTimeCallNotification(
                     callUuid = event.callUuid,
                     callerName = callerDisplay,

@@ -112,7 +112,7 @@ fun TapbackMenu(
 
     Popup(
         alignment = if (isFromMe) Alignment.TopEnd else Alignment.TopStart,
-        offset = IntOffset(0, -140), // Position above the message (increased for action buttons)
+        offset = IntOffset(0, -100), // Position above the message
         onDismissRequest = onDismiss,
         properties = PopupProperties(
             focusable = true,
@@ -162,76 +162,62 @@ private fun TapbackMenuContent(
         modifier = modifier
             .scale(animationProgress)
             .padding(4.dp),
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(16.dp),
         tonalElevation = 6.dp,
         shadowElevation = 4.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        Column {
-            // Tapback reactions row
-            Row(
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(0.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Tapback.entries.forEachIndexed { index, tapback ->
-                    TapbackButton(
-                        tapback = tapback,
-                        isSelected = tapback in myReactions,
-                        onClick = { onReactionSelected(tapback) },
-                        animationDelay = index * 20
-                    )
-                }
-
-                // Emoji picker button at the end
-                if (onEmojiPickerClick != null) {
-                    // Divider between tapbacks and emoji picker
-                    Box(
-                        modifier = Modifier
-                            .padding(horizontal = 4.dp)
-                            .width(1.dp)
-                            .height(20.dp)
-                            .background(MaterialTheme.colorScheme.outlineVariant)
-                    )
-
-                    EmojiPickerButton(
-                        onClick = onEmojiPickerClick,
-                        animationDelay = Tapback.entries.size * 20
-                    )
-                }
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(0.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Tapback reactions
+            Tapback.entries.forEachIndexed { index, tapback ->
+                TapbackButton(
+                    tapback = tapback,
+                    isSelected = tapback in myReactions,
+                    onClick = { onReactionSelected(tapback) },
+                    animationDelay = index * 20
+                )
             }
 
-            // Action buttons row (Copy, Forward)
-            if (onCopyClick != null || onForwardClick != null) {
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    modifier = Modifier.padding(horizontal = 8.dp)
-                )
-
-                Row(
+            // Divider before action buttons
+            if (onCopyClick != null || onForwardClick != null || onEmojiPickerClick != null) {
+                Box(
                     modifier = Modifier
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    if (onCopyClick != null) {
-                        ActionButton(
-                            icon = Icons.Outlined.ContentCopy,
-                            label = "Copy",
-                            onClick = onCopyClick,
-                            animationDelay = (Tapback.entries.size + 1) * 20
-                        )
-                    }
+                        .padding(horizontal = 2.dp)
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(MaterialTheme.colorScheme.outlineVariant)
+                )
+            }
 
-                    if (onForwardClick != null) {
-                        ActionButton(
-                            icon = Icons.AutoMirrored.Outlined.Reply,
-                            label = "Forward",
-                            onClick = onForwardClick,
-                            animationDelay = (Tapback.entries.size + 2) * 20
-                        )
-                    }
-                }
+            // Action buttons (icon-only)
+            if (onCopyClick != null) {
+                ActionButton(
+                    icon = Icons.Outlined.ContentCopy,
+                    contentDescription = "Copy",
+                    onClick = onCopyClick,
+                    animationDelay = Tapback.entries.size * 20
+                )
+            }
+
+            if (onForwardClick != null) {
+                ActionButton(
+                    icon = Icons.AutoMirrored.Outlined.Reply,
+                    contentDescription = "Forward",
+                    onClick = onForwardClick,
+                    animationDelay = (Tapback.entries.size + 1) * 20
+                )
+            }
+
+            // Emoji picker button at the end
+            if (onEmojiPickerClick != null) {
+                EmojiPickerButton(
+                    onClick = onEmojiPickerClick,
+                    animationDelay = (Tapback.entries.size + 2) * 20
+                )
             }
         }
     }
@@ -326,12 +312,12 @@ private fun EmojiPickerButton(
 }
 
 /**
- * Action button for message actions (Copy, Forward)
+ * Action button for message actions (Copy, Forward) - icon only
  */
 @Composable
 private fun ActionButton(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
+    contentDescription: String,
     onClick: () -> Unit,
     animationDelay: Int,
     modifier: Modifier = Modifier
@@ -353,29 +339,20 @@ private fun ActionButton(
         }
     }
 
-    Surface(
-        modifier = modifier.scale(scale),
-        onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
-        color = Color.Transparent
+    Box(
+        modifier = modifier
+            .scale(scale)
+            .size(28.dp)
+            .clip(CircleShape)
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = label,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(16.dp)
-            )
-            Text(
-                text = label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
+        Icon(
+            imageVector = icon,
+            contentDescription = contentDescription,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(16.dp)
+        )
     }
 }
 

@@ -8,13 +8,16 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.sms.*
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -36,7 +39,8 @@ class SmsRepository @Inject constructor(
     private val smsContentProvider: SmsContentProvider,
     private val smsSendService: SmsSendService,
     private val mmsSendService: MmsSendService,
-    private val smsContentObserver: SmsContentObserver
+    private val smsContentObserver: SmsContentObserver,
+    private val androidContactsService: AndroidContactsService
 ) {
     // ===== App State =====
 
@@ -128,13 +132,21 @@ class SmsRepository @Inject constructor(
             chatDao.insertChat(chat)
         }
 
-        // Create handles for addresses
+        // Create handles for addresses and link to chat
         addresses.forEach { address ->
+            // Look up contact info from device contacts
+            val contactName = androidContactsService.getContactDisplayName(address)
+            val formattedAddress = PhoneNumberFormatter.format(address)
+
             val handle = HandleEntity(
                 address = address,
-                service = "SMS"
+                formattedAddress = formattedAddress,
+                service = "SMS",
+                cachedDisplayName = contactName
             )
-            handleDao.insertHandle(handle)
+            val handleId = handleDao.insertHandle(handle)
+            // Link handle to chat (required for getParticipantsForChat to work)
+            chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
         }
 
         // For single contacts (not groups), link to unified group
@@ -418,6 +430,22 @@ class SmsRepository @Inject constructor(
                 unreadCount = 0
             )
             chatDao.insertChat(chat)
+
+            // Create handle and link to chat
+            if (address.isNotBlank()) {
+                // Look up contact info from device contacts
+                val contactName = androidContactsService.getContactDisplayName(address)
+                val formattedAddress = PhoneNumberFormatter.format(address)
+
+                val handle = HandleEntity(
+                    address = address,
+                    formattedAddress = formattedAddress,
+                    service = "SMS",
+                    cachedDisplayName = contactName
+                )
+                val handleId = handleDao.insertHandle(handle)
+                chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
+            }
         }
     }
 

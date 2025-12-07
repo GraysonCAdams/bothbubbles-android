@@ -386,70 +386,41 @@ class SetupViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSyncing = true, syncProgress = 0f, syncError = null) }
 
-            // Observe sync state for progress
-            launch {
-                syncService.syncState.collect { state ->
-                    when (state) {
-                        is SyncState.Syncing -> {
-                            _uiState.update { it.copy(syncProgress = state.progress) }
-                        }
-                        is SyncState.Completed -> {
-                            // Initialize FCM for push notifications
-                            // This fetches Firebase config from server and registers for push
-                            launch {
-                                try {
-                                    firebaseConfigManager.initializeFromServer()
-                                    fcmTokenManager.refreshToken()
-                                } catch (e: Exception) {
-                                    // FCM init failure is non-fatal, log and continue
-                                    android.util.Log.w("SetupViewModel", "FCM init failed", e)
-                                }
-                            }
-
-                            // Check if ML step is needed
-                            val currentState = _uiState.value
-                            if (currentState.shouldShowMlStep) {
-                                // Don't complete setup yet - wait for ML step
-                                _uiState.update {
-                                    it.copy(isSyncing = false)
-                                }
-                            } else {
-                                // No ML step needed, complete setup
-                                settingsDataStore.setSetupComplete(true)
-                                _uiState.update {
-                                    it.copy(
-                                        isSyncing = false,
-                                        isSyncComplete = true
-                                    )
-                                }
-                            }
-                        }
-                        is SyncState.Error -> {
-                            _uiState.update {
-                                it.copy(
-                                    isSyncing = false,
-                                    syncError = state.message
-                                )
-                            }
-                        }
-                        SyncState.Idle -> { /* Initial state */ }
-                    }
-                }
-            }
-
             try {
                 // Connect socket first
                 socketService.connect()
 
-                // Start initial sync
-                syncService.performInitialSync(
-                    messagesPerChat = _uiState.value.messagesPerChat
-                )
+                // Initialize FCM for push notifications (non-blocking)
+                launch {
+                    try {
+                        firebaseConfigManager.initializeFromServer()
+                        fcmTokenManager.refreshToken()
+                    } catch (e: Exception) {
+                        android.util.Log.w("SetupViewModel", "FCM init failed", e)
+                    }
+                }
+
+                // Mark setup complete IMMEDIATELY so user can use the app
+                // Sync will continue in background
+                settingsDataStore.setSetupComplete(true)
+                _uiState.update {
+                    it.copy(
+                        isSyncing = false,
+                        isSyncComplete = true
+                    )
+                }
+
+                // Start initial sync in background (continues after navigation)
+                launch {
+                    syncService.performInitialSync(
+                        messagesPerChat = _uiState.value.messagesPerChat
+                    )
+                }
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(
                         isSyncing = false,
-                        syncError = "Sync failed: ${e.message}"
+                        syncError = "Failed to start sync: ${e.message}"
                     )
                 }
             }

@@ -8,6 +8,7 @@ import com.bothbubbles.services.export.ExportFormat
 import com.bothbubbles.services.export.ExportProgress
 import com.bothbubbles.services.export.ExportStyle
 import com.bothbubbles.services.export.MessageExportService
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +39,7 @@ class ExportViewModel @Inject constructor(
                 val chatInfoList = chats.map { chat ->
                     ExportableChatInfo(
                         guid = chat.guid,
-                        displayName = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                        displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
                         isGroup = chat.isGroup
                     )
                 }

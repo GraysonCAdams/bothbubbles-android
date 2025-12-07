@@ -949,6 +949,44 @@ fun ConversationsScreen(
             onUnsnooze = { }
         )
 
+        // Corruption detected dialog - non-dismissable
+        if (uiState.isSyncCorrupted) {
+            AlertDialog(
+                onDismissRequest = { /* Not dismissable */ },
+                icon = {
+                    Icon(
+                        Icons.Default.Error,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                },
+                title = {
+                    Text("Data Issue Detected")
+                },
+                text = {
+                    Text(
+                        "The app encountered a data issue that cannot be automatically fixed. " +
+                        "To continue, the app data needs to be reset. Your messages on the server are safe."
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.resetAppData {
+                                // Navigate to setup
+                                onSettingsNavigate("setup", false)
+                            }
+                        },
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error
+                        )
+                    ) {
+                        Text("Reset App")
+                    }
+                }
+            )
+        }
+
         // Scroll to top button - slides up from bottom when scrolled
         AnimatedVisibility(
             visible = showScrollToTop && !isSearchActive && !isSelectionMode,
@@ -1009,6 +1047,10 @@ fun ConversationsScreen(
                 SyncProgressBar(
                     progress = uiState.syncProgress ?: 0f,
                     stage = uiState.syncStage ?: "Syncing...",
+                    totalChats = uiState.syncTotalChats,
+                    processedChats = uiState.syncProcessedChats,
+                    syncedMessages = uiState.syncedMessages,
+                    isInitialSync = uiState.isInitialSync,
                     modifier = Modifier.fillMaxWidth()
                 )
             }
@@ -1133,12 +1175,16 @@ private fun SmsImportProgressBar(
 
 /**
  * BlueBubbles sync progress bar that shows during initial or incremental sync.
- * Displays current sync stage and progress percentage.
+ * Displays current sync stage, progress percentage, and detailed counts for initial sync.
  */
 @Composable
 private fun SyncProgressBar(
     progress: Float,
     stage: String,
+    totalChats: Int,
+    processedChats: Int,
+    syncedMessages: Int,
+    isInitialSync: Boolean,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -1168,13 +1214,31 @@ private fun SyncProgressBar(
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
-                    Text(
-                        text = stage,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    Column {
+                        Text(
+                            text = if (isInitialSync) "Syncing messages..." else stage,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        // Show detailed counts for initial sync
+                        if (isInitialSync && (totalChats > 0 || syncedMessages > 0)) {
+                            Text(
+                                text = buildString {
+                                    if (totalChats > 0) {
+                                        append("$processedChats/$totalChats chats")
+                                    }
+                                    if (syncedMessages > 0) {
+                                        if (totalChats > 0) append(" • ")
+                                        append("$syncedMessages messages")
+                                    }
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                 }
                 Text(
                     text = "${(progress * 100).toInt()}%",
@@ -2138,7 +2202,7 @@ private fun PinnedConversationItem(
                     .fillMaxSize()
                     .clip(CircleShape)
                     .combinedClickable(
-                        onClick = onAvatarClick,
+                        onClick = onClick,
                         onLongClick = { showContextMenu = true }
                     )
             ) {

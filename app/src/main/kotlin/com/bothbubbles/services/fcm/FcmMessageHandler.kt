@@ -4,6 +4,7 @@ import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.util.PhoneNumberFormatter
 import com.google.firebase.messaging.RemoteMessage
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -112,7 +113,7 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
-        val chatTitle = chat?.displayName ?: chat?.chatIdentifier ?: senderName ?: "Unknown"
+        val chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: senderName ?: ""
 
         // Show notification
         notificationService.showMessageNotification(
@@ -151,7 +152,7 @@ class FcmMessageHandler @Inject constructor(
             "incoming", "ringing" -> {
                 notificationService.showFaceTimeCallNotification(
                     callUuid = callUuid,
-                    callerName = callerName ?: "Unknown",
+                    callerName = callerName ?: callerAddress?.let { PhoneNumberFormatter.format(it) } ?: "",
                     callerAddress = callerAddress
                 )
             }

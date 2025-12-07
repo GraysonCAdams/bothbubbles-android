@@ -9,6 +9,7 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.ui.components.UrlParsingUtils
 import com.bothbubbles.ui.navigation.Screen
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -86,8 +87,9 @@ class PlacesViewModel @Inject constructor(
             "You"
         } else {
             message.handleId?.let { handleId ->
-                handleDao.getHandleById(handleId)?.displayName
-            } ?: "Unknown"
+                val handle = handleDao.getHandleById(handleId)
+                handle?.displayName ?: handle?.address?.let { PhoneNumberFormatter.format(it) }
+            } ?: ""
         }
 
         val timestamp = dateFormat.format(Date(message.dateCreated))

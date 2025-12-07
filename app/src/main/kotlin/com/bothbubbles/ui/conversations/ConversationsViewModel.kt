@@ -84,6 +84,7 @@ class ConversationsViewModel @Inject constructor(
         loadUserProfile()
         checkPrivateApiPrompt()
         checkInitialSmsImport()
+        checkAndResumeSync()
     }
 
     private fun observeAppTitleSetting() {
@@ -304,8 +305,8 @@ class ConversationsViewModel @Inject constructor(
         val displayName = group.displayName
             ?: primaryParticipant?.displayName
             ?: primaryChat.displayName
-            ?: primaryChat.chatIdentifier
-            ?: "Unknown"
+            ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+            ?: address.let { PhoneNumberFormatter.format(it) }
 
         // Sum unread counts
         val totalUnread = chats.sumOf { it.unreadCount }
@@ -499,13 +500,78 @@ class ConversationsViewModel @Inject constructor(
     private fun observeSyncState() {
         viewModelScope.launch {
             syncService.syncState.collect { state ->
-                _uiState.update {
-                    it.copy(
-                        isSyncing = state is SyncState.Syncing,
-                        syncProgress = (state as? SyncState.Syncing)?.progress,
-                        syncStage = (state as? SyncState.Syncing)?.stage
-                    )
+                when (state) {
+                    is SyncState.Syncing -> {
+                        _uiState.update {
+                            it.copy(
+                                isSyncing = true,
+                                syncProgress = state.progress,
+                                syncStage = state.stage,
+                                syncTotalChats = state.totalChats,
+                                syncProcessedChats = state.processedChats,
+                                syncedMessages = state.syncedMessages,
+                                syncCurrentChatName = state.currentChatName,
+                                isInitialSync = state.isInitialSync,
+                                syncError = null,
+                                isSyncCorrupted = false
+                            )
+                        }
+                    }
+                    is SyncState.Completed -> {
+                        _uiState.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncProgress = null,
+                                syncStage = null,
+                                syncTotalChats = 0,
+                                syncProcessedChats = 0,
+                                syncedMessages = 0,
+                                syncCurrentChatName = null,
+                                isInitialSync = false,
+                                syncError = null,
+                                isSyncCorrupted = false
+                            )
+                        }
+                    }
+                    is SyncState.Error -> {
+                        _uiState.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncProgress = null,
+                                syncStage = null,
+                                syncError = state.message,
+                                isSyncCorrupted = state.isCorrupted
+                            )
+                        }
+                    }
+                    SyncState.Idle -> {
+                        _uiState.update {
+                            it.copy(
+                                isSyncing = false,
+                                syncProgress = null,
+                                syncStage = null,
+                                syncError = null,
+                                isSyncCorrupted = false
+                            )
+                        }
+                    }
                 }
+            }
+        }
+    }
+
+    /**
+     * Check for and resume interrupted initial sync on app startup.
+     */
+    private fun checkAndResumeSync() {
+        viewModelScope.launch {
+            val syncStarted = settingsDataStore.initialSyncStarted.first()
+            val syncComplete = settingsDataStore.initialSyncComplete.first()
+
+            if (syncStarted && !syncComplete) {
+                // Interrupted sync detected - resume it
+                android.util.Log.i("ConversationsViewModel", "Resuming interrupted initial sync")
+                syncService.resumeInitialSync()
             }
         }
     }
@@ -585,7 +651,8 @@ class ConversationsViewModel @Inject constructor(
                                 val resolvedDisplayName = if (!chat.isGroup && primaryParticipant != null) {
                                     primaryParticipant.displayName
                                 } else {
-                                    chat.displayName ?: chat.chatIdentifier ?: "Unknown"
+                                    chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                                        ?: primaryParticipant?.address?.let { PhoneNumberFormatter.format(it) } ?: ""
                                 }
 
                                 MessageSearchResult(
@@ -699,6 +766,37 @@ class ConversationsViewModel @Inject constructor(
 
     fun dismissSmsImportError() {
         _uiState.update { it.copy(smsImportError = null) }
+    }
+
+    /**
+     * Reset app data when corruption is detected.
+     * Clears all local data and returns to setup flow.
+     */
+    fun resetAppData(onReset: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                // Clear all local data
+                messageDao.deleteAllMessages()
+                chatDao.deleteAllChatHandleCrossRefs()
+                chatDao.deleteAllChats()
+                handleDao.deleteAllHandles()
+                unifiedChatGroupDao.deleteAllData()
+
+                // Clear sync progress and reset setup
+                settingsDataStore.clearSyncProgress()
+                settingsDataStore.setSetupComplete(false)
+
+                // Clear error state
+                _uiState.update { it.copy(syncError = null, isSyncCorrupted = false) }
+
+                // Navigate back to setup
+                withContext(Dispatchers.Main) {
+                    onReset()
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ConversationsViewModel", "Failed to reset app data", e)
+            }
+        }
     }
 
     fun togglePin(chatGuid: String) {
@@ -868,7 +966,7 @@ class ConversationsViewModel @Inject constructor(
         val resolvedDisplayName = if (!isGroup && primaryParticipant != null) {
             primaryParticipant.displayName
         } else {
-            displayName ?: chatIdentifier ?: "Unknown"
+            displayName ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: address.let { PhoneNumberFormatter.format(it) }
         }
 
         // Fetch link preview data for LINK type messages
@@ -934,10 +1032,11 @@ class ConversationsViewModel @Inject constructor(
         val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
         val today = Calendar.getInstance()
 
-        val isToday = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
-                messageDate.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)
-
         val isSameYear = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+
+        // Check if within the last 24 hours (show time instead of day name)
+        val hoursDiff = (now - timestamp) / (1000 * 60 * 60)
+        val isWithin24Hours = hoursDiff < 24
 
         // Check if within the last 7 days
         val daysDiff = (now - timestamp) / (1000 * 60 * 60 * 24)
@@ -947,7 +1046,7 @@ class ConversationsViewModel @Inject constructor(
         val timePattern = if (is24Hour) "HH:mm" else "h:mm a"
 
         return when {
-            isToday -> SimpleDateFormat(timePattern, Locale.getDefault()).format(Date(timestamp))
+            isWithin24Hours -> SimpleDateFormat(timePattern, Locale.getDefault()).format(Date(timestamp))
             daysDiff < 7 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
             isSameYear -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
             else -> SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(timestamp))
@@ -1048,6 +1147,15 @@ data class ConversationsUiState(
     val isSyncing: Boolean = false,
     val syncProgress: Float? = null,
     val syncStage: String? = null,
+    // Detailed sync info for initial sync
+    val syncTotalChats: Int = 0,
+    val syncProcessedChats: Int = 0,
+    val syncedMessages: Int = 0,
+    val syncCurrentChatName: String? = null,
+    val isInitialSync: Boolean = false,
+    // Sync error state
+    val syncError: String? = null,
+    val isSyncCorrupted: Boolean = false,
     val isConnected: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,

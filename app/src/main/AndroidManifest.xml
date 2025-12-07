@@ -187,6 +187,16 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- Android Auto CarAppService -->
+        <service
+            android:name=".services.auto.BothBubblesCarAppService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="androidx.car.app.CarAppService" />
+                <category android:name="androidx.car.app.category.MESSAGING" />
+            </intent-filter>
+        </service>
+
         <!-- SMS Receiver -->
         <receiver
             android:name=".services.sms.SmsBroadcastReceiver"

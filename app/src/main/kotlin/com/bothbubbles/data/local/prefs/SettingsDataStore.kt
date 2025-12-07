@@ -674,6 +674,82 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    // ===== Initial Sync Progress (Resumable) =====
+
+    /**
+     * Whether initial sync has been started (but may not be complete).
+     * Used to detect interrupted syncs that need to resume.
+     */
+    val initialSyncStarted: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.INITIAL_SYNC_STARTED] ?: false
+    }
+
+    /**
+     * Whether initial sync has completed successfully.
+     * When true, the app won't attempt to resume sync on startup.
+     */
+    val initialSyncComplete: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.INITIAL_SYNC_COMPLETE] ?: false
+    }
+
+    /**
+     * Set of chat GUIDs that have been successfully synced.
+     * Used to skip already-synced chats when resuming an interrupted sync.
+     */
+    val syncedChatGuids: Flow<Set<String>> = dataStore.data.map { prefs ->
+        (prefs[Keys.SYNCED_CHAT_GUIDS] ?: "")
+            .split(",")
+            .filter { it.isNotEmpty() }
+            .toSet()
+    }
+
+    /**
+     * Messages per chat setting used for initial sync (stored for resume).
+     */
+    val initialSyncMessagesPerChat: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.INITIAL_SYNC_MESSAGES_PER_CHAT] ?: 25
+    }
+
+    suspend fun setInitialSyncStarted(started: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.INITIAL_SYNC_STARTED] = started
+        }
+    }
+
+    suspend fun setInitialSyncComplete(complete: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.INITIAL_SYNC_COMPLETE] = complete
+        }
+    }
+
+    suspend fun markChatSynced(chatGuid: String) {
+        dataStore.edit { prefs ->
+            val current = (prefs[Keys.SYNCED_CHAT_GUIDS] ?: "")
+                .split(",")
+                .filter { it.isNotEmpty() }
+                .toMutableSet()
+            current.add(chatGuid)
+            prefs[Keys.SYNCED_CHAT_GUIDS] = current.joinToString(",")
+        }
+    }
+
+    suspend fun setInitialSyncMessagesPerChat(messagesPerChat: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.INITIAL_SYNC_MESSAGES_PER_CHAT] = messagesPerChat
+        }
+    }
+
+    /**
+     * Clear all sync progress. Called when starting a fresh sync or after reset.
+     */
+    suspend fun clearSyncProgress() {
+        dataStore.edit { prefs ->
+            prefs[Keys.INITIAL_SYNC_STARTED] = false
+            prefs[Keys.INITIAL_SYNC_COMPLETE] = false
+            prefs[Keys.SYNCED_CHAT_GUIDS] = ""
+        }
+    }
+
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
     }
@@ -781,5 +857,11 @@ class SettingsDataStore @Inject constructor(
 
         // Attachment Settings
         val AUTO_DOWNLOAD_ATTACHMENTS = booleanPreferencesKey("auto_download_attachments")
+
+        // Initial Sync Progress (Resumable)
+        val INITIAL_SYNC_STARTED = booleanPreferencesKey("initial_sync_started")
+        val INITIAL_SYNC_COMPLETE = booleanPreferencesKey("initial_sync_complete")
+        val SYNCED_CHAT_GUIDS = stringPreferencesKey("synced_chat_guids")
+        val INITIAL_SYNC_MESSAGES_PER_CHAT = intPreferencesKey("initial_sync_messages_per_chat")
     }
 }

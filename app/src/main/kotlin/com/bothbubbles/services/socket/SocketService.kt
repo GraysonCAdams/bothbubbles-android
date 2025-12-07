@@ -166,7 +166,8 @@ class SocketService @Inject constructor(
                     reconnectionDelay = 1000
                     reconnectionDelayMax = 5000
                     timeout = 20000
-                    auth = mapOf("password" to password)
+                    query = "guid=$password"
+                    transports = arrayOf("websocket", "polling")
                 }
 
                 socket = IO.socket(URI.create(serverAddress), options).apply {

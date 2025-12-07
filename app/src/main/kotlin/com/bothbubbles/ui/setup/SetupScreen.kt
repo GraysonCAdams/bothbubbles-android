@@ -726,18 +726,50 @@ private fun SmsSetupPage(
     val context = LocalContext.current
     val smsStatus = uiState.smsCapabilityStatus
 
-    // Permission launcher for SMS permissions
-    val smsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) {
-        onSmsPermissionsResult()
-    }
+    // Track if we should auto-prompt for default SMS after permissions granted
+    var shouldPromptDefaultSms by remember { mutableStateOf(false) }
 
     // Launcher to set as default SMS app
     val setDefaultSmsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         onDefaultSmsAppResult()
+    }
+
+    // Permission launcher for SMS permissions
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        onSmsPermissionsResult()
+        // If all permissions were granted, prompt for default SMS app
+        if (results.values.all { it }) {
+            shouldPromptDefaultSms = true
+        }
+    }
+
+    // Auto-launch default SMS prompt after permissions are granted
+    LaunchedEffect(shouldPromptDefaultSms, smsStatus) {
+        if (shouldPromptDefaultSms &&
+            smsStatus?.missingPermissions?.isEmpty() == true &&
+            smsStatus.isDefaultSmsApp == false) {
+            shouldPromptDefaultSms = false
+            setDefaultSmsLauncher.launch(getDefaultSmsAppIntent())
+        }
+    }
+
+    // On initial page load, check if we should prompt for default SMS app
+    // (permissions already granted but not default app yet)
+    var hasPromptedOnLoad by remember { mutableStateOf(false) }
+    LaunchedEffect(smsStatus, uiState.smsEnabled) {
+        if (!hasPromptedOnLoad &&
+            uiState.smsEnabled &&
+            smsStatus?.missingPermissions?.isEmpty() == true &&
+            smsStatus.isDefaultSmsApp == false) {
+            hasPromptedOnLoad = true
+            // Small delay to let the UI settle
+            kotlinx.coroutines.delay(500)
+            setDefaultSmsLauncher.launch(getDefaultSmsAppIntent())
+        }
     }
 
     Column(

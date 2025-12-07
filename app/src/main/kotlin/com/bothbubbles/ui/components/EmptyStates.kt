@@ -164,7 +164,8 @@ fun EmptyState(
         Text(
             text = title,
             style = MaterialTheme.typography.titleLarge.copy(fontFamily = KumbhSansFamily),
-            textAlign = TextAlign.Center
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface
         )
 
         Spacer(modifier = Modifier.height(8.dp))

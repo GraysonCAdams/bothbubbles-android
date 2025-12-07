@@ -385,11 +385,20 @@ fun AvatarWithMessageType(
     size: Dp = 56.dp,
     avatarContent: @Composable () -> Unit
 ) {
-    Box(modifier = modifier.size(size)) {
-        avatarContent()
+    val indicatorSize = size * 0.36f
+    val badgeOverflow = 4.dp // How much the badge extends beyond the avatar
+
+    // Outer box sized to accommodate badge overflow
+    Box(
+        modifier = modifier.size(size + badgeOverflow),
+        contentAlignment = Alignment.TopStart
+    ) {
+        // Avatar positioned to leave room for badge
+        Box(modifier = Modifier.size(size)) {
+            avatarContent()
+        }
 
         if (messageSourceType != MessageSourceType.NONE) {
-            val indicatorSize = size * 0.36f
             val iconSize = indicatorSize * 0.6f
             val indicatorColor = when (messageSourceType) {
                 MessageSourceType.IMESSAGE -> iMessageBlue
@@ -400,7 +409,6 @@ fun AvatarWithMessageType(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .offset(x = 2.dp, y = 2.dp)
                     .size(indicatorSize)
                     .border(2.dp, backgroundColor, CircleShape)
                     .clip(CircleShape)

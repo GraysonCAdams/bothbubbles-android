@@ -109,7 +109,8 @@ val LocalBubbleColors = staticCompositionLocalOf {
 @Composable
 fun BothBubblesTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    // Dynamic colors disabled by default - can produce poor contrast with some wallpapers
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val context = LocalContext.current
