@@ -12,8 +12,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Call
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,12 +35,15 @@ import com.bluebubbles.util.PhoneNumberFormatter
  */
 data class ContactInfo(
     val chatGuid: String,
-    val displayName: String,
+    val displayName: String,  // May include "Maybe:" prefix for inferred names
+    val rawDisplayName: String,  // Never includes "Maybe:" - use for contact intents and avatars
     val avatarPath: String?,
     val address: String,  // Phone number or email
     val isGroup: Boolean,
     val participantNames: List<String> = emptyList(),
-    val hasContact: Boolean = false  // True if this person is a saved contact
+    val hasContact: Boolean = false,  // True if this person is a saved contact
+    val isStarred: Boolean = false,  // True if this contact is starred (favorite) in Android Contacts
+    val hasInferredName: Boolean = false  // True if displayName includes "Maybe:" prefix
 )
 
 /**
@@ -49,6 +55,8 @@ fun ContactQuickActionsPopup(
     contactInfo: ContactInfo,
     onDismiss: () -> Unit,
     onMessageClick: () -> Unit,
+    onStarToggle: (Boolean) -> Unit = {},
+    onDismissInferredName: () -> Unit = {},  // Called when user dismisses the inferred name
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -88,7 +96,7 @@ fun ContactQuickActionsPopup(
                         )
                     } else {
                         Avatar(
-                            name = contactInfo.displayName,
+                            name = contactInfo.rawDisplayName,
                             avatarPath = contactInfo.avatarPath,
                             size = 120.dp
                         )
@@ -165,11 +173,71 @@ fun ContactQuickActionsPopup(
                                     icon = Icons.Default.PersonAdd,
                                     contentDescription = "Add contact",
                                     onClick = {
-                                        launchAddContact(context, contactInfo.address, contactInfo.displayName)
+                                        launchAddContact(context, contactInfo.address, contactInfo.rawDisplayName)
                                         onDismiss()
                                     }
                                 )
                             }
+                        }
+
+                        // Star/Favorite button (only for non-group chats with saved contacts)
+                        if (!contactInfo.isGroup && contactInfo.hasContact) {
+                            QuickActionButton(
+                                icon = if (contactInfo.isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                contentDescription = if (contactInfo.isStarred) "Remove from favorites" else "Add to favorites",
+                                onClick = {
+                                    onStarToggle(!contactInfo.isStarred)
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // Inferred name confirmation section
+                if (contactInfo.hasInferredName && !contactInfo.isGroup) {
+                    Spacer(modifier = Modifier.height(16.dp))
+
+                    Text(
+                        text = "We think this might be ${contactInfo.rawDisplayName}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // Dismiss button
+                        OutlinedButton(
+                            onClick = {
+                                onDismissInferredName()
+                                onDismiss()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Not them")
+                        }
+
+                        // Save as contact button
+                        Button(
+                            onClick = {
+                                launchAddContact(context, contactInfo.address, contactInfo.rawDisplayName)
+                                onDismiss()
+                            }
+                        ) {
+                            Icon(
+                                Icons.Default.PersonAdd,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("Save contact")
                         }
                     }
                 }

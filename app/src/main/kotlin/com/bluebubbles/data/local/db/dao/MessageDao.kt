@@ -98,6 +98,19 @@ interface MessageDao {
     suspend fun getTotalMessageCount(): Int
 
     /**
+     * Get messages that contain URLs for a specific chat.
+     * Uses pattern matching for http/https links and www prefixes.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid
+        AND date_deleted IS NULL
+        AND (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%www.%')
+        ORDER BY date_created DESC
+    """)
+    fun getMessagesWithUrlsForChat(chatGuid: String): Flow<List<MessageEntity>>
+
+    /**
      * Find a matching message by content and timestamp within a tolerance window.
      * Used to detect duplicate SMS/MMS messages that may have different GUIDs.
      */
@@ -146,6 +159,9 @@ interface MessageDao {
 
     @Query("UPDATE messages SET message_source = :messageSource WHERE guid = :guid")
     suspend fun updateMessageSource(guid: String, messageSource: String)
+
+    @Query("UPDATE messages SET date_played = :datePlayed WHERE guid = :guid")
+    suspend fun updateDatePlayed(guid: String, datePlayed: Long)
 
     // Replace temp GUID with server GUID
     @Query("""

@@ -201,6 +201,14 @@ class LinkPreviewRepository @Inject constructor(
         linkPreviewDao.evictOldEntries(DB_CACHE_MAX_ENTRIES)
     }
 
+    /**
+     * Searches link previews by title for the message search feature.
+     * Returns a list of URLs whose preview titles match the query.
+     */
+    suspend fun searchByTitle(query: String, limit: Int = 50): List<LinkPreviewEntity> {
+        return linkPreviewDao.searchByTitle(query, limit)
+    }
+
     // ===== Private Methods =====
 
     /**

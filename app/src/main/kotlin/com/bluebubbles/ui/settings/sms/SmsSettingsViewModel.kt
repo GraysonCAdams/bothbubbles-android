@@ -113,42 +113,6 @@ class SmsSettingsViewModel @Inject constructor(
         loadSmsStatus()
     }
 
-    /**
-     * Start SMS import process
-     */
-    fun startSmsImport() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isImporting = true, importProgress = 0f) }
-
-            smsRepository.importAllThreads(
-                limit = 500,
-                onProgress = { current, total ->
-                    _uiState.update {
-                        it.copy(importProgress = current.toFloat() / total.toFloat())
-                    }
-                }
-            ).fold(
-                onSuccess = { count ->
-                    _uiState.update {
-                        it.copy(
-                            isImporting = false,
-                            importProgress = 1f,
-                            lastImportCount = count
-                        )
-                    }
-                },
-                onFailure = { e ->
-                    _uiState.update {
-                        it.copy(
-                            isImporting = false,
-                            error = e.message
-                        )
-                    }
-                }
-            )
-        }
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
@@ -161,8 +125,5 @@ data class SmsSettingsUiState(
     val smsEnabled: Boolean = false,
     val preferSmsOverIMessage: Boolean = false,
     val selectedSimSlot: Int = -1,
-    val isImporting: Boolean = false,
-    val importProgress: Float = 0f,
-    val lastImportCount: Int? = null,
     val error: String? = null
 )

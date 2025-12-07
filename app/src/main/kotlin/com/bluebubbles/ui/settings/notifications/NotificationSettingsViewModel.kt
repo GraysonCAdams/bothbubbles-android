@@ -24,14 +24,16 @@ class NotificationSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 settingsDataStore.notificationsEnabled,
-                settingsDataStore.notifyOnChatList
-            ) { enabled, notifyOnChatList ->
-                enabled to notifyOnChatList
-            }.collect { (enabled, notifyOnChatList) ->
+                settingsDataStore.notifyOnChatList,
+                settingsDataStore.bubbleFilterMode
+            ) { enabled, notifyOnChatList, bubbleFilterMode ->
+                Triple(enabled, notifyOnChatList, bubbleFilterMode)
+            }.collect { (enabled, notifyOnChatList, bubbleFilterMode) ->
                 _uiState.update {
                     it.copy(
                         notificationsEnabled = enabled,
-                        notifyOnChatList = notifyOnChatList
+                        notifyOnChatList = notifyOnChatList,
+                        bubbleFilterMode = bubbleFilterMode
                     )
                 }
             }
@@ -49,9 +51,16 @@ class NotificationSettingsViewModel @Inject constructor(
             settingsDataStore.setNotifyOnChatList(enabled)
         }
     }
+
+    fun setBubbleFilterMode(mode: String) {
+        viewModelScope.launch {
+            settingsDataStore.setBubbleFilterMode(mode)
+        }
+    }
 }
 
 data class NotificationSettingsUiState(
     val notificationsEnabled: Boolean = true,
-    val notifyOnChatList: Boolean = false
+    val notifyOnChatList: Boolean = false,
+    val bubbleFilterMode: String = "all"
 )

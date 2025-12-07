@@ -33,7 +33,11 @@ import coil.compose.AsyncImage
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.ui.components.Avatar
+import com.bluebubbles.ui.components.ContactInfo
+import com.bluebubbles.ui.components.ContactQuickActionsPopup
 import com.bluebubbles.ui.components.ConversationAvatar
+import com.bluebubbles.ui.components.SnoozeDuration
+import com.bluebubbles.ui.components.SnoozeDurationDialog
 import com.bluebubbles.util.PhoneNumberFormatter
 import java.io.File
 
@@ -51,12 +55,16 @@ fun ConversationDetailsScreen(
     val uiState by viewModel.uiState.collectAsState()
     val actionState by viewModel.actionState.collectAsState()
     var showDeleteDialog by remember { mutableStateOf(false) }
+    var showSnoozeDialog by remember { mutableStateOf(false) }
+    var showBlockDialog by remember { mutableStateOf(false) }
+    var selectedParticipant by remember { mutableStateOf<HandleEntity?>(null) }
 
     // Handle action states
     LaunchedEffect(actionState) {
         when (actionState) {
             ConversationDetailsViewModel.ActionState.Archived,
-            ConversationDetailsViewModel.ActionState.Deleted -> {
+            ConversationDetailsViewModel.ActionState.Deleted,
+            ConversationDetailsViewModel.ActionState.Blocked -> {
                 onNavigateBack()
                 viewModel.clearActionState()
             }
@@ -114,14 +122,29 @@ fun ConversationDetailsScreen(
                     val context = LocalContext.current
                     ActionButtonsRow(
                         hasContact = uiState.hasContact,
-                        onCallClick = { /* TODO */ },
-                        onVideoClick = { /* TODO */ },
+                        isStarred = uiState.isContactStarred,
+                        isGroup = uiState.chat?.isGroup == true,
+                        onCallClick = {
+                            val phoneNumber = uiState.firstParticipantAddress
+                            if (phoneNumber.isNotBlank()) {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber"))
+                                context.startActivity(intent)
+                            }
+                        },
+                        onVideoClick = {
+                            val phoneNumber = uiState.firstParticipantAddress
+                            if (phoneNumber.isNotBlank()) {
+                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber"))
+                                context.startActivity(Intent.createChooser(intent, "Video call with..."))
+                            }
+                        },
                         onContactInfoClick = {
                             viewContact(context, uiState.firstParticipantAddress)
                         },
                         onAddContactClick = {
                             launchAddContact(context, uiState.firstParticipantAddress, uiState.displayName)
                         },
+                        onStarClick = { viewModel.toggleStarred() },
                         onSearchClick = onSearchClick
                     )
                 }
@@ -142,9 +165,11 @@ fun ConversationDetailsScreen(
                     ChatOptionsSection(
                         isPinned = uiState.isPinned,
                         isMuted = uiState.isMuted,
-                        onSnoozeClick = { /* TODO */ },
+                        isSnoozed = uiState.isSnoozed,
+                        snoozeUntil = uiState.snoozeUntil,
+                        onSnoozeClick = { showSnoozeDialog = true },
                         onNotificationsClick = onNotificationSettingsClick,
-                        onBlockReportClick = { /* TODO */ }
+                        onBlockReportClick = { showBlockDialog = true }
                     )
                 }
 
@@ -165,7 +190,7 @@ fun ConversationDetailsScreen(
                                 )
                             }
                         },
-                        onParticipantClick = { /* TODO */ }
+                        onParticipantClick = { participant -> selectedParticipant = participant }
                     )
                 }
 
@@ -210,6 +235,71 @@ fun ConversationDetailsScreen(
                     Text("Cancel")
                 }
             }
+        )
+    }
+
+    // Snooze duration dialog
+    SnoozeDurationDialog(
+        visible = showSnoozeDialog,
+        currentSnoozeUntil = uiState.snoozeUntil,
+        onDurationSelected = { duration ->
+            viewModel.snoozeChat(duration.durationMs)
+            showSnoozeDialog = false
+        },
+        onUnsnooze = {
+            viewModel.unsnoozeChat()
+            showSnoozeDialog = false
+        },
+        onDismiss = { showSnoozeDialog = false }
+    )
+
+    // Block confirmation dialog
+    if (showBlockDialog) {
+        AlertDialog(
+            onDismissRequest = { showBlockDialog = false },
+            title = { Text("Block contact?") },
+            text = { Text("You won't receive messages or calls from this contact. They won't be notified.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showBlockDialog = false
+                        viewModel.blockContact()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Block")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showBlockDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Participant quick actions popup
+    selectedParticipant?.let { participant ->
+        val context = LocalContext.current
+        ContactQuickActionsPopup(
+            contactInfo = ContactInfo(
+                chatGuid = "", // Not needed for participant popup
+                displayName = participant.displayName,
+                rawDisplayName = participant.rawDisplayName,
+                avatarPath = participant.cachedAvatarPath,
+                address = participant.address,
+                isGroup = false,
+                hasContact = participant.cachedDisplayName != null,
+                hasInferredName = participant.hasInferredName
+            ),
+            onDismiss = { selectedParticipant = null },
+            onMessageClick = {
+                // Could navigate to 1:1 chat with this participant
+                selectedParticipant = null
+            },
+            onStarToggle = { /* Starring handled elsewhere */ }
         )
     }
 }
@@ -259,10 +349,13 @@ private fun ConversationHeader(
 @Composable
 private fun ActionButtonsRow(
     hasContact: Boolean,
+    isStarred: Boolean,
+    isGroup: Boolean,
     onCallClick: () -> Unit,
     onVideoClick: () -> Unit,
     onContactInfoClick: () -> Unit,
     onAddContactClick: () -> Unit,
+    onStarClick: () -> Unit,
     onSearchClick: () -> Unit
 ) {
     Row(
@@ -286,6 +379,14 @@ private fun ActionButtonsRow(
             label = if (hasContact) "Contact info" else "Add contact",
             onClick = if (hasContact) onContactInfoClick else onAddContactClick
         )
+        // Favorite button - only show for non-group chats with saved contacts
+        if (!isGroup && hasContact) {
+            ActionButton(
+                icon = if (isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                label = if (isStarred) "Favorited" else "Favorite",
+                onClick = onStarClick
+            )
+        }
         ActionButton(
             icon = Icons.Outlined.Search,
             label = "Search",
@@ -473,10 +574,18 @@ private fun MediaSection(
 private fun ChatOptionsSection(
     isPinned: Boolean,
     isMuted: Boolean,
+    isSnoozed: Boolean,
+    snoozeUntil: Long?,
     onSnoozeClick: () -> Unit,
     onNotificationsClick: () -> Unit,
     onBlockReportClick: () -> Unit
 ) {
+    val snoozeLabel = if (isSnoozed && snoozeUntil != null) {
+        "Snoozed ${SnoozeDuration.formatRemainingTime(snoozeUntil)}"
+    } else {
+        "Snooze chat"
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -488,9 +597,10 @@ private fun ChatOptionsSection(
     ) {
         Column {
             OptionRow(
-                icon = Icons.Outlined.Snooze,
-                label = "Snooze chat",
-                onClick = onSnoozeClick
+                icon = if (isSnoozed) Icons.Filled.Snooze else Icons.Outlined.Snooze,
+                label = snoozeLabel,
+                onClick = onSnoozeClick,
+                tint = if (isSnoozed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
             )
 
             HorizontalDivider(

@@ -182,7 +182,8 @@ class SmsContentObserver @Inject constructor(
                             chatTitle = chat?.displayName ?: address,
                             messageText = body ?: "",
                             messageGuid = existingGuid,
-                            senderName = null
+                            senderName = null,
+                            senderAddress = normalizedAddress
                         )
                     }
 
@@ -279,7 +280,8 @@ class SmsContentObserver @Inject constructor(
                             chatTitle = chat?.displayName ?: primaryAddress,
                             messageText = textContent ?: "[MMS]",
                             messageGuid = existingGuid,
-                            senderName = if (isGroup) primaryAddress else null
+                            senderName = if (isGroup) primaryAddress else null,
+                            senderAddress = primaryAddress
                         )
                     }
 

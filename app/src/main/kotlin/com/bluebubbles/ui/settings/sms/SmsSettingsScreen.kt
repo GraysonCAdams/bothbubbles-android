@@ -108,17 +108,6 @@ fun SmsSettingsScreen(
                 }
             }
 
-            // Import SMS
-            item {
-                ImportSmsCard(
-                    isImporting = uiState.isImporting,
-                    progress = uiState.importProgress,
-                    lastCount = uiState.lastImportCount,
-                    enabled = uiState.capabilityStatus?.canReadSms == true,
-                    onStartImport = viewModel::startSmsImport
-                )
-            }
-
             // Error display
             uiState.error?.let { error ->
                 item {
@@ -342,62 +331,3 @@ private fun SimSelectionCard(
     }
 }
 
-@Composable
-private fun ImportSmsCard(
-    isImporting: Boolean,
-    progress: Float,
-    lastCount: Int?,
-    enabled: Boolean,
-    onStartImport: () -> Unit
-) {
-    Card {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Download, contentDescription = null)
-                Spacer(modifier = Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Import SMS History", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "Import existing SMS/MMS messages into BothBubbles",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
-
-            if (isImporting) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Text(
-                    "${(progress * 100).toInt()}% complete",
-                    style = MaterialTheme.typography.bodySmall
-                )
-            } else {
-                lastCount?.let {
-                    Text(
-                        "Last import: $it conversations",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Button(
-                    onClick = onStartImport,
-                    enabled = enabled && !isImporting,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Icon(Icons.Default.Download, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Import SMS Messages")
-                }
-            }
-        }
-    }
-}

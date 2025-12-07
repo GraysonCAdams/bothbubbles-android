@@ -1,5 +1,8 @@
 package com.bluebubbles.ui.chat.details
 
+import android.content.Intent
+import android.media.MediaMetadataRetriever
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -30,6 +33,9 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -44,6 +50,7 @@ fun MediaLinksScreen(
     viewModel: MediaLinksViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
+    val context = LocalContext.current
 
     Scaffold(
         topBar = {
@@ -152,9 +159,6 @@ fun MediaLinksScreen(
                         onSeeAllClick = onSeeAllPlaces
                     )
                 }
-                item {
-                    PlacesPromoCard()
-                }
 
                 // Links section
                 item {
@@ -177,7 +181,13 @@ fun MediaLinksScreen(
                     }
                 } else {
                     items(uiState.links) { link ->
-                        LinkPreviewCard(link = link, onClick = { /* TODO */ })
+                        LinkPreviewCard(
+                            link = link,
+                            onClick = {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(link.url))
+                                context.startActivity(intent)
+                            }
+                        )
                     }
                 }
 
@@ -328,8 +338,32 @@ private fun MediaThumbnail(
     showDuration: Boolean,
     size: Int = 100
 ) {
+    val context = LocalContext.current
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
+    var videoDuration by remember { mutableStateOf<Long?>(null) }
+
+    // Get video duration if this is a video and has a local path
+    LaunchedEffect(attachment.guid, attachment.localPath) {
+        if (showDuration && attachment.isVideo && attachment.localPath != null) {
+            videoDuration = withContext(Dispatchers.IO) {
+                try {
+                    val retriever = MediaMetadataRetriever()
+                    val file = File(attachment.localPath)
+                    if (file.exists()) {
+                        retriever.setDataSource(context, Uri.fromFile(file))
+                        val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                        retriever.release()
+                        durationStr?.toLongOrNull()
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    null
+                }
+            }
+        }
+    }
 
     Box(
         modifier = Modifier
@@ -401,63 +435,39 @@ private fun MediaThumbnail(
             }
 
             // Duration badge
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.7f),
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(4.dp)
-            ) {
-                Text(
-                    text = "0:13", // TODO: Get actual duration
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
-                )
+            if (videoDuration != null) {
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color.Black.copy(alpha = 0.7f),
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .padding(4.dp)
+                ) {
+                    Text(
+                        text = formatVideoDuration(videoDuration!!),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
+                    )
+                }
             }
         }
     }
 }
 
-@Composable
-private fun PlacesPromoCard() {
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ),
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        Column(
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = "See previews for links, places, and more",
-                style = MaterialTheme.typography.titleMedium
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                text = "Get info cards from Google in the Messages app. This uses select info from your chat history without identifying you. Learn more",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(16.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                TextButton(onClick = { /* TODO */ }) {
-                    Text("Not now")
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                OutlinedButton(onClick = { /* TODO */ }) {
-                    Text("Turn on")
-                }
-            }
-        }
+/**
+ * Formats video duration in milliseconds to a human-readable string (e.g., "1:23" or "1:23:45")
+ */
+private fun formatVideoDuration(millis: Long): String {
+    val totalSeconds = millis / 1000
+    val hours = totalSeconds / 3600
+    val minutes = (totalSeconds % 3600) / 60
+    val seconds = totalSeconds % 60
+
+    return if (hours > 0) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%d:%02d", minutes, seconds)
     }
 }
 

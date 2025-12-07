@@ -23,14 +23,24 @@ import com.bluebubbles.MainActivity
 import com.bluebubbles.R
 import com.bluebubbles.ui.bubble.BubbleActivity
 import com.bluebubbles.ui.call.IncomingCallActivity
+import com.bluebubbles.data.local.db.dao.ChatDao
+import com.bluebubbles.data.local.prefs.SettingsDataStore
+import com.bluebubbles.data.repository.QuickReplyTemplateRepository
+import com.bluebubbles.services.contacts.AndroidContactsService
 import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class NotificationService @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val settingsDataStore: SettingsDataStore,
+    private val androidContactsService: AndroidContactsService,
+    private val chatDao: ChatDao,
+    private val quickReplyTemplateRepository: QuickReplyTemplateRepository
 ) {
     companion object {
         const val CHANNEL_MESSAGES = "messages"
@@ -142,6 +152,31 @@ class NotificationService @Inject constructor(
     }
 
     /**
+     * Determines if bubbles should be shown for a conversation based on the filter mode.
+     *
+     * @param chatGuid The chat GUID
+     * @param senderAddress The sender's address (phone number or email)
+     * @return true if bubbles should be shown
+     */
+    private fun shouldShowBubble(chatGuid: String, senderAddress: String?): Boolean {
+        return runBlocking {
+            when (settingsDataStore.bubbleFilterMode.first()) {
+                "none" -> false
+                "all" -> true
+                "selected" -> chatDao.getChatByGuid(chatGuid)?.bubbleEnabled ?: false
+                "favorites" -> {
+                    if (senderAddress.isNullOrEmpty()) {
+                        false
+                    } else {
+                        androidContactsService.isContactStarred(senderAddress)
+                    }
+                }
+                else -> true
+            }
+        }
+    }
+
+    /**
      * Creates bubble metadata for a conversation notification.
      * This enables the notification to be displayed as a floating bubble.
      *
@@ -180,6 +215,8 @@ class NotificationService @Inject constructor(
 
     /**
      * Show a notification for a new message
+     *
+     * @param senderAddress The sender's address (phone/email) used for bubble filtering
      */
     fun showMessageNotification(
         chatGuid: String,
@@ -187,6 +224,7 @@ class NotificationService @Inject constructor(
         messageText: String,
         messageGuid: String,
         senderName: String?,
+        senderAddress: String? = null,
         isGroup: Boolean = false,
         avatarUri: String? = null,
         linkPreviewTitle: String? = null,
@@ -208,9 +246,19 @@ class NotificationService @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Reply action
+        // Get quick reply template choices for notification chips
+        val templateChoices = runBlocking {
+            quickReplyTemplateRepository.getNotificationChoices(maxCount = 3)
+        }
+
+        // Reply action with quick reply template chips
         val replyRemoteInput = RemoteInput.Builder(EXTRA_REPLY_TEXT)
             .setLabel(context.getString(R.string.message_placeholder))
+            .apply {
+                if (templateChoices.isNotEmpty()) {
+                    setChoices(templateChoices)
+                }
+            }
             .build()
 
         val replyIntent = Intent(context, NotificationReceiver::class.java).apply {
@@ -225,13 +273,17 @@ class NotificationService @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
+        // Check for verification code in message (needed before building reply action)
+        val detectedCode = PhoneAndCodeParsingUtils.detectFirstCode(messageText)
+
+        // Reply action - disable smart reply suggestions if OTP detected
         val replyAction = NotificationCompat.Action.Builder(
             android.R.drawable.ic_menu_send,
             context.getString(R.string.action_reply),
             replyPendingIntent
         )
             .addRemoteInput(replyRemoteInput)
-            .setAllowGeneratedReplies(true)
+            .setAllowGeneratedReplies(detectedCode == null)
             .build()
 
         // Mark as read action
@@ -245,9 +297,6 @@ class NotificationService @Inject constructor(
             markReadIntent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-
-        // Check for verification code in message
-        val detectedCode = PhoneAndCodeParsingUtils.detectFirstCode(messageText)
 
         // Format display text with link preview if available
         val displayText = when {
@@ -271,8 +320,12 @@ class NotificationService @Inject constructor(
         // Create conversation shortcut for bubble support
         val shortcutId = createConversationShortcut(chatGuid, chatTitle, isGroup)
 
-        // Create bubble metadata
-        val bubbleMetadata = createBubbleMetadata(chatGuid, chatTitle)
+        // Create bubble metadata if bubbles are enabled for this conversation
+        val bubbleMetadata = if (shouldShowBubble(chatGuid, senderAddress)) {
+            createBubbleMetadata(chatGuid, chatTitle)
+        } else {
+            null
+        }
 
         val notificationBuilder = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(android.R.drawable.sym_action_chat)

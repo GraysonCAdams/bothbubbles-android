@@ -30,18 +30,20 @@ object SmsModule {
     @Singleton
     fun provideSmsSendService(
         @ApplicationContext context: Context,
-        messageDao: MessageDao
+        messageDao: MessageDao,
+        smsPermissionHelper: SmsPermissionHelper
     ): SmsSendService {
-        return SmsSendService(context, messageDao)
+        return SmsSendService(context, messageDao, smsPermissionHelper)
     }
 
     @Provides
     @Singleton
     fun provideMmsSendService(
         @ApplicationContext context: Context,
-        messageDao: MessageDao
+        messageDao: MessageDao,
+        smsPermissionHelper: SmsPermissionHelper
     ): MmsSendService {
-        return MmsSendService(context, messageDao)
+        return MmsSendService(context, messageDao, smsPermissionHelper)
     }
 
     @Provides

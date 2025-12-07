@@ -11,7 +11,8 @@ data class DetectedUrl(
     val endIndex: Int,
     val matchedText: String,
     val url: String, // Normalized URL with protocol
-    val domain: String // Extracted domain for display
+    val domain: String, // Extracted domain for display
+    val isCoordinates: Boolean = false // True if this was detected from raw coordinates
 )
 
 /**
@@ -48,6 +49,21 @@ object UrlParsingUtils {
         "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
         "fbclid", "gclid", "dclid", "msclkid", "twclid",
         "igshid", "ref_src", "ref_url", "s", "t", "si"
+    )
+
+    // Coordinate patterns to detect raw lat/lng in message text
+    // These will be converted to Google Maps URLs for preview
+    private val COORDINATE_PATTERNS = listOf(
+        // Decimal degrees with optional space: 37.7749, -122.4194 or 37.7749,-122.4194
+        Pattern.compile(
+            """(-?\d{1,3}\.\d{3,8}),\s*(-?\d{1,3}\.\d{3,8})""",
+            Pattern.CASE_INSENSITIVE
+        ),
+        // GPS format: N 37.7749, W 122.4194 or N37.7749 W122.4194
+        Pattern.compile(
+            """([NS])\s*(\d{1,3}\.\d{3,8}),?\s*([EW])\s*(\d{1,3}\.\d{3,8})""",
+            Pattern.CASE_INSENSITIVE
+        )
     )
 
     /**
@@ -93,10 +109,108 @@ object UrlParsingUtils {
 
     /**
      * Gets the first URL from text (for link preview purposes)
+     * Also detects raw coordinates and converts them to Google Maps URLs
      */
     fun getFirstUrl(text: String?): DetectedUrl? {
         if (text.isNullOrBlank()) return null
-        return detectUrls(text).firstOrNull()
+
+        // First check for regular URLs
+        val urls = detectUrls(text)
+
+        // Also check for raw coordinates
+        val coordinates = detectCoordinates(text)
+
+        // Return whichever comes first in the text
+        val allDetected = (urls + coordinates).sortedBy { it.startIndex }
+        return allDetected.firstOrNull()
+    }
+
+    /**
+     * Detects raw coordinates in text and converts them to Google Maps URLs
+     * Examples: "37.7749, -122.4194" or "N 37.7749, W 122.4194"
+     */
+    fun detectCoordinates(text: String): List<DetectedUrl> {
+        val detectedCoords = mutableListOf<DetectedUrl>()
+        val coveredRanges = mutableListOf<IntRange>()
+
+        // First pattern: decimal degrees (37.7749, -122.4194)
+        val decimalMatcher = COORDINATE_PATTERNS[0].matcher(text)
+        while (decimalMatcher.find()) {
+            val matchedText = decimalMatcher.group()
+            val startIndex = decimalMatcher.start()
+            val endIndex = decimalMatcher.end()
+
+            // Check for overlaps
+            val overlaps = coveredRanges.any { range ->
+                startIndex < range.last && endIndex > range.first
+            }
+            if (overlaps) continue
+
+            val lat = decimalMatcher.group(1)?.toDoubleOrNull() ?: continue
+            val lng = decimalMatcher.group(2)?.toDoubleOrNull() ?: continue
+
+            // Validate coordinate ranges
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue
+
+            // Don't match if this looks like it's already part of a URL
+            val beforeMatch = if (startIndex > 0) text.substring(maxOf(0, startIndex - 10), startIndex) else ""
+            if (beforeMatch.contains("maps.google") || beforeMatch.contains("maps.apple") ||
+                beforeMatch.contains("?q=") || beforeMatch.contains("@")) continue
+
+            val googleMapsUrl = "https://maps.google.com/?q=$lat,$lng"
+            detectedCoords.add(
+                DetectedUrl(
+                    startIndex = startIndex,
+                    endIndex = endIndex,
+                    matchedText = matchedText,
+                    url = googleMapsUrl,
+                    domain = "maps.google.com",
+                    isCoordinates = true
+                )
+            )
+            coveredRanges.add(startIndex until endIndex)
+        }
+
+        // Second pattern: GPS format (N 37.7749, W 122.4194)
+        val gpsMatcher = COORDINATE_PATTERNS[1].matcher(text)
+        while (gpsMatcher.find()) {
+            val matchedText = gpsMatcher.group()
+            val startIndex = gpsMatcher.start()
+            val endIndex = gpsMatcher.end()
+
+            // Check for overlaps
+            val overlaps = coveredRanges.any { range ->
+                startIndex < range.last && endIndex > range.first
+            }
+            if (overlaps) continue
+
+            val nsDir = gpsMatcher.group(1)?.uppercase() ?: continue
+            val latVal = gpsMatcher.group(2)?.toDoubleOrNull() ?: continue
+            val ewDir = gpsMatcher.group(3)?.uppercase() ?: continue
+            val lngVal = gpsMatcher.group(4)?.toDoubleOrNull() ?: continue
+
+            // Convert to signed coordinates
+            val lat = if (nsDir == "S") -latVal else latVal
+            val lng = if (ewDir == "W") -lngVal else lngVal
+
+            // Validate coordinate ranges
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) continue
+
+            val googleMapsUrl = "https://maps.google.com/?q=$lat,$lng"
+            detectedCoords.add(
+                DetectedUrl(
+                    startIndex = startIndex,
+                    endIndex = endIndex,
+                    matchedText = matchedText,
+                    url = googleMapsUrl,
+                    domain = "maps.google.com",
+                    isCoordinates = true
+                )
+            )
+            coveredRanges.add(startIndex until endIndex)
+        }
+
+        return detectedCoords.sortedBy { it.startIndex }
     }
 
     /**

@@ -8,6 +8,8 @@ import com.bluebubbles.data.repository.MessageRepository
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.ui.components.MessageUiModel
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +35,10 @@ class BubbleChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(BubbleChatUiState())
     val uiState: StateFlow<BubbleChatUiState> = _uiState.asStateFlow()
 
+    // Draft persistence
+    private var draftSaveJob: Job? = null
+    private val draftSaveDebounceMs = 500L
+
     init {
         loadChat()
         loadMessages()
@@ -41,15 +47,19 @@ class BubbleChatViewModel @Inject constructor(
 
     private fun loadChat() {
         viewModelScope.launch {
+            var draftLoaded = false
             chatRepository.observeChat(chatGuid).collect { chat ->
                 chat?.let {
                     _uiState.update { state ->
                         state.copy(
                             chatTitle = chat.displayName ?: chat.chatIdentifier ?: "",
                             isLocalSmsChat = chat.isLocalSms,
-                            isLoading = false
+                            isLoading = false,
+                            // Load draft only on first observation
+                            draftText = if (!draftLoaded) chat.textFieldText ?: "" else state.draftText
                         )
                     }
+                    draftLoaded = true
                 }
             }
         }
@@ -101,6 +111,15 @@ class BubbleChatViewModel @Inject constructor(
      */
     fun updateDraft(text: String) {
         _uiState.update { it.copy(draftText = text) }
+        persistDraft(text)
+    }
+
+    private fun persistDraft(text: String) {
+        draftSaveJob?.cancel()
+        draftSaveJob = viewModelScope.launch {
+            delay(draftSaveDebounceMs)
+            chatRepository.updateDraftText(chatGuid, text)
+        }
     }
 
     /**
@@ -112,6 +131,11 @@ class BubbleChatViewModel @Inject constructor(
         if (text.isBlank()) return
 
         _uiState.update { it.copy(isSending = true, draftText = "") }
+        // Clear draft from database
+        draftSaveJob?.cancel()
+        viewModelScope.launch {
+            chatRepository.updateDraftText(chatGuid, null)
+        }
 
         viewModelScope.launch {
             messageRepository.sendUnified(

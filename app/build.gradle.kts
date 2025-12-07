@@ -122,8 +122,10 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
 
-    // ML Kit (Barcode Scanning)
+    // ML Kit
     implementation(libs.mlkit.barcode.scanning)
+    implementation(libs.mlkit.smart.reply)
+    implementation(libs.mlkit.entity.extraction)
 
     // WorkManager
     implementation(libs.work.runtime.ktx)

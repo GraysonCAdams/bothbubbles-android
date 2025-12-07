@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.material.icons.outlined.AddReaction
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -91,6 +93,7 @@ data class ReactionUiModel(
 /**
  * iOS-style tapback reaction menu that appears on long-press.
  * Shows all 6 iMessage reactions in a horizontal row with optional emoji picker.
+ * Also includes action buttons for Copy and Forward.
  * Positioned above the message bubble, can float over top bar if needed.
  */
 @Composable
@@ -101,13 +104,15 @@ fun TapbackMenu(
     myReactions: Set<Tapback> = emptySet(),
     isFromMe: Boolean = false,
     onEmojiPickerClick: (() -> Unit)? = null,
+    onCopyClick: (() -> Unit)? = null,
+    onForwardClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     if (!visible) return
 
     Popup(
         alignment = if (isFromMe) Alignment.TopEnd else Alignment.TopStart,
-        offset = IntOffset(0, -120), // Position above the message
+        offset = IntOffset(0, -140), // Position above the message (increased for action buttons)
         onDismissRequest = onDismiss,
         properties = PopupProperties(
             focusable = true,
@@ -121,6 +126,8 @@ fun TapbackMenu(
             },
             myReactions = myReactions,
             onEmojiPickerClick = onEmojiPickerClick,
+            onCopyClick = onCopyClick?.let { { it(); onDismiss() } },
+            onForwardClick = onForwardClick?.let { { it(); onDismiss() } },
             modifier = modifier
         )
     }
@@ -131,6 +138,8 @@ private fun TapbackMenuContent(
     onReactionSelected: (Tapback) -> Unit,
     myReactions: Set<Tapback>,
     onEmojiPickerClick: (() -> Unit)? = null,
+    onCopyClick: (() -> Unit)? = null,
+    onForwardClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     // Animation for the menu appearing
@@ -158,35 +167,71 @@ private fun TapbackMenuContent(
         shadowElevation = 4.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(0.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Tapback.entries.forEachIndexed { index, tapback ->
-                TapbackButton(
-                    tapback = tapback,
-                    isSelected = tapback in myReactions,
-                    onClick = { onReactionSelected(tapback) },
-                    animationDelay = index * 20
-                )
+        Column {
+            // Tapback reactions row
+            Row(
+                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(0.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Tapback.entries.forEachIndexed { index, tapback ->
+                    TapbackButton(
+                        tapback = tapback,
+                        isSelected = tapback in myReactions,
+                        onClick = { onReactionSelected(tapback) },
+                        animationDelay = index * 20
+                    )
+                }
+
+                // Emoji picker button at the end
+                if (onEmojiPickerClick != null) {
+                    // Divider between tapbacks and emoji picker
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 4.dp)
+                            .width(1.dp)
+                            .height(20.dp)
+                            .background(MaterialTheme.colorScheme.outlineVariant)
+                    )
+
+                    EmojiPickerButton(
+                        onClick = onEmojiPickerClick,
+                        animationDelay = Tapback.entries.size * 20
+                    )
+                }
             }
 
-            // Emoji picker button at the end
-            if (onEmojiPickerClick != null) {
-                // Divider between tapbacks and emoji picker
-                Box(
-                    modifier = Modifier
-                        .padding(horizontal = 4.dp)
-                        .width(1.dp)
-                        .height(20.dp)
-                        .background(MaterialTheme.colorScheme.outlineVariant)
+            // Action buttons row (Copy, Forward)
+            if (onCopyClick != null || onForwardClick != null) {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.padding(horizontal = 8.dp)
                 )
 
-                EmojiPickerButton(
-                    onClick = onEmojiPickerClick,
-                    animationDelay = Tapback.entries.size * 20
-                )
+                Row(
+                    modifier = Modifier
+                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (onCopyClick != null) {
+                        ActionButton(
+                            icon = Icons.Outlined.ContentCopy,
+                            label = "Copy",
+                            onClick = onCopyClick,
+                            animationDelay = (Tapback.entries.size + 1) * 20
+                        )
+                    }
+
+                    if (onForwardClick != null) {
+                        ActionButton(
+                            icon = Icons.AutoMirrored.Outlined.Reply,
+                            label = "Forward",
+                            onClick = onForwardClick,
+                            animationDelay = (Tapback.entries.size + 2) * 20
+                        )
+                    }
+                }
             }
         }
     }
@@ -277,6 +322,60 @@ private fun EmojiPickerButton(
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(18.dp)
         )
+    }
+}
+
+/**
+ * Action button for message actions (Copy, Forward)
+ */
+@Composable
+private fun ActionButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+    animationDelay: Int,
+    modifier: Modifier = Modifier
+) {
+    // Staggered animation like tapback buttons
+    var scale by remember { mutableFloatStateOf(0f) }
+
+    LaunchedEffect(Unit) {
+        kotlinx.coroutines.delay(animationDelay.toLong())
+        animate(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = spring(
+                dampingRatio = Spring.DampingRatioMediumBouncy,
+                stiffness = Spring.StiffnessMedium
+            )
+        ) { value, _ ->
+            scale = value
+        }
+    }
+
+    Surface(
+        modifier = modifier.scale(scale),
+        onClick = onClick,
+        shape = RoundedCornerShape(8.dp),
+        color = Color.Transparent
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(16.dp)
+            )
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }
 

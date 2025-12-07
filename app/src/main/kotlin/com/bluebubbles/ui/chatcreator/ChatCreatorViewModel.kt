@@ -10,6 +10,7 @@ import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
 import com.bluebubbles.data.remote.api.dto.CreateChatRequest
+import com.bluebubbles.services.contacts.AndroidContactsService
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.ui.components.PhoneAndCodeParsingUtils
@@ -28,7 +29,8 @@ class ChatCreatorViewModel @Inject constructor(
     private val chatDao: ChatDao,
     private val api: BlueBubblesApi,
     private val socketService: SocketService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
 
     companion object {
@@ -314,13 +316,16 @@ class ChatCreatorViewModel @Inject constructor(
             else -> null // iMessage doesn't need a label
         }
 
+        // Check if contact is starred (favorite) in Android contacts
+        val isFavorite = androidContactsService.isContactStarred(address)
+
         return ContactUiModel(
             address = address,
             formattedAddress = formattedAddress ?: address,
             displayName = displayName,
             service = service,
             avatarPath = cachedAvatarPath,
-            isFavorite = false, // TODO: Implement favorites
+            isFavorite = isFavorite,
             serviceLabel = serviceLabel
         )
     }

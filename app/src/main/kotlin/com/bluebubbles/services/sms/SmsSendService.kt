@@ -1,8 +1,11 @@
 package com.bluebubbles.services.sms
 
 import android.app.PendingIntent
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import android.util.Log
@@ -22,7 +25,8 @@ import javax.inject.Singleton
 @Singleton
 class SmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val messageDao: MessageDao
+    private val messageDao: MessageDao,
+    private val smsPermissionHelper: SmsPermissionHelper
 ) {
     companion object {
         private const val TAG = "SmsSendService"
@@ -47,18 +51,23 @@ class SmsSendService @Inject constructor(
         subscriptionId: Int = -1
     ): Result<MessageEntity> = withContext(Dispatchers.IO) {
         runCatching {
-            val messageGuid = "sms-outgoing-${System.currentTimeMillis()}-${address.hashCode()}"
+            val timestamp = System.currentTimeMillis()
+            val providerMessage = insertOutgoingToProvider(address, text, timestamp, subscriptionId)
+            val messageGuid = providerMessage?.let { "sms-${it.id}" }
+                ?: "sms-outgoing-$timestamp-${address.hashCode()}"
 
             // Create message entity first (optimistic insert)
             val message = MessageEntity(
                 guid = messageGuid,
                 chatGuid = chatGuid,
                 text = text,
-                dateCreated = System.currentTimeMillis(),
+                dateCreated = timestamp,
                 isFromMe = true,
                 messageSource = MessageSource.LOCAL_SMS.name,
                 smsStatus = "pending",
-                simSlot = if (subscriptionId >= 0) subscriptionId else null
+                simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                smsId = providerMessage?.id,
+                smsThreadId = providerMessage?.threadId
             )
             messageDao.insertMessage(message)
 
@@ -116,6 +125,7 @@ class SmsSendService @Inject constructor(
                     error = if (status == "failed") (errorCode ?: 1) else 0
                 )
                 messageDao.updateMessage(updatedMessage)
+                updateProviderMessageStatus(updatedMessage.smsId, status)
                 Log.d(TAG, "Updated message $messageGuid status to $status")
             }
         }
@@ -185,6 +195,97 @@ class SmsSendService @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
     }
+
+    private fun insertOutgoingToProvider(
+        address: String,
+        text: String,
+        timestamp: Long,
+        subscriptionId: Int
+    ): ProviderMessageRef? {
+        if (!smsPermissionHelper.isDefaultSmsApp()) return null
+
+        return try {
+            val values = ContentValues().apply {
+                put(Telephony.Sms.ADDRESS, address)
+                put(Telephony.Sms.BODY, text)
+                put(Telephony.Sms.DATE, timestamp)
+                put(Telephony.Sms.DATE_SENT, timestamp)
+                put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_OUTBOX)
+                put(Telephony.Sms.READ, 1)
+                put(Telephony.Sms.SEEN, 1)
+                put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_PENDING)
+                if (subscriptionId >= 0) {
+                    put(Telephony.Sms.SUBSCRIPTION_ID, subscriptionId)
+                }
+            }
+
+            val uri = context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values) ?: return null
+            queryProviderMessage(uri)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Missing permission to write SMS provider", e)
+            null
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to insert SMS into provider", e)
+            null
+        }
+    }
+
+    private fun queryProviderMessage(uri: Uri): ProviderMessageRef? {
+        return context.contentResolver.query(
+            uri,
+            arrayOf(Telephony.Sms._ID, Telephony.Sms.THREAD_ID),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                ProviderMessageRef(
+                    id = cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Sms._ID)),
+                    threadId = cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Sms.THREAD_ID))
+                )
+            } else {
+                null
+            }
+        } ?: uri.lastPathSegment?.toLongOrNull()?.let { ProviderMessageRef(it, null) }
+    }
+
+    private fun updateProviderMessageStatus(smsId: Long?, status: String) {
+        if (smsId == null || !smsPermissionHelper.isDefaultSmsApp()) return
+
+        val values = ContentValues()
+        val now = System.currentTimeMillis()
+        when (status) {
+            "sent", "delivered" -> {
+                values.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_SENT)
+                values.put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_COMPLETE)
+                values.put(Telephony.Sms.DATE_SENT, now)
+            }
+            "failed", "delivery_failed" -> {
+                values.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_FAILED)
+                values.put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_FAILED)
+            }
+            else -> {
+                values.put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_OUTBOX)
+                values.put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_PENDING)
+            }
+        }
+
+        if (values.size() == 0) return
+
+        try {
+            val uri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, smsId.toString())
+            context.contentResolver.update(uri, values, null, null)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Missing permission to update SMS provider", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Unable to update SMS provider status", e)
+        }
+    }
+
+    private data class ProviderMessageRef(
+        val id: Long,
+        val threadId: Long?
+    )
 }
 
 /**

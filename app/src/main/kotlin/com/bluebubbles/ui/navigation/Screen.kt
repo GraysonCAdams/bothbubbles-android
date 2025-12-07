@@ -8,7 +8,10 @@ import kotlinx.serialization.Serializable
 sealed interface Screen {
 
     @Serializable
-    data object Setup : Screen
+    data class Setup(
+        val skipWelcome: Boolean = false,
+        val skipSmsSetup: Boolean = false
+    ) : Screen
 
     @Serializable
     data object Conversations : Screen
@@ -64,13 +67,28 @@ sealed interface Screen {
     data class NotificationSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class NotificationProvider(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class About(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data object OpenSourceLicenses : Screen
 
     @Serializable
     data class SwipeSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
     data class EffectsSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data class QuickReplyTemplates(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data class SpamSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data class CategorizationSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
     data class MediaViewer(
@@ -95,4 +113,13 @@ sealed interface Screen {
 
     @Serializable
     data class Camera(val chatGuid: String) : Screen
+
+    @Serializable
+    data class SharePicker(
+        val sharedText: String? = null,
+        val sharedUris: List<String> = emptyList()
+    ) : Screen
+
+    @Serializable
+    data class ExportMessages(val returnToSettings: Boolean = false) : Screen
 }

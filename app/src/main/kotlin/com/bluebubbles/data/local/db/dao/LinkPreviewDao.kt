@@ -69,6 +69,20 @@ interface LinkPreviewDao {
     @Query("SELECT COUNT(*) FROM link_previews WHERE fetch_status = 'SUCCESS'")
     suspend fun getSuccessfulPreviewCount(): Int
 
+    /**
+     * Search link previews by title (for message search feature).
+     * Returns URLs whose titles contain the search query.
+     */
+    @Query("""
+        SELECT * FROM link_previews
+        WHERE fetch_status = 'SUCCESS'
+        AND title IS NOT NULL
+        AND title LIKE '%' || :query || '%'
+        ORDER BY last_accessed DESC
+        LIMIT :limit
+    """)
+    suspend fun searchByTitle(query: String, limit: Int = 50): List<LinkPreviewEntity>
+
     // ===== Inserts/Updates =====
 
     /**

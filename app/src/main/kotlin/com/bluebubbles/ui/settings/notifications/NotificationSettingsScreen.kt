@@ -12,9 +12,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -161,6 +166,40 @@ fun NotificationSettingsScreen(
                     }
                 }
 
+                // Chat bubbles filter setting
+                var showBubbleFilterDialog by remember { mutableStateOf(false) }
+
+                SettingsCard {
+                    ListItem(
+                        headlineContent = { Text("Chat bubbles") },
+                        supportingContent = {
+                            Text(getBubbleFilterDescription(uiState.bubbleFilterMode))
+                        },
+                        leadingContent = {
+                            Icon(Icons.Outlined.ChatBubbleOutline, contentDescription = null)
+                        },
+                        trailingContent = {
+                            Icon(
+                                Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        },
+                        modifier = Modifier.clickable { showBubbleFilterDialog = true }
+                    )
+                }
+
+                if (showBubbleFilterDialog) {
+                    BubbleFilterDialog(
+                        currentMode = uiState.bubbleFilterMode,
+                        onModeSelected = { mode ->
+                            viewModel.setBubbleFilterMode(mode)
+                            showBubbleFilterDialog = false
+                        },
+                        onDismiss = { showBubbleFilterDialog = false }
+                    )
+                }
+
                 // System notification settings
                 SettingsCard {
                     ListItem(
@@ -187,4 +226,74 @@ fun NotificationSettingsScreen(
             }
         }
     }
+}
+
+private fun getBubbleFilterDescription(mode: String): String {
+    return when (mode) {
+        "all" -> "All conversations"
+        "favorites" -> "Favorite contacts only"
+        "selected" -> "Selected conversations"
+        "none" -> "Disabled"
+        else -> "All conversations"
+    }
+}
+
+@Composable
+private fun BubbleFilterDialog(
+    currentMode: String,
+    onModeSelected: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(
+        "all" to "All conversations",
+        "favorites" to "Favorite contacts only",
+        "selected" to "Selected conversations",
+        "none" to "Disabled"
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Show chat bubbles for") },
+        text = {
+            Column(modifier = Modifier.selectableGroup()) {
+                options.forEach { (mode, label) ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = currentMode == mode,
+                                onClick = { onModeSelected(mode) },
+                                role = Role.RadioButton
+                            )
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = currentMode == mode,
+                            onClick = null // null because parent handles click
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                            if (mode == "favorites") {
+                                Text(
+                                    text = "Based on starred contacts in Android",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }

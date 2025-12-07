@@ -29,6 +29,7 @@ import com.bluebubbles.ui.theme.KumbhSansFamily
 @Composable
 fun AboutScreen(
     onNavigateBack: () -> Unit,
+    onOpenSourceLicensesClick: () -> Unit = {},
     viewModel: AboutViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -213,9 +214,7 @@ fun AboutScreen(
                         leadingContent = {
                             Icon(Icons.Default.Description, contentDescription = null)
                         },
-                        modifier = Modifier.clickable {
-                            // TODO: Show licenses screen
-                        }
+                        modifier = Modifier.clickable(onClick = onOpenSourceLicensesClick)
                     )
                 }
             }

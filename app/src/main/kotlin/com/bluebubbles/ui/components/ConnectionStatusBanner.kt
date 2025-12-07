@@ -324,13 +324,12 @@ fun determineConnectionBannerState(
  */
 fun determineSmsBannerState(
     smsEnabled: Boolean,
-    isDefaultSmsApp: Boolean,
-    hasAllPermissions: Boolean,
+    isFullyFunctional: Boolean,
     isSmsBannerDismissed: Boolean
 ): SmsBannerState {
     return when {
         !smsEnabled -> SmsBannerState.Disabled
-        isDefaultSmsApp && hasAllPermissions -> SmsBannerState.Connected
+        isFullyFunctional -> SmsBannerState.Connected
         isSmsBannerDismissed -> SmsBannerState.Dismissed
         else -> SmsBannerState.NotDefaultApp
     }

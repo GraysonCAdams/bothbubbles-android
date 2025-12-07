@@ -4,12 +4,14 @@ import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import android.content.Intent
 import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
@@ -32,17 +34,34 @@ import com.bluebubbles.ui.chatcreator.GroupCreatorScreen
 import com.bluebubbles.ui.camera.InAppCameraScreen
 import com.bluebubbles.ui.media.MediaViewerScreen
 import com.bluebubbles.ui.setup.SetupScreen
+import com.bluebubbles.ui.share.SharePickerScreen
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 
 private const val TRANSITION_DURATION = 300
 
+/**
+ * Data class to hold share intent data parsed from MainActivity
+ */
+data class ShareIntentData(
+    val sharedText: String? = null,
+    val sharedUris: List<Uri> = emptyList()
+)
+
 @Composable
 fun BlueBubblesNavHost(
     navController: NavHostController = rememberNavController(),
-    isSetupComplete: Boolean = true
+    isSetupComplete: Boolean = true,
+    shareIntentData: ShareIntentData? = null
 ) {
-    // Determine start destination based on setup status
-    val startDestination: Screen = if (isSetupComplete) Screen.Conversations else Screen.Setup
+    // Determine start destination based on setup status and share intent
+    val startDestination: Screen = when {
+        !isSetupComplete -> Screen.Setup()
+        shareIntentData != null -> Screen.SharePicker(
+            sharedText = shareIntentData.sharedText,
+            sharedUris = shareIntentData.sharedUris.map { it.toString() }
+        )
+        else -> Screen.Conversations
+    }
 
     fun popBackStackReturningToSettings(returnToSettings: Boolean) {
         if (returnToSettings) {
@@ -103,8 +122,9 @@ fun BlueBubblesNavHost(
                     // No longer used - settings panel slides in from right
                 },
                 onSettingsNavigate = { destination, returnToSettings ->
-                    val screen = when (destination) {
+                    val screen: Screen? = when (destination) {
                         "server" -> Screen.ServerSettings(returnToSettings)
+                        "setup" -> Screen.Setup(skipWelcome = true, skipSmsSetup = true)
                         "archived" -> Screen.ArchivedChats(returnToSettings)
                         "blocked" -> Screen.BlockedContacts(returnToSettings)
                         "sync" -> Screen.SyncSettings(returnToSettings)
@@ -112,7 +132,11 @@ fun BlueBubblesNavHost(
                         "notifications" -> Screen.NotificationSettings(returnToSettings)
                         "swipe" -> Screen.SwipeSettings(returnToSettings)
                         "effects" -> Screen.EffectsSettings(returnToSettings)
+                        "templates" -> Screen.QuickReplyTemplates(returnToSettings)
+                        "spam" -> Screen.SpamSettings(returnToSettings)
+                        "categorization" -> Screen.CategorizationSettings(returnToSettings)
                         "about" -> Screen.About(returnToSettings)
+                        "export" -> Screen.ExportMessages(returnToSettings)
                         else -> null
                     }
 
@@ -134,6 +158,19 @@ fun BlueBubblesNavHost(
                 .getStateFlow<String?>("captured_photo_uri", null)
                 .collectAsState()
 
+            // Handle shared content from share picker
+            val sharedText = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("shared_text", null)
+                .collectAsState()
+            val sharedUris = backStackEntry.savedStateHandle
+                .getStateFlow<ArrayList<String>?>("shared_uris", null)
+                .collectAsState()
+
+            // Handle search activation from ChatDetails screen
+            val activateSearch = backStackEntry.savedStateHandle
+                .getStateFlow("activate_search", false)
+                .collectAsState()
+
             ChatScreen(
                 chatGuid = route.chatGuid,
                 onBackClick = { navController.popBackStack() },
@@ -149,6 +186,16 @@ fun BlueBubblesNavHost(
                 capturedPhotoUri = capturedPhotoUri.value?.toUri(),
                 onCapturedPhotoHandled = {
                     backStackEntry.savedStateHandle.remove<String>("captured_photo_uri")
+                },
+                sharedText = sharedText.value,
+                sharedUris = sharedUris.value?.map { it.toUri() } ?: emptyList(),
+                onSharedContentHandled = {
+                    backStackEntry.savedStateHandle.remove<String>("shared_text")
+                    backStackEntry.savedStateHandle.remove<ArrayList<String>>("shared_uris")
+                },
+                activateSearch = activateSearch.value,
+                onSearchActivated = {
+                    backStackEntry.savedStateHandle["activate_search"] = false
                 }
             )
         }
@@ -199,7 +246,9 @@ fun BlueBubblesNavHost(
                 chatGuid = route.chatGuid,
                 onNavigateBack = { navController.popBackStack() },
                 onSearchClick = {
-                    // TODO: Navigate to search in conversation
+                    // Set activate_search flag on Chat screen and pop back
+                    navController.previousBackStackEntry?.savedStateHandle?.set("activate_search", true)
+                    navController.popBackStack()
                 },
                 onMediaGalleryClick = { mediaType ->
                     navController.navigate(Screen.MediaGallery(route.chatGuid, mediaType))
@@ -237,6 +286,7 @@ fun BlueBubblesNavHost(
                 onSyncSettingsClick = { navController.navigate(Screen.SyncSettings(returnToSettings = true)) },
                 onSmsSettingsClick = { navController.navigate(Screen.SmsSettings(returnToSettings = true)) },
                 onNotificationsClick = { navController.navigate(Screen.NotificationSettings(returnToSettings = true)) },
+                onNotificationProviderClick = { navController.navigate(Screen.NotificationProvider(returnToSettings = true)) },
                 onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings(returnToSettings = true)) },
                 onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
                 onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
@@ -306,13 +356,33 @@ fun BlueBubblesNavHost(
             )
         }
 
+        // Notification Provider (FCM vs Foreground Service)
+        composable<Screen.NotificationProvider> { backStackEntry ->
+            val route: Screen.NotificationProvider = backStackEntry.toRoute()
+            com.bluebubbles.ui.settings.notifications.NotificationProviderScreen(
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
         // About
         composable<Screen.About> { backStackEntry ->
             val route: Screen.About = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.about.AboutScreen(
                 onNavigateBack = {
                     popBackStackReturningToSettings(route.returnToSettings)
+                },
+                onOpenSourceLicensesClick = {
+                    navController.navigate(Screen.OpenSourceLicenses)
                 }
+            )
+        }
+
+        // Open Source Licenses
+        composable<Screen.OpenSourceLicenses> {
+            com.bluebubbles.ui.settings.about.OpenSourceLicensesScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 
@@ -331,6 +401,36 @@ fun BlueBubblesNavHost(
             val route: Screen.EffectsSettings = backStackEntry.toRoute()
             com.bluebubbles.ui.settings.EffectsSettingsScreen(
                 onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
+        // Quick Reply Templates
+        composable<Screen.QuickReplyTemplates> { backStackEntry ->
+            val route: Screen.QuickReplyTemplates = backStackEntry.toRoute()
+            com.bluebubbles.ui.settings.templates.QuickReplyTemplatesScreen(
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
+        // Spam Settings
+        composable<Screen.SpamSettings> { backStackEntry ->
+            val route: Screen.SpamSettings = backStackEntry.toRoute()
+            com.bluebubbles.ui.settings.spam.SpamSettingsScreen(
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
+        // Categorization Settings
+        composable<Screen.CategorizationSettings> { backStackEntry ->
+            val route: Screen.CategorizationSettings = backStackEntry.toRoute()
+            com.bluebubbles.ui.settings.categorization.CategorizationSettingsScreen(
+                onBackClick = {
                     popBackStackReturningToSettings(route.returnToSettings)
                 }
             )
@@ -382,11 +482,13 @@ fun BlueBubblesNavHost(
         // Links gallery
         composable<Screen.LinksGallery> { backStackEntry ->
             val route: Screen.LinksGallery = backStackEntry.toRoute()
+            val context = LocalContext.current
             LinksScreen(
                 chatGuid = route.chatGuid,
                 onNavigateBack = { navController.popBackStack() },
                 onLinkClick = { url ->
-                    // TODO: Open URL in browser
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    context.startActivity(intent)
                 }
             )
         }
@@ -394,27 +496,32 @@ fun BlueBubblesNavHost(
         // Places gallery
         composable<Screen.PlacesGallery> { backStackEntry ->
             val route: Screen.PlacesGallery = backStackEntry.toRoute()
+            val context = LocalContext.current
             PlacesScreen(
                 chatGuid = route.chatGuid,
                 onNavigateBack = { navController.popBackStack() },
-                onPlaceClick = { placeId ->
-                    // TODO: Open place details
+                onPlaceClick = { placeUrl ->
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(placeUrl))
+                    context.startActivity(intent)
                 }
             )
         }
 
-        // Search
+        // Search - Note: Main search is integrated into ConversationsScreen
+        // This route is currently unused but kept for potential future global search
         composable<Screen.Search> {
-            // TODO: SearchScreen - temporary placeholder
             SettingsScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Setup (onboarding)
-        composable<Screen.Setup> {
+        composable<Screen.Setup> { backStackEntry ->
+            val route: Screen.Setup = backStackEntry.toRoute()
             SetupScreen(
+                skipWelcome = route.skipWelcome,
+                skipSmsSetup = route.skipSmsSetup,
                 onSetupComplete = {
                     navController.navigate(Screen.Conversations) {
-                        popUpTo(Screen.Setup) { inclusive = true }
+                        popUpTo(Screen.Setup(route.skipWelcome, route.skipSmsSetup)) { inclusive = true }
                     }
                 }
             )
@@ -432,6 +539,67 @@ fun BlueBubblesNavHost(
                     navController.previousBackStackEntry
                         ?.savedStateHandle
                         ?.set("captured_photo_uri", uri.toString())
+                    navController.popBackStack()
+                }
+            )
+        }
+
+        // Export Messages
+        composable<Screen.ExportMessages> { backStackEntry ->
+            val route: Screen.ExportMessages = backStackEntry.toRoute()
+            com.bluebubbles.ui.settings.export.ExportScreen(
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
+        // Share picker - conversation selection for sharing content
+        composable<Screen.SharePicker> { backStackEntry ->
+            val route: Screen.SharePicker = backStackEntry.toRoute()
+            SharePickerScreen(
+                sharedText = route.sharedText,
+                sharedUris = route.sharedUris.map { it.toUri() },
+                onConversationSelected = { chatGuid ->
+                    // Navigate to chat with shared content
+                    // Pass shared URIs as strings in a special format that ChatScreen can parse
+                    val chatRoute = Screen.Chat(chatGuid)
+                    navController.navigate(chatRoute) {
+                        popUpTo(Screen.SharePicker(route.sharedText, route.sharedUris)) { inclusive = true }
+                    }
+                    // Set shared content on the destination entry after navigation
+                    try {
+                        val chatEntry = navController.getBackStackEntry(chatRoute)
+                        chatEntry.savedStateHandle.apply {
+                            route.sharedText?.let { set("shared_text", it) }
+                            if (route.sharedUris.isNotEmpty()) {
+                                set("shared_uris", ArrayList(route.sharedUris))
+                            }
+                        }
+                    } catch (_: Exception) {
+                        // Entry might not be found immediately - the Chat screen handles this
+                    }
+                },
+                onNewConversation = {
+                    // Navigate to chat creator with shared content
+                    val creatorRoute = Screen.ChatCreator(
+                        initialAttachments = route.sharedUris
+                    )
+                    navController.navigate(creatorRoute) {
+                        popUpTo(Screen.SharePicker(route.sharedText, route.sharedUris)) { inclusive = true }
+                    }
+                    // Pass shared text via saved state handle
+                    try {
+                        val creatorEntry = navController.getBackStackEntry(creatorRoute)
+                        route.sharedText?.let {
+                            creatorEntry.savedStateHandle.set("shared_text", it)
+                        }
+                    } catch (_: Exception) {
+                        // Entry might not be found immediately
+                    }
+                },
+                onCancel = {
+                    // Just finish the activity - go back to the source app
                     navController.popBackStack()
                 }
             )

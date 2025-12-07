@@ -43,40 +43,13 @@ data class LinkItem(
 fun LinksScreen(
     chatGuid: String,
     onNavigateBack: () -> Unit,
-    onLinkClick: (String) -> Unit = {}
+    onLinkClick: (String) -> Unit = {},
+    viewModel: LinksViewModel = hiltViewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    // TODO: Get links from ViewModel - for now using sample data
-    val links = remember {
-        listOf(
-            LinkItem(
-                id = "1",
-                url = "https://www.barnesandnobl...",
-                title = null,
-                domain = "barnesandnoble.com",
-                senderName = "Liz Levine",
-                timestamp = "16:46",
-                thumbnailUrl = null
-            ),
-            LinkItem(
-                id = "2",
-                url = "https://www.barnesandnobl...",
-                title = null,
-                domain = "barnesandnoble.com",
-                senderName = "Liz Levine",
-                timestamp = "16:45"
-            ),
-            LinkItem(
-                id = "3",
-                url = "Pricing - Sculpted By Lagree",
-                title = "Pricing - Sculpted By Lagree",
-                domain = "sculptedbylagree.com",
-                senderName = "Liz Levine",
-                timestamp = "13:39"
-            )
-        )
-    }
+    val uiState by viewModel.uiState.collectAsState()
+    val links = uiState.links
 
     val filteredLinks = remember(searchQuery, links) {
         if (searchQuery.isBlank()) links
@@ -120,7 +93,16 @@ fun LinksScreen(
             )
         }
     ) { paddingValues ->
-        if (filteredLinks.isEmpty()) {
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (filteredLinks.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()

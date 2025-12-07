@@ -65,6 +65,12 @@ interface HandleDao {
     @Query("UPDATE handles SET inferred_name = :inferredName WHERE id = :id")
     suspend fun updateInferredName(id: Long, inferredName: String?)
 
+    @Query("UPDATE handles SET inferred_name = NULL WHERE id = :id")
+    suspend fun clearInferredName(id: Long)
+
+    @Query("UPDATE handles SET inferred_name = NULL WHERE address = :address")
+    suspend fun clearInferredNameByAddress(address: String)
+
     // ===== Spam =====
 
     @Query("UPDATE handles SET spam_report_count = spam_report_count + 1 WHERE id = :id")

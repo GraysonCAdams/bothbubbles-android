@@ -9,12 +9,16 @@ import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
 import com.bluebubbles.data.local.db.dao.LinkPreviewDao
 import com.bluebubbles.data.local.db.dao.MessageDao
+import com.bluebubbles.data.local.db.dao.QuickReplyTemplateDao
+import com.bluebubbles.data.local.db.dao.ScheduledMessageDao
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.local.db.entity.LinkPreviewEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
+import com.bluebubbles.data.local.db.entity.QuickReplyTemplateEntity
+import com.bluebubbles.data.local.db.entity.ScheduledMessageEntity
 
 /**
  * Room database for BlueBubbles.
@@ -44,9 +48,11 @@ import com.bluebubbles.data.local.db.entity.MessageEntity
         HandleEntity::class,
         AttachmentEntity::class,
         ChatHandleCrossRef::class,
-        LinkPreviewEntity::class
+        LinkPreviewEntity::class,
+        QuickReplyTemplateEntity::class,
+        ScheduledMessageEntity::class
     ],
-    version = 8,
+    version = 12,
     exportSchema = true
 )
 abstract class BlueBubblesDatabase : RoomDatabase() {
@@ -56,6 +62,8 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
     abstract fun handleDao(): HandleDao
     abstract fun attachmentDao(): AttachmentDao
     abstract fun linkPreviewDao(): LinkPreviewDao
+    abstract fun quickReplyTemplateDao(): QuickReplyTemplateDao
+    abstract fun scheduledMessageDao(): ScheduledMessageDao
 
     companion object {
         const val DATABASE_NAME = "bluebubbles.db"
@@ -219,6 +227,78 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 8 to 9: Add quick_reply_templates table for user-saved reply templates
+         */
+        val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS quick_reply_templates (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        title TEXT NOT NULL,
+                        text TEXT NOT NULL,
+                        usage_count INTEGER NOT NULL DEFAULT 0,
+                        last_used_at INTEGER DEFAULT NULL,
+                        created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                        display_order INTEGER NOT NULL DEFAULT 0,
+                        is_favorite INTEGER NOT NULL DEFAULT 0
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_quick_reply_templates_usage_count ON quick_reply_templates(usage_count)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_quick_reply_templates_is_favorite ON quick_reply_templates(is_favorite)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_quick_reply_templates_display_order ON quick_reply_templates(display_order)")
+            }
+        }
+
+        /**
+         * Migration from version 9 to 10: Add message categorization columns to chats table
+         * for ML-based transaction/delivery/promotion/reminder classification
+         */
+        val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chats ADD COLUMN category TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE chats ADD COLUMN category_confidence INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chats ADD COLUMN category_last_updated INTEGER DEFAULT NULL")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_category ON chats(category)")
+            }
+        }
+
+        /**
+         * Migration from version 10 to 11: Add snooze_until column to chats table
+         * for temporarily suppressing notifications for a conversation.
+         * Value is epoch timestamp when snooze expires, -1 for indefinite, or null if not snoozed.
+         */
+        val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chats ADD COLUMN snooze_until INTEGER DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Migration from version 11 to 12: Add scheduled_messages table
+         * for client-side scheduled message sending via WorkManager.
+         */
+        val MIGRATION_11_12 = object : Migration(11, 12) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS scheduled_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        chat_guid TEXT NOT NULL,
+                        text TEXT,
+                        attachment_uris TEXT,
+                        scheduled_at INTEGER NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        status TEXT NOT NULL DEFAULT 'PENDING',
+                        work_request_id TEXT,
+                        error_message TEXT
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_scheduled_messages_chat_guid ON scheduled_messages(chat_guid)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_scheduled_messages_scheduled_at ON scheduled_messages(scheduled_at)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_scheduled_messages_status ON scheduled_messages(status)")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -231,7 +311,11 @@ abstract class BlueBubblesDatabase : RoomDatabase() {
             MIGRATION_4_5,
             MIGRATION_5_6,
             MIGRATION_6_7,
-            MIGRATION_7_8
+            MIGRATION_7_8,
+            MIGRATION_8_9,
+            MIGRATION_9_10,
+            MIGRATION_10_11,
+            MIGRATION_11_12
         )
     }
 }

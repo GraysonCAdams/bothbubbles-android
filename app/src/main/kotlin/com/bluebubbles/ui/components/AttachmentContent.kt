@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.AudioFile
 import androidx.compose.material.icons.outlined.BrokenImage
+import androidx.compose.material.icons.outlined.ContactPage
 import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -46,6 +47,12 @@ fun AttachmentContent(
             modifier = modifier
         )
         attachment.isAudio -> AudioAttachment(
+            attachment = attachment,
+            onClick = { onMediaClick(attachment.guid) },
+            isFromMe = isFromMe,
+            modifier = modifier
+        )
+        attachment.isVCard -> VCardAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
             isFromMe = isFromMe,
@@ -318,6 +325,77 @@ private fun AudioAttachment(
 }
 
 @Composable
+private fun VCardAttachment(
+    attachment: AttachmentUiModel,
+    onClick: () -> Unit,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier
+) {
+    // Extract contact name from filename (format: Name_timestamp.vcf)
+    val contactName = attachment.transferName
+        ?.substringBeforeLast("_")
+        ?.replace("_", " ")
+        ?: "Contact"
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (isFromMe) {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        modifier = modifier
+            .widthIn(min = 180.dp, max = 250.dp)
+            .clickable(onClick = onClick)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Contact icon
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.ContactPage,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+            }
+
+            // Contact info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = contactName,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
+                )
+                Text(
+                    text = "Contact Card",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Add contact icon
+            Icon(
+                Icons.Default.PersonAdd,
+                contentDescription = "Add contact",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+@Composable
 private fun FileAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
@@ -412,5 +490,6 @@ private fun getFileIcon(extension: String?) = when (extension?.lowercase()) {
     "zip", "rar", "7z", "tar", "gz" -> Icons.Default.FolderZip
     "txt", "rtf" -> Icons.Default.TextSnippet
     "html", "htm", "xml", "json" -> Icons.Default.Code
+    "vcf" -> Icons.Outlined.ContactPage
     else -> Icons.Outlined.InsertDriveFile
 }

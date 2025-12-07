@@ -5,7 +5,9 @@ import android.provider.ContactsContract
 import android.net.Uri
 import android.util.Log
 import com.bluebubbles.data.local.db.dao.HandleDao
+import com.bluebubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,7 +31,8 @@ import javax.inject.Singleton
 @Singleton
 class SpamDetector @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val handleDao: HandleDao
+    private val handleDao: HandleDao,
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "SpamDetector"
@@ -100,6 +103,12 @@ class SpamDetector @Inject constructor(
         messageText: String?,
         chatGuid: String
     ): SpamResult {
+        // Check if spam detection is enabled
+        val isEnabled = settingsDataStore.spamDetectionEnabled.first()
+        if (!isEnabled) {
+            return SpamResult(0, false, emptyList())
+        }
+
         val text = messageText ?: ""
         val reasons = mutableListOf<String>()
         var score = 0
@@ -172,12 +181,14 @@ class SpamDetector @Inject constructor(
         // Cap score at 100
         score = score.coerceIn(0, 100)
 
-        val isSpam = score >= SPAM_THRESHOLD
+        // Get threshold from settings
+        val threshold = settingsDataStore.spamThreshold.first()
+        val isSpam = score >= threshold
 
         if (isSpam) {
-            Log.i(TAG, "Message from $senderAddress classified as spam (score: $score, reasons: $reasons)")
+            Log.i(TAG, "Message from $senderAddress classified as spam (score: $score, threshold: $threshold, reasons: $reasons)")
         } else {
-            Log.d(TAG, "Message from $senderAddress not spam (score: $score)")
+            Log.d(TAG, "Message from $senderAddress not spam (score: $score, threshold: $threshold)")
         }
 
         return SpamResult(score, isSpam, reasons)

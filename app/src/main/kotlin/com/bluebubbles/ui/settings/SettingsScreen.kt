@@ -27,11 +27,15 @@ fun SettingsScreen(
     onServerSettingsClick: () -> Unit = {},
     onArchivedClick: () -> Unit = {},
     onBlockedClick: () -> Unit = {},
+    onSpamClick: () -> Unit = {},
+    onCategorizationClick: () -> Unit = {},
     onSyncSettingsClick: () -> Unit = {},
     onSmsSettingsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
+    onNotificationProviderClick: () -> Unit = {},
     onSwipeSettingsClick: () -> Unit = {},
     onEffectsSettingsClick: () -> Unit = {},
+    onTemplatesClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -63,11 +67,15 @@ fun SettingsScreen(
             onServerSettingsClick = onServerSettingsClick,
             onArchivedClick = onArchivedClick,
             onBlockedClick = onBlockedClick,
+            onSpamClick = onSpamClick,
+            onCategorizationClick = onCategorizationClick,
             onSyncSettingsClick = onSyncSettingsClick,
             onSmsSettingsClick = onSmsSettingsClick,
             onNotificationsClick = onNotificationsClick,
+            onNotificationProviderClick = onNotificationProviderClick,
             onSwipeSettingsClick = onSwipeSettingsClick,
             onEffectsSettingsClick = onEffectsSettingsClick,
+            onTemplatesClick = onTemplatesClick,
             onAboutClick = onAboutClick,
             viewModel = viewModel
         )
@@ -89,11 +97,16 @@ fun SettingsContent(
     onServerSettingsClick: () -> Unit,
     onArchivedClick: () -> Unit,
     onBlockedClick: () -> Unit,
+    onSpamClick: () -> Unit,
+    onCategorizationClick: () -> Unit,
     onSyncSettingsClick: () -> Unit,
+    onExportClick: () -> Unit = {},
     onSmsSettingsClick: () -> Unit,
     onNotificationsClick: () -> Unit,
+    onNotificationProviderClick: () -> Unit,
     onSwipeSettingsClick: () -> Unit,
     onEffectsSettingsClick: () -> Unit,
+    onTemplatesClick: () -> Unit,
     onAboutClick: () -> Unit,
     viewModel: SettingsViewModel
 ) {
@@ -139,6 +152,26 @@ fun SettingsContent(
                     title = "Blocked contacts",
                     onClick = onBlockedClick
                 )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Spam protection
+                SettingsMenuItem(
+                    icon = Icons.Default.Shield,
+                    title = "Spam protection",
+                    subtitle = "Automatic spam detection settings",
+                    onClick = onSpamClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Message categorization
+                SettingsMenuItem(
+                    icon = Icons.Default.Category,
+                    title = "Message categorization",
+                    subtitle = "Sort messages into categories with ML",
+                    onClick = onCategorizationClick
+                )
             }
         }
 
@@ -161,12 +194,32 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                // Notification Provider (FCM vs Foreground Service)
+                SettingsMenuItem(
+                    icon = Icons.Default.CloudSync,
+                    title = "Notification provider",
+                    subtitle = "FCM push or foreground service",
+                    onClick = onNotificationProviderClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // SMS/MMS settings
                 SettingsMenuItem(
                     icon = Icons.Default.CellTower,
                     title = stringResource(R.string.settings_sms),
                     subtitle = "Local SMS messaging options",
                     onClick = onSmsSettingsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Quick reply templates
+                SettingsMenuItem(
+                    icon = Icons.Default.Quickreply,
+                    title = "Quick reply templates",
+                    subtitle = "Saved responses and smart suggestions",
+                    onClick = onTemplatesClick
                 )
             }
         }
@@ -316,6 +369,16 @@ fun SettingsContent(
                     title = "Sync settings",
                     subtitle = "Last synced: ${uiState.lastSyncFormatted}",
                     onClick = onSyncSettingsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Export messages
+                SettingsMenuItem(
+                    icon = Icons.Default.Download,
+                    title = "Export messages",
+                    subtitle = "Save conversations as HTML or PDF",
+                    onClick = onExportClick
                 )
             }
         }

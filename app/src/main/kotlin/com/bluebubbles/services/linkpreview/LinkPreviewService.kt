@@ -1,6 +1,9 @@
 package com.bluebubbles.services.linkpreview
 
+import android.content.Context
+import android.location.Geocoder
 import android.util.Log
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -11,6 +14,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.net.URI
 import java.net.URLEncoder
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -55,7 +59,11 @@ private data class OEmbedProvider(
  * and falls back to Open Graph meta tag parsing for other sites.
  */
 @Singleton
-class LinkPreviewService @Inject constructor() {
+class LinkPreviewService @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    // Geocoder for reverse geocoding map coordinates to addresses
+    private val geocoder by lazy { Geocoder(context, Locale.getDefault()) }
 
     companion object {
         private const val TAG = "LinkPreviewService"
@@ -135,6 +143,36 @@ class LinkPreviewService @Inject constructor() {
                 )
             )
         )
+
+        // Maps URL patterns for synthetic preview generation
+        // Each pattern captures (latitude, longitude) as groups 1 and 2
+        private data class MapsPattern(
+            val regex: Regex,
+            val siteName: String
+        )
+
+        private val MAPS_PATTERNS = listOf(
+            // Google Maps ?q= format (our sending format): maps.google.com/?q=37.7749,-122.4194
+            MapsPattern(
+                """maps\.google\.com/?\?q=(-?\d+\.?\d*),(-?\d+\.?\d*)""".toRegex(RegexOption.IGNORE_CASE),
+                "Google Maps"
+            ),
+            // Google Maps @ format: google.com/maps/@37.7749,-122.4194,15z
+            MapsPattern(
+                """google\.com/maps.*@(-?\d+\.?\d*),(-?\d+\.?\d*)""".toRegex(RegexOption.IGNORE_CASE),
+                "Google Maps"
+            ),
+            // Apple Maps ?ll= format: maps.apple.com/?ll=37.7749,-122.4194
+            MapsPattern(
+                """maps\.apple\.com.*[?&]ll=(-?\d+\.?\d*),(-?\d+\.?\d*)""".toRegex(RegexOption.IGNORE_CASE),
+                "Apple Maps"
+            ),
+            // Apple Maps ?q= format: maps.apple.com/?q=37.7749,-122.4194
+            MapsPattern(
+                """maps\.apple\.com.*[?&]q=(-?\d+\.?\d*),(-?\d+\.?\d*)""".toRegex(RegexOption.IGNORE_CASE),
+                "Apple Maps"
+            )
+        )
     }
 
     // Rate limiting: max concurrent requests
@@ -156,7 +194,14 @@ class LinkPreviewService @Inject constructor() {
     suspend fun fetchMetadata(url: String): LinkMetadataResult = withContext(Dispatchers.IO) {
         rateLimiter.withPermit {
             try {
-                // First, try oEmbed for supported providers
+                // First, try maps preview for Google Maps / Apple Maps URLs
+                val mapsResult = tryMapsPreview(url)
+                if (mapsResult != null) {
+                    Log.d(TAG, "Maps preview successful for: $url")
+                    return@withPermit mapsResult
+                }
+
+                // Second, try oEmbed for supported providers
                 val oembedResult = tryOEmbed(url)
                 if (oembedResult != null) {
                     Log.d(TAG, "oEmbed successful for: $url")
@@ -174,6 +219,74 @@ class LinkPreviewService @Inject constructor() {
                 Log.e(TAG, "Unexpected error fetching metadata for $url", e)
                 LinkMetadataResult.Error(e.message ?: "Unknown error")
             }
+        }
+    }
+
+    /**
+     * Tries to generate a synthetic preview for Google Maps / Apple Maps URLs.
+     * Extracts coordinates from the URL, generates a static map image, and reverse geocodes the address.
+     */
+    private suspend fun tryMapsPreview(url: String): LinkMetadataResult? {
+        // Find matching maps pattern
+        for (pattern in MAPS_PATTERNS) {
+            val match = pattern.regex.find(url) ?: continue
+
+            // Extract coordinates from regex groups
+            val lat = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: continue
+            val lng = match.groupValues.getOrNull(2)?.toDoubleOrNull() ?: continue
+
+            // Validate coordinate ranges
+            if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+                Log.w(TAG, "Invalid coordinates in maps URL: lat=$lat, lng=$lng")
+                continue
+            }
+
+            Log.d(TAG, "Detected ${pattern.siteName} URL with coordinates: $lat, $lng")
+
+            // Generate static map image URL
+            val staticMapUrl = buildStaticMapUrl(lat, lng)
+
+            // Try to reverse geocode the address
+            val address = reverseGeocode(lat, lng)
+
+            // Build the preview metadata
+            val title = address ?: "Shared Location"
+            val description = "%.6f, %.6f".format(lat, lng)
+
+            return LinkMetadataResult.Success(
+                LinkMetadata(
+                    title = title,
+                    description = description,
+                    imageUrl = staticMapUrl,
+                    faviconUrl = null,
+                    siteName = pattern.siteName,
+                    contentType = "location"
+                )
+            )
+        }
+
+        return null
+    }
+
+    /**
+     * Builds a static map image URL using OpenStreetMap (free, no API key required)
+     */
+    private fun buildStaticMapUrl(lat: Double, lng: Double): String {
+        return "https://staticmap.openstreetmap.de/staticmap.php?" +
+            "center=$lat,$lng&zoom=15&size=400x200&markers=$lat,$lng,red-pushpin"
+    }
+
+    /**
+     * Reverse geocodes coordinates to a human-readable address using Android Geocoder
+     */
+    @Suppress("DEPRECATION")
+    private fun reverseGeocode(lat: Double, lng: Double): String? {
+        return try {
+            val addresses = geocoder.getFromLocation(lat, lng, 1)
+            addresses?.firstOrNull()?.getAddressLine(0)
+        } catch (e: Exception) {
+            Log.w(TAG, "Reverse geocoding failed: ${e.message}")
+            null
         }
     }
 

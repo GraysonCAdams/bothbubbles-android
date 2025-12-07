@@ -6,6 +6,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.provider.Telephony
+import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -24,6 +25,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,12 +46,24 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SetupScreen(
+    skipWelcome: Boolean = false,
+    skipSmsSetup: Boolean = false,
     onSetupComplete: () -> Unit,
     viewModel: SetupViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val pagerState = rememberPagerState(pageCount = { 5 }) // 5 pages now
     val coroutineScope = rememberCoroutineScope()
+
+    // Calculate start page based on mode and permissions state
+    val startPage = remember(skipWelcome, uiState.allPermissionsGranted) {
+        when {
+            !skipWelcome -> 0  // Full onboarding starts at Welcome
+            uiState.allPermissionsGranted -> 2  // Skip to Server Connection
+            else -> 1  // Start at Permissions
+        }
+    }
+
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 5 })
 
     // Sync pager state with viewmodel
     LaunchedEffect(uiState.currentPage) {
@@ -76,21 +90,32 @@ fun SetupScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surface)
     ) {
-        // Page indicator
+        // Calculate visible pages based on mode
+        val visiblePages = remember(skipWelcome, skipSmsSetup, uiState.allPermissionsGranted) {
+            buildList {
+                if (!skipWelcome) add(0)  // Welcome
+                if (!skipWelcome || !uiState.allPermissionsGranted) add(1)  // Permissions
+                add(2)  // Server Connection (always shown)
+                if (!skipSmsSetup) add(3)  // SMS Setup
+                add(4)  // Sync (always shown when server connected)
+            }
+        }
+
+        // Page indicator - only show dots for visible pages
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
             horizontalArrangement = Arrangement.Center
         ) {
-            repeat(5) { index ->
+            visiblePages.forEach { pageIndex ->
                 Box(
                     modifier = Modifier
                         .padding(horizontal = 4.dp)
                         .size(8.dp)
                         .clip(CircleShape)
                         .background(
-                            if (index == pagerState.currentPage) {
+                            if (pageIndex == pagerState.currentPage) {
                                 MaterialTheme.colorScheme.primary
                             } else {
                                 MaterialTheme.colorScheme.surfaceVariant
@@ -114,7 +139,9 @@ fun SetupScreen(
                     uiState = uiState,
                     onPermissionsChecked = { viewModel.checkPermissions() },
                     onNext = { coroutineScope.launch { pagerState.animateScrollToPage(2) } },
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(0) } }
+                    onBack = if (skipWelcome) onSetupComplete else {
+                        { coroutineScope.launch { pagerState.animateScrollToPage(0) } }
+                    }
                 )
                 2 -> ServerConnectionPage(
                     uiState = uiState,
@@ -122,19 +149,36 @@ fun SetupScreen(
                     onPasswordChange = viewModel::updatePassword,
                     onTestConnection = viewModel::testConnection,
                     onShowQrScanner = viewModel::showQrScanner,
-                    onNext = { coroutineScope.launch { pagerState.animateScrollToPage(3) } },
-                    onSkip = {
-                        viewModel.skipServerSetup()
-                        coroutineScope.launch { pagerState.animateScrollToPage(3) }
+                    onNext = {
+                        coroutineScope.launch {
+                            // Skip SMS setup page if in reconnect mode
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 4 else 3)
+                        }
                     },
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(1) } }
+                    onSkip = if (skipSmsSetup) null else {
+                        {
+                            viewModel.skipServerSetup()
+                            coroutineScope.launch { pagerState.animateScrollToPage(3) }
+                        }
+                    },
+                    onBack = if (skipWelcome && uiState.allPermissionsGranted) onSetupComplete else {
+                        { coroutineScope.launch { pagerState.animateScrollToPage(1) } }
+                    }
                 )
                 3 -> SmsSetupPage(
                     uiState = uiState,
                     onSmsEnabledChange = viewModel::updateSmsEnabled,
-                    onNext = { coroutineScope.launch { pagerState.animateScrollToPage(4) } },
+                    getMissingSmsPermissions = viewModel::getMissingSmsPermissions,
+                    getDefaultSmsAppIntent = viewModel::getDefaultSmsAppIntent,
+                    onSmsPermissionsResult = viewModel::onSmsPermissionsResult,
+                    onDefaultSmsAppResult = viewModel::onDefaultSmsAppResult,
+                    onNext = {
+                        viewModel.finalizeSmsSettings()
+                        coroutineScope.launch { pagerState.animateScrollToPage(4) }
+                    },
                     onBack = { coroutineScope.launch { pagerState.animateScrollToPage(2) } },
                     onFinish = {
+                        viewModel.finalizeSmsSettings()
                         viewModel.completeSetupWithoutSync()
                         onSetupComplete()
                     }
@@ -144,7 +188,15 @@ fun SetupScreen(
                     onMessagesPerChatChange = viewModel::updateMessagesPerChat,
                     onSkipEmptyChatsChange = viewModel::updateSkipEmptyChats,
                     onStartSync = viewModel::startSync,
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(3) } }
+                    onDownloadMlModel = viewModel::downloadMlModel,
+                    onSkipMlDownload = viewModel::skipMlDownload,
+                    onMlCellularUpdateChange = viewModel::updateMlCellularAutoUpdate,
+                    onBack = {
+                        coroutineScope.launch {
+                            // Go back to Server Connection if SMS setup was skipped
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 2 else 3)
+                        }
+                    }
                 )
             }
         }
@@ -406,7 +458,7 @@ private fun ServerConnectionPage(
     onTestConnection: () -> Unit,
     onShowQrScanner: () -> Unit,
     onNext: () -> Unit,
-    onSkip: () -> Unit,
+    onSkip: (() -> Unit)?,
     onBack: () -> Unit
 ) {
     var showPassword by remember { mutableStateOf(false) }
@@ -597,15 +649,17 @@ private fun ServerConnectionPage(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Skip option
-        TextButton(
-            onClick = onSkip,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text("Skip for now (SMS/MMS only)")
-        }
+        // Skip option - only shown in full onboarding mode
+        if (onSkip != null) {
+            TextButton(
+                onClick = onSkip,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Skip for now (SMS/MMS only)")
+            }
 
-        Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(8.dp))
+        }
 
         // Navigation buttons
         Row(
@@ -634,15 +688,29 @@ private fun ServerConnectionPage(
 private fun SmsSetupPage(
     uiState: SetupUiState,
     onSmsEnabledChange: (Boolean) -> Unit,
+    getMissingSmsPermissions: () -> Array<String>,
+    getDefaultSmsAppIntent: () -> Intent,
+    onSmsPermissionsResult: () -> Unit,
+    onDefaultSmsAppResult: () -> Unit,
     onNext: () -> Unit,
     onBack: () -> Unit,
     onFinish: () -> Unit
 ) {
     val context = LocalContext.current
+    val smsStatus = uiState.smsCapabilityStatus
 
-    // Check if we're the default SMS app
-    val isDefaultSmsApp = remember {
-        Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
+    // Permission launcher for SMS permissions
+    val smsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) {
+        onSmsPermissionsResult()
+    }
+
+    // Launcher to set as default SMS app
+    val setDefaultSmsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        onDefaultSmsAppResult()
     }
 
     Column(
@@ -710,63 +778,97 @@ private fun SmsSetupPage(
             }
         }
 
-        // Default SMS app info
-        if (uiState.smsEnabled) {
+        // SMS capability status
+        if (uiState.smsEnabled && smsStatus != null) {
             Spacer(modifier = Modifier.height(16.dp))
 
             Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp),
-                color = if (isDefaultSmsApp) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.tertiaryContainer
+                color = when {
+                    smsStatus.isFullyFunctional -> MaterialTheme.colorScheme.primaryContainer
+                    !smsStatus.deviceSupportsSms -> MaterialTheme.colorScheme.errorContainer
+                    else -> MaterialTheme.colorScheme.tertiaryContainer
                 }
             ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        if (isDefaultSmsApp) Icons.Default.CheckCircle else Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = if (isDefaultSmsApp) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.tertiary
-                        }
-                    )
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (isDefaultSmsApp) "Default SMS app" else "Not default SMS app",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = if (isDefaultSmsApp) {
-                                MaterialTheme.colorScheme.onPrimaryContainer
-                            } else {
-                                MaterialTheme.colorScheme.onTertiaryContainer
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            when {
+                                smsStatus.isFullyFunctional -> Icons.Default.CheckCircle
+                                !smsStatus.deviceSupportsSms -> Icons.Default.PhonelinkOff
+                                else -> Icons.Default.Warning
+                            },
+                            contentDescription = null,
+                            tint = when {
+                                smsStatus.isFullyFunctional -> MaterialTheme.colorScheme.primary
+                                !smsStatus.deviceSupportsSms -> MaterialTheme.colorScheme.error
+                                else -> MaterialTheme.colorScheme.tertiary
                             }
                         )
-                        if (!isDefaultSmsApp) {
-                            Text(
-                                text = "Set as default to send and receive SMS/MMS",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
+
+                        Spacer(modifier = Modifier.width(12.dp))
+
+                        Text(
+                            text = when {
+                                smsStatus.isFullyFunctional -> "SMS Fully Configured"
+                                !smsStatus.deviceSupportsSms -> "Device Doesn't Support SMS"
+                                else -> "SMS Setup Required"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            color = when {
+                                smsStatus.isFullyFunctional -> MaterialTheme.colorScheme.onPrimaryContainer
+                                !smsStatus.deviceSupportsSms -> MaterialTheme.colorScheme.onErrorContainer
+                                else -> MaterialTheme.colorScheme.onTertiaryContainer
+                            }
+                        )
                     }
 
-                    if (!isDefaultSmsApp) {
-                        FilledTonalButton(
-                            onClick = {
-                                val intent = Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
-                                intent.putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
-                                context.startActivity(intent)
+                    // Status indicators
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        StatusIndicator("Read", smsStatus.canReadSms)
+                        StatusIndicator("Send", smsStatus.canSendSms)
+                        StatusIndicator("Receive", smsStatus.canReceiveSms)
+                    }
+
+                    // Show setup buttons if needed
+                    if (smsStatus.needsSetup) {
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        // Request permissions if missing
+                        if (smsStatus.missingPermissions.isNotEmpty()) {
+                            Button(
+                                onClick = {
+                                    smsPermissionLauncher.launch(getMissingSmsPermissions())
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Security, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Grant SMS Permissions (${smsStatus.missingPermissions.size} needed)")
                             }
-                        ) {
-                            Text("Set")
+                        }
+
+                        // Request default SMS app if we have receive permission but aren't default
+                        if (!smsStatus.isDefaultSmsApp && smsStatus.hasReceivePermission) {
+                            if (smsStatus.missingPermissions.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                            Button(
+                                onClick = {
+                                    setDefaultSmsLauncher.launch(getDefaultSmsAppIntent())
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Icon(Icons.Default.Sms, contentDescription = null)
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text("Set as Default SMS App")
+                            }
                         }
                     }
                 }
@@ -865,6 +967,9 @@ private fun SyncPage(
     onMessagesPerChatChange: (Int) -> Unit,
     onSkipEmptyChatsChange: (Boolean) -> Unit,
     onStartSync: () -> Unit,
+    onDownloadMlModel: () -> Unit,
+    onSkipMlDownload: () -> Unit,
+    onMlCellularUpdateChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -873,160 +978,358 @@ private fun SyncPage(
             .padding(24.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        if (uiState.isSyncing) {
-            // Sync progress view
-            Spacer(modifier = Modifier.weight(1f))
-
-            CircularProgressIndicator(
-                progress = { uiState.syncProgress },
-                modifier = Modifier.size(120.dp),
-                strokeWidth = 8.dp
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                text = "${(uiState.syncProgress * 100).toInt()}%",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Syncing your messages...",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.weight(1f))
-        } else if (uiState.syncError != null) {
-            // Error view
-            Spacer(modifier = Modifier.weight(1f))
-
-            Icon(
-                Icons.Default.Error,
-                contentDescription = null,
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.error
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Sync Failed",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = uiState.syncError,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(onClick = onStartSync) {
-                Text("Retry")
+        when {
+            // ML Download view (shown after sync completes if ML step is needed)
+            uiState.syncProgress >= 1f && uiState.shouldShowMlStep && !uiState.mlSetupComplete -> {
+                MlDownloadSection(
+                    uiState = uiState,
+                    onDownload = onDownloadMlModel,
+                    onSkip = onSkipMlDownload,
+                    onCellularUpdateChange = onMlCellularUpdateChange
+                )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-        } else {
-            // Settings view
-            Text(
-                text = "Sync Settings",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
+            // Syncing view
+            uiState.isSyncing -> {
+                Spacer(modifier = Modifier.weight(1f))
 
-            Spacer(modifier = Modifier.height(8.dp))
+                CircularProgressIndicator(
+                    progress = { uiState.syncProgress },
+                    modifier = Modifier.size(120.dp),
+                    strokeWidth = 8.dp
+                )
 
-            Text(
-                text = "Configure how iMessages are synced from your server",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                Spacer(modifier = Modifier.height(24.dp))
 
-            Spacer(modifier = Modifier.height(32.dp))
+                Text(
+                    text = "${(uiState.syncProgress * 100).toInt()}%",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
 
-            // Messages per chat slider
-            Text(
-                text = "Messages per conversation: ${uiState.messagesPerChat}",
-                style = MaterialTheme.typography.titleMedium
-            )
+                Spacer(modifier = Modifier.height(8.dp))
 
-            Slider(
-                value = uiState.messagesPerChat.toFloat(),
-                onValueChange = { onMessagesPerChatChange(it.toInt()) },
-                valueRange = 10f..100f,
-                steps = 8,
-                modifier = Modifier.fillMaxWidth()
-            )
+                Text(
+                    text = "Syncing your messages...",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
-            Text(
-                text = "More messages = longer sync time",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                Spacer(modifier = Modifier.weight(1f))
+            }
 
-            Spacer(modifier = Modifier.height(24.dp))
+            // Error view
+            uiState.syncError != null -> {
+                Spacer(modifier = Modifier.weight(1f))
 
-            // Skip empty chats toggle
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHigh
-            ) {
-                Row(
-                    modifier = Modifier.padding(16.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Icon(
+                    Icons.Default.Error,
+                    contentDescription = null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.error
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                Text(
+                    text = "Sync Failed",
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = uiState.syncError,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(onClick = onStartSync) {
+                    Text("Retry")
+                }
+
+                Spacer(modifier = Modifier.weight(1f))
+            }
+
+            // Settings view (before sync)
+            else -> {
+                Text(
+                    text = "Sync Settings",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Text(
+                    text = "Configure how iMessages are synced from your server",
+                    style = MaterialTheme.typography.bodyLarge,
+                    textAlign = TextAlign.Center,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(32.dp))
+
+                // Messages per chat slider
+                Text(
+                    text = "Messages per conversation: ${uiState.messagesPerChat}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+
+                Slider(
+                    value = uiState.messagesPerChat.toFloat(),
+                    onValueChange = { onMessagesPerChatChange(it.toInt()) },
+                    valueRange = 10f..100f,
+                    steps = 8,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "More messages = longer sync time",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                // Skip empty chats toggle
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Skip empty conversations",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Text(
-                            text = "Don't sync conversations with no messages",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Skip empty conversations",
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            Text(
+                                text = "Don't sync conversations with no messages",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Switch(
+                            checked = uiState.skipEmptyChats,
+                            onCheckedChange = onSkipEmptyChatsChange
                         )
                     }
-                    Switch(
-                        checked = uiState.skipEmptyChats,
-                        onCheckedChange = onSkipEmptyChatsChange
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.weight(1f))
-
-            // Navigation buttons
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                TextButton(onClick = onBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Back")
                 }
 
-                Button(
-                    onClick = onStartSync,
-                    modifier = Modifier.height(48.dp)
+                Spacer(modifier = Modifier.weight(1f))
+
+                // Navigation buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Icon(Icons.Default.Sync, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Start Sync")
+                    TextButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Back")
+                    }
+
+                    Button(
+                        onClick = onStartSync,
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Start Sync")
+                    }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MlDownloadSection(
+    uiState: SetupUiState,
+    onDownload: () -> Unit,
+    onSkip: () -> Unit,
+    onCellularUpdateChange: (Boolean) -> Unit
+) {
+    Column(
+        modifier = Modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.weight(0.5f))
+
+        // Icon
+        Surface(
+            modifier = Modifier.size(80.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Outlined.Psychology,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Smart Message Categorization",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "Enable automatic categorization of messages into Transactions, Deliveries, Promotions, and Reminders.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Download info card
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(12.dp),
+            color = if (uiState.isOnWifi) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.tertiaryContainer
+            }
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        if (uiState.isOnWifi) Icons.Default.Wifi else Icons.Default.SignalCellularAlt,
+                        contentDescription = null,
+                        tint = if (uiState.isOnWifi) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onTertiaryContainer
+                        }
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = if (uiState.isOnWifi) {
+                            "Ready to download (~20 MB)"
+                        } else {
+                            "Cellular download (~20 MB)"
+                        },
+                        style = MaterialTheme.typography.titleSmall,
+                        color = if (uiState.isOnWifi) {
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        } else {
+                            MaterialTheme.colorScheme.onTertiaryContainer
+                        }
+                    )
+                }
+
+                if (!uiState.isOnWifi) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "You're on cellular data. Downloading will use approximately 20 MB of your data plan.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.8f)
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    // Checkbox for enabling cellular auto-updates
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = uiState.mlEnableCellularUpdates,
+                            onCheckedChange = onCellularUpdateChange
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Also enable automatic ML updates on cellular",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                    }
+                }
+            }
+        }
+
+        // Error message
+        if (uiState.mlDownloadError != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.errorContainer
+            ) {
+                Row(
+                    modifier = Modifier.padding(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Error,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = uiState.mlDownloadError,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Download button
+        Button(
+            onClick = onDownload,
+            enabled = !uiState.mlDownloading,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            if (uiState.mlDownloading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Downloading...")
+            } else {
+                Icon(Icons.Default.Download, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Download ML Model")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Skip button
+        TextButton(
+            onClick = onSkip,
+            enabled = !uiState.mlDownloading
+        ) {
+            Text("Skip for now")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
     }
 }
 
@@ -1040,4 +1343,21 @@ private fun QrScannerOverlay(
         onQrCodeScanned = onQrCodeScanned,
         onDismiss = onDismiss
     )
+}
+
+@Composable
+private fun StatusIndicator(label: String, enabled: Boolean) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Icon(
+            if (enabled) Icons.Default.Check else Icons.Default.Close,
+            contentDescription = null,
+            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+            modifier = Modifier.size(20.dp)
+        )
+        Text(
+            label,
+            style = MaterialTheme.typography.bodySmall,
+            color = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline
+        )
+    }
 }

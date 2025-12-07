@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.location.Location
 import android.net.Uri
-import android.provider.ContactsContract
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,7 +57,7 @@ fun AttachmentPickerPanel(
     onDismiss: () -> Unit,
     onAttachmentSelected: (Uri) -> Unit,
     onLocationSelected: (Double, Double) -> Unit,
-    onContactSelected: (String, String) -> Unit, // name, phone
+    onContactSelected: (Uri) -> Unit, // contact URI for vCard generation
     onScheduleClick: () -> Unit,
     onMagicComposeClick: () -> Unit,
     onCameraClick: () -> Unit = {},
@@ -101,15 +100,13 @@ fun AttachmentPickerPanel(
         if (uris.isNotEmpty()) onDismiss()
     }
 
-    // Contact picker
+    // Contact picker - returns URI for vCard generation
     val contactLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickContact()
     ) { uri ->
         uri?.let {
-            extractContactInfo(context, it)?.let { (name, phone) ->
-                onContactSelected(name, phone)
-                onDismiss()
-            }
+            onContactSelected(it)
+            onDismiss()
         }
     }
 
@@ -308,48 +305,6 @@ private fun getCurrentLocation(context: Context, onLocationReceived: (Double, Do
     }
 }
 
-/**
- * Extracts contact name and phone number from a contact URI
- */
-private fun extractContactInfo(context: Context, contactUri: Uri): Pair<String, String>? {
-    var name = ""
-    var phone = ""
-
-    // Get contact ID from URI
-    val contactId = contactUri.lastPathSegment ?: return null
-
-    // Query for name
-    context.contentResolver.query(
-        contactUri,
-        arrayOf(ContactsContract.Contacts.DISPLAY_NAME),
-        null,
-        null,
-        null
-    )?.use { cursor ->
-        if (cursor.moveToFirst()) {
-            name = cursor.getString(0) ?: ""
-        }
-    }
-
-    // Query for phone number
-    context.contentResolver.query(
-        ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
-        arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
-        "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} = ?",
-        arrayOf(contactId),
-        null
-    )?.use { cursor ->
-        if (cursor.moveToFirst()) {
-            phone = cursor.getString(0) ?: ""
-        }
-    }
-
-    return if (name.isNotEmpty() || phone.isNotEmpty()) {
-        Pair(name, phone)
-    } else {
-        null
-    }
-}
 
 /**
  * Schedule message dialog for picking a send time

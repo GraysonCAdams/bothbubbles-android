@@ -89,6 +89,9 @@ interface ChatDao {
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL")
     suspend fun getChatCount(): Int
 
+    @Query("SELECT guid FROM chats WHERE date_deleted IS NULL ORDER BY latest_message_date DESC")
+    suspend fun getAllChatGuids(): List<String>
+
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND has_unread_message = 1")
     fun getUnreadChatCount(): Flow<Int>
 
@@ -169,6 +172,9 @@ interface ChatDao {
     @Query("UPDATE chats SET vibration_enabled = :enabled WHERE guid = :guid")
     suspend fun updateVibrationEnabled(guid: String, enabled: Boolean)
 
+    @Query("UPDATE chats SET snooze_until = :snoozeUntil WHERE guid = :guid")
+    suspend fun updateSnoozeUntil(guid: String, snoozeUntil: Long?)
+
     @Query("UPDATE chats SET latest_message_date = :date WHERE guid = :guid")
     suspend fun updateLatestMessageDate(guid: String, date: Long)
 
@@ -233,6 +239,30 @@ interface ChatDao {
 
     @Query("UPDATE chats SET is_spam = 0, spam_score = 0 WHERE guid = :guid")
     suspend fun clearSpamStatus(guid: String)
+
+    // ===== Message Categorization =====
+
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND category = :category
+        ORDER BY latest_message_date DESC
+    """)
+    fun getChatsByCategory(category: String): Flow<List<ChatEntity>>
+
+    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND category = :category")
+    fun getChatCountByCategory(category: String): Flow<Int>
+
+    @Query("""
+        UPDATE chats
+        SET category = :category,
+            category_confidence = :confidence,
+            category_last_updated = :timestamp
+        WHERE guid = :guid
+    """)
+    suspend fun updateCategory(guid: String, category: String?, confidence: Int, timestamp: Long)
+
+    @Query("UPDATE chats SET category = NULL, category_confidence = 0, category_last_updated = NULL WHERE guid = :guid")
+    suspend fun clearCategory(guid: String)
 
     // ===== Transactions =====
 

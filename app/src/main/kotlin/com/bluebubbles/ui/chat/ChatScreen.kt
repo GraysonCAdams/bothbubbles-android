@@ -74,17 +74,24 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.bluebubbles.util.PhoneNumberFormatter
 import com.bluebubbles.R
+import com.bluebubbles.services.contacts.VCardService
 import com.bluebubbles.ui.components.AttachmentPickerPanel
+import com.bluebubbles.ui.components.EmojiPickerPanel
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.DateSeparator
+import com.bluebubbles.ui.components.ForwardableChatInfo
+import com.bluebubbles.ui.components.ForwardMessageDialog
 import com.bluebubbles.ui.components.MessageBubble
 import com.bluebubbles.ui.components.MessageGroupPosition
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ScheduleMessageDialog
+import com.bluebubbles.ui.components.SmartReplyChips
 import com.bluebubbles.ui.components.SpamSafetyBanner
 import com.bluebubbles.ui.components.TapbackMenu
+import com.bluebubbles.ui.components.VCardOptionsDialog
 import com.bluebubbles.ui.effects.EffectPickerSheet
 import com.bluebubbles.ui.effects.MessageEffect
+import com.bluebubbles.ui.effects.bubble.BubbleEffectWrapper
 import com.bluebubbles.ui.effects.screen.ScreenEffectOverlay
 import com.bluebubbles.ui.theme.BlueBubblesTheme
 import java.text.SimpleDateFormat
@@ -103,9 +110,15 @@ fun ChatScreen(
     onCameraClick: () -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
+    sharedText: String? = null,
+    sharedUris: List<Uri> = emptyList(),
+    onSharedContentHandled: () -> Unit = {},
+    activateSearch: Boolean = false,
+    onSearchActivated: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
 
@@ -118,11 +131,23 @@ fun ChatScreen(
     // Attachment picker state
     var showAttachmentPicker by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
+    var showEmojiPicker by remember { mutableStateOf(false) }
 
-    // Effect picker and active screen effect state
+    // vCard options dialog state
+    var showVCardOptionsDialog by remember { mutableStateOf(false) }
+    var pendingContactData by remember { mutableStateOf<VCardService.ContactData?>(null) }
+
+    // Effect picker state
     var showEffectPicker by remember { mutableStateOf(false) }
-    var activeScreenEffect by remember { mutableStateOf<MessageEffect.Screen?>(null) }
-    var activeScreenEffectMessageText by remember { mutableStateOf<String?>(null) }
+
+    // Effect settings from ViewModel
+    val autoPlayEffects by viewModel.autoPlayEffects.collectAsStateWithLifecycle()
+    val replayEffectsOnScroll by viewModel.replayEffectsOnScroll.collectAsStateWithLifecycle()
+    val reduceMotion by viewModel.reduceMotion.collectAsStateWithLifecycle()
+    val activeScreenEffectState by viewModel.activeScreenEffect.collectAsStateWithLifecycle()
+
+    // Track processed screen effects this session to avoid re-triggering
+    val processedEffectMessages = remember { mutableSetOf<String>() }
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
@@ -131,6 +156,11 @@ fun ChatScreen(
     var selectedMessageForRetry by remember { mutableStateOf<MessageUiModel?>(null) }
     var canRetrySmsForMessage by remember { mutableStateOf(false) }
     val retryMenuScope = rememberCoroutineScope()
+
+    // Forward message dialog state
+    var showForwardDialog by remember { mutableStateOf(false) }
+    var messageToForward by remember { mutableStateOf<MessageUiModel?>(null) }
+    val forwardableChats by viewModel.getForwardableChats().collectAsStateWithLifecycle(initialValue = emptyList())
 
     // Track pending attachments locally for UI
     var pendingAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
@@ -259,6 +289,33 @@ fun ChatScreen(
         }
     }
 
+    // Handle shared content from share picker
+    LaunchedEffect(sharedText, sharedUris) {
+        // Add shared URIs as attachments
+        if (sharedUris.isNotEmpty()) {
+            sharedUris.forEach { uri ->
+                pendingAttachments = pendingAttachments + uri
+                viewModel.addAttachment(uri)
+            }
+        }
+        // Set shared text as draft
+        if (sharedText != null) {
+            viewModel.updateDraft(sharedText)
+        }
+        // Mark shared content as handled
+        if (sharedText != null || sharedUris.isNotEmpty()) {
+            onSharedContentHandled()
+        }
+    }
+
+    // Handle search activation from ChatDetails screen
+    LaunchedEffect(activateSearch) {
+        if (activateSearch) {
+            viewModel.activateSearch()
+            onSearchActivated()
+        }
+    }
+
     Box(modifier = Modifier.fillMaxSize()) {
     Scaffold(
         containerColor = Color.Transparent,
@@ -283,16 +340,29 @@ fun ChatScreen(
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
-                            Text(
-                                text = if (PhoneNumberFormatter.isPhoneNumber(uiState.chatTitle)) {
-                                    PhoneNumberFormatter.format(uiState.chatTitle)
-                                } else {
-                                    uiState.chatTitle
-                                },
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                style = MaterialTheme.typography.titleMedium
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    text = if (PhoneNumberFormatter.isPhoneNumber(uiState.chatTitle)) {
+                                        PhoneNumberFormatter.format(uiState.chatTitle)
+                                    } else {
+                                        uiState.chatTitle
+                                    },
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    style = MaterialTheme.typography.titleMedium
+                                )
+                                if (uiState.isSnoozed) {
+                                    Icon(
+                                        Icons.Default.Snooze,
+                                        contentDescription = "Snoozed",
+                                        modifier = Modifier.size(18.dp),
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
                             if (uiState.isTyping) {
                                 Text(
                                     text = stringResource(R.string.typing_indicator),
@@ -333,9 +403,6 @@ fun ChatScreen(
                                     ChatMenuAction.DETAILS -> onDetailsClick()
                                     ChatMenuAction.STARRED -> viewModel.toggleStarred()
                                     ChatMenuAction.SEARCH -> viewModel.activateSearch()
-                                    ChatMenuAction.CHANGE_COLORS -> {
-                                        // TODO: Implement change colors functionality
-                                    }
                                     ChatMenuAction.ARCHIVE -> viewModel.archiveChat()
                                     ChatMenuAction.UNARCHIVE -> viewModel.unarchiveChat()
                                     ChatMenuAction.DELETE -> showDeleteDialog = true
@@ -365,10 +432,15 @@ fun ChatScreen(
                         val locationText = "📍 https://maps.google.com/?q=$lat,$lng"
                         viewModel.updateDraft(locationText)
                     },
-                    onContactSelected = { name, phone ->
-                        // Format contact as text to share
-                        val contactText = "$name: $phone"
-                        viewModel.updateDraft(contactText)
+                    onContactSelected = { contactUri ->
+                        // Get contact data and show options dialog
+                        val contactData = viewModel.getContactData(contactUri)
+                        if (contactData != null) {
+                            pendingContactData = contactData
+                            showVCardOptionsDialog = true
+                        } else {
+                            Toast.makeText(context, "Failed to read contact", Toast.LENGTH_SHORT).show()
+                        }
                     },
                     onScheduleClick = { showScheduleDialog = true },
                     onMagicComposeClick = {
@@ -376,6 +448,15 @@ fun ChatScreen(
                         Toast.makeText(context, "Magic Compose coming soon!", Toast.LENGTH_SHORT).show()
                     },
                     onCameraClick = onCameraClick
+                )
+
+                // Emoji picker panel (slides up above input)
+                EmojiPickerPanel(
+                    visible = showEmojiPicker,
+                    onDismiss = { showEmojiPicker = false },
+                    onEmojiSelected = { emoji ->
+                        viewModel.updateDraft(uiState.draftText + emoji)
+                    }
                 )
 
                 if (isRecording) {
@@ -492,21 +573,39 @@ fun ChatScreen(
                         }
                     )
                 } else {
-                    MessageInputArea(
-                        text = uiState.draftText,
-                        onTextChange = viewModel::updateDraft,
-                        onSendClick = {
-                            viewModel.sendMessage()
-                            pendingAttachments = emptyList()
-                            showAttachmentPicker = false
-                        },
+                    Column {
+                        // Smart reply suggestions (ML Kit + user templates, max 3, right-aligned)
+                        SmartReplyChips(
+                            suggestions = smartReplySuggestions,
+                            onSuggestionClick = { suggestion ->
+                                viewModel.updateDraft(suggestion.text)
+                                suggestion.templateId?.let { viewModel.recordTemplateUsage(it) }
+                            }
+                        )
+
+                        MessageInputArea(
+                            text = uiState.draftText,
+                            onTextChange = viewModel::updateDraft,
+                            onSendClick = {
+                                viewModel.sendMessage()
+                                pendingAttachments = emptyList()
+                                showAttachmentPicker = false
+                                showEmojiPicker = false
+                            },
                         onSendLongPress = {
                             // Open effect picker on long press (iMessage only)
                             if (!uiState.isLocalSmsChat) {
                                 showEffectPicker = true
                             }
                         },
-                        onAttachClick = { showAttachmentPicker = !showAttachmentPicker },
+                        onAttachClick = {
+                            showAttachmentPicker = !showAttachmentPicker
+                            if (showAttachmentPicker) showEmojiPicker = false
+                        },
+                        onEmojiClick = {
+                            showEmojiPicker = !showEmojiPicker
+                            if (showEmojiPicker) showAttachmentPicker = false
+                        },
                         onImageClick = { imagePickerLauncher.launch("image/*") },
                         onVoiceMemoClick = {
                             audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -565,8 +664,10 @@ fun ChatScreen(
                             pendingAttachments = emptyList()
                             viewModel.clearAttachments()
                         },
-                        isPickerExpanded = showAttachmentPicker
+                        isPickerExpanded = showAttachmentPicker,
+                        isEmojiPickerExpanded = showEmojiPicker
                     )
+                    }
                 }
             }
         }
@@ -587,6 +688,23 @@ fun ChatScreen(
                 // Small delay to let the message render and calculate its height
                 kotlinx.coroutines.delay(100)
                 listState.animateScrollToItem(0)
+            }
+        }
+
+        // Detect new messages with screen effects and trigger playback
+        LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
+            val newest = uiState.messages.firstOrNull() ?: return@LaunchedEffect
+            // Skip if already processed this session
+            if (newest.guid in processedEffectMessages) return@LaunchedEffect
+            // Skip if effects disabled or reduce motion enabled
+            if (!autoPlayEffects || reduceMotion) return@LaunchedEffect
+            // Skip if already played (and not replaying on scroll)
+            if (newest.effectPlayed && !replayEffectsOnScroll) return@LaunchedEffect
+
+            val effect = MessageEffect.fromStyleId(newest.expressiveSendStyleId)
+            if (effect is MessageEffect.Screen) {
+                processedEffectMessages.add(newest.guid)
+                viewModel.triggerScreenEffect(newest)
             }
         }
 
@@ -748,25 +866,43 @@ fun ChatScreen(
                                 }
 
                                 Box {
-                                    MessageBubble(
-                                        message = message,
-                                        onLongPress = {
-                                            if (message.hasError && message.isFromMe) {
-                                                // For failed messages, show retry menu
-                                                selectedMessageForRetry = message
-                                                // Check if SMS retry is available
-                                                retryMenuScope.launch {
-                                                    canRetrySmsForMessage = viewModel.canRetryAsSms(message.guid)
+                                    // Parse bubble effect from expressiveSendStyleId
+                                    val bubbleEffect = remember(message.expressiveSendStyleId) {
+                                        MessageEffect.fromStyleId(message.expressiveSendStyleId) as? MessageEffect.Bubble
+                                    }
+
+                                    // Determine if this bubble should animate
+                                    val shouldAnimateBubble = bubbleEffect != null &&
+                                        autoPlayEffects && !reduceMotion &&
+                                        (!message.effectPlayed || replayEffectsOnScroll)
+
+                                    BubbleEffectWrapper(
+                                        effect = bubbleEffect,
+                                        isNewMessage = shouldAnimateBubble,
+                                        isFromMe = message.isFromMe,
+                                        onEffectComplete = { viewModel.onBubbleEffectCompleted(message.guid) },
+                                        onReveal = { viewModel.onBubbleEffectCompleted(message.guid) }
+                                    ) {
+                                        MessageBubble(
+                                            message = message,
+                                            onLongPress = {
+                                                if (message.hasError && message.isFromMe) {
+                                                    // For failed messages, show retry menu
+                                                    selectedMessageForRetry = message
+                                                    // Check if SMS retry is available
+                                                    retryMenuScope.launch {
+                                                        canRetrySmsForMessage = viewModel.canRetryAsSms(message.guid)
+                                                    }
+                                                } else if (canTapback) {
+                                                    selectedMessageForTapback = message
                                                 }
-                                            } else if (canTapback) {
-                                                selectedMessageForTapback = message
-                                            }
-                                        },
-                                        onMediaClick = onMediaClick,
-                                        groupPosition = groupPosition,
-                                        searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
-                                        isCurrentSearchMatch = isCurrentSearchMatch
-                                    )
+                                            },
+                                            onMediaClick = onMediaClick,
+                                            groupPosition = groupPosition,
+                                            searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
+                                            isCurrentSearchMatch = isCurrentSearchMatch
+                                        )
+                                    }
 
                                     // Show tapback menu for this message (positioned above)
                                     if (selectedMessageForTapback?.guid == message.guid) {
@@ -782,6 +918,17 @@ fun ChatScreen(
                                                 // TODO: Show emoji picker for custom reactions
                                                 selectedMessageForTapback = null
                                                 Toast.makeText(context, "Custom emoji reactions coming soon!", Toast.LENGTH_SHORT).show()
+                                            },
+                                            onCopyClick = message.text?.let { text ->
+                                                {
+                                                    val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Message", text))
+                                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                                }
+                                            },
+                                            onForwardClick = {
+                                                messageToForward = message
+                                                showForwardDialog = true
                                             }
                                         )
                                     }
@@ -813,13 +960,12 @@ fun ChatScreen(
         }
     }
 
-    // Screen effect overlay (above all other content)
+    // Screen effect overlay (above all other content) - connected to ViewModel
     ScreenEffectOverlay(
-        effect = activeScreenEffect,
-        messageText = activeScreenEffectMessageText,
+        effect = activeScreenEffectState?.effect,
+        messageText = activeScreenEffectState?.messageText,
         onEffectComplete = {
-            activeScreenEffect = null
-            activeScreenEffectMessageText = null
+            viewModel.onScreenEffectCompleted()
         }
     )
     } // End of outer Box
@@ -832,15 +978,11 @@ fun ChatScreen(
                 showEffectPicker = false
                 if (effect != null) {
                     // Send message with effect
+                    // Screen effect will trigger automatically when the message appears in the list
                     viewModel.sendMessage(effect.appleId)
                     pendingAttachments = emptyList()
                     showAttachmentPicker = false
-
-                    // Trigger screen effect if it's a screen effect
-                    if (effect is MessageEffect.Screen) {
-                        activeScreenEffect = effect
-                        activeScreenEffectMessageText = uiState.draftText
-                    }
+                    showEmojiPicker = false
                 }
             },
             onDismiss = { showEffectPicker = false }
@@ -911,14 +1053,80 @@ fun ChatScreen(
         visible = showScheduleDialog,
         onDismiss = { showScheduleDialog = false },
         onSchedule = { timestamp ->
-            // TODO: Implement scheduled message sending
+            // Schedule the message
+            viewModel.scheduleMessage(
+                text = uiState.draftText,
+                attachments = pendingAttachments,
+                sendAt = timestamp
+            )
+
+            // Clear the draft and attachments
+            viewModel.updateDraft("")
+            pendingAttachments = emptyList()
+
+            // Show confirmation with disclaimer
+            val dateFormat = java.text.SimpleDateFormat("MMM dd, h:mm a", java.util.Locale.getDefault())
             Toast.makeText(
                 context,
-                "Message scheduled for ${java.text.SimpleDateFormat("MMM dd, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(timestamp))}",
-                Toast.LENGTH_SHORT
+                "Scheduled for ${dateFormat.format(java.util.Date(timestamp))}. Phone must be on to send.",
+                Toast.LENGTH_LONG
             ).show()
+
+            showScheduleDialog = false
         }
     )
+
+    // vCard options dialog
+    VCardOptionsDialog(
+        visible = showVCardOptionsDialog,
+        contactData = pendingContactData,
+        onDismiss = {
+            showVCardOptionsDialog = false
+            pendingContactData = null
+        },
+        onConfirm = { options ->
+            pendingContactData?.let { contactData ->
+                val success = viewModel.addContactAsVCard(contactData, options)
+                if (!success) {
+                    Toast.makeText(context, "Failed to create contact card", Toast.LENGTH_SHORT).show()
+                }
+            }
+            showVCardOptionsDialog = false
+            pendingContactData = null
+        }
+    )
+
+    // Forward message dialog
+    ForwardMessageDialog(
+        visible = showForwardDialog,
+        onDismiss = {
+            showForwardDialog = false
+            messageToForward = null
+        },
+        onChatSelected = { targetChatGuid ->
+            messageToForward?.let { message ->
+                viewModel.forwardMessage(message.guid, targetChatGuid)
+            }
+        },
+        chats = forwardableChats.map { chat ->
+            ForwardableChatInfo(
+                guid = chat.guid,
+                displayName = chat.displayName ?: chat.chatIdentifier ?: "Unknown",
+                isGroup = chat.isGroup
+            )
+        },
+        isForwarding = uiState.isForwarding
+    )
+
+    // Handle forward success
+    LaunchedEffect(uiState.forwardSuccess) {
+        if (uiState.forwardSuccess) {
+            Toast.makeText(context, "Message forwarded", Toast.LENGTH_SHORT).show()
+            showForwardDialog = false
+            messageToForward = null
+            viewModel.clearForwardSuccess()
+        }
+    }
 }
 
 /**
@@ -935,6 +1143,7 @@ private fun MessageInputArea(
     onSendClick: () -> Unit,
     onSendLongPress: () -> Unit = {},
     onAttachClick: () -> Unit,
+    onEmojiClick: () -> Unit,
     onImageClick: () -> Unit,
     onVoiceMemoClick: () -> Unit,
     onVoiceMemoPressStart: () -> Unit,
@@ -946,6 +1155,7 @@ private fun MessageInputArea(
     onRemoveAttachment: (Uri) -> Unit,
     onClearAllAttachments: () -> Unit,
     isPickerExpanded: Boolean = false,
+    isEmojiPickerExpanded: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isMmsMode = isLocalSmsChat && (hasAttachments || text.length > 160)
@@ -1076,13 +1286,17 @@ private fun MessageInputArea(
 
                         // Emoji button
                         IconButton(
-                            onClick = { /* TODO: Emoji picker */ },
+                            onClick = onEmojiClick,
                             modifier = Modifier.size(40.dp)
                         ) {
                             Icon(
                                 Icons.Outlined.EmojiEmotions,
                                 contentDescription = stringResource(R.string.emoji),
-                                tint = inputColors.inputIcon,
+                                tint = if (isEmojiPickerExpanded) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    inputColors.inputIcon
+                                },
                                 modifier = Modifier.size(24.dp)
                             )
                         }

@@ -8,27 +8,39 @@ import android.provider.BlockedNumberContract
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
+import androidx.work.workDataOf
 import com.bluebubbles.data.local.db.dao.AttachmentDao
+import com.bluebubbles.data.local.db.dao.ScheduledMessageDao
 import com.bluebubbles.data.local.db.entity.AttachmentEntity
+import com.bluebubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
+import com.bluebubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.data.repository.MessageDeliveryMode
 import com.bluebubbles.data.repository.MessageRepository
+import com.bluebubbles.data.repository.QuickReplyTemplateRepository
 import com.bluebubbles.data.repository.SmsRepository
+import com.bluebubbles.services.contacts.VCardService
 import com.bluebubbles.services.messaging.ChatFallbackTracker
+import com.bluebubbles.services.smartreply.SmartReplyService
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.services.socket.SocketEvent
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sound.SoundManager
+import com.bluebubbles.services.scheduled.ScheduledMessageWorker
 import com.bluebubbles.services.spam.SpamReportingService
 import com.bluebubbles.services.spam.SpamRepository
 import com.bluebubbles.ui.components.AttachmentUiModel
 import com.bluebubbles.ui.components.MessageUiModel
 import com.bluebubbles.ui.components.ReactionUiModel
+import com.bluebubbles.ui.components.SuggestionItem
 import com.bluebubbles.ui.components.Tapback
+import com.bluebubbles.ui.effects.MessageEffect
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -36,6 +48,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @HiltViewModel
@@ -50,7 +63,12 @@ class ChatViewModel @Inject constructor(
     private val soundManager: SoundManager,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
-    private val attachmentDao: AttachmentDao
+    private val attachmentDao: AttachmentDao,
+    private val vCardService: VCardService,
+    private val smartReplyService: SmartReplyService,
+    private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
+    private val scheduledMessageDao: ScheduledMessageDao,
+    private val workManager: WorkManager
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -60,10 +78,45 @@ class ChatViewModel @Inject constructor(
 
     private val _pendingAttachments = MutableStateFlow<List<Uri>>(emptyList())
 
+    // Smart reply suggestions (ML Kit + user templates, max 3)
+    private val _mlSuggestions = MutableStateFlow<List<String>>(emptyList())
+
+    val smartReplySuggestions: StateFlow<List<SuggestionItem>> = combine(
+        _mlSuggestions,
+        quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
+    ) { mlSuggestions, templates ->
+        getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     // Typing indicator state
     private var typingDebounceJob: Job? = null
     private var isCurrentlyTyping = false
     private val typingDebounceMs = 3000L // 3 seconds after last keystroke to send stopped-typing
+
+    // Draft persistence
+    private var draftSaveJob: Job? = null
+    private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
+
+    // Effect settings flows
+    val autoPlayEffects = settingsDataStore.autoPlayEffects
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+    val replayEffectsOnScroll = settingsDataStore.replayEffectsOnScroll
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+    val reduceMotion = settingsDataStore.reduceMotion
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
+    // Screen effect state and queue
+    data class ScreenEffectState(
+        val effect: MessageEffect.Screen,
+        val messageGuid: String,
+        val messageText: String?
+    )
+
+    private val _activeScreenEffect = MutableStateFlow<ScreenEffectState?>(null)
+    val activeScreenEffect: StateFlow<ScreenEffectState?> = _activeScreenEffect.asStateFlow()
+
+    private val screenEffectQueue = mutableListOf<ScreenEffectState>()
+    private var isPlayingScreenEffect = false
 
     init {
         loadChat()
@@ -75,6 +128,61 @@ class ChatViewModel @Inject constructor(
         observeParticipantsForSaveContactBanner()
         observeFallbackMode()
         observeConnectionState()
+        observeSmartReplies()
+    }
+
+    /**
+     * Observe messages and generate ML Kit smart reply suggestions.
+     * Debounced to avoid excessive processing while scrolling.
+     */
+    private fun observeSmartReplies() {
+        viewModelScope.launch {
+            _uiState.map { it.messages }
+                .distinctUntilChanged()
+                .debounce(500)  // Wait for conversation to settle
+                .collect { messages ->
+                    val suggestions = smartReplyService.getSuggestions(messages, maxSuggestions = 3)
+                    _mlSuggestions.value = suggestions
+                }
+        }
+    }
+
+    /**
+     * Combine ML suggestions and user templates into max N suggestions.
+     * ML suggestions appear first (more contextual), user templates fill remaining slots.
+     */
+    private fun getCombinedSuggestions(
+        mlSuggestions: List<String>,
+        userTemplates: List<QuickReplyTemplateEntity>,
+        maxTotal: Int
+    ): List<SuggestionItem> {
+        val combined = mutableListOf<SuggestionItem>()
+
+        // Add ML suggestions first (most contextual)
+        mlSuggestions.take(maxTotal).forEach { text ->
+            combined.add(SuggestionItem(text = text, isSmartSuggestion = true))
+        }
+
+        // Fill remaining slots with user templates
+        val remaining = maxTotal - combined.size
+        userTemplates.take(remaining).forEach { template ->
+            combined.add(SuggestionItem(
+                text = template.title,
+                isSmartSuggestion = false,
+                templateId = template.id
+            ))
+        }
+
+        return combined
+    }
+
+    /**
+     * Record usage of a user template (for "most used" sorting).
+     */
+    fun recordTemplateUsage(templateId: Long) {
+        viewModelScope.launch {
+            quickReplyTemplateRepository.recordUsage(templateId)
+        }
     }
 
     private fun observeFallbackMode() {
@@ -207,6 +315,7 @@ class ChatViewModel @Inject constructor(
 
     private fun loadChat() {
         viewModelScope.launch {
+            var draftLoaded = false
             chatRepository.observeChat(chatGuid).collect { chat ->
                 chat?.let {
                     _uiState.update { state ->
@@ -217,9 +326,14 @@ class ChatViewModel @Inject constructor(
                             isStarred = it.isStarred,
                             participantPhone = it.chatIdentifier,
                             isSpam = it.isSpam,
-                            isReportedToCarrier = it.spamReportedToCarrier
+                            isReportedToCarrier = it.spamReportedToCarrier,
+                            isSnoozed = it.isSnoozed,
+                            snoozeUntil = it.snoozeUntil,
+                            // Load draft only on first observation to avoid overwriting user edits
+                            draftText = if (!draftLoaded) it.textFieldText ?: "" else state.draftText
                         )
                     }
+                    draftLoaded = true
                 }
             }
         }
@@ -227,9 +341,17 @@ class ChatViewModel @Inject constructor(
 
     private fun loadMessages() {
         viewModelScope.launch {
-            messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
+            // Combine messages with participants to get sender names
+            combine(
+                messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0),
+                chatRepository.observeParticipantsForChat(chatGuid)
+            ) { messages, participants ->
+                // Build a map from handleId to displayName for quick lookup
+                val handleIdToName = participants.associate { it.id to it.displayName }
+                Pair(messages, handleIdToName)
+            }
                 .distinctUntilChanged()
-                .map { messages ->
+                .map { (messages, handleIdToName) ->
                     // Separate actual reactions (iMessage tapbacks)
                     val iMessageReactions = messages.filter { it.isReaction }
 
@@ -276,7 +398,7 @@ class ChatViewModel @Inject constructor(
                         val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
                         // Fetch attachments for this message
                         val attachments = attachmentDao.getAttachmentsForMessage(message.guid)
-                        message.toUiModel(messageReactions, messageSmsReactions, attachments)
+                        message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName)
                     }
                 }
                 .collect { messageModels ->
@@ -398,6 +520,18 @@ class ChatViewModel @Inject constructor(
     fun updateDraft(text: String) {
         _uiState.update { it.copy(draftText = text) }
         handleTypingIndicator(text)
+        persistDraft(text)
+    }
+
+    /**
+     * Persist draft to database with debouncing to avoid excessive writes.
+     */
+    private fun persistDraft(text: String) {
+        draftSaveJob?.cancel()
+        draftSaveJob = viewModelScope.launch {
+            delay(draftSaveDebounceMs)
+            chatRepository.updateDraftText(chatGuid, text)
+        }
     }
 
     /**
@@ -444,13 +578,18 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Called when leaving the chat to ensure we send stopped-typing
+     * Called when leaving the chat to ensure we send stopped-typing and save draft
      */
     fun onChatLeave() {
         typingDebounceJob?.cancel()
         if (isCurrentlyTyping) {
             isCurrentlyTyping = false
             socketService.sendStoppedTyping(chatGuid)
+        }
+        // Save draft immediately when leaving (cancel debounce and save now)
+        draftSaveJob?.cancel()
+        viewModelScope.launch {
+            chatRepository.updateDraftText(chatGuid, _uiState.value.draftText)
         }
     }
 
@@ -462,6 +601,28 @@ class ChatViewModel @Inject constructor(
     fun addAttachment(uri: Uri) {
         _pendingAttachments.update { it + uri }
         _uiState.update { it.copy(attachmentCount = _pendingAttachments.value.size) }
+    }
+
+    /**
+     * Gets contact data from a contact URI for preview in options dialog.
+     * Returns null if the contact cannot be read.
+     */
+    fun getContactData(contactUri: Uri): VCardService.ContactData? {
+        return vCardService.getContactData(contactUri)
+    }
+
+    /**
+     * Creates a vCard file from contact data with field options and adds it as an attachment.
+     * Returns true if successful, false otherwise.
+     */
+    fun addContactAsVCard(contactData: VCardService.ContactData, options: VCardService.FieldOptions): Boolean {
+        val vcardUri = vCardService.createVCardFromContactData(contactData, options)
+        return if (vcardUri != null) {
+            addAttachment(vcardUri)
+            true
+        } else {
+            false
+        }
     }
 
     fun removeAttachment(uri: Uri) {
@@ -490,6 +651,9 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, draftText = "") }
             _pendingAttachments.value = emptyList()
+            // Clear draft from database when message is sent
+            draftSaveJob?.cancel()
+            chatRepository.updateDraftText(chatGuid, null)
 
             // Use unified send which auto-routes to iMessage or local SMS/MMS
             messageRepository.sendUnified(
@@ -527,6 +691,9 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSending = true, draftText = "") }
             _pendingAttachments.value = emptyList()
+            // Clear draft from database when message is sent
+            draftSaveJob?.cancel()
+            chatRepository.updateDraftText(chatGuid, null)
 
             messageRepository.sendUnified(
                 chatGuid = chatGuid,
@@ -629,6 +796,39 @@ class ChatViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+    /**
+     * Forward a message to another conversation.
+     */
+    fun forwardMessage(messageGuid: String, targetChatGuid: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isForwarding = true) }
+            messageRepository.forwardMessage(messageGuid, targetChatGuid).fold(
+                onSuccess = {
+                    _uiState.update { it.copy(isForwarding = false, forwardSuccess = true) }
+                    soundManager.playSendSound()
+                },
+                onFailure = { e ->
+                    _uiState.update { it.copy(isForwarding = false, error = "Failed to forward: ${e.message}") }
+                }
+            )
+        }
+    }
+
+    /**
+     * Get all available chats for forwarding (excluding current chat).
+     */
+    fun getForwardableChats(): Flow<List<com.bluebubbles.data.local.db.entity.ChatEntity>> {
+        return chatRepository.observeActiveChats()
+            .map { chats -> chats.filter { it.guid != chatGuid } }
+    }
+
+    /**
+     * Clear the forward success flag.
+     */
+    fun clearForwardSuccess() {
+        _uiState.update { it.copy(forwardSuccess = false) }
     }
 
     /**
@@ -852,7 +1052,8 @@ class ChatViewModel @Inject constructor(
     private fun MessageEntity.toUiModel(
         reactions: List<MessageEntity> = emptyList(),
         smsReactions: List<SyntheticReaction> = emptyList(),
-        attachments: List<AttachmentEntity> = emptyList()
+        attachments: List<AttachmentEntity> = emptyList(),
+        handleIdToName: Map<Long, String> = emptyMap()
     ): MessageUiModel {
         // Build a set of removed reactions: (isFromMe, tapbackType)
         // These are reactions that have been explicitly removed (3xxx codes)
@@ -876,7 +1077,7 @@ class ChatViewModel @Inject constructor(
                     ReactionUiModel(
                         tapback = it,
                         isFromMe = reaction.isFromMe,
-                        senderName = null // TODO: Get from handle
+                        senderName = reaction.handleId?.let { handleIdToName[it] }
                     )
                 }
             }
@@ -929,12 +1130,12 @@ class ChatViewModel @Inject constructor(
             hasError = error != 0,
             isReaction = associatedMessageType?.contains("reaction") == true,
             attachments = attachmentUiModels,
-            senderName = null, // TODO: Get from handle
+            senderName = handleId?.let { handleIdToName[it] },
             messageSource = messageSource,
             reactions = allReactions,
             myReactions = myReactions,
             expressiveSendStyleId = expressiveSendStyleId,
-            effectPlayed = false // TODO: Track effect playback in metadata
+            effectPlayed = datePlayed != null
         )
     }
 
@@ -1061,6 +1262,99 @@ class ChatViewModel @Inject constructor(
             _uiState.update { it.copy(isReportedToCarrier = isReported) }
         }
     }
+
+    // ===== Effect Playback =====
+
+    /**
+     * Called when a bubble effect animation completes.
+     */
+    fun onBubbleEffectCompleted(messageGuid: String) {
+        viewModelScope.launch {
+            messageRepository.markEffectPlayed(messageGuid)
+        }
+    }
+
+    /**
+     * Trigger a screen effect for a message.
+     * Effects are queued to prevent overlapping animations.
+     */
+    fun triggerScreenEffect(message: MessageUiModel) {
+        val effect = MessageEffect.fromStyleId(message.expressiveSendStyleId) as? MessageEffect.Screen ?: return
+        val state = ScreenEffectState(effect, message.guid, message.text)
+        screenEffectQueue.add(state)
+        if (!isPlayingScreenEffect) playNextScreenEffect()
+    }
+
+    private fun playNextScreenEffect() {
+        val next = screenEffectQueue.removeFirstOrNull()
+        if (next != null) {
+            isPlayingScreenEffect = true
+            _activeScreenEffect.value = next
+        } else {
+            isPlayingScreenEffect = false
+        }
+    }
+
+    /**
+     * Called when a screen effect animation completes.
+     */
+    fun onScreenEffectCompleted() {
+        val state = _activeScreenEffect.value
+        if (state != null) {
+            viewModelScope.launch {
+                messageRepository.markEffectPlayed(state.messageGuid)
+            }
+        }
+        _activeScreenEffect.value = null
+        isPlayingScreenEffect = false
+        playNextScreenEffect()
+    }
+
+    // ===== Scheduled Messages =====
+
+    /**
+     * Schedule a message to be sent at a later time.
+     *
+     * Note: This uses client-side scheduling with WorkManager.
+     * The phone must be on and have network connectivity for the message to send.
+     */
+    fun scheduleMessage(text: String, attachments: List<Uri>, sendAt: Long) {
+        viewModelScope.launch {
+            // Convert attachments to JSON array string
+            val attachmentUrisJson = if (attachments.isNotEmpty()) {
+                attachments.joinToString(",", "[", "]") { "\"${it}\"" }
+            } else {
+                null
+            }
+
+            // Create scheduled message entity
+            val scheduledMessage = ScheduledMessageEntity(
+                chatGuid = chatGuid,
+                text = text.ifBlank { null },
+                attachmentUris = attachmentUrisJson,
+                scheduledAt = sendAt
+            )
+
+            // Insert into database
+            val id = scheduledMessageDao.insert(scheduledMessage)
+
+            // Calculate delay
+            val delay = sendAt - System.currentTimeMillis()
+
+            // Schedule WorkManager job
+            val workRequest = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
+                .setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                .setInputData(
+                    workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_MESSAGE_ID to id)
+                )
+                .build()
+
+            workManager.enqueue(workRequest)
+
+            // Save the work request ID for potential cancellation
+            scheduledMessageDao.updateWorkRequestId(id, workRequest.id.toString())
+        }
+    }
 }
 
 data class ChatUiState(
@@ -1096,5 +1390,11 @@ data class ChatUiState(
     val isServerConnected: Boolean = true,
     // Spam detection
     val isSpam: Boolean = false,
-    val isReportedToCarrier: Boolean = false
+    val isReportedToCarrier: Boolean = false,
+    // Message forwarding
+    val isForwarding: Boolean = false,
+    val forwardSuccess: Boolean = false,
+    // Snooze
+    val isSnoozed: Boolean = false,
+    val snoozeUntil: Long? = null
 )

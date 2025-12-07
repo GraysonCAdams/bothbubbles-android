@@ -85,6 +85,15 @@ data class HandleEntity(
             ?: address
 
     /**
+     * Raw display name WITHOUT "Maybe:" prefix - use for contact cards, intents, and avatars
+     */
+    val rawDisplayName: String
+        get() = cachedDisplayName
+            ?: inferredName
+            ?: formattedAddress
+            ?: address
+
+    /**
      * Whether this handle has an inferred (unconfirmed) name
      */
     val hasInferredName: Boolean

@@ -7,6 +7,7 @@ import com.bluebubbles.data.remote.api.dto.MessageDto
 import com.bluebubbles.data.repository.ChatRepository
 import com.bluebubbles.data.repository.LinkPreviewRepository
 import com.bluebubbles.data.repository.MessageRepository
+import com.bluebubbles.services.categorization.CategorizationRepository
 import com.bluebubbles.services.notifications.NotificationService
 import com.bluebubbles.services.spam.SpamRepository
 import com.bluebubbles.ui.components.UrlParsingUtils
@@ -29,7 +30,8 @@ class SocketEventHandler @Inject constructor(
     private val handleDao: HandleDao,
     private val notificationService: NotificationService,
     private val linkPreviewRepository: LinkPreviewRepository,
-    private val spamRepository: SpamRepository
+    private val spamRepository: SpamRepository,
+    private val categorizationRepository: CategorizationRepository
 ) {
     companion object {
         private const val TAG = "SocketEventHandler"
@@ -99,6 +101,15 @@ class SocketEventHandler @Inject constructor(
                 return
             }
 
+            // Check if chat is snoozed - if snoozed, skip notification
+            if (chat?.isSnoozed == true) {
+                Log.i(TAG, "Chat ${event.chatGuid} is snoozed, skipping notification")
+                return
+            }
+
+            // Categorize the message for filtering purposes
+            categorizationRepository.evaluateAndCategorize(event.chatGuid, senderAddress, messageText)
+
             val senderName = resolveSenderName(event.message)
 
             // Fetch link preview data if message contains a URL
@@ -122,6 +133,7 @@ class SocketEventHandler @Inject constructor(
                 messageText = messageText,
                 messageGuid = savedMessage.guid,
                 senderName = senderName,
+                senderAddress = senderAddress,
                 linkPreviewTitle = linkTitle,
                 linkPreviewDomain = linkDomain
             )

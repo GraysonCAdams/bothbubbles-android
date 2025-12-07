@@ -45,6 +45,15 @@ class ChatRepository @Inject constructor(
     fun observeParticipantsForChat(chatGuid: String): Flow<List<HandleEntity>> =
         chatDao.observeParticipantsForChat(chatGuid)
 
+    /**
+     * Get the first participant's phone number/address for a chat.
+     * Used for blocking functionality.
+     */
+    suspend fun getChatParticipantAddress(chatGuid: String): String? {
+        val participants = chatDao.getParticipantsForChat(chatGuid)
+        return participants.firstOrNull()?.address
+    }
+
     // ===== Remote Operations =====
 
     /**
@@ -200,6 +209,39 @@ class ChatRepository @Inject constructor(
 
     suspend fun setVibrationEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
         chatDao.updateVibrationEnabled(guid, enabled)
+    }
+
+    /**
+     * Snooze notifications for a chat until a specific time.
+     * @param guid The chat GUID
+     * @param snoozeUntil Epoch timestamp when snooze expires, -1 for indefinite, null to unsnooze
+     */
+    suspend fun setSnoozeUntil(guid: String, snoozeUntil: Long?): Result<Unit> = runCatching {
+        chatDao.updateSnoozeUntil(guid, snoozeUntil)
+    }
+
+    /**
+     * Snooze notifications for a chat for a specific duration.
+     * @param guid The chat GUID
+     * @param durationMs Duration in milliseconds, or -1 for indefinite
+     */
+    suspend fun snoozeChat(guid: String, durationMs: Long): Result<Unit> = runCatching {
+        val snoozeUntil = if (durationMs == -1L) -1L else System.currentTimeMillis() + durationMs
+        chatDao.updateSnoozeUntil(guid, snoozeUntil)
+    }
+
+    /**
+     * Unsnooze a chat (remove snooze)
+     */
+    suspend fun unsnoozeChat(guid: String): Result<Unit> = runCatching {
+        chatDao.updateSnoozeUntil(guid, null)
+    }
+
+    /**
+     * Update draft text for a chat
+     */
+    suspend fun updateDraftText(guid: String, text: String?) {
+        chatDao.updateDraftText(guid, text?.takeIf { it.isNotBlank() })
     }
 
     /**

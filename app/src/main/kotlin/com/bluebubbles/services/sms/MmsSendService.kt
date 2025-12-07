@@ -28,7 +28,8 @@ import javax.inject.Singleton
 @Singleton
 class MmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val messageDao: MessageDao
+    private val messageDao: MessageDao,
+    private val smsPermissionHelper: SmsPermissionHelper
 ) {
     companion object {
         private const val TAG = "MmsSendService"
@@ -64,7 +65,10 @@ class MmsSendService @Inject constructor(
         subscriptionId: Int = -1
     ): Result<MessageEntity> = withContext(Dispatchers.IO) {
         runCatching {
-            val messageGuid = "mms-outgoing-${System.currentTimeMillis()}"
+            val timestamp = System.currentTimeMillis()
+            val providerMessage = insertMmsToProvider(recipients, text, attachments, subject)
+            val messageGuid = providerMessage?.let { "mms-${it.id}" }
+                ?: "mms-outgoing-$timestamp"
 
             // Create message entity first (optimistic insert)
             val message = MessageEntity(
@@ -72,12 +76,14 @@ class MmsSendService @Inject constructor(
                 chatGuid = chatGuid,
                 text = text,
                 subject = subject,
-                dateCreated = System.currentTimeMillis(),
+                dateCreated = timestamp,
                 isFromMe = true,
                 hasAttachments = attachments.isNotEmpty(),
                 messageSource = MessageSource.LOCAL_MMS.name,
                 smsStatus = "pending",
-                simSlot = if (subscriptionId >= 0) subscriptionId else null
+                simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                smsId = providerMessage?.id,
+                smsThreadId = providerMessage?.threadId
             )
             messageDao.insertMessage(message)
 
@@ -286,60 +292,115 @@ class MmsSendService @Inject constructor(
     suspend fun insertMmsToProvider(
         recipients: List<String>,
         text: String?,
-        messageGuid: String
-    ): Uri? = withContext(Dispatchers.IO) {
+        attachments: List<Uri>,
+        subject: String?
+    ): MmsProviderRef? = withContext(Dispatchers.IO) {
+        if (!smsPermissionHelper.isDefaultSmsApp()) return@withContext null
+
         try {
-            // Insert into MMS table
+            val nowSeconds = System.currentTimeMillis() / 1000
             val values = ContentValues().apply {
-                put(Telephony.Mms.DATE, System.currentTimeMillis() / 1000)
-                put(Telephony.Mms.DATE_SENT, System.currentTimeMillis() / 1000)
+                put(Telephony.Mms.DATE, nowSeconds)
+                put(Telephony.Mms.DATE_SENT, nowSeconds)
                 put(Telephony.Mms.MESSAGE_BOX, Telephony.Mms.MESSAGE_BOX_OUTBOX)
                 put(Telephony.Mms.READ, 1)
                 put(Telephony.Mms.SEEN, 1)
                 put(Telephony.Mms.MESSAGE_TYPE, 128) // m-send-req
                 put(Telephony.Mms.MMS_VERSION, 19) // 1.3
                 put(Telephony.Mms.CONTENT_TYPE, "application/vnd.wap.multipart.related")
+                if (!subject.isNullOrBlank()) {
+                    put(Telephony.Mms.SUBJECT, subject)
+                }
             }
 
-            val mmsUri = context.contentResolver.insert(Telephony.Mms.CONTENT_URI, values)
+            val mmsUri = context.contentResolver.insert(Telephony.Mms.CONTENT_URI, values) ?: return@withContext null
+            val mmsId = mmsUri.lastPathSegment?.toLongOrNull() ?: return@withContext null
+
+            insertMmsAddresses(mmsId, recipients)
+            insertMmsTextPart(mmsId, text)
+            attachments.forEach { insertMmsAttachmentPart(mmsId, it) }
+
+            val threadId = queryMmsThreadId(mmsId)
             Log.d(TAG, "Inserted MMS to provider: $mmsUri")
-
-            // Insert addresses
-            mmsUri?.let { uri ->
-                val mmsId = uri.lastPathSegment?.toLongOrNull() ?: return@let
-
-                // Insert TO addresses
-                recipients.forEach { recipient ->
-                    val addrValues = ContentValues().apply {
-                        put(Telephony.Mms.Addr.ADDRESS, recipient)
-                        put(Telephony.Mms.Addr.TYPE, 151) // TO
-                        put(Telephony.Mms.Addr.MSG_ID, mmsId)
-                    }
-                    context.contentResolver.insert(
-                        Uri.parse("content://mms/$mmsId/addr"),
-                        addrValues
-                    )
-                }
-
-                // Insert text part if present
-                if (!text.isNullOrBlank()) {
-                    val partValues = ContentValues().apply {
-                        put(Telephony.Mms.Part.MSG_ID, mmsId)
-                        put(Telephony.Mms.Part.CONTENT_TYPE, "text/plain")
-                        put(Telephony.Mms.Part.CHARSET, 106) // UTF-8
-                        put(Telephony.Mms.Part.TEXT, text)
-                    }
-                    context.contentResolver.insert(
-                        Uri.parse("content://mms/$mmsId/part"),
-                        partValues
-                    )
-                }
-            }
-
-            mmsUri
+            MmsProviderRef(mmsUri, mmsId, threadId)
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Missing permission to write MMS provider", e)
+            null
         } catch (e: Exception) {
             Log.e(TAG, "Failed to insert MMS to provider", e)
             null
         }
     }
+
+    private fun insertMmsAddresses(mmsId: Long, recipients: List<String>) {
+        recipients.forEach { recipient ->
+            val addrValues = ContentValues().apply {
+                put(Telephony.Mms.Addr.ADDRESS, recipient)
+                put(Telephony.Mms.Addr.TYPE, 151) // TO
+                put(Telephony.Mms.Addr.MSG_ID, mmsId)
+            }
+            context.contentResolver.insert(
+                Uri.parse("content://mms/$mmsId/addr"),
+                addrValues
+            )
+        }
+    }
+
+    private fun insertMmsTextPart(mmsId: Long, text: String?) {
+        if (text.isNullOrBlank()) return
+
+        val partValues = ContentValues().apply {
+            put(Telephony.Mms.Part.MSG_ID, mmsId)
+            put(Telephony.Mms.Part.CONTENT_TYPE, "text/plain")
+            put(Telephony.Mms.Part.CHARSET, 106) // UTF-8
+            put(Telephony.Mms.Part.TEXT, text)
+        }
+        context.contentResolver.insert(
+            Uri.parse("content://mms/$mmsId/part"),
+            partValues
+        )
+    }
+
+    private fun insertMmsAttachmentPart(mmsId: Long, attachmentUri: Uri) {
+        val contentResolver: ContentResolver = context.contentResolver
+        val mimeType = contentResolver.getType(attachmentUri) ?: "application/octet-stream"
+        val fileName = attachmentUri.lastPathSegment ?: "attachment"
+
+        val partValues = ContentValues().apply {
+            put(Telephony.Mms.Part.MSG_ID, mmsId)
+            put(Telephony.Mms.Part.CONTENT_TYPE, mimeType)
+            put(Telephony.Mms.Part.FILENAME, fileName)
+            put(Telephony.Mms.Part.NAME, fileName)
+        }
+
+        val partUri = contentResolver.insert(Uri.parse("content://mms/part"), partValues) ?: return
+
+        try {
+            contentResolver.openOutputStream(partUri)?.use { output ->
+                contentResolver.openInputStream(attachmentUri)?.use { input ->
+                    input.copyTo(output)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to persist MMS attachment", e)
+        }
+    }
+
+    private fun queryMmsThreadId(mmsId: Long): Long? {
+        return context.contentResolver.query(
+            Uri.withAppendedPath(Telephony.Mms.CONTENT_URI, mmsId.toString()),
+            arrayOf(Telephony.Mms.THREAD_ID),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Mms.THREAD_ID)) else null
+        }
+    }
+
+    data class MmsProviderRef(
+        val uri: Uri,
+        val id: Long,
+        val threadId: Long?
+    )
 }

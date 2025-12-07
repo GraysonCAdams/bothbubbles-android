@@ -6,6 +6,7 @@ import android.app.NotificationManager
 import android.os.Build
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
+import com.bluebubbles.services.fcm.FcmTokenManager
 import com.bluebubbles.services.socket.SocketConnectionManager
 import com.bluebubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.HiltAndroidApp
@@ -20,6 +21,9 @@ class BlueBubblesApp : Application(), Configuration.Provider {
     @Inject
     lateinit var socketConnectionManager: SocketConnectionManager
 
+    @Inject
+    lateinit var fcmTokenManager: FcmTokenManager
+
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
             .setWorkerFactory(workerFactory)
@@ -32,6 +36,9 @@ class BlueBubblesApp : Application(), Configuration.Provider {
 
         // Initialize socket connection manager for auto-connect
         socketConnectionManager.initialize()
+
+        // Initialize FCM token manager (handles token retrieval and server registration)
+        fcmTokenManager.initialize()
     }
 
     private fun createNotificationChannels() {

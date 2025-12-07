@@ -19,6 +19,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 
@@ -36,37 +37,13 @@ data class PlaceItem(
 fun PlacesScreen(
     chatGuid: String,
     onNavigateBack: () -> Unit,
-    onPlaceClick: (String) -> Unit = {}
+    onPlaceClick: (String) -> Unit = {},
+    viewModel: PlacesViewModel = hiltViewModel()
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    // TODO: Get places from ViewModel - for now using sample data
-    val places = remember {
-        listOf(
-            PlaceItem(
-                id = "1",
-                title = "See my real-time location o...",
-                url = null,
-                senderName = "Liz Levine",
-                timestamp = "Nov 22, 21:37",
-                thumbnailUrl = null
-            ),
-            PlaceItem(
-                id = "2",
-                title = "https://maps.app.goo.gl/Bw...",
-                url = "https://maps.app.goo.gl/Bw...",
-                senderName = "You",
-                timestamp = "Nov 17, 15:23"
-            ),
-            PlaceItem(
-                id = "3",
-                title = "https://maps.app.goo.gl/vux...",
-                url = "https://maps.app.goo.gl/vux...",
-                senderName = "You",
-                timestamp = "Nov 8, 11:53"
-            )
-        )
-    }
+    val uiState by viewModel.uiState.collectAsState()
+    val places = uiState.places
 
     val filteredPlaces = remember(searchQuery, places) {
         if (searchQuery.isBlank()) places
@@ -110,7 +87,16 @@ fun PlacesScreen(
             )
         }
     ) { paddingValues ->
-        if (filteredPlaces.isEmpty()) {
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        } else if (filteredPlaces.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -133,7 +119,7 @@ fun PlacesScreen(
                 items(filteredPlaces, key = { it.id }) { place ->
                     PlaceCard(
                         place = place,
-                        onClick = { onPlaceClick(place.id) }
+                        onClick = { place.url?.let { onPlaceClick(it) } }
                     )
                 }
             }

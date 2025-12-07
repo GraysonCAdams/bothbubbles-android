@@ -2,6 +2,7 @@ package com.bluebubbles.ui.setup
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
@@ -11,9 +12,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bluebubbles.data.local.prefs.SettingsDataStore
 import com.bluebubbles.data.remote.api.BlueBubblesApi
+import com.bluebubbles.services.categorization.EntityExtractionService
+import com.bluebubbles.services.categorization.MlModelUpdateWorker
+import com.bluebubbles.services.fcm.FirebaseConfigManager
+import com.bluebubbles.services.fcm.FcmTokenManager
+import com.bluebubbles.services.sms.SmsCapabilityStatus
+import com.bluebubbles.services.sms.SmsPermissionHelper
 import com.bluebubbles.services.socket.SocketService
 import com.bluebubbles.services.sync.SyncService
 import com.bluebubbles.services.sync.SyncState
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -30,7 +39,11 @@ class SetupViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val api: BlueBubblesApi,
     private val socketService: SocketService,
-    private val syncService: SyncService
+    private val syncService: SyncService,
+    private val smsPermissionHelper: SmsPermissionHelper,
+    private val entityExtractionService: EntityExtractionService,
+    private val firebaseConfigManager: FirebaseConfigManager,
+    private val fcmTokenManager: FcmTokenManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SetupUiState())
@@ -39,6 +52,13 @@ class SetupViewModel @Inject constructor(
     init {
         checkPermissions()
         loadSavedSettings()
+        loadSmsStatus()
+        checkMlModelStatus()
+    }
+
+    private fun loadSmsStatus() {
+        val status = smsPermissionHelper.getSmsCapabilityStatus()
+        _uiState.update { it.copy(smsCapabilityStatus = status) }
     }
 
     private fun loadSavedSettings() {
@@ -198,6 +218,138 @@ class SetupViewModel @Inject constructor(
         _uiState.update { it.copy(smsEnabled = enabled) }
     }
 
+    /**
+     * Get missing SMS permissions as an array for the permission launcher
+     */
+    fun getMissingSmsPermissions(): Array<String> {
+        return smsPermissionHelper.getMissingSmsPermissions().toTypedArray()
+    }
+
+    /**
+     * Get intent to request default SMS app status
+     */
+    fun getDefaultSmsAppIntent(): Intent {
+        return smsPermissionHelper.createDefaultSmsAppIntent()
+    }
+
+    /**
+     * Called after SMS permissions are granted/denied
+     */
+    fun onSmsPermissionsResult() {
+        loadSmsStatus()
+    }
+
+    /**
+     * Called after default SMS app request completes
+     */
+    fun onDefaultSmsAppResult() {
+        loadSmsStatus()
+        // If we're now the default SMS app, auto-enable SMS
+        if (smsPermissionHelper.isDefaultSmsApp()) {
+            viewModelScope.launch {
+                settingsDataStore.setSmsEnabled(true)
+            }
+            _uiState.update { it.copy(smsEnabled = true) }
+        }
+    }
+
+    /**
+     * Finalize SMS settings when completing setup
+     */
+    fun finalizeSmsSettings() {
+        viewModelScope.launch {
+            settingsDataStore.setSmsEnabled(_uiState.value.smsEnabled)
+        }
+    }
+
+    // ===== ML Model Methods =====
+
+    /**
+     * Check if ML model is already downloaded and network status
+     */
+    private fun checkMlModelStatus() {
+        viewModelScope.launch {
+            val isDownloaded = entityExtractionService.checkModelDownloaded()
+            _uiState.update {
+                it.copy(
+                    mlModelDownloaded = isDownloaded,
+                    isOnWifi = isOnWifi()
+                )
+            }
+        }
+    }
+
+    /**
+     * Check if device is on WiFi
+     */
+    private fun isOnWifi(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    /**
+     * Update the checkbox for enabling cellular auto-updates
+     */
+    fun updateMlCellularAutoUpdate(enabled: Boolean) {
+        _uiState.update { it.copy(mlEnableCellularUpdates = enabled) }
+    }
+
+    /**
+     * Start ML model download
+     */
+    fun downloadMlModel() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(mlDownloading = true, mlDownloadError = null) }
+
+            val allowCellular = !isOnWifi() // If not on WiFi, user has consented to cellular
+            val success = entityExtractionService.downloadModel(allowCellular)
+
+            if (success) {
+                // Save to settings
+                settingsDataStore.setMlModelDownloaded(true)
+                // If downloaded on cellular and user checked the box, enable cellular updates
+                if (!isOnWifi() && _uiState.value.mlEnableCellularUpdates) {
+                    settingsDataStore.setMlAutoUpdateOnCellular(true)
+                }
+                // Schedule periodic ML model updates
+                MlModelUpdateWorker.schedule(context)
+                // Complete setup now that ML is downloaded
+                settingsDataStore.setSetupComplete(true)
+                _uiState.update {
+                    it.copy(
+                        mlDownloading = false,
+                        mlModelDownloaded = true,
+                        isSyncComplete = true
+                    )
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        mlDownloading = false,
+                        mlDownloadError = "Failed to download ML model"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Skip ML model download - complete setup without ML
+     */
+    fun skipMlDownload() {
+        viewModelScope.launch {
+            settingsDataStore.setSetupComplete(true)
+            _uiState.update {
+                it.copy(
+                    mlDownloadSkipped = true,
+                    isSyncComplete = true
+                )
+            }
+        }
+    }
+
     fun skipServerSetup() {
         // Clear server settings when skipping
         viewModelScope.launch {
@@ -233,12 +385,34 @@ class SetupViewModel @Inject constructor(
                             _uiState.update { it.copy(syncProgress = state.progress) }
                         }
                         is SyncState.Completed -> {
-                            settingsDataStore.setSetupComplete(true)
-                            _uiState.update {
-                                it.copy(
-                                    isSyncing = false,
-                                    isSyncComplete = true
-                                )
+                            // Initialize FCM for push notifications
+                            // This fetches Firebase config from server and registers for push
+                            launch {
+                                try {
+                                    firebaseConfigManager.initializeFromServer()
+                                    fcmTokenManager.refreshToken()
+                                } catch (e: Exception) {
+                                    // FCM init failure is non-fatal, log and continue
+                                    android.util.Log.w("SetupViewModel", "FCM init failed", e)
+                                }
+                            }
+
+                            // Check if ML step is needed
+                            val currentState = _uiState.value
+                            if (currentState.shouldShowMlStep) {
+                                // Don't complete setup yet - wait for ML step
+                                _uiState.update {
+                                    it.copy(isSyncing = false)
+                                }
+                            } else {
+                                // No ML step needed, complete setup
+                                settingsDataStore.setSetupComplete(true)
+                                _uiState.update {
+                                    it.copy(
+                                        isSyncing = false,
+                                        isSyncComplete = true
+                                    )
+                                }
                             }
                         }
                         is SyncState.Error -> {
@@ -310,6 +484,7 @@ data class SetupUiState(
 
     // SMS settings
     val smsEnabled: Boolean = true,
+    val smsCapabilityStatus: SmsCapabilityStatus? = null,
 
     // Sync settings
     val messagesPerChat: Int = 25,
@@ -317,11 +492,30 @@ data class SetupUiState(
     val isSyncing: Boolean = false,
     val syncProgress: Float = 0f,
     val isSyncComplete: Boolean = false,
-    val syncError: String? = null
+    val syncError: String? = null,
+
+    // ML model settings
+    val mlModelDownloaded: Boolean = false,
+    val mlDownloading: Boolean = false,
+    val mlDownloadError: String? = null,
+    val mlDownloadSkipped: Boolean = false,
+    val mlEnableCellularUpdates: Boolean = false,
+    val isOnWifi: Boolean = true
 ) {
     val canProceedFromPermissions: Boolean
         get() = hasNotificationPermission && hasContactsPermission
 
     val canProceedFromConnection: Boolean
         get() = isConnectionSuccessful
+
+    val allPermissionsGranted: Boolean
+        get() = hasNotificationPermission && hasContactsPermission && isBatteryOptimizationDisabled
+
+    /** ML setup is complete when downloaded or explicitly skipped */
+    val mlSetupComplete: Boolean
+        get() = mlModelDownloaded || mlDownloadSkipped
+
+    /** Show ML step when connected to server (categorization is for iMessage) and model not yet downloaded */
+    val shouldShowMlStep: Boolean
+        get() = isConnectionSuccessful && !mlModelDownloaded
 }

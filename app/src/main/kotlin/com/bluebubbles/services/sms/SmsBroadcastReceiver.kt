@@ -19,6 +19,7 @@ import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.services.nameinference.NameInferenceService
 import com.bluebubbles.data.local.db.entity.MessageEntity
 import com.bluebubbles.data.local.db.entity.MessageSource
+import com.bluebubbles.services.categorization.CategorizationRepository
 import com.bluebubbles.services.notifications.NotificationService
 import com.bluebubbles.services.sound.SoundManager
 import com.bluebubbles.services.spam.SpamRepository
@@ -68,6 +69,9 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     @Inject
     lateinit var spamRepository: SpamRepository
 
+    @Inject
+    lateinit var categorizationRepository: CategorizationRepository
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -79,23 +83,13 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     }
 
     private fun handleSmsReceived(context: Context, intent: Intent) {
-        // If we are the default app, handleSmsDeliver will be called, so we ignore this one.
-        if (smsPermissionHelper.isDefaultSmsApp()) {
-            Log.d(TAG, "SMS_RECEIVED_ACTION - ignoring because we are default app (waiting for DELIVER)")
+        if (!smsPermissionHelper.isDefaultSmsApp()) {
+            Log.d(TAG, "SMS_RECEIVED_ACTION - ignoring because we are not the default SMS app")
             return
         }
 
-        Log.d(TAG, "SMS_RECEIVED_ACTION - processing as non-default app")
-        val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
-        if (messages.isNullOrEmpty()) return
-
-        scope.launch {
-            try {
-                processIncomingSms(context, messages)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error processing SMS", e)
-            }
-        }
+        // If we are the default app, handleSmsDeliver will be called, so we still ignore this one
+        Log.d(TAG, "SMS_RECEIVED_ACTION - ignoring because we are default app (waiting for DELIVER)")
     }
 
     private fun handleSmsDeliver(context: Context, intent: Intent) {
@@ -191,13 +185,17 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 return@forEach
             }
 
+            // Categorize the message for filtering purposes
+            categorizationRepository.evaluateAndCategorize(chatGuid, address, fullBody)
+
             // Show notification (only for non-spam messages)
             notificationService.showMessageNotification(
                 chatGuid = chatGuid,
                 chatTitle = chat.displayName ?: address,
                 messageText = fullBody,
                 messageGuid = message.guid,
-                senderName = null
+                senderName = null,
+                senderAddress = address
             )
 
             // Play receive sound

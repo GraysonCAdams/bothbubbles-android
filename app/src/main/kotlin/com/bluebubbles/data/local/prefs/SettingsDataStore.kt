@@ -117,6 +117,10 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.SELECTED_SIM_SLOT] ?: -1
     }
 
+    val hasCompletedInitialSmsImport: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.HAS_COMPLETED_INITIAL_SMS_IMPORT] ?: false
+    }
+
     // ===== Notification Settings =====
 
     val notificationsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -125,6 +129,53 @@ class SettingsDataStore @Inject constructor(
 
     val notifyOnChatList: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.NOTIFY_ON_CHAT_LIST] ?: false
+    }
+
+    /**
+     * Bubble filter mode for chat bubbles.
+     * - "all": Show bubbles for all conversations
+     * - "favorites": Only show bubbles for starred contacts (Android favorites)
+     * - "selected": Only show bubbles for conversations with bubbleEnabled=true
+     * - "none": Disable bubbles entirely
+     */
+    val bubbleFilterMode: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.BUBBLE_FILTER_MODE] ?: "all"
+    }
+
+    // ===== FCM Push Notifications =====
+
+    /**
+     * Notification provider mode.
+     * - "fcm": Use Firebase Cloud Messaging (default, requires Google Play Services)
+     * - "foreground": Use foreground service to keep socket connection alive
+     */
+    val notificationProvider: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.NOTIFICATION_PROVIDER] ?: "fcm"
+    }
+
+    val fcmToken: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FCM_TOKEN] ?: ""
+    }
+
+    val fcmTokenRegistered: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.FCM_TOKEN_REGISTERED] ?: false
+    }
+
+    // Firebase dynamic config (fetched from server)
+    val firebaseProjectNumber: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_PROJECT_NUMBER] ?: ""
+    }
+
+    val firebaseAppId: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_APP_ID] ?: ""
+    }
+
+    val firebaseApiKey: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_API_KEY] ?: ""
+    }
+
+    val firebaseStorageBucket: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_STORAGE_BUCKET] ?: ""
     }
 
     // ===== Background Service =====
@@ -319,6 +370,12 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun setHasCompletedInitialSmsImport(completed: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.HAS_COMPLETED_INITIAL_SMS_IMPORT] = completed
+        }
+    }
+
     suspend fun setNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.NOTIFICATIONS_ENABLED] = enabled
@@ -328,6 +385,55 @@ class SettingsDataStore @Inject constructor(
     suspend fun setNotifyOnChatList(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.NOTIFY_ON_CHAT_LIST] = enabled
+        }
+    }
+
+    suspend fun setBubbleFilterMode(mode: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.BUBBLE_FILTER_MODE] = mode
+        }
+    }
+
+    suspend fun setNotificationProvider(provider: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.NOTIFICATION_PROVIDER] = provider
+        }
+    }
+
+    suspend fun setFcmToken(token: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.FCM_TOKEN] = token
+        }
+    }
+
+    suspend fun setFcmTokenRegistered(registered: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.FCM_TOKEN_REGISTERED] = registered
+        }
+    }
+
+    suspend fun setFirebaseConfig(
+        projectNumber: String,
+        appId: String,
+        apiKey: String,
+        storageBucket: String
+    ) {
+        dataStore.edit { prefs ->
+            prefs[Keys.FIREBASE_PROJECT_NUMBER] = projectNumber
+            prefs[Keys.FIREBASE_APP_ID] = appId
+            prefs[Keys.FIREBASE_API_KEY] = apiKey
+            prefs[Keys.FIREBASE_STORAGE_BUCKET] = storageBucket
+        }
+    }
+
+    suspend fun clearFirebaseConfig() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.FIREBASE_PROJECT_NUMBER)
+            prefs.remove(Keys.FIREBASE_APP_ID)
+            prefs.remove(Keys.FIREBASE_API_KEY)
+            prefs.remove(Keys.FIREBASE_STORAGE_BUCKET)
+            prefs.remove(Keys.FCM_TOKEN)
+            prefs[Keys.FCM_TOKEN_REGISTERED] = false
         }
     }
 
@@ -426,6 +532,60 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    // ===== Spam Settings =====
+
+    val spamDetectionEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SPAM_DETECTION_ENABLED] ?: true
+    }
+
+    val spamThreshold: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.SPAM_THRESHOLD] ?: 70
+    }
+
+    suspend fun setSpamDetectionEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SPAM_DETECTION_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSpamThreshold(threshold: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SPAM_THRESHOLD] = threshold.coerceIn(30, 100)
+        }
+    }
+
+    // ===== Message Categorization (ML) Settings =====
+
+    val mlModelDownloaded: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.ML_MODEL_DOWNLOADED] ?: false
+    }
+
+    val mlAutoUpdateOnCellular: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.ML_AUTO_UPDATE_ON_CELLULAR] ?: false
+    }
+
+    val categorizationEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.CATEGORIZATION_ENABLED] ?: true
+    }
+
+    suspend fun setMlModelDownloaded(downloaded: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ML_MODEL_DOWNLOADED] = downloaded
+        }
+    }
+
+    suspend fun setMlAutoUpdateOnCellular(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ML_AUTO_UPDATE_ON_CELLULAR] = enabled
+        }
+    }
+
+    suspend fun setCategorizationEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.CATEGORIZATION_ENABLED] = enabled
+        }
+    }
+
     suspend fun clearAll() {
         dataStore.edit { it.clear() }
     }
@@ -474,10 +634,21 @@ class SettingsDataStore @Inject constructor(
         val AUTO_RETRY_AS_SMS = booleanPreferencesKey("auto_retry_as_sms")
         val PREFER_SMS_OVER_IMESSAGE = booleanPreferencesKey("prefer_sms_over_imessage")
         val SELECTED_SIM_SLOT = intPreferencesKey("selected_sim_slot")
+        val HAS_COMPLETED_INITIAL_SMS_IMPORT = booleanPreferencesKey("has_completed_initial_sms_import")
 
         // Notifications
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val NOTIFY_ON_CHAT_LIST = booleanPreferencesKey("notify_on_chat_list")
+        val BUBBLE_FILTER_MODE = stringPreferencesKey("bubble_filter_mode")
+
+        // FCM Push Notifications
+        val NOTIFICATION_PROVIDER = stringPreferencesKey("notification_provider")
+        val FCM_TOKEN = stringPreferencesKey("fcm_token")
+        val FCM_TOKEN_REGISTERED = booleanPreferencesKey("fcm_token_registered")
+        val FIREBASE_PROJECT_NUMBER = stringPreferencesKey("firebase_project_number")
+        val FIREBASE_APP_ID = stringPreferencesKey("firebase_app_id")
+        val FIREBASE_API_KEY = stringPreferencesKey("firebase_api_key")
+        val FIREBASE_STORAGE_BUCKET = stringPreferencesKey("firebase_storage_bucket")
 
         // Background
         val KEEP_ALIVE = booleanPreferencesKey("keep_alive")
@@ -503,5 +674,14 @@ class SettingsDataStore @Inject constructor(
 
         // Sound Settings
         val MESSAGE_SOUNDS_ENABLED = booleanPreferencesKey("message_sounds_enabled")
+
+        // Spam Settings
+        val SPAM_DETECTION_ENABLED = booleanPreferencesKey("spam_detection_enabled")
+        val SPAM_THRESHOLD = intPreferencesKey("spam_threshold")
+
+        // Message Categorization (ML) Settings
+        val ML_MODEL_DOWNLOADED = booleanPreferencesKey("ml_model_downloaded")
+        val ML_AUTO_UPDATE_ON_CELLULAR = booleanPreferencesKey("ml_auto_update_on_cellular")
+        val CATEGORIZATION_ENABLED = booleanPreferencesKey("categorization_enabled")
     }
 }

@@ -411,6 +411,47 @@ class MessageRepository @Inject constructor(
         return address?.isPhoneNumber() == true
     }
 
+    /**
+     * Forward a message to another conversation.
+     * Copies the message text and attachments to the target chat.
+     */
+    suspend fun forwardMessage(
+        messageGuid: String,
+        targetChatGuid: String
+    ): Result<MessageEntity> = runCatching {
+        val originalMessage = messageDao.getMessageByGuid(messageGuid)
+            ?: throw Exception("Original message not found")
+
+        // Get attachments for the original message
+        val attachments = attachmentDao.getAttachmentsForMessage(messageGuid)
+
+        // Convert attachment entities to URIs if they have local paths
+        val attachmentUris = attachments.mapNotNull { attachment ->
+            attachment.localPath?.let { path ->
+                try {
+                    Uri.parse(path)
+                } catch (e: Exception) {
+                    null
+                }
+            } ?: attachment.webUrl?.let { url ->
+                // For web URLs, we'll need to download first or just skip for now
+                // In practice, most forwarded messages will have local paths
+                null
+            }
+        }
+
+        Log.d(TAG, "Forwarding message $messageGuid to $targetChatGuid with ${attachmentUris.size} attachments")
+
+        // Send the message to the target chat
+        sendUnified(
+            chatGuid = targetChatGuid,
+            text = originalMessage.text ?: "",
+            subject = originalMessage.subject,
+            attachments = attachmentUris,
+            deliveryMode = MessageDeliveryMode.AUTO
+        ).getOrThrow()
+    }
+
     // ===== Unified Send Operations =====
 
     /**
@@ -767,6 +808,13 @@ class MessageRepository @Inject constructor(
         messageDao.deleteMessage(messageGuid)
     }
 
+    /**
+     * Mark a message's effect as played by setting the datePlayed timestamp.
+     */
+    suspend fun markEffectPlayed(messageGuid: String) {
+        messageDao.updateDatePlayed(messageGuid, System.currentTimeMillis())
+    }
+
     // ===== Incoming Message Handling =====
 
     /**
@@ -808,7 +856,14 @@ class MessageRepository @Inject constructor(
     // ===== Private Helpers =====
 
     private suspend fun syncMessageAttachments(messageDto: MessageDto) {
-        messageDto.attachments?.forEach { attachmentDto ->
+        if (messageDto.attachments.isNullOrEmpty()) return
+
+        val serverAddress = settingsDataStore.serverAddress.first()
+        val authKey = settingsDataStore.guidAuthKey.first()
+
+        messageDto.attachments.forEach { attachmentDto ->
+            val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download?guid=$authKey"
+
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,
                 messageGuid = messageDto.guid,
@@ -822,7 +877,8 @@ class MessageRepository @Inject constructor(
                 width = attachmentDto.width,
                 height = attachmentDto.height,
                 hasLivePhoto = attachmentDto.hasLivePhoto,
-                isSticker = attachmentDto.isSticker
+                isSticker = attachmentDto.isSticker,
+                webUrl = webUrl
             )
             attachmentDao.insertAttachment(attachment)
         }

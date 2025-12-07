@@ -21,7 +21,6 @@ enum class ChatMenuAction(
     DETAILS("Details"),
     STARRED("Starred"),
     SEARCH("Search"),
-    CHANGE_COLORS("Change colors"),
     ARCHIVE("Archive"),
     UNARCHIVE("Unarchive"),
     DELETE("Delete", isDestructive = true),
@@ -90,14 +89,6 @@ fun ChatOverflowMenu(
             action = ChatMenuAction.SEARCH,
             onClick = {
                 onAction(ChatMenuAction.SEARCH)
-                onDismissRequest()
-            }
-        )
-
-        ChatMenuItem(
-            action = ChatMenuAction.CHANGE_COLORS,
-            onClick = {
-                onAction(ChatMenuAction.CHANGE_COLORS)
                 onDismissRequest()
             }
         )

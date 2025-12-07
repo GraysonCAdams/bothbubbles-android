@@ -46,7 +46,9 @@ enum class SwipeActionType(
     MUTE("mute", "Mute", Icons.Default.NotificationsOff, Color(0xFF7B1FA2)),
     UNMUTE("unmute", "Unmute", Icons.Default.Notifications, Color(0xFF7B1FA2)),
     MARK_READ("mark_read", "Mark as Read", Icons.Default.MarkEmailRead, Color(0xFF0097A7)),
-    MARK_UNREAD("mark_unread", "Mark as Unread", Icons.Default.MarkEmailUnread, Color(0xFF0097A7));
+    MARK_UNREAD("mark_unread", "Mark as Unread", Icons.Default.MarkEmailUnread, Color(0xFF0097A7)),
+    SNOOZE("snooze", "Snooze", Icons.Default.Snooze, Color(0xFF9C27B0)),
+    UNSNOOZE("unsnooze", "Unsnooze", Icons.Outlined.Snooze, Color(0xFF9C27B0));
 
     companion object {
         fun fromKey(key: String): SwipeActionType =
@@ -59,12 +61,14 @@ enum class SwipeActionType(
             baseAction: SwipeActionType,
             isPinned: Boolean,
             isMuted: Boolean,
-            isRead: Boolean
+            isRead: Boolean,
+            isSnoozed: Boolean = false
         ): SwipeActionType {
             return when (baseAction) {
                 PIN, UNPIN -> if (isPinned) UNPIN else PIN
                 MUTE, UNMUTE -> if (isMuted) UNMUTE else MUTE
                 MARK_READ, MARK_UNREAD -> if (isRead) MARK_UNREAD else MARK_READ
+                SNOOZE, UNSNOOZE -> if (isSnoozed) UNSNOOZE else SNOOZE
                 else -> baseAction
             }
         }
@@ -93,6 +97,7 @@ fun SwipeableConversationTile(
     unreadCount: Int = 0,
     isPinned: Boolean = false,
     isMuted: Boolean = false,
+    isSnoozed: Boolean = false,
     isTyping: Boolean = false,
     messageStatus: MessageStatus = MessageStatus.NONE,
     avatarContent: @Composable () -> Unit,
@@ -111,13 +116,15 @@ fun SwipeableConversationTile(
         swipeConfig.leftAction,
         isPinned,
         isMuted,
-        isRead
+        isRead,
+        isSnoozed
     )
     val rightAction = SwipeActionType.getContextualAction(
         swipeConfig.rightAction,
         isPinned,
         isMuted,
-        isRead
+        isRead,
+        isSnoozed
     )
 
     if (!swipeConfig.enabled || (leftAction == SwipeActionType.NONE && rightAction == SwipeActionType.NONE)) {

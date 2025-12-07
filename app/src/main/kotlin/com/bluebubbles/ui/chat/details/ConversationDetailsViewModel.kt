@@ -10,6 +10,7 @@ import com.bluebubbles.data.local.db.entity.AttachmentEntity
 import com.bluebubbles.data.local.db.entity.ChatEntity
 import com.bluebubbles.data.local.db.entity.HandleEntity
 import com.bluebubbles.data.repository.ChatRepository
+import com.bluebubbles.services.contacts.AndroidContactsService
 import com.bluebubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,6 +27,7 @@ data class ConversationDetailsUiState(
     val imageCount: Int = 0,
     val otherMediaCount: Int = 0,
     val recentImages: List<AttachmentEntity> = emptyList(),
+    val isContactStarred: Boolean = false,
     val isLoading: Boolean = true,
     val error: String? = null
 ) {
@@ -57,6 +59,12 @@ data class ConversationDetailsUiState(
     val isSms: Boolean
         get() = chat?.isLocalSms == true || chat?.isTextForwarding == true
 
+    val isSnoozed: Boolean
+        get() = chat?.isSnoozed == true
+
+    val snoozeUntil: Long?
+        get() = chat?.snoozeUntil
+
     /**
      * Whether the first participant is a saved contact.
      * True if the participant has a cachedDisplayName (synced from device contacts).
@@ -76,7 +84,8 @@ class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
-    private val attachmentDao: AttachmentDao
+    private val attachmentDao: AttachmentDao,
+    private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -85,19 +94,30 @@ class ConversationDetailsViewModel @Inject constructor(
     private val _actionState = MutableStateFlow<ActionState>(ActionState.Idle)
     val actionState: StateFlow<ActionState> = _actionState
 
+    private val _isContactStarred = MutableStateFlow(false)
+
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
         chatDao.observeParticipantsForChat(chatGuid),
         attachmentDao.observeImageCountForChat(chatGuid),
         attachmentDao.observeOtherMediaCountForChat(chatGuid),
-        attachmentDao.observeRecentImagesForChat(chatGuid, 5)
-    ) { chat, participants, imageCount, otherMediaCount, recentImages ->
+        attachmentDao.observeRecentImagesForChat(chatGuid, 5),
+        _isContactStarred
+    ) { values ->
+        val chat = values[0] as ChatEntity?
+        val participants = values[1] as List<HandleEntity>
+        val imageCount = values[2] as Int
+        val otherMediaCount = values[3] as Int
+        val recentImages = values[4] as List<AttachmentEntity>
+        val isStarred = values[5] as Boolean
+
         ConversationDetailsUiState(
             chat = chat,
             participants = participants,
             imageCount = imageCount,
             otherMediaCount = otherMediaCount,
             recentImages = recentImages,
+            isContactStarred = isStarred,
             isLoading = false
         )
     }.stateIn(
@@ -105,6 +125,31 @@ class ConversationDetailsViewModel @Inject constructor(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ConversationDetailsUiState()
     )
+
+    init {
+        // Check starred status when participants are loaded
+        viewModelScope.launch {
+            chatDao.observeParticipantsForChat(chatGuid).collect { participants ->
+                val address = participants.firstOrNull()?.address
+                if (address != null) {
+                    _isContactStarred.value = androidContactsService.isContactStarred(address)
+                }
+            }
+        }
+    }
+
+    fun toggleStarred() {
+        viewModelScope.launch {
+            val address = uiState.value.firstParticipantAddress
+            if (address.isNotEmpty()) {
+                val newStarred = !_isContactStarred.value
+                val success = androidContactsService.setContactStarred(address, newStarred)
+                if (success) {
+                    _isContactStarred.value = newStarred
+                }
+            }
+        }
+    }
 
     fun togglePin() {
         viewModelScope.launch {
@@ -119,6 +164,18 @@ class ConversationDetailsViewModel @Inject constructor(
             val currentState = uiState.value
             val newMuted = !currentState.isMuted
             chatRepository.setMuted(chatGuid, newMuted)
+        }
+    }
+
+    fun snoozeChat(durationMs: Long) {
+        viewModelScope.launch {
+            chatRepository.snoozeChat(chatGuid, durationMs)
+        }
+    }
+
+    fun unsnoozeChat() {
+        viewModelScope.launch {
+            chatRepository.unsnoozeChat(chatGuid)
         }
     }
 
@@ -140,6 +197,21 @@ class ConversationDetailsViewModel @Inject constructor(
         }
     }
 
+    fun blockContact() {
+        viewModelScope.launch {
+            val address = uiState.value.firstParticipantAddress
+            if (address.isNotEmpty()) {
+                // Block using Android's BlockedNumberContract
+                val blocked = androidContactsService.blockNumber(address)
+                if (blocked) {
+                    // Also archive the chat
+                    chatRepository.setArchived(chatGuid, true)
+                    _actionState.value = ActionState.Blocked
+                }
+            }
+        }
+    }
+
     fun clearActionState() {
         _actionState.value = ActionState.Idle
     }
@@ -148,5 +220,6 @@ class ConversationDetailsViewModel @Inject constructor(
         data object Idle : ActionState
         data object Archived : ActionState
         data object Deleted : ActionState
+        data object Blocked : ActionState
     }
 }

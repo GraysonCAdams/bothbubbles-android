@@ -2,12 +2,15 @@ package com.bluebubbles.di
 
 import android.content.Context
 import androidx.room.Room
+import androidx.work.WorkManager
 import com.bluebubbles.data.local.db.BlueBubblesDatabase
 import com.bluebubbles.data.local.db.dao.AttachmentDao
 import com.bluebubbles.data.local.db.dao.ChatDao
 import com.bluebubbles.data.local.db.dao.HandleDao
 import com.bluebubbles.data.local.db.dao.LinkPreviewDao
 import com.bluebubbles.data.local.db.dao.MessageDao
+import com.bluebubbles.data.local.db.dao.QuickReplyTemplateDao
+import com.bluebubbles.data.local.db.dao.ScheduledMessageDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -74,5 +77,23 @@ object AppModule {
     @Singleton
     fun provideLinkPreviewDao(database: BlueBubblesDatabase): LinkPreviewDao {
         return database.linkPreviewDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideQuickReplyTemplateDao(database: BlueBubblesDatabase): QuickReplyTemplateDao {
+        return database.quickReplyTemplateDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideScheduledMessageDao(database: BlueBubblesDatabase): ScheduledMessageDao {
+        return database.scheduledMessageDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWorkManager(@ApplicationContext context: Context): WorkManager {
+        return WorkManager.getInstance(context)
     }
 }

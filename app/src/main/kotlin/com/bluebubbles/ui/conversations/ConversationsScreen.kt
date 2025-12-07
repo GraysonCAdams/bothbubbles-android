@@ -68,6 +68,7 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bluebubbles.R
+import com.bluebubbles.services.categorization.MessageCategory
 import com.bluebubbles.services.socket.ConnectionState
 import com.bluebubbles.ui.components.Avatar
 import com.bluebubbles.ui.components.ConnectionBannerState
@@ -77,6 +78,7 @@ import com.bluebubbles.ui.components.SmsStatusBanner
 import com.bluebubbles.ui.components.ContactInfo
 import com.bluebubbles.ui.components.ContactQuickActionsPopup
 import com.bluebubbles.ui.components.GroupAvatar
+import com.bluebubbles.ui.components.SnoozeDurationDialog
 import com.bluebubbles.ui.components.SwipeActionType
 import com.bluebubbles.ui.components.SwipeConfig
 import com.bluebubbles.ui.components.SwipeableConversationTile
@@ -157,6 +159,7 @@ fun ConversationsScreen(
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
     var conversationFilter by remember { mutableStateOf(ConversationFilter.ALL) }
+    var categoryFilter by remember { mutableStateOf<MessageCategory?>(null) }
     var showFilterDropdown by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -267,9 +270,24 @@ fun ConversationsScreen(
     // Selection mode state
     var selectedConversations by remember { mutableStateOf(setOf<String>()) }
     val isSelectionMode = selectedConversations.isNotEmpty()
+    var showBatchSnoozeDialog by remember { mutableStateOf(false) }
 
     // Contact quick actions popup state
     var quickActionsContact by remember { mutableStateOf<ContactInfo?>(null) }
+    var isQuickActionContactStarred by remember { mutableStateOf(false) }
+
+    // Update starred status when contact popup opens
+    LaunchedEffect(quickActionsContact) {
+        quickActionsContact?.let { contact ->
+            if (contact.hasContact && !contact.isGroup) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                    isQuickActionContactStarred = viewModel.isContactStarred(contact.address)
+                }
+            } else {
+                isQuickActionContactStarred = false
+            }
+        }
+    }
 
     // Slightly darker background that shows behind the header and card
     val darkerBackground = MaterialTheme.colorScheme.surfaceContainerLow
@@ -334,7 +352,7 @@ fun ConversationsScreen(
                                     selectedConversations.forEach { viewModel.togglePin(it) }
                                     selectedConversations = emptySet()
                                 },
-                                onSnooze = { /* TODO: Implement snooze */ },
+                                onSnooze = { showBatchSnoozeDialog = true },
                                 onArchive = {
                                     selectedConversations.forEach { viewModel.archiveChat(it) }
                                     selectedConversations = emptySet()
@@ -405,15 +423,16 @@ fun ConversationsScreen(
 
                                 // Filter dropdown
                                 Box {
+                                    val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
                                     IconButton(onClick = { showFilterDropdown = true }) {
                                         Icon(
-                                            imageVector = if (conversationFilter != ConversationFilter.ALL) {
+                                            imageVector = if (hasActiveFilter) {
                                                 Icons.Default.FilterList
                                             } else {
                                                 Icons.Outlined.FilterList
                                             },
                                             contentDescription = "Filter conversations",
-                                            tint = if (conversationFilter != ConversationFilter.ALL) {
+                                            tint = if (hasActiveFilter) {
                                                 MaterialTheme.colorScheme.primary
                                             } else {
                                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -425,7 +444,9 @@ fun ConversationsScreen(
                                         expanded = showFilterDropdown,
                                         onDismissRequest = { showFilterDropdown = false }
                                     ) {
+                                        // Status filters
                                         ConversationFilter.entries.forEach { filter ->
+                                            val isSelected = conversationFilter == filter && categoryFilter == null
                                             DropdownMenuItem(
                                                 text = {
                                                     Row(
@@ -435,7 +456,7 @@ fun ConversationsScreen(
                                                         Icon(
                                                             imageVector = filter.icon,
                                                             contentDescription = null,
-                                                            tint = if (conversationFilter == filter) {
+                                                            tint = if (isSelected) {
                                                                 MaterialTheme.colorScheme.primary
                                                             } else {
                                                                 MaterialTheme.colorScheme.onSurfaceVariant
@@ -444,12 +465,12 @@ fun ConversationsScreen(
                                                         )
                                                         Text(
                                                             text = filter.label,
-                                                            color = if (conversationFilter == filter) {
+                                                            color = if (isSelected) {
                                                                 MaterialTheme.colorScheme.primary
                                                             } else {
                                                                 MaterialTheme.colorScheme.onSurface
                                                             },
-                                                            fontWeight = if (conversationFilter == filter) {
+                                                            fontWeight = if (isSelected) {
                                                                 FontWeight.Medium
                                                             } else {
                                                                 FontWeight.Normal
@@ -459,6 +480,61 @@ fun ConversationsScreen(
                                                 },
                                                 onClick = {
                                                     conversationFilter = filter
+                                                    categoryFilter = null // Clear category when status selected
+                                                    showFilterDropdown = false
+                                                }
+                                            )
+                                        }
+
+                                        // Divider with "Categories" label
+                                        HorizontalDivider(
+                                            modifier = Modifier.padding(vertical = 8.dp),
+                                            color = MaterialTheme.colorScheme.outlineVariant
+                                        )
+                                        Text(
+                                            text = "Categories",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                        )
+
+                                        // Category filters
+                                        MessageCategory.entries.forEach { category ->
+                                            val isSelected = categoryFilter == category
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                    ) {
+                                                        Icon(
+                                                            imageVector = category.icon,
+                                                            contentDescription = null,
+                                                            tint = if (isSelected) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurfaceVariant
+                                                            },
+                                                            modifier = Modifier.size(20.dp)
+                                                        )
+                                                        Text(
+                                                            text = category.displayName,
+                                                            color = if (isSelected) {
+                                                                MaterialTheme.colorScheme.primary
+                                                            } else {
+                                                                MaterialTheme.colorScheme.onSurface
+                                                            },
+                                                            fontWeight = if (isSelected) {
+                                                                FontWeight.Medium
+                                                            } else {
+                                                                FontWeight.Normal
+                                                            }
+                                                        )
+                                                    }
+                                                },
+                                                onClick = {
+                                                    categoryFilter = category
+                                                    conversationFilter = ConversationFilter.ALL // Reset status filter
                                                     showFilterDropdown = false
                                                 }
                                             )
@@ -543,22 +619,42 @@ fun ConversationsScreen(
                 // Apply conversation filter
                 // By default, hide spam conversations unless the SPAM filter is active
                 val filteredConversations = uiState.conversations.filter { conv ->
-                    when (conversationFilter) {
+                    // Apply status filter first
+                    val matchesStatus = when (conversationFilter) {
                         ConversationFilter.ALL -> !conv.isSpam
                         ConversationFilter.UNREAD -> !conv.isSpam && conv.unreadCount > 0
                         ConversationFilter.SPAM -> conv.isSpam
                         ConversationFilter.UNKNOWN_SENDERS -> !conv.isSpam && !conv.hasContact
                         ConversationFilter.KNOWN_SENDERS -> !conv.isSpam && conv.hasContact
                     }
+
+                    // Apply category filter if set
+                    val matchesCategory = categoryFilter?.let { category ->
+                        conv.category?.equals(category.name, ignoreCase = true) == true
+                    } ?: true
+
+                    matchesStatus && matchesCategory
                 }
 
                 // Show empty state if filter returns no results
-                if (filteredConversations.isEmpty() && conversationFilter != ConversationFilter.ALL) {
-                    EmptyFilterState(
-                        filter = conversationFilter,
-                        onClearFilter = { conversationFilter = ConversationFilter.ALL },
-                        modifier = Modifier.fillMaxSize()
-                    )
+                val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
+                if (filteredConversations.isEmpty() && hasActiveFilter) {
+                    if (categoryFilter != null) {
+                        EmptyCategoryState(
+                            category = categoryFilter!!,
+                            onClearFilter = {
+                                categoryFilter = null
+                                conversationFilter = ConversationFilter.ALL
+                            },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    } else {
+                        EmptyFilterState(
+                            filter = conversationFilter,
+                            onClearFilter = { conversationFilter = ConversationFilter.ALL },
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                     return@Surface
                 }
 
@@ -619,11 +715,13 @@ fun ConversationsScreen(
                                         quickActionsContact = ContactInfo(
                                             chatGuid = conversation.guid,
                                             displayName = conversation.displayName,
+                                            rawDisplayName = conversation.rawDisplayName,
                                             avatarPath = conversation.avatarPath,
                                             address = conversation.address,
                                             isGroup = conversation.isGroup,
                                             participantNames = conversation.participantNames,
-                                            hasContact = conversation.hasContact
+                                            hasContact = conversation.hasContact,
+                                            hasInferredName = conversation.hasInferredName
                                         )
                                     }
                                 },
@@ -688,6 +786,7 @@ fun ConversationsScreen(
                                 unreadCount = conversation.unreadCount,
                                 isPinned = conversation.isPinned,
                                 isMuted = conversation.isMuted,
+                                isSnoozed = conversation.isSnoozed,
                                 isTyping = conversation.isTyping,
                                 messageStatus = conversation.lastMessageStatus,
                                 avatarContent = {
@@ -698,7 +797,7 @@ fun ConversationsScreen(
                                         )
                                     } else {
                                         Avatar(
-                                            name = conversation.displayName,
+                                            name = conversation.rawDisplayName,
                                             avatarPath = conversation.avatarPath,
                                             size = 56.dp
                                         )
@@ -715,11 +814,13 @@ fun ConversationsScreen(
                                     quickActionsContact = ContactInfo(
                                         chatGuid = conversation.guid,
                                         displayName = conversation.displayName,
+                                        rawDisplayName = conversation.rawDisplayName,
                                         avatarPath = conversation.avatarPath,
                                         address = conversation.address,
                                         isGroup = conversation.isGroup,
                                         participantNames = conversation.participantNames,
-                                        hasContact = conversation.hasContact
+                                        hasContact = conversation.hasContact,
+                                        hasInferredName = conversation.hasInferredName
                                     )
                                 },
                                 swipeConfig = conversationSwipeConfig,
@@ -775,10 +876,33 @@ fun ConversationsScreen(
         // Contact quick actions popup
         quickActionsContact?.let { contact ->
             ContactQuickActionsPopup(
-                contactInfo = contact,
+                contactInfo = contact.copy(isStarred = isQuickActionContactStarred),
                 onDismiss = { quickActionsContact = null },
                 onMessageClick = {
                     onConversationClick(contact.chatGuid)
+                },
+                onStarToggle = { newStarred ->
+                    val success = viewModel.toggleContactStarred(contact.address, newStarred)
+                    if (success) {
+                        isQuickActionContactStarred = newStarred
+                    }
+                },
+                onDismissInferredName = {
+                    viewModel.dismissInferredName(contact.address)
+                }
+            )
+        }
+
+        // Batch snooze dialog for multi-select
+        if (showBatchSnoozeDialog) {
+            SnoozeDurationDialog(
+                onDismiss = { showBatchSnoozeDialog = false },
+                onDurationSelected = { durationMs ->
+                    selectedConversations.forEach { guid ->
+                        viewModel.snoozeChat(guid, durationMs)
+                    }
+                    showBatchSnoozeDialog = false
+                    selectedConversations = emptySet()
                 }
             )
         }
@@ -827,13 +951,41 @@ fun ConversationsScreen(
         }
 
         // Stacked status banners at the bottom
-        // SMS banner stacks on top of the iMessage banner
+        // SMS import progress and banner stacks on top of the iMessage banner
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding(),
             verticalArrangement = Arrangement.Bottom
         ) {
+            // SMS import progress bar
+            AnimatedVisibility(
+                visible = uiState.isImportingSms,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                SmsImportProgressBar(
+                    progress = uiState.smsImportProgress,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+
+            // SMS import error bar (shown when import fails)
+            AnimatedVisibility(
+                visible = uiState.smsImportError != null && !uiState.isImportingSms,
+                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
+            ) {
+                uiState.smsImportError?.let { error ->
+                    SmsImportErrorBar(
+                        errorMessage = error,
+                        onRetry = { viewModel.startSmsImport() },
+                        onDismiss = { viewModel.dismissSmsImportError() },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+
             // SMS status banner (on top when both visible)
             SmsStatusBanner(
                 state = uiState.smsBannerState,
@@ -850,8 +1002,8 @@ fun ConversationsScreen(
             ConnectionStatusBanner(
                 state = uiState.connectionBannerState,
                 onSetupClick = {
-                    // Navigate to server settings
-                    onSettingsNavigate("server", false)
+                    // Navigate to setup flow (skip welcome and SMS setup)
+                    onSettingsNavigate("setup", false)
                 },
                 onDismiss = {
                     viewModel.dismissSetupBanner()
@@ -860,6 +1012,127 @@ fun ConversationsScreen(
                     viewModel.retryConnection()
                 }
             )
+        }
+    }
+}
+
+/**
+ * SMS import progress bar that shows at the bottom of the conversation list.
+ * Displays a linear progress indicator with percentage text.
+ */
+@Composable
+private fun SmsImportProgressBar(
+    progress: Float,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 2.dp
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Sms,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Importing SMS messages...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                Text(
+                    text = "${(progress * 100).toInt()}%",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+    }
+}
+
+/**
+ * SMS import error bar that shows when import fails.
+ * Displays error message with retry and dismiss options.
+ */
+@Composable
+private fun SmsImportErrorBar(
+    errorMessage: String,
+    onRetry: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier,
+        color = MaterialTheme.colorScheme.errorContainer,
+        tonalElevation = 2.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                Icons.Default.Error,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(20.dp)
+            )
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "SMS import failed",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = errorMessage,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            TextButton(onClick = onRetry) {
+                Text("Retry")
+            }
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(24.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Dismiss",
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }
@@ -978,7 +1251,9 @@ private fun SearchOverlay(
                 val filteredConversations = conversations.filter { conv ->
                     val matchesQuery = query.isEmpty() ||
                         conv.displayName.contains(query, ignoreCase = true) ||
-                        conv.address.contains(query, ignoreCase = true)
+                        conv.address.contains(query, ignoreCase = true) ||
+                        // Also search link preview titles for conversations with links
+                        (conv.lastMessageLinkTitle?.contains(query, ignoreCase = true) == true)
 
                     val matchesFilter = when (selectedFilter) {
                         SearchFilter.UNREAD -> conv.unreadCount > 0
@@ -989,7 +1264,15 @@ private fun SearchOverlay(
                         SearchFilter.STARRED -> conv.isPinned // Using pinned as proxy for starred
                         SearchFilter.IMAGES -> conv.lastMessageType == MessageType.IMAGE
                         SearchFilter.VIDEOS -> conv.lastMessageType == MessageType.VIDEO
-                        SearchFilter.PLACES -> false // TODO: Implement places filter
+                        SearchFilter.PLACES -> conv.lastMessageLinkDomain?.let { domain ->
+                            // Check if the domain matches any known places/maps service
+                            val placesPatterns = listOf(
+                                "maps.google", "google.com/maps", "maps.app.goo.gl",
+                                "goo.gl/maps", "maps.apple.com", "findmy.apple.com",
+                                "find-my.apple.com"
+                            )
+                            placesPatterns.any { domain.lowercase().contains(it) }
+                        } == true
                         SearchFilter.LINKS -> conv.lastMessageType == MessageType.LINK
                         null -> true
                     }
@@ -1059,7 +1342,7 @@ private fun SearchOverlay(
                             }
                         }
 
-                        // Message content matches
+                        // Message content matches - reuse GoogleStyleConversationTile
                         if (filteredMessageResults.isNotEmpty()) {
                             item {
                                 Text(
@@ -1073,9 +1356,10 @@ private fun SearchOverlay(
                                 items = filteredMessageResults,
                                 key = { it.messageGuid }
                             ) { result ->
-                                MessageSearchResultTile(
-                                    result = result,
-                                    onClick = { onConversationClick(result.chatGuid) }
+                                GoogleStyleConversationTile(
+                                    conversation = result.toConversationUiModel(),
+                                    onClick = { onConversationClick(result.chatGuid) },
+                                    onLongClick = { } // No long-press actions for search results
                                 )
                             }
                         }
@@ -1083,112 +1367,6 @@ private fun SearchOverlay(
                 }
             }
         }
-    }
-}
-
-/**
- * Message search result tile styled like a compact conversation tile.
- * Uses the same visual style as GoogleStyleConversationTile but with:
- * - Smaller avatar (40dp vs 56dp)
- * - No swipe/long-press actions
- * - Same phone number formatting
- * - Same date formatting as conversation list
- */
-@Composable
-private fun MessageSearchResultTile(
-    result: MessageSearchResult,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surface
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Avatar (compact size)
-            Avatar(
-                name = result.chatDisplayName,
-                avatarPath = null,
-                size = 40.dp
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Content
-            Column(modifier = Modifier.weight(1f)) {
-                // Chat name with phone number formatting
-                Text(
-                    text = formatDisplayName(result.chatDisplayName),
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // Message preview
-                Text(
-                    text = if (result.isFromMe) "You: ${result.messageText}" else result.messageText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Timestamp - same format as conversation list
-            Text(
-                text = formatRelativeTime(result.timestamp),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-/**
- * Formats timestamp for search results using the same logic as conversation list.
- * - Today: Time in device format (12h/24h)
- * - Within 7 days: Day abbreviation (Mon, Tue, etc.)
- * - Same year: Month and day (Jan 15)
- * - Different year: Short date (1/15/24)
- */
-@Composable
-private fun formatRelativeTime(timestamp: Long): String {
-    if (timestamp == 0L) return ""
-
-    val context = LocalContext.current
-    val now = System.currentTimeMillis()
-    val messageDate = java.util.Calendar.getInstance().apply { timeInMillis = timestamp }
-    val today = java.util.Calendar.getInstance()
-
-    val isToday = messageDate.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR) &&
-            messageDate.get(java.util.Calendar.DAY_OF_YEAR) == today.get(java.util.Calendar.DAY_OF_YEAR)
-
-    val isSameYear = messageDate.get(java.util.Calendar.YEAR) == today.get(java.util.Calendar.YEAR)
-
-    // Check if within the last 7 days
-    val daysDiff = (now - timestamp) / (1000 * 60 * 60 * 24)
-
-    // Get system time format (12h or 24h)
-    val is24Hour = android.text.format.DateFormat.is24HourFormat(context)
-    val timePattern = if (is24Hour) "HH:mm" else "h:mm a"
-
-    return when {
-        isToday -> java.text.SimpleDateFormat(timePattern, java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-        daysDiff < 7 -> java.text.SimpleDateFormat("EEE", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-        isSameYear -> java.text.SimpleDateFormat("MMM d", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
-        else -> java.text.SimpleDateFormat("M/d/yy", java.util.Locale.getDefault()).format(java.util.Date(timestamp))
     }
 }
 
@@ -1563,12 +1741,12 @@ private fun GoogleStyleConversationTile(
                 } else {
                     if (conversation.isGroup) {
                         GroupAvatar(
-                            names = listOf(conversation.displayName), // TODO: Get participant names
+                            names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
                             size = 56.dp
                         )
                     } else {
                         Avatar(
-                            name = conversation.displayName,
+                            name = conversation.rawDisplayName,
                             avatarPath = conversation.avatarPath,
                             size = 56.dp
                         )
@@ -1625,6 +1803,15 @@ private fun GoogleStyleConversationTile(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+
+                    if (conversation.isSnoozed) {
+                        Icon(
+                            Icons.Default.Snooze,
+                            contentDescription = "Snoozed",
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -1671,7 +1858,7 @@ private fun GoogleStyleConversationTile(
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
                             lineHeight = 18.sp,
-                            textIndent = TextIndent(firstLine = firstLineIndent)
+                            textIndent = TextIndent(firstLine = firstLineIndent, restLine = 0.sp)
                         ),
                         color = textColor,
                         maxLines = 2,
@@ -2018,6 +2205,45 @@ private fun EmptyFilterState(
     }
 }
 
+@Composable
+private fun EmptyCategoryState(
+    category: MessageCategory,
+    onClearFilter: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier,
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Icon(
+                imageVector = category.icon,
+                contentDescription = null,
+                modifier = Modifier.size(64.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+            )
+            Text(
+                text = "No ${category.displayName.lowercase()}",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Text(
+                text = category.description,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                modifier = Modifier.padding(horizontal = 32.dp),
+                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+            )
+            TextButton(onClick = onClearFilter) {
+                Text("Show all conversations")
+            }
+        }
+    }
+}
+
 private fun formatMessagePreview(conversation: ConversationUiModel): String {
     return when {
         conversation.hasDraft -> conversation.draftText ?: ""
@@ -2217,11 +2443,15 @@ private fun SettingsPanel(
                 onServerSettingsClick = { navigateFromDrawer("server") },
                 onArchivedClick = { navigateFromDrawer("archived") },
                 onBlockedClick = { navigateFromDrawer("blocked") },
+                onSpamClick = { navigateFromDrawer("spam") },
+                onCategorizationClick = { navigateFromDrawer("categorization") },
                 onSyncSettingsClick = { navigateFromDrawer("sync") },
+                onExportClick = { navigateFromDrawer("export") },
                 onSmsSettingsClick = { navigateFromDrawer("sms") },
                 onNotificationsClick = { navigateFromDrawer("notifications") },
                 onSwipeSettingsClick = { navigateFromDrawer("swipe") },
                 onEffectsSettingsClick = { navigateFromDrawer("effects") },
+                onTemplatesClick = { navigateFromDrawer("templates") },
                 onAboutClick = { navigateFromDrawer("about") },
                 viewModel = viewModel
             )
