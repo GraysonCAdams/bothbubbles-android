@@ -1,5 +1,6 @@
 package com.bothbubbles.data.repository
 
+import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -12,6 +13,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.ChatDto
 import com.bothbubbles.data.remote.api.dto.ChatQueryRequest
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -23,8 +25,13 @@ class ChatRepository @Inject constructor(
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
-    private val api: BothBubblesApi
+    private val api: BothBubblesApi,
+    private val androidContactsService: AndroidContactsService
 ) {
+    companion object {
+        private const val TAG = "ChatRepository"
+    }
+
     // ===== Local Operations =====
 
     fun observeAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
@@ -49,6 +56,45 @@ class ChatRepository @Inject constructor(
 
     fun observeParticipantsForChat(chatGuid: String): Flow<List<HandleEntity>> =
         chatDao.observeParticipantsForChat(chatGuid)
+
+    /**
+     * Observe participants from multiple chats (for merged/unified conversations).
+     * Combines and deduplicates participants from all specified chats.
+     */
+    fun observeParticipantsForChats(chatGuids: List<String>): Flow<List<HandleEntity>> {
+        if (chatGuids.isEmpty()) return kotlinx.coroutines.flow.flowOf(emptyList())
+        if (chatGuids.size == 1) return observeParticipantsForChat(chatGuids.first())
+
+        return kotlinx.coroutines.flow.combine(
+            chatGuids.map { guid -> chatDao.observeParticipantsForChat(guid) }
+        ) { participantLists ->
+            participantLists.flatMap { it.toList() }.distinctBy { it.id }
+        }
+    }
+
+    /**
+     * Get participants from multiple chats (one-shot query for merged/unified conversations).
+     * Combines and deduplicates participants from all specified chats.
+     */
+    suspend fun getParticipantsForChats(chatGuids: List<String>): List<HandleEntity> {
+        if (chatGuids.isEmpty()) return emptyList()
+        return chatGuids.flatMap { guid ->
+            chatDao.getParticipantsForChat(guid)
+        }.distinctBy { it.id }
+    }
+
+    /**
+     * Find the "best" participant from a list - prefers one with saved contact info.
+     * Used for displaying names/avatars in conversation lists.
+     *
+     * Priority:
+     * 1. Participant with cachedDisplayName (saved contact)
+     * 2. First participant in the list
+     */
+    fun getBestParticipant(participants: List<HandleEntity>): HandleEntity? {
+        return participants.find { it.cachedDisplayName != null }
+            ?: participants.firstOrNull()
+    }
 
     /**
      * Get the first participant's phone number/address for a chat.
@@ -269,8 +315,49 @@ class ChatRepository @Inject constructor(
         }
     }
 
+    /**
+     * Refresh contact info (display name and photo) for all handles from device contacts.
+     * This should be called when:
+     * - READ_CONTACTS permission is newly granted
+     * - App starts with permission already granted (to catch contact changes)
+     * Returns the number of handles updated.
+     */
+    suspend fun refreshAllContactInfo(): Int {
+        if (!androidContactsService.hasReadPermission()) {
+            Log.d(TAG, "refreshAllContactInfo: No READ_CONTACTS permission, skipping")
+            return 0
+        }
+
+        var updatedCount = 0
+        try {
+            val allHandles = handleDao.getAllHandlesOnce()
+            Log.d(TAG, "refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
+
+            for (handle in allHandles) {
+                val displayName = androidContactsService.getContactDisplayName(handle.address)
+                val photoUri = androidContactsService.getContactPhotoUri(handle.address)
+
+                // Only update if we found contact info or if there's existing cached info to clear
+                if (displayName != handle.cachedDisplayName || photoUri != handle.cachedAvatarPath) {
+                    handleDao.updateCachedContactInfo(handle.id, displayName, photoUri)
+                    updatedCount++
+                }
+            }
+
+            Log.d(TAG, "refreshAllContactInfo: Updated $updatedCount handles")
+        } catch (e: Exception) {
+            Log.e(TAG, "refreshAllContactInfo: Error refreshing contact info", e)
+        }
+
+        return updatedCount
+    }
+
     private suspend fun syncChatParticipants(chatDto: ChatDto) {
         chatDto.participants?.forEach { handleDto ->
+            // Look up contact info from device contacts
+            val contactName = androidContactsService.getContactDisplayName(handleDto.address)
+            val contactPhotoUri = androidContactsService.getContactPhotoUri(handleDto.address)
+
             val handle = HandleEntity(
                 address = handleDto.address,
                 service = handleDto.service,
@@ -278,10 +365,12 @@ class ChatRepository @Inject constructor(
                 formattedAddress = handleDto.formattedAddress,
                 defaultEmail = handleDto.defaultEmail,
                 defaultPhone = handleDto.defaultPhone,
-                originalRowId = handleDto.originalRowId
+                originalRowId = handleDto.originalRowId,
+                cachedDisplayName = contactName,
+                cachedAvatarPath = contactPhotoUri
             )
-            // Insert and get the ID
-            val handleId = handleDao.insertHandle(handle)
+            // Use upsert to get existing handle ID (insertHandle with REPLACE breaks cross-refs)
+            val handleId = handleDao.upsertHandle(handle)
 
             // Create cross-reference using the handle ID
             val crossRef = ChatHandleCrossRef(
@@ -309,29 +398,62 @@ class ChatRepository @Inject constructor(
         normalizedPhone: String,
         displayName: String?
     ) {
-        // Check if this chat is already in a unified group
-        if (unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)) {
+        // Skip if identifier is empty or looks like an email/RCS address (not a phone)
+        // This prevents all non-phone chats from being lumped into a single group
+        if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
+            Log.d(TAG, "linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
             return
         }
 
-        // Check if unified group already exists for this phone number
-        var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+        Log.d(TAG, "linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
 
-        if (group == null) {
-            // Create new unified group with this iMessage chat as primary
-            val newGroup = UnifiedChatGroupEntity(
-                identifier = normalizedPhone,
-                primaryChatGuid = chatGuid,
-                displayName = displayName
-            )
-            val groupId = unifiedChatGroupDao.insertGroup(newGroup)
-            group = newGroup.copy(id = groupId)
+        try {
+            // Check if this chat is already in a unified group
+            if (unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)) {
+                Log.d(TAG, "linkChatToUnifiedGroup: $chatGuid is already in a unified group")
+                return
+            }
+
+            // Check if unified group already exists for this phone number
+            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+            Log.d(TAG, "linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
+
+            if (group == null) {
+                // Create new unified group with this iMessage chat as primary
+                val newGroup = UnifiedChatGroupEntity(
+                    identifier = normalizedPhone,
+                    primaryChatGuid = chatGuid,
+                    displayName = displayName
+                )
+                // Use atomic method to prevent FOREIGN KEY errors
+                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
+                Log.d(TAG, "linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
+
+                // If SMS created the group first (during concurrent sync), claim primary for iMessage
+                if (group.primaryChatGuid != chatGuid &&
+                    (group.primaryChatGuid.startsWith("sms;") || group.primaryChatGuid.startsWith("mms;"))) {
+                    Log.d(TAG, "linkChatToUnifiedGroup: Claiming primary for iMessage (was ${group.primaryChatGuid})")
+                    unifiedChatGroupDao.updatePrimaryChatGuid(group.id, chatGuid)
+                }
+            } else {
+                // Group exists, add this iMessage chat to it
+                Log.d(TAG, "linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
+                unifiedChatGroupDao.insertMember(
+                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
+                )
+
+                // If SMS is currently primary, claim it for iMessage
+                if (group.primaryChatGuid.startsWith("sms;") || group.primaryChatGuid.startsWith("mms;")) {
+                    Log.d(TAG, "linkChatToUnifiedGroup: Claiming primary for iMessage (was ${group.primaryChatGuid})")
+                    unifiedChatGroupDao.updatePrimaryChatGuid(group.id, chatGuid)
+                }
+            }
+
+            Log.d(TAG, "linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+        } catch (e: Exception) {
+            Log.e(TAG, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'", e)
+            throw e
         }
-
-        // Add this iMessage chat to the unified group
-        unifiedChatGroupDao.insertMember(
-            UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-        )
     }
 
     private fun ChatDto.toEntity(): ChatEntity {

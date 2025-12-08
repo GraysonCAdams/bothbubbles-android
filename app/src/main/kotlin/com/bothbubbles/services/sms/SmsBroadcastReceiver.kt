@@ -20,6 +20,7 @@ import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.services.categorization.CategorizationRepository
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.spam.SpamRepository
@@ -72,6 +73,9 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     @Inject
     lateinit var categorizationRepository: CategorizationRepository
 
+    @Inject
+    lateinit var androidContactsService: AndroidContactsService
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -123,6 +127,12 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
         messagesByAddress.forEach { (rawAddress, parts) ->
             if (rawAddress.isBlank()) return@forEach
+
+            // Skip non-phone addresses (RCS, email, etc.) - rare for SMS but check anyway
+            if (!isValidPhoneAddress(rawAddress)) {
+                Log.d(TAG, "Skipping SMS from non-phone address: $rawAddress")
+                return@forEach
+            }
 
             // Normalize address to prevent duplicate conversations for same phone number
             // e.g., "+16505551229", "6505551229", "(650) 555-1229" all become "+16505551229"
@@ -265,8 +275,17 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Get or create handle for this address
             var handle = handleDao.getHandleByAddressAndService(address, "SMS")
             if (handle == null) {
+                // Look up contact info from device contacts
+                val contactName = androidContactsService.getContactDisplayName(address)
+                val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
+
                 val handleId = handleDao.insertHandle(
-                    HandleEntity(address = address, service = "SMS")
+                    HandleEntity(
+                        address = address,
+                        service = "SMS",
+                        cachedDisplayName = contactName,
+                        cachedAvatarPath = contactPhotoUri
+                    )
                 )
                 handle = handleDao.getHandleById(handleId)
             }
@@ -281,5 +300,21 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             Log.e(TAG, "Error ensuring handle and inferring sender name", e)
         }
+    }
+
+    /**
+     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
+     */
+    private fun isValidPhoneAddress(address: String): Boolean {
+        if (address.isBlank()) return false
+        // Filter out RCS addresses
+        if (address.contains("@")) return false
+        if (address.contains("rcs.google.com")) return false
+        if (address.contains("rbm.goog")) return false
+        // Filter out "insert-address-token" placeholder
+        if (address.contains("insert-address-token")) return false
+        // Should have at least some digits to be a phone number
+        if (address.count { it.isDigit() } < 3) return false
+        return true
     }
 }

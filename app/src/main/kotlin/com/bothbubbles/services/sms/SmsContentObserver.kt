@@ -233,19 +233,39 @@ class SmsContentObserver @Inject constructor(
                     val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = 1)
                     val mmsMessage = mmsMessages.find { it.id == id } ?: continue
 
+                    // Filter addresses to only valid phone numbers (exclude RCS, email, etc.)
+                    val validAddresses = mmsMessage.addresses.filter { isValidPhoneAddress(it.address) }
+                    if (validAddresses.isEmpty()) {
+                        Log.d(TAG, "Skipping MMS $id - no valid phone addresses (RCS or email-only message)")
+                        continue
+                    }
+
                     // Get primary address (for chat creation)
                     val rawPrimaryAddress = if (isFromMe) {
-                        mmsMessage.addresses.find { it.type == 151 }?.address // TO
+                        validAddresses.find { it.type == 151 }?.address // TO
+                            ?: validAddresses.find { it.type == 130 }?.address // BCC (other recipient)
                     } else {
-                        mmsMessage.addresses.find { it.type == 137 }?.address // FROM
-                    } ?: continue
+                        validAddresses.find { it.type == 137 }?.address // FROM
+                    }
+
+                    if (rawPrimaryAddress == null) {
+                        Log.d(TAG, "Skipping MMS $id - no valid primary address found")
+                        continue
+                    }
+
                     // Normalize to prevent duplicate conversations
                     val primaryAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(rawPrimaryAddress)
 
-                    // Determine chat GUID based on participants
-                    val isGroup = mmsMessage.addresses.size > 2
+                    // Determine if this is a group chat by counting unique phone numbers
+                    // A 1:1 MMS has 2 unique numbers (sender + recipient)
+                    // A group MMS has 3+ unique numbers
+                    val uniquePhoneNumbers = validAddresses
+                        .map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it.address) }
+                        .distinct()
+                    val isGroup = uniquePhoneNumbers.size > 2
+
                     val chatGuid = if (isGroup) {
-                        "mms;-;${mmsMessage.addresses.map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it.address) }.sorted().joinToString(",")}"
+                        "mms;-;${uniquePhoneNumbers.sorted().joinToString(",")}"
                     } else {
                         "sms;-;$primaryAddress"
                     }
@@ -297,6 +317,22 @@ class SmsContentObserver @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Error processing MMS changes", e)
         }
+    }
+
+    /**
+     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
+     */
+    private fun isValidPhoneAddress(address: String): Boolean {
+        if (address.isBlank()) return false
+        // Filter out RCS addresses
+        if (address.contains("@")) return false
+        if (address.contains("rcs.google.com")) return false
+        if (address.contains("rbm.goog")) return false
+        // Filter out "insert-address-token" placeholder
+        if (address.contains("insert-address-token")) return false
+        // Should have at least some digits to be a phone number
+        if (address.count { it.isDigit() } < 3) return false
+        return true
     }
 
     private suspend fun ensureChatExists(

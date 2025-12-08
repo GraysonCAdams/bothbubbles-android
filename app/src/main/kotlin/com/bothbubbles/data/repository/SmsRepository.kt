@@ -3,6 +3,7 @@ package com.bothbubbles.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
+import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -42,6 +43,10 @@ class SmsRepository @Inject constructor(
     private val smsContentObserver: SmsContentObserver,
     private val androidContactsService: AndroidContactsService
 ) {
+    companion object {
+        private const val TAG = "SmsRepository"
+    }
+
     // ===== App State =====
 
     /**
@@ -107,8 +112,17 @@ class SmsRepository @Inject constructor(
         val rawAddresses = thread.recipientAddresses
         if (rawAddresses.isEmpty()) return
 
-        // Normalize addresses to prevent duplicate conversations
-        val addresses = rawAddresses.map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
+        // Filter to valid phone numbers and normalize
+        val addresses = rawAddresses
+            .filter { isValidPhoneAddress(it) }
+            .map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
+            .filter { it.isNotBlank() }
+            .distinct()
+
+        if (addresses.isEmpty()) {
+            Log.d(TAG, "Skipping thread ${thread.threadId} - no valid phone addresses")
+            return
+        }
 
         val isGroup = addresses.size > 1
         val chatGuid = if (isGroup) {
@@ -133,26 +147,79 @@ class SmsRepository @Inject constructor(
         }
 
         // Create handles for addresses and link to chat
-        addresses.forEach { address ->
+        // Use upsertHandle to get existing handle ID instead of creating duplicates
+        // (insertHandle with REPLACE would delete existing handles, breaking cross-refs)
+        addresses.filter { it.isNotBlank() }.forEach { address ->
             // Look up contact info from device contacts
             val contactName = androidContactsService.getContactDisplayName(address)
+            val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
             val formattedAddress = PhoneNumberFormatter.format(address)
 
             val handle = HandleEntity(
                 address = address,
                 formattedAddress = formattedAddress,
                 service = "SMS",
-                cachedDisplayName = contactName
+                cachedDisplayName = contactName,
+                cachedAvatarPath = contactPhotoUri
             )
-            val handleId = handleDao.insertHandle(handle)
+            val handleId = handleDao.upsertHandle(handle)
             // Link handle to chat (required for getParticipantsForChat to work)
             chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
         }
 
         // For single contacts (not groups), link to unified group
-        if (!isGroup) {
-            val normalizedPhone = addresses.first()
+        val validAddresses = addresses.filter { it.isNotBlank() }
+        if (!isGroup && validAddresses.isNotEmpty()) {
+            val normalizedPhone = validAddresses.first()
             linkChatToUnifiedGroup(chatGuid, normalizedPhone)
+        }
+
+        // Import the most recent message so the badge displays correctly in conversation list
+        importLatestMessageForThread(thread.threadId, chatGuid, isGroup)
+
+        // Update unified group's latestMessageDate if applicable
+        if (!isGroup && validAddresses.isNotEmpty()) {
+            val normalizedPhone = validAddresses.first()
+            val group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+            if (group != null) {
+                // Update latestMessageDate if this thread's message is newer
+                val currentLatest = group.latestMessageDate ?: 0L
+                if (thread.lastMessageDate > currentLatest) {
+                    unifiedChatGroupDao.updateLatestMessage(group.id, thread.lastMessageDate, thread.snippet)
+                }
+            }
+        }
+    }
+
+    /**
+     * Import the most recent message from an SMS/MMS thread.
+     * This ensures the conversation list can display the correct message source badge.
+     */
+    private suspend fun importLatestMessageForThread(threadId: Long, chatGuid: String, isGroup: Boolean) {
+        // First try SMS (more common)
+        val smsMessages = smsContentProvider.getSmsMessages(threadId, limit = 1)
+        val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = 1)
+
+        // Find the most recent message between SMS and MMS
+        val latestSms = smsMessages.firstOrNull()
+        val latestMms = mmsMessages.firstOrNull()
+
+        val latestMessage: MessageEntity? = when {
+            latestSms != null && latestMms != null -> {
+                if (latestSms.date >= latestMms.date) {
+                    with(smsContentProvider) { latestSms.toMessageEntity(chatGuid) }
+                } else {
+                    with(smsContentProvider) { latestMms.toMessageEntity(chatGuid) }
+                }
+            }
+            latestSms != null -> with(smsContentProvider) { latestSms.toMessageEntity(chatGuid) }
+            latestMms != null -> with(smsContentProvider) { latestMms.toMessageEntity(chatGuid) }
+            else -> null
+        }
+
+        // Insert the message if we found one (upsert to avoid duplicates)
+        latestMessage?.let { msg ->
+            messageDao.insertOrUpdateMessage(msg)
         }
     }
 
@@ -161,35 +228,57 @@ class SmsRepository @Inject constructor(
      * This enables merging SMS and iMessage conversations for the same contact.
      */
     private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
-        // Check if unified group already exists for this phone number
-        var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-
-        if (group == null) {
-            // Check if there's an existing iMessage chat for this phone
-            val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-
-            // Create new unified group
-            val primaryGuid = existingIMessageChat?.guid ?: chatGuid
-            val newGroup = UnifiedChatGroupEntity(
-                identifier = normalizedPhone,
-                primaryChatGuid = primaryGuid,
-                displayName = existingIMessageChat?.displayName
-            )
-            val groupId = unifiedChatGroupDao.insertGroup(newGroup)
-            group = newGroup.copy(id = groupId)
-
-            // Add existing iMessage chat to group if found
-            if (existingIMessageChat != null) {
-                unifiedChatGroupDao.insertMember(
-                    UnifiedChatMember(groupId = groupId, chatGuid = existingIMessageChat.guid)
-                )
-            }
+        // Skip if identifier is empty or looks like an email/RCS address (not a phone)
+        // This prevents all non-phone chats from being lumped into a single group
+        if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
+            Log.d(TAG, "linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
+            return
         }
 
-        // Add this SMS chat to the unified group
-        unifiedChatGroupDao.insertMember(
-            UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-        )
+        Log.d(TAG, "linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
+
+        try {
+            // Check if unified group already exists for this phone number
+            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+            Log.d(TAG, "linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
+
+            if (group == null) {
+                // Check if there's an existing iMessage chat for this phone
+                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+                Log.d(TAG, "linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
+
+                // Create new unified group and add this chat atomically
+                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
+                val newGroup = UnifiedChatGroupEntity(
+                    identifier = normalizedPhone,
+                    primaryChatGuid = primaryGuid,
+                    displayName = existingIMessageChat?.displayName
+                )
+
+                // Use atomic method to prevent FOREIGN KEY errors
+                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
+                Log.d(TAG, "linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
+
+                // Add existing iMessage chat to group if found (separate from SMS chat)
+                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
+                    Log.d(TAG, "linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
+                    unifiedChatGroupDao.insertMember(
+                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
+                    )
+                }
+            } else {
+                // Group exists, just add this SMS chat to it
+                Log.d(TAG, "linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
+                unifiedChatGroupDao.insertMember(
+                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
+                )
+            }
+
+            Log.d(TAG, "linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+        } catch (e: Exception) {
+            Log.e(TAG, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'", e)
+            throw e
+        }
     }
 
     /**
@@ -216,8 +305,13 @@ class SmsRepository @Inject constructor(
      * Handles cases like +1 prefix, different country codes, etc.
      */
     private fun phonesMatch(phone1: String, phone2: String): Boolean {
+        // Empty strings should never match (prevents RCS/email addresses from matching all phones)
+        if (phone1.isEmpty() || phone2.isEmpty()) return false
         if (phone1 == phone2) return true
-        if (phone1.endsWith(phone2) || phone2.endsWith(phone1)) return true
+        // Only use endsWith matching if both strings have reasonable length
+        if (phone1.length >= 7 && phone2.length >= 7) {
+            if (phone1.endsWith(phone2) || phone2.endsWith(phone1)) return true
+        }
         // Compare last 10 digits for US numbers
         if (phone1.length >= 10 && phone2.length >= 10 &&
             phone1.takeLast(10) == phone2.takeLast(10)) {
@@ -431,19 +525,21 @@ class SmsRepository @Inject constructor(
             )
             chatDao.insertChat(chat)
 
-            // Create handle and link to chat
+            // Create handle and link to chat (use upsert to preserve existing handle IDs)
             if (address.isNotBlank()) {
                 // Look up contact info from device contacts
                 val contactName = androidContactsService.getContactDisplayName(address)
+                val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
                 val formattedAddress = PhoneNumberFormatter.format(address)
 
                 val handle = HandleEntity(
                     address = address,
                     formattedAddress = formattedAddress,
                     service = "SMS",
-                    cachedDisplayName = contactName
+                    cachedDisplayName = contactName,
+                    cachedAvatarPath = contactPhotoUri
                 )
-                val handleId = handleDao.insertHandle(handle)
+                val handleId = handleDao.upsertHandle(handle)
                 chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
             }
         }
@@ -503,5 +599,21 @@ class SmsRepository @Inject constructor(
             smsId = id,
             smsThreadId = threadId
         )
+    }
+
+    /**
+     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
+     */
+    private fun isValidPhoneAddress(address: String): Boolean {
+        if (address.isBlank()) return false
+        // Filter out RCS addresses
+        if (address.contains("@")) return false
+        if (address.contains("rcs.google.com")) return false
+        if (address.contains("rbm.goog")) return false
+        // Filter out "insert-address-token" placeholder
+        if (address.contains("insert-address-token")) return false
+        // Should have at least some digits to be a phone number
+        if (address.count { it.isDigit() } < 3) return false
+        return true
     }
 }

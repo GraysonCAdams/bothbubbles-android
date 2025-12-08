@@ -410,12 +410,10 @@ class SetupViewModel @Inject constructor(
                     )
                 }
 
-                // Start initial sync in background (continues after navigation)
-                launch {
-                    syncService.performInitialSync(
-                        messagesPerChat = _uiState.value.messagesPerChat
-                    )
-                }
+                // Start initial sync in SyncService's own scope (survives ViewModel destruction)
+                syncService.startInitialSync(
+                    messagesPerChat = _uiState.value.messagesPerChat
+                )
             } catch (e: Exception) {
                 _uiState.update {
                     it.copy(

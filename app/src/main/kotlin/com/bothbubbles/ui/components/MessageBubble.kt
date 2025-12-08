@@ -150,6 +150,513 @@ fun MessageBubble(
     // Whether to show delivery indicator (iMessage-style: only on last message in sequence)
     showDeliveryIndicator: Boolean = true
 ) {
+    // Detect first URL in message text for link preview
+    val firstUrl = remember(message.text) {
+        UrlParsingUtils.getFirstUrl(message.text)
+    }
+
+    // Check if this message needs segmented rendering
+    // (has media attachments OR has link preview with text)
+    val needsSegmentation = remember(message, firstUrl) {
+        MessageSegmentParser.needsSegmentation(message, firstUrl != null)
+    }
+
+    if (needsSegmentation) {
+        // Use segmented rendering for messages with media/links
+        SegmentedMessageBubble(
+            message = message,
+            firstUrl = firstUrl,
+            onLongPress = onLongPress,
+            onMediaClick = onMediaClick,
+            modifier = modifier,
+            groupPosition = groupPosition,
+            searchQuery = searchQuery,
+            isCurrentSearchMatch = isCurrentSearchMatch,
+            onDownloadClick = onDownloadClick,
+            downloadingAttachments = downloadingAttachments,
+            showDeliveryIndicator = showDeliveryIndicator
+        )
+    } else {
+        // Use optimized single-bubble rendering for simple text messages
+        SimpleBubbleContent(
+            message = message,
+            firstUrl = firstUrl,
+            onLongPress = onLongPress,
+            onMediaClick = onMediaClick,
+            modifier = modifier,
+            groupPosition = groupPosition,
+            searchQuery = searchQuery,
+            isCurrentSearchMatch = isCurrentSearchMatch,
+            onDownloadClick = onDownloadClick,
+            downloadingAttachments = downloadingAttachments,
+            showDeliveryIndicator = showDeliveryIndicator
+        )
+    }
+}
+
+/**
+ * Segmented message rendering for messages with media or link previews.
+ * Renders media and links outside bubbles as standalone elements.
+ */
+@Composable
+private fun SegmentedMessageBubble(
+    message: MessageUiModel,
+    firstUrl: DetectedUrl?,
+    onLongPress: () -> Unit,
+    onMediaClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
+    searchQuery: String? = null,
+    isCurrentSearchMatch: Boolean = false,
+    onDownloadClick: ((String) -> Unit)? = null,
+    downloadingAttachments: Map<String, Float> = emptyMap(),
+    showDeliveryIndicator: Boolean = true
+) {
+    val bubbleColors = BothBubblesTheme.bubbleColors
+    val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
+    val hapticFeedback = LocalHapticFeedback.current
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
+
+    // Parse message into segments
+    val segments = remember(message, firstUrl) {
+        MessageSegmentParser.parse(message, firstUrl)
+    }
+
+    // Swipe-to-reveal timestamp state
+    val dragOffset = remember { Animatable(0f) }
+    val maxDragPx = with(density) { 80.dp.toPx() }
+
+    // Tap-to-show timestamp state
+    var showTimestamp by remember { mutableStateOf(false) }
+
+    // Message type label
+    val messageTypeLabel = when (message.messageSource) {
+        MessageSource.LOCAL_SMS.name -> "SMS"
+        MessageSource.LOCAL_MMS.name -> "MMS"
+        MessageSource.SERVER_SMS.name -> "SMS"
+        else -> "iMessage"
+    }
+
+    Box(
+        modifier = modifier.fillMaxWidth(),
+        contentAlignment = Alignment.CenterStart
+    ) {
+        // Sliding timestamp
+        val timestampAlpha = (dragOffset.value.absoluteValue / maxDragPx).coerceIn(0f, 1f)
+
+        if (message.isFromMe) {
+            Column(
+                horizontalAlignment = Alignment.End,
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .offset(x = (80 - (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
+                    .alpha(timestampAlpha)
+                    .padding(end = 8.dp)
+            ) {
+                Text(
+                    text = message.formattedTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = messageTypeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        } else {
+            Column(
+                horizontalAlignment = Alignment.Start,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = (-80 + (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
+                    .alpha(timestampAlpha)
+                    .padding(start = 8.dp)
+            ) {
+                Text(
+                    text = message.formattedTime,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = messageTypeLabel,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
+
+        // Main content row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset(dragOffset.value.roundToInt(), 0) }
+                .pointerInput(message.guid) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            coroutineScope.launch {
+                                dragOffset.animateTo(
+                                    0f,
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                                        stiffness = Spring.StiffnessLow
+                                    )
+                                )
+                            }
+                        },
+                        onDragCancel = {
+                            coroutineScope.launch {
+                                dragOffset.animateTo(0f)
+                            }
+                        },
+                        onHorizontalDrag = { _, dragAmount ->
+                            coroutineScope.launch {
+                                val newOffset = if (message.isFromMe) {
+                                    (dragOffset.value + dragAmount).coerceIn(-maxDragPx, 0f)
+                                } else {
+                                    (dragOffset.value + dragAmount).coerceIn(0f, maxDragPx)
+                                }
+                                dragOffset.snapTo(newOffset)
+                            }
+                        }
+                    )
+                },
+            horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
+                modifier = Modifier.widthIn(max = 300.dp)
+            ) {
+                // Sender name for group chats
+                if (!message.isFromMe && message.senderName != null) {
+                    Text(
+                        text = message.senderName,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 12.dp, bottom = 2.dp)
+                    )
+                }
+
+                // Render segments with reactions on first segment
+                Box {
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        segments.forEachIndexed { index, segment ->
+                            when (segment) {
+                                is MessageSegment.MediaSegment -> {
+                                    BorderlessMediaContent(
+                                        attachment = segment.attachment,
+                                        isFromMe = message.isFromMe,
+                                        onMediaClick = onMediaClick,
+                                        maxWidth = 300.dp,
+                                        onDownloadClick = onDownloadClick,
+                                        isDownloading = segment.attachment.guid in downloadingAttachments,
+                                        downloadProgress = downloadingAttachments[segment.attachment.guid] ?: 0f,
+                                        modifier = Modifier
+                                            .pointerInput(message.guid) {
+                                                detectTapGestures(
+                                                    onTap = { showTimestamp = !showTimestamp },
+                                                    onLongPress = {
+                                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        onLongPress()
+                                                    }
+                                                )
+                                            }
+                                    )
+                                }
+
+                                is MessageSegment.TextSegment -> {
+                                    TextBubbleSegment(
+                                        message = message,
+                                        text = segment.text,
+                                        groupPosition = groupPosition,
+                                        searchQuery = searchQuery,
+                                        isCurrentSearchMatch = isCurrentSearchMatch && index == segments.indexOfFirst { it is MessageSegment.TextSegment },
+                                        onLongPress = onLongPress,
+                                        onTimestampToggle = { showTimestamp = !showTimestamp }
+                                    )
+                                }
+
+                                is MessageSegment.LinkPreviewSegment -> {
+                                    BorderlessLinkPreview(
+                                        url = segment.url,
+                                        isFromMe = message.isFromMe,
+                                        maxWidth = 300.dp,
+                                        modifier = Modifier
+                                            .pointerInput(message.guid) {
+                                                detectTapGestures(
+                                                    onLongPress = {
+                                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                        onLongPress()
+                                                    }
+                                                )
+                                            }
+                                    )
+                                }
+
+                                is MessageSegment.FileSegment -> {
+                                    AttachmentContent(
+                                        attachment = segment.attachment,
+                                        isFromMe = message.isFromMe,
+                                        onMediaClick = onMediaClick,
+                                        onDownloadClick = onDownloadClick,
+                                        isDownloading = segment.attachment.guid in downloadingAttachments,
+                                        downloadProgress = downloadingAttachments[segment.attachment.guid] ?: 0f
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Reactions overlay on top-corner
+                    if (message.reactions.isNotEmpty()) {
+                        ReactionsDisplay(
+                            reactions = message.reactions,
+                            isFromMe = message.isFromMe,
+                            modifier = Modifier
+                                .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
+                                .offset(
+                                    x = if (message.isFromMe) (-20).dp else 20.dp,
+                                    y = (-14).dp
+                                )
+                        )
+                    }
+                }
+
+                // Tap-to-reveal timestamp
+                if (showTimestamp) {
+                    Text(
+                        text = "${message.formattedTime} · $messageTypeLabel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(
+                            start = if (message.isFromMe) 0.dp else 12.dp,
+                            end = if (message.isFromMe) 12.dp else 0.dp,
+                            top = 2.dp
+                        )
+                    )
+                }
+
+                // Delivery indicator
+                if (message.isFromMe && showDeliveryIndicator) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .padding(end = 4.dp, top = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        DeliveryIndicator(
+                            isSent = message.isSent,
+                            isDelivered = message.isDelivered,
+                            isRead = message.isRead,
+                            hasError = message.hasError
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Text bubble segment for use in segmented message rendering.
+ */
+@Composable
+private fun TextBubbleSegment(
+    message: MessageUiModel,
+    text: String,
+    groupPosition: MessageGroupPosition,
+    searchQuery: String?,
+    isCurrentSearchMatch: Boolean,
+    onLongPress: () -> Unit,
+    onTimestampToggle: () -> Unit
+) {
+    val bubbleColors = BothBubblesTheme.bubbleColors
+    val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
+    val hapticFeedback = LocalHapticFeedback.current
+    val context = LocalContext.current
+
+    // Detect clickables in text
+    val detectedDates = remember(text) { DateParsingUtils.detectDates(text) }
+    val detectedPhoneNumbers = remember(text) { PhoneAndCodeParsingUtils.detectPhoneNumbers(text) }
+    val detectedCodes = remember(text) { PhoneAndCodeParsingUtils.detectCodes(text) }
+
+    // Phone number context menu state
+    var showPhoneMenu by remember { mutableStateOf(false) }
+    var selectedPhoneNumber by remember { mutableStateOf<DetectedPhoneNumber?>(null) }
+
+    val bubbleShape = when (groupPosition) {
+        MessageGroupPosition.SINGLE -> if (message.isFromMe) MessageShapes.sentSingle else MessageShapes.receivedSingle
+        MessageGroupPosition.FIRST -> if (message.isFromMe) MessageShapes.sentFirst else MessageShapes.receivedFirst
+        MessageGroupPosition.MIDDLE -> if (message.isFromMe) MessageShapes.sentMiddle else MessageShapes.receivedMiddle
+        MessageGroupPosition.LAST -> if (message.isFromMe) MessageShapes.sentLast else MessageShapes.receivedLast
+    }
+
+    Surface(
+        shape = bubbleShape,
+        color = when {
+            message.isFromMe && isIMessage -> bubbleColors.iMessageSent
+            message.isFromMe -> bubbleColors.smsSent
+            else -> bubbleColors.received
+        },
+        tonalElevation = 0.dp,
+        modifier = Modifier
+            .then(
+                if (isCurrentSearchMatch) {
+                    Modifier.border(
+                        width = 2.dp,
+                        color = Color(0xFFFF9800),
+                        shape = bubbleShape
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .pointerInput(message.guid) {
+                detectTapGestures(
+                    onTap = { onTimestampToggle() },
+                    onLongPress = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPress()
+                    }
+                )
+            }
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+        ) {
+            val textColor = when {
+                message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
+                message.isFromMe -> bubbleColors.smsSentText
+                else -> bubbleColors.receivedText
+            }
+
+            val hasClickableContent = detectedDates.isNotEmpty() ||
+                    detectedPhoneNumbers.isNotEmpty() ||
+                    detectedCodes.isNotEmpty()
+
+            val annotatedText = if (!searchQuery.isNullOrBlank() && text.contains(searchQuery, ignoreCase = true)) {
+                buildSearchHighlightedText(text, searchQuery, textColor, detectedDates)
+            } else if (hasClickableContent) {
+                buildAnnotatedStringWithClickables(text, detectedDates, detectedPhoneNumbers, detectedCodes, textColor)
+            } else {
+                null
+            }
+
+            if (annotatedText != null) {
+                ClickableText(
+                    text = annotatedText,
+                    style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
+                    onClick = { offset ->
+                        // Handle date clicks
+                        annotatedText.getStringAnnotations("DATE", offset, offset).firstOrNull()?.let { annotation ->
+                            val dateIndex = annotation.item.toIntOrNull()
+                            if (dateIndex != null && dateIndex < detectedDates.size) {
+                                openCalendarIntent(context, detectedDates[dateIndex], text, detectedDates)
+                            }
+                            return@ClickableText
+                        }
+
+                        // Handle phone clicks
+                        annotatedText.getStringAnnotations("PHONE", offset, offset).firstOrNull()?.let { annotation ->
+                            val phoneIndex = annotation.item.toIntOrNull()
+                            if (phoneIndex != null && phoneIndex < detectedPhoneNumbers.size) {
+                                selectedPhoneNumber = detectedPhoneNumbers[phoneIndex]
+                                showPhoneMenu = true
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            }
+                            return@ClickableText
+                        }
+
+                        // Handle code clicks
+                        annotatedText.getStringAnnotations("CODE", offset, offset).firstOrNull()?.let { annotation ->
+                            val codeIndex = annotation.item.toIntOrNull()
+                            if (codeIndex != null && codeIndex < detectedCodes.size) {
+                                copyToClipboard(context, detectedCodes[codeIndex].code, "Code copied")
+                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            }
+                            return@ClickableText
+                        }
+
+                        onTimestampToggle()
+                    }
+                )
+
+                // Phone number context menu
+                DropdownMenu(
+                    expanded = showPhoneMenu,
+                    onDismissRequest = {
+                        showPhoneMenu = false
+                        selectedPhoneNumber = null
+                    }
+                ) {
+                    selectedPhoneNumber?.let { phone ->
+                        DropdownMenuItem(
+                            text = { Text("Send message") },
+                            onClick = {
+                                openSmsIntent(context, phone.normalizedNumber)
+                                showPhoneMenu = false
+                            },
+                            leadingIcon = { Icon(Icons.Default.Message, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Call") },
+                            onClick = {
+                                openDialerIntent(context, phone.normalizedNumber)
+                                showPhoneMenu = false
+                            },
+                            leadingIcon = { Icon(Icons.Default.Phone, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Add to contacts") },
+                            onClick = {
+                                openAddContactIntent(context, phone.normalizedNumber)
+                                showPhoneMenu = false
+                            },
+                            leadingIcon = { Icon(Icons.Default.PersonAdd, null) }
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Copy") },
+                            onClick = {
+                                copyToClipboard(context, phone.matchedText, "Phone number copied")
+                                showPhoneMenu = false
+                            },
+                            leadingIcon = { Icon(Icons.Default.ContentCopy, null) }
+                        )
+                    }
+                }
+            } else {
+                Text(
+                    text = text,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = textColor
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Simple single-bubble rendering for text-only messages (optimized path).
+ */
+@Composable
+private fun SimpleBubbleContent(
+    message: MessageUiModel,
+    firstUrl: DetectedUrl?,
+    onLongPress: () -> Unit,
+    onMediaClick: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    groupPosition: MessageGroupPosition = MessageGroupPosition.SINGLE,
+    searchQuery: String? = null,
+    isCurrentSearchMatch: Boolean = false,
+    onDownloadClick: ((String) -> Unit)? = null,
+    downloadingAttachments: Map<String, Float> = emptyMap(),
+    showDeliveryIndicator: Boolean = true
+) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
     val hapticFeedback = LocalHapticFeedback.current
@@ -180,11 +687,6 @@ fun MessageBubble(
     val detectedCodes = remember(message.text) {
         if (message.text.isNullOrBlank()) emptyList()
         else PhoneAndCodeParsingUtils.detectCodes(message.text)
-    }
-
-    // Detect first URL in message text for link preview
-    val firstUrl = remember(message.text) {
-        UrlParsingUtils.getFirstUrl(message.text)
     }
 
     // Phone number context menu state

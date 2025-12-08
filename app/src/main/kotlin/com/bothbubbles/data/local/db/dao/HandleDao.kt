@@ -16,6 +16,9 @@ interface HandleDao {
     @Query("SELECT * FROM handles ORDER BY cached_display_name ASC")
     fun getAllHandles(): Flow<List<HandleEntity>>
 
+    @Query("SELECT * FROM handles")
+    suspend fun getAllHandlesOnce(): List<HandleEntity>
+
     @Query("SELECT * FROM handles WHERE id = :id")
     suspend fun getHandleById(id: Long): HandleEntity?
 

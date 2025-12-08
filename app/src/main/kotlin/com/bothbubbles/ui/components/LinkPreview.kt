@@ -8,6 +8,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -137,6 +139,60 @@ fun LinkPreview(
                 url = url,
                 domain = domain,
                 isFromMe = isFromMe,
+                modifier = modifier
+            )
+        }
+    }
+}
+
+/**
+ * Borderless link preview composable for use outside message bubbles.
+ * Renders without Card container, using only subtle rounded corners.
+ */
+@Composable
+fun BorderlessLinkPreview(
+    url: String,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier,
+    maxWidth: Dp = 300.dp,
+    viewModel: LinkPreviewViewModel = hiltViewModel()
+) {
+    val previewState by viewModel.getPreviewState(url).collectAsState()
+    val domain = remember(url) { UrlParsingUtils.extractDomain(url) }
+
+    when (val state = previewState) {
+        is LinkPreviewState.Loading -> {
+            BorderlessLinkPreviewShimmer(
+                showImage = true,
+                maxWidth = maxWidth,
+                modifier = modifier
+            )
+        }
+
+        is LinkPreviewState.Success -> {
+            BorderlessLinkPreviewCard(
+                preview = state.preview,
+                isFromMe = isFromMe,
+                maxWidth = maxWidth,
+                modifier = modifier
+            )
+        }
+
+        is LinkPreviewState.Error -> {
+            // For errors in borderless mode, show minimal
+            BorderlessLinkPreviewMinimal(
+                url = url,
+                domain = domain,
+                maxWidth = maxWidth,
+                modifier = modifier
+            )
+        }
+
+        is LinkPreviewState.NoPreview -> {
+            BorderlessLinkPreviewMinimal(
+                url = url,
+                domain = domain,
+                maxWidth = maxWidth,
                 modifier = modifier
             )
         }

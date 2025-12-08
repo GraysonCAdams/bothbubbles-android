@@ -101,12 +101,19 @@ data class HandleEntity(
 
     /**
      * Generate initials from the actual name (without "Maybe: " prefix)
+     * Strips emojis and non-letter/digit characters before extracting initials
      */
     val initials: String
         get() {
             // Use actual name without "Maybe: " prefix for initials
             val name = cachedDisplayName ?: inferredName ?: formattedAddress ?: address
-            val parts = name.split(" ").filter { it.isNotBlank() }
+            // Strip emojis and other non-letter/non-digit characters
+            val cleanedName = name.trim()
+                .split(" ")
+                .map { word -> word.filter { it.isLetterOrDigit() } }
+                .filter { it.isNotBlank() }
+                .joinToString(" ")
+            val parts = cleanedName.split(" ").filter { it.isNotBlank() }
             return when {
                 parts.size >= 2 -> "${parts.first().first()}${parts.last().first()}"
                 parts.size == 1 && parts.first().length >= 2 -> parts.first().take(2)

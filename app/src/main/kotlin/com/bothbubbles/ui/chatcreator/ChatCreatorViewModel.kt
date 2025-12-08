@@ -15,10 +15,12 @@ import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -42,6 +44,9 @@ class ChatCreatorViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatCreatorUiState())
     val uiState: StateFlow<ChatCreatorUiState> = _uiState.asStateFlow()
+
+    // Cached starred addresses for quick lookup
+    private var starredAddresses: Set<String> = emptySet()
 
     init {
         loadContacts()
@@ -118,6 +123,9 @@ class ChatCreatorViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
+            // Pre-fetch all starred addresses once (on IO thread)
+            starredAddresses = androidContactsService.getAllStarredAddresses()
+
             // Observe handles and group chats from database
             combine(
                 handleDao.getAllHandles(),
@@ -130,7 +138,7 @@ class ChatCreatorViewModel @Inject constructor(
                 },
                 _searchQuery
             ) { handles, groupChats, query ->
-                val contacts = handles.map { it.toContactUiModel() }
+                val contacts = handles.map { it.toContactUiModel(starredAddresses) }
 
                 val filtered = if (query.isNotBlank()) {
                     contacts.filter { contact ->
@@ -308,7 +316,7 @@ class ChatCreatorViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    private fun HandleEntity.toContactUiModel(): ContactUiModel {
+    private fun HandleEntity.toContactUiModel(starredSet: Set<String>): ContactUiModel {
         // Determine service label
         val serviceLabel = when {
             service.equals("SMS", ignoreCase = true) -> "SMS"
@@ -316,8 +324,11 @@ class ChatCreatorViewModel @Inject constructor(
             else -> null // iMessage doesn't need a label
         }
 
-        // Check if contact is starred (favorite) in Android contacts
-        val isFavorite = androidContactsService.isContactStarred(address)
+        // Check if contact is starred using the pre-fetched set (fast O(1) lookup)
+        val normalizedAddress = address.replace(Regex("[^0-9+]"), "")
+        val isFavorite = starredSet.contains(address) ||
+                starredSet.contains(normalizedAddress) ||
+                starredSet.contains(address.lowercase())
 
         return ContactUiModel(
             address = address,

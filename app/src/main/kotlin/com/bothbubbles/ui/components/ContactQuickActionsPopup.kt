@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Star
@@ -60,6 +61,7 @@ fun ContactQuickActionsPopup(
     onStarToggle: (Boolean) -> Unit = {},
     onDismissInferredName: () -> Unit = {},  // Called when user dismisses the inferred name
     onContactAdded: () -> Unit = {},  // Called when user returns from adding a contact
+    onSetGroupPhoto: () -> Unit = {},  // Called when user wants to set/change group photo
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -153,6 +155,18 @@ fun ContactQuickActionsPopup(
                                 onDismiss()
                             }
                         )
+
+                        // Set group photo (only for group chats)
+                        if (contactInfo.isGroup) {
+                            QuickActionButton(
+                                icon = Icons.Default.Image,
+                                contentDescription = "Set group photo",
+                                onClick = {
+                                    onSetGroupPhoto()
+                                    onDismiss()
+                                }
+                            )
+                        }
 
                         // Call (only for non-group chats)
                         if (!contactInfo.isGroup) {

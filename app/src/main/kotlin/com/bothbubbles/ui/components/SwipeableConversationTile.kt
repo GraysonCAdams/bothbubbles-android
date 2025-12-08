@@ -308,12 +308,13 @@ private fun ConversationTileContent(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Avatar - clickable/long-clickable if handler provided
+            // Size is 60dp to accommodate the message type badge overflow (56dp avatar + 4dp)
             Box(
                 modifier = Modifier
-                    .size(56.dp)
+                    .size(60.dp)
                     .then(
                         if (onAvatarClick != null) {
-                            Modifier.clip(CircleShape).combinedClickable(
+                            Modifier.combinedClickable(
                                 onClick = onAvatarClick,
                                 onLongClick = onAvatarClick
                             )

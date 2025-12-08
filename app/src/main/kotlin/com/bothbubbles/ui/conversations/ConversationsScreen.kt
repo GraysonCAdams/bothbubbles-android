@@ -1,7 +1,10 @@
 package com.bothbubbles.ui.conversations
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -62,6 +65,7 @@ import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
@@ -90,6 +94,7 @@ import com.bothbubbles.ui.components.SwipeableConversationTile
 import com.bothbubbles.ui.components.MessageStatusIndicator
 import com.bothbubbles.ui.components.ConversationListSkeleton
 import com.bothbubbles.ui.components.staggeredEntrance
+import com.bothbubbles.ui.components.UrlParsingUtils
 import com.bothbubbles.ui.settings.SettingsContent
 import com.bothbubbles.ui.settings.SettingsViewModel
 import com.bothbubbles.ui.theme.KumbhSansFamily
@@ -139,11 +144,13 @@ fun ConversationsScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
 
-    // Refresh SMS state when screen resumes (to catch permission/default app changes)
+    // Refresh state when screen resumes (to catch permission/default app changes)
     DisposableEffect(lifecycleOwner) {
         val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
             if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshSmsState()
+                // Refresh contact info in case permission was granted or contacts changed
+                viewModel.onPermissionStateChanged()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -287,6 +294,19 @@ fun ConversationsScreen(
     // Contact quick actions popup state
     var quickActionsContact by remember { mutableStateOf<ContactInfo?>(null) }
     var isQuickActionContactStarred by remember { mutableStateOf(false) }
+
+    // Group photo picker state
+    var pendingGroupPhotoChat by remember { mutableStateOf<String?>(null) }
+    val groupPhotoPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri ->
+        uri?.let { selectedUri ->
+            pendingGroupPhotoChat?.let { chatGuid ->
+                viewModel.setGroupPhoto(chatGuid, selectedUri)
+            }
+        }
+        pendingGroupPhotoChat = null
+    }
 
     // Update starred status when contact popup opens
     LaunchedEffect(quickActionsContact) {
@@ -577,12 +597,26 @@ fun ConversationsScreen(
                 }
             },
             floatingActionButton = {
+                // Calculate bottom padding based on visible progress bars
+                // Each bar is ~80dp, animate the offset so FAB stays above them
+                val progressBarHeight = 80.dp
+                val fabBottomPadding by animateDpAsState(
+                    targetValue = when {
+                        uiState.isSyncing && !isSearchActive -> progressBarHeight
+                        uiState.isImportingSms -> progressBarHeight
+                        else -> 0.dp
+                    },
+                    animationSpec = tween(durationMillis = 300),
+                    label = "fabPadding"
+                )
+
                 // MD3 Extended FAB with animated expansion
                 // Uses standard MD3 shape (16dp corner radius) and elevation
                 // The `expanded` parameter animates the text label with a slide transition
                 ExtendedFloatingActionButton(
                     onClick = onNewMessageClick,
                     expanded = isFabExpanded,
+                    modifier = Modifier.padding(bottom = fabBottomPadding),
                     icon = {
                         Icon(
                             Icons.AutoMirrored.Filled.Message,
@@ -823,6 +857,7 @@ fun ConversationsScreen(
                                         if (conversation.isGroup) {
                                             GroupAvatar(
                                                 names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                                                avatarPaths = conversation.participantAvatarPaths,
                                                 size = 56.dp
                                             )
                                         } else {
@@ -930,6 +965,10 @@ fun ConversationsScreen(
                 },
                 onContactAdded = {
                     viewModel.refreshContactInfo(contact.address)
+                },
+                onSetGroupPhoto = {
+                    pendingGroupPhotoChat = contact.chatGuid
+                    groupPhotoPickerLauncher.launch("image/*")
                 }
             )
         }
@@ -1034,8 +1073,7 @@ fun ConversationsScreen(
         // Sync progress, SMS import progress, and banners stack on top of each other
         Column(
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding(),
+                .align(Alignment.BottomCenter),
             verticalArrangement = Arrangement.Bottom
         ) {
             // BlueBubbles sync progress bar (shows during initial/incremental sync)
@@ -1122,6 +1160,7 @@ private fun SmsImportProgressBar(
     progress: Float,
     modifier: Modifier = Modifier
 ) {
+    val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1130,7 +1169,7 @@ private fun SmsImportProgressBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -1187,6 +1226,7 @@ private fun SyncProgressBar(
     isInitialSync: Boolean,
     modifier: Modifier = Modifier
 ) {
+    val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1195,7 +1235,7 @@ private fun SyncProgressBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
@@ -1216,7 +1256,7 @@ private fun SyncProgressBar(
                     )
                     Column {
                         Text(
-                            text = if (isInitialSync) "Syncing messages..." else stage,
+                            text = if (isInitialSync) "Importing BlueBubbles messages..." else stage,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -1270,6 +1310,7 @@ private fun SmsImportErrorBar(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     Surface(
         modifier = modifier,
         color = MaterialTheme.colorScheme.errorContainer,
@@ -1278,7 +1319,7 @@ private fun SmsImportErrorBar(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
+                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomPadding),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp)
         ) {
@@ -1702,10 +1743,16 @@ private fun ProfileAvatarWithRing(
             contentAlignment = Alignment.Center
         ) {
             if (userAvatarPath != null) {
+                val avatarUri = remember(userAvatarPath) { android.net.Uri.parse(userAvatarPath) }
                 coil.compose.AsyncImage(
-                    model = userAvatarPath,
+                    model = coil.request.ImageRequest.Builder(LocalContext.current)
+                        .data(avatarUri)
+                        .crossfade(true)
+                        .build(),
                     contentDescription = "Profile",
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop
                 )
             } else if (userName != null) {
@@ -1933,6 +1980,7 @@ private fun GoogleStyleConversationTile(
                         if (conversation.isGroup) {
                             GroupAvatar(
                                 names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                                avatarPaths = conversation.participantAvatarPaths,
                                 size = 56.dp
                             )
                         } else {
@@ -2148,7 +2196,7 @@ private fun PinnedConversationsRow(
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
     ) {
         items(
             items = conversations,
@@ -2184,7 +2232,7 @@ private fun PinnedConversationItem(
     Box(modifier = modifier) {
         Column(
             modifier = Modifier
-                .width(72.dp)
+                .width(100.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .combinedClickable(
                     onClick = onClick,
@@ -2194,13 +2242,12 @@ private fun PinnedConversationItem(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
         // Avatar with unread badge or selection checkmark
-        // Outer Box without clip to allow badge overflow
-        Box(modifier = Modifier.size(56.dp)) {
-            // Avatar content - clip only applies to avatar, not badge
+        // Outer Box sized for avatar + badge overflow (72dp + 4dp)
+        Box(modifier = Modifier.size(76.dp)) {
+            // Avatar content - no clip here, AvatarWithMessageType handles its own clipping
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .clip(CircleShape)
+                    .size(76.dp) // Size includes badge overflow
                     .combinedClickable(
                         onClick = onClick,
                         onLongClick = { showContextMenu = true }
@@ -2211,7 +2258,7 @@ private fun PinnedConversationItem(
                     Surface(
                         color = MaterialTheme.colorScheme.outline,
                         shape = CircleShape,
-                        modifier = Modifier.fillMaxSize()
+                        modifier = Modifier.size(72.dp)
                     ) {
                         Box(
                             contentAlignment = Alignment.Center,
@@ -2221,7 +2268,7 @@ private fun PinnedConversationItem(
                                 Icons.Default.Check,
                                 contentDescription = "Selected",
                                 tint = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.size(28.dp)
+                                modifier = Modifier.size(32.dp)
                             )
                         }
                     }
@@ -2229,18 +2276,19 @@ private fun PinnedConversationItem(
                     AvatarWithMessageType(
                         messageSourceType = getMessageSourceType(conversation.lastMessageSource),
                         backgroundColor = MaterialTheme.colorScheme.surface,
-                        size = 56.dp
+                        size = 72.dp
                     ) {
                         if (conversation.isGroup) {
                             GroupAvatar(
                                 names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                                size = 56.dp
+                                avatarPaths = conversation.participantAvatarPaths,
+                                size = 72.dp
                             )
                         } else {
                             Avatar(
                                 name = conversation.displayName,
                                 avatarPath = conversation.avatarPath,
-                                size = 56.dp
+                                size = 72.dp
                             )
                         }
                     }
@@ -2305,14 +2353,16 @@ private fun PinnedConversationItem(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Name (truncated) - format phone numbers nicely
+            // Name (truncated) - format phone numbers nicely, constrain width for grid layout
             val formattedName = formatDisplayName(conversation.displayName)
             Text(
                 text = formattedName.split(" ").firstOrNull() ?: formattedName,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
-                overflow = TextOverflow.Ellipsis
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 88.dp)
             )
         }
 
@@ -2468,17 +2518,48 @@ private fun formatMessagePreview(conversation: ConversationUiModel): String {
 
 /**
  * Formats a link preview for display in the conversation list.
- * Shows "Title (domain)" if title is available, otherwise shows the URL.
+ * Includes any text surrounding the link, with the link portion replaced by
+ * the preview title/domain when available.
  */
 private fun formatLinkPreview(conversation: ConversationUiModel): String {
     val title = conversation.lastMessageLinkTitle
     val domain = conversation.lastMessageLinkDomain
+    val messageText = conversation.lastMessageText
 
-    return when {
+    // Get the link representation (title, domain, or raw URL)
+    val linkDisplay = when {
         title != null && domain != null -> "$title ($domain)"
         title != null -> title
         domain != null -> domain
-        else -> conversation.lastMessageText.take(50)
+        else -> null
+    }
+
+    // If we have no link display info, just return the message text
+    if (linkDisplay == null) {
+        return messageText.take(100)
+    }
+
+    // Find the URL position in the original text
+    val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
+    if (detectedUrl == null) {
+        return linkDisplay
+    }
+
+    // Extract text before and after the URL
+    val textBefore = messageText.substring(0, detectedUrl.startIndex).trim()
+    val textAfter = messageText.substring(detectedUrl.endIndex).trim()
+
+    // Build the preview with surrounding text
+    return buildString {
+        if (textBefore.isNotEmpty()) {
+            append(textBefore)
+            append(" ")
+        }
+        append(linkDisplay)
+        if (textAfter.isNotEmpty()) {
+            append(" ")
+            append(textAfter)
+        }
     }
 }
 

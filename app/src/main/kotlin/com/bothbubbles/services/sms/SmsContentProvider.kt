@@ -136,10 +136,11 @@ class SmsContentProvider @Inject constructor(
     }
 
     /**
-     * Get addresses for a thread
+     * Get addresses for a thread.
+     * Returns the other participants' phone numbers (excluding user's own number for received messages).
      */
     private fun getAddressesForThread(threadId: Long): List<String> {
-        val addresses = mutableListOf<String>()
+        val addresses = mutableSetOf<String>()
 
         // Get from SMS messages in the thread
         contentResolver.query(
@@ -150,26 +151,70 @@ class SmsContentProvider @Inject constructor(
             "${Telephony.Sms.DATE} DESC LIMIT 1"
         )?.use { cursor ->
             if (cursor.moveToFirst()) {
-                cursor.getStringOrNull(Telephony.Sms.ADDRESS)?.let { addresses.add(it) }
-            }
-        }
-
-        // Also check MMS for group conversations
-        contentResolver.query(
-            Uri.parse("content://mms/${threadId}/addr"),
-            arrayOf("address", "type"),
-            "type = 151", // TO type
-            null,
-            null
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                cursor.getString(0)?.let { addr ->
-                    if (addr !in addresses) addresses.add(addr)
+                cursor.getStringOrNull(Telephony.Sms.ADDRESS)?.let { addr ->
+                    if (isValidPhoneAddress(addr)) addresses.add(addr)
                 }
             }
         }
 
-        return addresses.distinct()
+        // If no SMS, check MMS messages in the thread
+        if (addresses.isEmpty()) {
+            // First get MMS IDs in this thread
+            val mmsIds = mutableListOf<Long>()
+            contentResolver.query(
+                Telephony.Mms.CONTENT_URI,
+                arrayOf(Telephony.Mms._ID),
+                "${Telephony.Mms.THREAD_ID} = ?",
+                arrayOf(threadId.toString()),
+                "${Telephony.Mms.DATE} DESC LIMIT 5"
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    mmsIds.add(cursor.getLong(0))
+                }
+            }
+
+            // For each MMS, get addresses (excluding user's own number which is typically TO)
+            for (mmsId in mmsIds) {
+                contentResolver.query(
+                    Uri.parse("content://mms/$mmsId/addr"),
+                    arrayOf("address", "type"),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val addr = cursor.getString(0)
+                        val type = cursor.getInt(1)
+                        // type 137 = FROM (sender), type 130 = BCC (other recipients in group)
+                        // type 151 = TO (usually the user for incoming messages)
+                        // For determining thread participants, we want FROM and BCC addresses
+                        if (addr != null && isValidPhoneAddress(addr) && (type == 137 || type == 130)) {
+                            addresses.add(addr)
+                        }
+                    }
+                }
+                // If we found addresses, no need to check more MMS messages
+                if (addresses.isNotEmpty()) break
+            }
+        }
+
+        return addresses.toList()
+    }
+
+    /**
+     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
+     */
+    private fun isValidPhoneAddress(address: String): Boolean {
+        if (address.isBlank()) return false
+        // Filter out RCS addresses
+        if (address.contains("@")) return false
+        if (address.contains("rcs.google.com")) return false
+        if (address.contains("rbm.goog")) return false
+        // Filter out "insert-address-token" placeholder
+        if (address.contains("insert-address-token")) return false
+        // Should have at least some digits to be a phone number
+        if (address.count { it.isDigit() } < 3) return false
+        return true
     }
 
     // ===== SMS Messages =====

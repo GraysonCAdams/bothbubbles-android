@@ -223,8 +223,9 @@ class ConversationDetailsViewModel @Inject constructor(
     fun refreshContactInfo(address: String) {
         viewModelScope.launch {
             val displayName = androidContactsService.getContactDisplayName(address)
-            if (displayName != null) {
-                chatRepository.updateHandleCachedContactInfo(address, displayName)
+            val photoUri = androidContactsService.getContactPhotoUri(address)
+            if (displayName != null || photoUri != null) {
+                chatRepository.updateHandleCachedContactInfo(address, displayName, photoUri)
             }
         }
     }

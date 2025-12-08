@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
@@ -87,6 +88,9 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
 
+    @Inject
+    lateinit var androidContactsService: AndroidContactsService
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -158,6 +162,15 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
             return
         }
 
+        // Check if this is a valid phone number (not RCS or email)
+        if (!isValidPhoneAddress(rawAddress)) {
+            Log.d(TAG, "MMS from non-phone address: $rawAddress - writing to provider but skipping chat creation")
+            // Still write to provider to trigger download, but don't create a chat
+            // The SmsContentObserver will handle this message properly when it arrives
+            writeMmsToProvider(context, notification, subscriptionId)
+            return
+        }
+
         // Normalize address
         val address = PhoneAndCodeParsingUtils.normalizePhoneNumber(rawAddress)
 
@@ -206,6 +219,22 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
             Log.i(TAG, "MMS from $address written to provider (ID: $mmsId), awaiting download")
         }
+    }
+
+    /**
+     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
+     */
+    private fun isValidPhoneAddress(address: String): Boolean {
+        if (address.isBlank()) return false
+        // Filter out RCS addresses
+        if (address.contains("@")) return false
+        if (address.contains("rcs.google.com")) return false
+        if (address.contains("rbm.goog")) return false
+        // Filter out "insert-address-token" placeholder
+        if (address.contains("insert-address-token")) return false
+        // Should have at least some digits to be a phone number
+        if (address.count { it.isDigit() } < 3) return false
+        return true
     }
 
     /**
@@ -323,8 +352,17 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         try {
             var handle = handleDao.getHandleByAddressAndService(address, "SMS")
             if (handle == null) {
+                // Look up contact info from device contacts
+                val contactName = androidContactsService.getContactDisplayName(address)
+                val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
+
                 val handleId = handleDao.insertHandle(
-                    HandleEntity(address = address, service = "SMS")
+                    HandleEntity(
+                        address = address,
+                        service = "SMS",
+                        cachedDisplayName = contactName,
+                        cachedAvatarPath = contactPhotoUri
+                    )
                 )
                 handle = handleDao.getHandleById(handleId)
             }

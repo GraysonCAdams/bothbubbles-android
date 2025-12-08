@@ -15,6 +15,7 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
+import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -95,6 +96,10 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    // Separate draft text flow for TextField performance - avoids full screen recomposition on each keystroke
+    private val _draftText = MutableStateFlow("")
+    val draftText: StateFlow<String> = _draftText.asStateFlow()
 
     private val _pendingAttachments = MutableStateFlow<List<Uri>>(emptyList())
 
@@ -311,6 +316,7 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun syncMessages() {
+        _uiState.update { it.copy(isSyncingMessages = true) }
         if (messageRepository.isLocalSmsChat(chatGuid)) {
             syncSmsMessages()
         } else {
@@ -330,6 +336,7 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             )
+            _uiState.update { it.copy(isSyncingMessages = false) }
         }
     }
 
@@ -439,9 +446,10 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             val displayName = androidContactsService.getContactDisplayName(address)
-            if (displayName != null) {
-                // Update the cached display name in the database
-                chatRepository.updateHandleCachedContactInfo(address, displayName)
+            val photoUri = androidContactsService.getContactPhotoUri(address)
+            if (displayName != null || photoUri != null) {
+                // Update the cached display name and photo in the database
+                chatRepository.updateHandleCachedContactInfo(address, displayName, photoUri)
                 // Hide the save contact banner since they saved the contact
                 _uiState.update { it.copy(showSaveContactBanner = false) }
             }
@@ -455,11 +463,25 @@ class ChatViewModel @Inject constructor(
     private fun loadChat() {
         viewModelScope.launch {
             var draftLoaded = false
-            chatRepository.observeChat(chatGuid).collect { chat ->
+
+            // Observe participants from all chats in merged conversation
+            val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
+
+            // Combine chat with participants to resolve display name properly
+            combine(
+                chatRepository.observeChat(chatGuid),
+                participantsFlow
+            ) { chat, participants -> chat to participants }
+            .collect { (chat, participants) ->
                 chat?.let {
+                    val chatTitle = resolveChatTitle(it, participants)
+                    // Load draft only on first observation to avoid overwriting user edits
+                    if (!draftLoaded) {
+                        _draftText.value = it.textFieldText ?: ""
+                    }
                     _uiState.update { state ->
                         state.copy(
-                            chatTitle = it.displayName ?: it.chatIdentifier?.let { id -> PhoneNumberFormatter.format(id) } ?: "",
+                            chatTitle = chatTitle,
                             isGroup = it.isGroup,
                             isArchived = it.isArchived,
                             isStarred = it.isStarred,
@@ -469,15 +491,34 @@ class ChatViewModel @Inject constructor(
                             isSnoozed = it.isSnoozed,
                             snoozeUntil = it.snoozeUntil,
                             isLocalSmsChat = it.isLocalSms,
-                            isIMessageChat = it.isIMessage,
-                            // Load draft only on first observation to avoid overwriting user edits
-                            draftText = if (!draftLoaded) it.textFieldText ?: "" else state.draftText
+                            isIMessageChat = it.isIMessage
                         )
                     }
                     draftLoaded = true
                 }
             }
         }
+    }
+
+    /**
+     * Resolve the display name for a chat, using consistent logic with the conversation list.
+     * For 1:1 chats: prefer participant's displayName (from contacts or inferred)
+     * For group chats: use chat displayName or generate from participant names
+     */
+    private fun resolveChatTitle(chat: ChatEntity, participants: List<HandleEntity>): String {
+        // For group chats: use explicit group name or generate from participants
+        if (chat.isGroup) {
+            return chat.displayName?.takeIf { it.isNotBlank() }
+                ?: participants.take(3).joinToString(", ") { it.displayName }
+                    .let { names -> if (participants.size > 3) "$names +${participants.size - 3}" else names }
+                    .ifEmpty { PhoneNumberFormatter.format(chat.chatIdentifier ?: "") }
+        }
+
+        // For 1:1 chats: prefer participant's displayName (handles contact lookup, inferred names)
+        val primaryParticipant = participants.firstOrNull()
+        return primaryParticipant?.displayName
+            ?: chat.displayName?.takeIf { it.isNotBlank() }
+            ?: PhoneNumberFormatter.format(chat.chatIdentifier ?: primaryParticipant?.address ?: "")
     }
 
     private fun loadMessages() {
@@ -489,15 +530,8 @@ class ChatViewModel @Inject constructor(
                 messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
             }
 
-            // For merged chats, combine participants from all chats
-            val participantsFlow = if (isMergedChat) {
-                // Observe participants from all merged chats and combine them
-                combine(mergedChatGuids.map { guid -> chatRepository.observeParticipantsForChat(guid) }) { participantLists ->
-                    participantLists.flatMap { it.toList() }.distinctBy { it.id }
-                }
-            } else {
-                chatRepository.observeParticipantsForChat(chatGuid)
-            }
+            // Observe participants from all chats in merged conversation
+            val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
 
             // Combine messages with participants to get sender names
             combine(
@@ -655,6 +689,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.update { it.copy(error = e.message) }
                 }
             }
+            _uiState.update { it.copy(isSyncingMessages = false) }
         }
     }
 
@@ -676,7 +711,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateDraft(text: String) {
-        _uiState.update { it.copy(draftText = text) }
+        _draftText.value = text
         handleTypingIndicator(text)
         persistDraft(text)
     }
@@ -747,7 +782,7 @@ class ChatViewModel @Inject constructor(
         // Save draft immediately when leaving (cancel debounce and save now)
         draftSaveJob?.cancel()
         viewModelScope.launch {
-            chatRepository.updateDraftText(chatGuid, _uiState.value.draftText)
+            chatRepository.updateDraftText(chatGuid, _draftText.value)
         }
     }
 
@@ -794,7 +829,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendMessage(effectId: String? = null) {
-        val text = _uiState.value.draftText.trim()
+        val text = _draftText.value.trim()
         val attachments = _pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
@@ -807,7 +842,8 @@ class ChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true, draftText = "") }
+            _draftText.value = ""
+            _uiState.update { it.copy(isSending = true) }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -841,13 +877,14 @@ class ChatViewModel @Inject constructor(
      * Send message with explicit delivery mode override
      */
     fun sendMessageVia(deliveryMode: MessageDeliveryMode) {
-        val text = _uiState.value.draftText.trim()
+        val text = _draftText.value.trim()
         val attachments = _pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isSending = true, draftText = "") }
+            _draftText.value = ""
+            _uiState.update { it.copy(isSending = true) }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -1510,10 +1547,10 @@ data class ChatUiState(
     val isGroup: Boolean = false,
     val isLoading: Boolean = true,
     val isLoadingMore: Boolean = false,
+    val isSyncingMessages: Boolean = false,
     val isSending: Boolean = false,
     val canLoadMore: Boolean = true,
     val messages: List<MessageUiModel> = emptyList(),
-    val draftText: String = "",
     val isTyping: Boolean = false,
     val error: String? = null,
     val isLocalSmsChat: Boolean = false,

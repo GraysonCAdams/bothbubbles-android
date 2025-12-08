@@ -742,3 +742,376 @@ private fun getFileIcon(extension: String?) = when (extension?.lowercase()) {
     "vcf" -> Icons.Outlined.ContactPage
     else -> Icons.Outlined.InsertDriveFile
 }
+
+// =============================================================================
+// BORDERLESS MEDIA COMPONENTS
+// Used when rendering media outside message bubbles as standalone elements
+// =============================================================================
+
+/**
+ * Renders media content (image or video) without bubble container styling.
+ * Used for standalone media segments in segmented message rendering.
+ *
+ * @param attachment The attachment to render
+ * @param isFromMe Whether this message is from the current user
+ * @param onMediaClick Callback when media is clicked for viewing
+ * @param maxWidth Maximum width constraint for the media
+ * @param onDownloadClick Optional callback for manual download mode
+ * @param isDownloading Whether this attachment is currently being downloaded
+ * @param downloadProgress Download progress (0.0 to 1.0)
+ */
+@Composable
+fun BorderlessMediaContent(
+    attachment: AttachmentUiModel,
+    isFromMe: Boolean,
+    onMediaClick: (String) -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp = 300.dp,
+    modifier: Modifier = Modifier,
+    onDownloadClick: ((String) -> Unit)? = null,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f
+) {
+    // Show placeholder if manual download mode and attachment needs download
+    val showPlaceholder = onDownloadClick != null && attachment.needsDownload
+
+    when {
+        showPlaceholder -> BorderlessAttachmentPlaceholder(
+            attachment = attachment,
+            onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
+            isDownloading = isDownloading,
+            downloadProgress = downloadProgress,
+            maxWidth = maxWidth,
+            modifier = modifier
+        )
+        attachment.isImage -> BorderlessImageAttachment(
+            attachment = attachment,
+            onClick = { onMediaClick(attachment.guid) },
+            maxWidth = maxWidth,
+            modifier = modifier
+        )
+        attachment.isVideo -> BorderlessVideoAttachment(
+            attachment = attachment,
+            onClick = { onMediaClick(attachment.guid) },
+            maxWidth = maxWidth,
+            modifier = modifier
+        )
+    }
+}
+
+/**
+ * Placeholder for borderless media that needs to be downloaded.
+ */
+@Composable
+private fun BorderlessAttachmentPlaceholder(
+    attachment: AttachmentUiModel,
+    onDownloadClick: () -> Unit,
+    isDownloading: Boolean,
+    downloadProgress: Float,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else if (attachment.isVideo) {
+        16f / 9f
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clickable(enabled = !isDownloading, onClick = onDownloadClick),
+        contentAlignment = Alignment.Center
+    ) {
+        // Placeholder background with aspect ratio
+        Box(
+            modifier = Modifier
+                .widthIn(max = maxWidth)
+                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+        )
+
+        // Download button or progress overlay
+        Surface(
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier.size(56.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                if (isDownloading) {
+                    CircularProgressIndicator(
+                        progress = { downloadProgress },
+                        modifier = Modifier.size(40.dp),
+                        strokeWidth = 3.dp,
+                        color = Color.White,
+                        trackColor = Color.White.copy(alpha = 0.3f)
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Download,
+                        contentDescription = "Download attachment",
+                        tint = Color.White,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+
+        // File size badge
+        if (attachment.friendlySize.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = attachment.friendlySize,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Video indicator
+        if (attachment.isVideo) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        Icons.Default.Videocam,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(12.dp)
+                    )
+                    Text(
+                        text = "Video",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders an image attachment without bubble container styling.
+ * Only has subtle rounded corners, no background color.
+ */
+@Composable
+private fun BorderlessImageAttachment(
+    attachment: AttachmentUiModel,
+    onClick: () -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var isError by remember { mutableStateOf(false) }
+
+    val imageUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio for proper sizing
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            // NO background color - borderless
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (imageUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = attachment.transferName ?: "Image",
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
+                    isError = state is AsyncImagePainter.State.Error
+                }
+            )
+        } else {
+            isError = true
+        }
+
+        // Loading indicator (with subtle background)
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // Error state
+        if (isError) {
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    if (attachment.friendlySize.isNotEmpty()) {
+                        Text(
+                            text = attachment.friendlySize,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders a video attachment without bubble container styling.
+ * Shows thumbnail with play button, only subtle rounded corners.
+ */
+@Composable
+private fun BorderlessVideoAttachment(
+    attachment: AttachmentUiModel,
+    onClick: () -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var isError by remember { mutableStateOf(false) }
+
+    val thumbnailUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        16f / 9f // Default video aspect ratio
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            // NO background color - borderless
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (thumbnailUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(thumbnailUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = attachment.transferName ?: "Video",
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
+                    isError = state is AsyncImagePainter.State.Error
+                }
+            )
+        } else {
+            // No thumbnail available, show placeholder
+            Box(
+                modifier = Modifier
+                    .width(200.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            )
+        }
+
+        // Loading indicator
+        if (isLoading && thumbnailUrl != null) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // Play button overlay (always show for videos)
+        if (!isLoading || isError || thumbnailUrl == null) {
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Play video",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+
+        // File size badge
+        if (attachment.friendlySize.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = attachment.friendlySize,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}

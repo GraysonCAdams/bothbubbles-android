@@ -97,8 +97,34 @@ interface UnifiedChatGroupDao {
 
     // ===== Inserts/Updates =====
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertGroup(group: UnifiedChatGroupEntity): Long
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertGroupIfNotExists(group: UnifiedChatGroupEntity): Long
+
+    /**
+     * Safely get or create a unified group for the given identifier.
+     * Uses a transaction to avoid race conditions that could cause data loss.
+     * Returns the group (either existing or newly created).
+     */
+    @Transaction
+    suspend fun getOrCreateGroup(group: UnifiedChatGroupEntity): UnifiedChatGroupEntity {
+        // First check if group already exists
+        val existing = getGroupByIdentifier(group.identifier)
+        if (existing != null) {
+            return existing
+        }
+
+        // Try to insert - if another thread beat us, IGNORE will return -1
+        val insertedId = insertGroupIfNotExists(group)
+
+        // If insert succeeded, return the new group
+        if (insertedId > 0) {
+            return group.copy(id = insertedId)
+        }
+
+        // Another thread inserted first - fetch and return that one
+        return getGroupByIdentifier(group.identifier)
+            ?: throw IllegalStateException("Failed to get or create unified group for ${group.identifier}")
+    }
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertMember(member: UnifiedChatMember)
@@ -184,10 +210,25 @@ interface UnifiedChatGroupDao {
         group: UnifiedChatGroupEntity,
         chatGuids: List<String>
     ): Long {
-        val groupId = insertGroup(group)
-        val members = chatGuids.map { UnifiedChatMember(groupId, it) }
+        val createdGroup = getOrCreateGroup(group)
+        val members = chatGuids.map { UnifiedChatMember(createdGroup.id, it) }
         insertMembers(members)
-        return groupId
+        return createdGroup.id
+    }
+
+    /**
+     * Atomically get or create a unified group and add a chat as a member.
+     * This ensures the group exists when inserting the member, preventing FOREIGN KEY errors.
+     * Returns the group (either existing or newly created).
+     */
+    @Transaction
+    suspend fun getOrCreateGroupAndAddMember(
+        group: UnifiedChatGroupEntity,
+        chatGuid: String
+    ): UnifiedChatGroupEntity {
+        val createdGroup = getOrCreateGroup(group)
+        insertMember(UnifiedChatMember(groupId = createdGroup.id, chatGuid = chatGuid))
+        return createdGroup
     }
 
     @Transaction
@@ -203,4 +244,14 @@ interface UnifiedChatGroupDao {
         deleteAllMembers()
         deleteAllGroups()
     }
+
+    /**
+     * Delete unified groups that have no members (orphaned groups).
+     * This can happen if all chats in a group are deleted.
+     */
+    @Query("""
+        DELETE FROM unified_chat_groups
+        WHERE id NOT IN (SELECT DISTINCT group_id FROM unified_chat_members)
+    """)
+    suspend fun deleteOrphanedGroups(): Int
 }

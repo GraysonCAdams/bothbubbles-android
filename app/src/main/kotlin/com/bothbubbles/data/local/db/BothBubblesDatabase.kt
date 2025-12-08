@@ -57,7 +57,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         UnifiedChatGroupEntity::class,
         UnifiedChatMember::class
     ],
-    version = 15,
+    version = 16,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -388,6 +388,23 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 15 to 16: Clean up corrupted unified_chat_groups
+         * where primaryChatGuid incorrectly points to an RCS/email chat for phone-based groups.
+         * This was caused by a bug in phonesMatch() where empty strings matched all phones.
+         */
+        val MIGRATION_15_16 = object : Migration(15, 16) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Due to bugs in unified group creation, wipe all unified groups and let them rebuild.
+                // Issues fixed:
+                // 1. phonesMatch() matched empty strings to all phones (RCS/email chats matched everything)
+                // 2. Empty identifiers caused all non-phone chats to join the same group
+                // 3. Email addresses were used as identifiers instead of being skipped
+                db.execSQL("DELETE FROM unified_chat_members")
+                db.execSQL("DELETE FROM unified_chat_groups")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -407,7 +424,8 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_11_12,
             MIGRATION_12_13,
             MIGRATION_13_14,
-            MIGRATION_14_15
+            MIGRATION_14_15,
+            MIGRATION_15_16
         )
     }
 }

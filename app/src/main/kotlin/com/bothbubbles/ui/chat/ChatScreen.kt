@@ -93,6 +93,7 @@ import com.bothbubbles.ui.components.SpamSafetyBanner
 import com.bothbubbles.ui.components.TapbackMenu
 import com.bothbubbles.ui.components.VCardOptionsDialog
 import com.bothbubbles.ui.components.MessageListSkeleton
+import com.bothbubbles.ui.components.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.staggeredEntrance
 import com.bothbubbles.ui.effects.EffectPickerSheet
 import com.bothbubbles.ui.effects.MessageEffect
@@ -123,6 +124,7 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val context = LocalContext.current
@@ -472,7 +474,7 @@ fun ChatScreen(
                     visible = showEmojiPicker,
                     onDismiss = { showEmojiPicker = false },
                     onEmojiSelected = { emoji ->
-                        viewModel.updateDraft(uiState.draftText + emoji)
+                        viewModel.updateDraft(draftText + emoji)
                     }
                 )
 
@@ -601,7 +603,7 @@ fun ChatScreen(
                         )
 
                         MessageInputArea(
-                            text = uiState.draftText,
+                            text = draftText,
                             onTextChange = viewModel::updateDraft,
                             onSendClick = {
                                 viewModel.sendMessage()
@@ -798,11 +800,6 @@ fun ChatScreen(
                         label = "banner_padding"
                     )
 
-                    // Get IME (keyboard) height to add extra scroll space when keyboard is visible
-                    val imeInsets = WindowInsets.ime
-                    val density = androidx.compose.ui.platform.LocalDensity.current
-                    val imeHeight = with(density) { imeInsets.getBottom(density).toDp() }
-
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
@@ -811,8 +808,7 @@ fun ChatScreen(
                             start = 16.dp,
                             end = 16.dp,
                             top = bannerTopPadding,
-                            // Add IME height to ensure content can scroll above keyboard
-                            bottom = 8.dp + imeHeight
+                            bottom = 8.dp
                         )
                         // Spacing is handled per-item based on group position
                     ) {
@@ -988,6 +984,21 @@ fun ChatScreen(
                                 }
                             }
                         }
+
+                        // Syncing indicator - shows skeleton bubbles at top while fetching messages
+                        // Since reverseLayout=true, adding at end puts it at visual top
+                        if (uiState.isSyncingMessages && uiState.messages.isNotEmpty()) {
+                            item(key = "sync_skeleton") {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    MessageBubbleSkeleton(isFromMe = false)
+                                    MessageBubbleSkeleton(isFromMe = true)
+                                    MessageBubbleSkeleton(isFromMe = false)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -1007,7 +1018,7 @@ fun ChatScreen(
     // Effect picker bottom sheet
     if (showEffectPicker) {
         EffectPickerSheet(
-            messageText = uiState.draftText,
+            messageText = draftText,
             onEffectSelected = { effect ->
                 showEffectPicker = false
                 if (effect != null) {
@@ -1089,7 +1100,7 @@ fun ChatScreen(
         onSchedule = { timestamp ->
             // Schedule the message
             viewModel.scheduleMessage(
-                text = uiState.draftText,
+                text = draftText,
                 attachments = pendingAttachments,
                 sendAt = timestamp
             )

@@ -13,11 +13,17 @@ import com.bothbubbles.data.repository.SmsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -61,7 +67,11 @@ class SyncService @Inject constructor(
         private const val TAG = "SyncService"
         private const val CHAT_PAGE_SIZE = 50
         private const val MESSAGE_PAGE_SIZE = 25
+        private const val MESSAGE_SYNC_CONCURRENCY = 3
     }
+
+    /** Lightweight data for queuing chats for message sync */
+    private data class ChatSyncTask(val guid: String, val displayName: String?)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -73,100 +83,159 @@ class SyncService @Inject constructor(
 
     /**
      * Perform initial full sync
-     * Downloads all chats and recent messages from the server.
+     * Downloads all chats and recent messages from the server concurrently.
+     * Chat fetching and message syncing happen in tandem - as each page of chats
+     * is fetched, those chats are immediately queued for message syncing.
      * Progress is persisted per-chat so sync can resume after app restart.
+     *
+     * @param messagesPerChat Number of messages to sync per chat
+     * @param onProgress Optional callback for progress updates (0-100). When provided,
+     *                   internal _syncState updates are suppressed (caller manages state).
      */
     suspend fun performInitialSync(
-        messagesPerChat: Int = MESSAGE_PAGE_SIZE
+        messagesPerChat: Int = MESSAGE_PAGE_SIZE,
+        onProgress: ((progress: Int, processedChats: Int, totalChats: Int, syncedMessages: Int) -> Unit)? = null
     ): Result<Unit> = runCatching {
-        Log.i(TAG, "Starting initial sync")
+        Log.i(TAG, "Starting initial sync (concurrent mode)")
 
         // Mark sync as started and store settings for potential resume
         settingsDataStore.setInitialSyncStarted(true)
         settingsDataStore.setInitialSyncMessagesPerChat(messagesPerChat)
 
-        _syncState.value = SyncState.Syncing(
-            progress = 0f,
-            stage = "Starting sync...",
-            isInitialSync = true
-        )
-
-        var offset = 0
-        var totalChats = 0
-        var processedChats = 0
-        var syncedMessages = 0
-
-        // Phase 1: Sync all chats
-        _syncState.value = SyncState.Syncing(
-            progress = 0.1f,
-            stage = "Fetching conversations...",
-            isInitialSync = true
-        )
-
-        do {
-            val result = chatRepository.syncChats(
-                limit = CHAT_PAGE_SIZE,
-                offset = offset
-            )
-
-            val chats = result.getOrThrow()
-            totalChats += chats.size
-            offset += CHAT_PAGE_SIZE
-
+        // Only update internal state if no external progress handler
+        if (onProgress == null) {
             _syncState.value = SyncState.Syncing(
-                progress = 0.1f + (0.2f * (offset.toFloat() / maxOf(totalChats, 1))),
-                stage = "Fetching conversations...",
-                totalChats = totalChats,
+                progress = 0f,
+                stage = "Starting sync...",
                 isInitialSync = true
             )
-        } while (result.getOrNull()?.size == CHAT_PAGE_SIZE)
-
-        Log.i(TAG, "Synced $totalChats chats")
-
-        // Phase 2: Sync messages for each chat
-        val allChats = chatDao.getAllChats().first()
-        val chatCount = allChats.size
+        }
 
         // Get already synced chats (for resume scenario)
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
 
-        allChats.forEachIndexed { index, chat ->
-            // Skip already synced chats (resume scenario)
-            if (chat.guid in alreadySynced) {
-                processedChats++
-                return@forEachIndexed
+        // Atomic counters for thread-safe progress tracking
+        val totalChatsFound = AtomicInteger(0)
+        val processedChats = AtomicInteger(0)
+        val syncedMessages = AtomicInteger(0)
+
+        // Channel to queue chats for message syncing as they're fetched
+        val chatQueue = Channel<ChatSyncTask>(Channel.UNLIMITED)
+
+        // Semaphore to limit concurrent message sync operations
+        val syncSemaphore = Semaphore(MESSAGE_SYNC_CONCURRENCY)
+
+        coroutineScope {
+            // Producer: Fetch chats page by page and queue them for message syncing
+            val chatFetcher = async {
+                var offset = 0
+
+                if (onProgress == null) {
+                    _syncState.value = SyncState.Syncing(
+                        progress = 0.05f,
+                        stage = "Fetching conversations...",
+                        isInitialSync = true
+                    )
+                } else {
+                    onProgress(5, 0, 0, 0)
+                }
+
+                do {
+                    val result = chatRepository.syncChats(
+                        limit = CHAT_PAGE_SIZE,
+                        offset = offset
+                    )
+
+                    val chats = result.getOrThrow()
+                    totalChatsFound.addAndGet(chats.size)
+                    offset += CHAT_PAGE_SIZE
+
+                    // Queue each chat for message syncing
+                    chats.forEach { chat ->
+                        if (chat.guid !in alreadySynced) {
+                            chatQueue.send(ChatSyncTask(chat.guid, chat.displayName))
+                        } else {
+                            // Already synced from previous run
+                            processedChats.incrementAndGet()
+                        }
+                    }
+
+                    // Update progress - chat fetching is ~20% of total work
+                    val fetchProgressPercent = minOf(20, 5 + (15 * offset / maxOf(totalChatsFound.get(), 100)))
+                    if (onProgress == null) {
+                        _syncState.value = SyncState.Syncing(
+                            progress = fetchProgressPercent / 100f,
+                            stage = "Fetching conversations...",
+                            totalChats = totalChatsFound.get(),
+                            processedChats = processedChats.get(),
+                            syncedMessages = syncedMessages.get(),
+                            isInitialSync = true
+                        )
+                    } else {
+                        onProgress(fetchProgressPercent, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
+                    }
+                } while (result.getOrNull()?.size == CHAT_PAGE_SIZE)
+
+                chatQueue.close()
+                Log.i(TAG, "Chat fetching complete: ${totalChatsFound.get()} chats found")
             }
 
-            try {
-                val chatName = chat.displayName ?: "chat"
-                _syncState.value = SyncState.Syncing(
-                    progress = 0.3f + (0.6f * (index.toFloat() / chatCount)),
-                    stage = "Syncing messages...",
-                    totalChats = chatCount,
-                    processedChats = processedChats,
-                    syncedMessages = syncedMessages,
-                    currentChatName = chatName,
-                    isInitialSync = true
-                )
+            // Consumer: Sync messages for chats as they arrive, with limited concurrency
+            val messageSyncer = async {
+                val syncJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
 
-                val result = messageRepository.syncMessagesForChat(
-                    chatGuid = chat.guid,
-                    limit = messagesPerChat
-                )
-                syncedMessages += result.getOrNull()?.size ?: 0
-                processedChats++
+                for (task in chatQueue) {
+                    val job = async {
+                        syncSemaphore.withPermit {
+                            try {
+                                val result = messageRepository.syncMessagesForChat(
+                                    chatGuid = task.guid,
+                                    limit = messagesPerChat
+                                )
+                                syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
+                                settingsDataStore.markChatSynced(task.guid)
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Failed to sync messages for chat ${task.guid}", e)
+                                // Mark as synced to avoid retry loop
+                                settingsDataStore.markChatSynced(task.guid)
+                            }
 
-                // Mark this chat as synced (persisted for resume)
-                settingsDataStore.markChatSynced(chat.guid)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
-                processedChats++
-                // Continue with next chat - mark as synced to avoid retry loop
-                settingsDataStore.markChatSynced(chat.guid)
+                            val processed = processedChats.incrementAndGet()
+                            val total = totalChatsFound.get()
+
+                            // Update progress - message syncing is ~80% of total work (20% to 90%)
+                            val messageProgressPercent = if (total > 0) {
+                                20 + (70 * processed / total)
+                            } else 20
+
+                            if (onProgress == null) {
+                                _syncState.value = SyncState.Syncing(
+                                    progress = messageProgressPercent / 100f,
+                                    stage = "Syncing messages...",
+                                    totalChats = total,
+                                    processedChats = processed,
+                                    syncedMessages = syncedMessages.get(),
+                                    currentChatName = task.displayName,
+                                    isInitialSync = true
+                                )
+                            } else {
+                                onProgress(messageProgressPercent, processed, total, syncedMessages.get())
+                            }
+                        }
+                    }
+                    syncJobs.add(job)
+                }
+
+                // Wait for all message sync jobs to complete
+                syncJobs.forEach { it.await() }
             }
+
+            // Wait for both producer and consumer to complete
+            chatFetcher.await()
+            messageSyncer.await()
         }
 
-        Log.i(TAG, "Synced messages for $processedChats/$chatCount chats ($syncedMessages messages)")
+        Log.i(TAG, "Synced messages for ${processedChats.get()}/${totalChatsFound.get()} chats (${syncedMessages.get()} messages)")
 
         // Update last sync time
         val syncTime = System.currentTimeMillis()
@@ -176,29 +245,39 @@ class SyncService @Inject constructor(
         // Mark initial sync as complete
         settingsDataStore.setInitialSyncComplete(true)
 
-        _syncState.value = SyncState.Completed
+        // Only update internal state if no external progress handler
+        if (onProgress == null) {
+            _syncState.value = SyncState.Completed
+        } else {
+            onProgress(100, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
+        }
         Log.i(TAG, "Initial sync completed")
         Unit
     }.onFailure { e ->
         Log.e(TAG, "Initial sync failed", e)
-        val isCorrupted = e is SQLiteException ||
-            e.message?.contains("database", ignoreCase = true) == true &&
-            (e.message?.contains("corrupt", ignoreCase = true) == true ||
-             e.message?.contains("malformed", ignoreCase = true) == true)
-        _syncState.value = SyncState.Error(
-            message = if (isCorrupted) "Database corruption detected" else (e.message ?: "Sync failed"),
-            isCorrupted = isCorrupted,
-            canRetry = !isCorrupted
-        )
+        // Only update internal state on error if no external handler
+        // (caller should handle errors from Result)
+        if (onProgress == null) {
+            val isCorrupted = e is SQLiteException ||
+                e.message?.contains("database", ignoreCase = true) == true &&
+                (e.message?.contains("corrupt", ignoreCase = true) == true ||
+                 e.message?.contains("malformed", ignoreCase = true) == true)
+            _syncState.value = SyncState.Error(
+                message = if (isCorrupted) "Database corruption detected" else (e.message ?: "Sync failed"),
+                isCorrupted = isCorrupted,
+                canRetry = !isCorrupted
+            )
+        }
     }
 
     /**
      * Resume an interrupted initial sync.
      * Called on app startup if initialSyncStarted=true but initialSyncComplete=false.
      * Skips already-synced chats and continues from where it left off.
+     * Uses concurrent message syncing for better performance.
      */
     suspend fun resumeInitialSync(): Result<Unit> = runCatching {
-        Log.i(TAG, "Resuming interrupted initial sync")
+        Log.i(TAG, "Resuming interrupted initial sync (concurrent mode)")
 
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
         val messagesPerChat = settingsDataStore.initialSyncMessagesPerChat.first()
@@ -215,46 +294,56 @@ class SyncService @Inject constructor(
         Log.i(TAG, "Resuming sync: ${remainingChats.size} chats remaining (${alreadySynced.size} already synced)")
 
         val totalChats = allChats.size
-        var processedChats = alreadySynced.size
-        var syncedMessages = 0
+        val processedChats = AtomicInteger(alreadySynced.size)
+        val syncedMessages = AtomicInteger(0)
 
         _syncState.value = SyncState.Syncing(
-            progress = 0.3f + (0.6f * (processedChats.toFloat() / totalChats)),
+            progress = 0.2f + (0.7f * (processedChats.get().toFloat() / totalChats)),
             stage = "Resuming sync...",
             totalChats = totalChats,
-            processedChats = processedChats,
-            syncedMessages = syncedMessages,
+            processedChats = processedChats.get(),
+            syncedMessages = 0,
             isInitialSync = true
         )
 
-        remainingChats.forEachIndexed { index, chat ->
-            try {
-                val chatName = chat.displayName ?: "chat"
-                _syncState.value = SyncState.Syncing(
-                    progress = 0.3f + (0.6f * ((processedChats + index).toFloat() / totalChats)),
-                    stage = "Syncing messages...",
-                    totalChats = totalChats,
-                    processedChats = processedChats + index,
-                    syncedMessages = syncedMessages,
-                    currentChatName = chatName,
-                    isInitialSync = true
-                )
+        // Semaphore to limit concurrent message sync operations
+        val syncSemaphore = Semaphore(MESSAGE_SYNC_CONCURRENCY)
 
-                val result = messageRepository.syncMessagesForChat(
-                    chatGuid = chat.guid,
-                    limit = messagesPerChat
-                )
-                syncedMessages += result.getOrNull()?.size ?: 0
+        coroutineScope {
+            val syncJobs = remainingChats.map { chat ->
+                async {
+                    syncSemaphore.withPermit {
+                        try {
+                            val result = messageRepository.syncMessagesForChat(
+                                chatGuid = chat.guid,
+                                limit = messagesPerChat
+                            )
+                            syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
+                            settingsDataStore.markChatSynced(chat.guid)
+                        } catch (e: Exception) {
+                            Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
+                            settingsDataStore.markChatSynced(chat.guid)
+                        }
 
-                settingsDataStore.markChatSynced(chat.guid)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
-                settingsDataStore.markChatSynced(chat.guid)
+                        val processed = processedChats.incrementAndGet()
+                        _syncState.value = SyncState.Syncing(
+                            progress = 0.2f + (0.7f * (processed.toFloat() / totalChats)),
+                            stage = "Syncing messages...",
+                            totalChats = totalChats,
+                            processedChats = processed,
+                            syncedMessages = syncedMessages.get(),
+                            currentChatName = chat.displayName,
+                            isInitialSync = true
+                        )
+                    }
+                }
             }
+
+            // Wait for all sync jobs to complete
+            syncJobs.forEach { it.await() }
         }
 
-        processedChats = totalChats
-        Log.i(TAG, "Resume sync completed: $syncedMessages messages synced")
+        Log.i(TAG, "Resume sync completed: ${syncedMessages.get()} messages synced")
 
         val syncTime = System.currentTimeMillis()
         settingsDataStore.setLastSyncTime(syncTime)
@@ -424,9 +513,14 @@ class SyncService @Inject constructor(
      * Purge all data and reimport with unified chat groups.
      * This creates proper iMessage/SMS conversation merging for single contacts.
      * Groups (both SMS/MMS and iMessage) remain separate.
+     *
+     * iMessage and SMS import run concurrently for faster sync.
+     * Race conditions on unified group creation are handled by:
+     * - Atomic getOrCreateGroup in UnifiedChatGroupDao
+     * - iMessage claiming primary status if SMS created the group first
      */
     suspend fun performUnifiedResync(): Result<Unit> = runCatching {
-        Log.i(TAG, "Starting unified resync - purging all data")
+        Log.i(TAG, "Starting unified resync - purging all data (concurrent mode)")
         _syncState.value = SyncState.Syncing(0f, "Clearing existing data...")
 
         // Clear all existing data including unified groups
@@ -443,25 +537,68 @@ class SyncService @Inject constructor(
 
         _syncState.value = SyncState.Syncing(
             progress = 0.1f,
-            stage = "Reimporting from server...",
+            stage = "Importing messages...",
             isInitialSync = true
         )
 
-        // Reimport iMessage chats (will create unified groups for single contacts)
-        performInitialSync().getOrThrow()
+        // Track progress from both sources (0-100 each)
+        val iMessageProgress = AtomicInteger(0)
+        val smsProgress = AtomicInteger(0)
+        val smsCurrentThread = AtomicInteger(0)
+        val smsTotalThreads = AtomicInteger(0)
 
-        _syncState.value = SyncState.Syncing(0.8f, "Reimporting SMS threads...")
+        // Helper to update combined progress display
+        fun updateCombinedProgress() {
+            val imPct = iMessageProgress.get()
+            val smsPct = smsProgress.get()
+            // Combined progress: 10% base + 85% for actual work (split between iMessage and SMS)
+            val combinedProgress = 0.1f + (0.85f * (imPct + smsPct) / 200f)
+            _syncState.value = SyncState.Syncing(
+                progress = combinedProgress,
+                stage = "iMessage: $imPct% | SMS: ${smsCurrentThread.get()}/${smsTotalThreads.get()}",
+                isInitialSync = true
+            )
+        }
 
-        // Reimport SMS threads (will link to unified groups)
-        smsRepository.importAllThreads(
-            onProgress = { current, total ->
-                val progress = 0.8f + (0.15f * (current.toFloat() / total))
-                _syncState.value = SyncState.Syncing(progress, "Importing SMS: $current/$total...")
+        // Run iMessage and SMS import concurrently
+        coroutineScope {
+            // iMessage sync (server data)
+            val iMessageJob = async {
+                Log.i(TAG, "Starting concurrent iMessage sync")
+                performInitialSync(
+                    onProgress = { progress, _, _, _ ->
+                        iMessageProgress.set(progress)
+                        updateCombinedProgress()
+                    }
+                ).getOrThrow()
+                iMessageProgress.set(100)
+                updateCombinedProgress()
+                Log.i(TAG, "Concurrent iMessage sync completed")
             }
-        )
+
+            // SMS import (local device data)
+            val smsJob = async {
+                Log.i(TAG, "Starting concurrent SMS import")
+                smsRepository.importAllThreads(
+                    onProgress = { current, total ->
+                        smsCurrentThread.set(current)
+                        smsTotalThreads.set(total)
+                        smsProgress.set((current * 100) / maxOf(total, 1))
+                        updateCombinedProgress()
+                    }
+                )
+                smsProgress.set(100)
+                updateCombinedProgress()
+                Log.i(TAG, "Concurrent SMS import completed")
+            }
+
+            // Wait for both to complete
+            iMessageJob.await()
+            smsJob.await()
+        }
 
         _syncState.value = SyncState.Completed
-        Log.i(TAG, "Unified resync completed")
+        Log.i(TAG, "Unified resync completed (concurrent)")
         Unit
     }.onFailure { e ->
         Log.e(TAG, "Unified resync failed", e)
@@ -497,6 +634,17 @@ class SyncService @Inject constructor(
     }.onFailure { e ->
         Log.e(TAG, "Server data cleanup failed", e)
         _syncState.value = SyncState.Error(e.message ?: "Cleanup failed")
+    }
+
+    /**
+     * Start initial sync in the service's own scope.
+     * This survives ViewModel destruction, allowing sync to continue in background.
+     * Called from SetupViewModel after server connection is established.
+     */
+    fun startInitialSync(messagesPerChat: Int = MESSAGE_PAGE_SIZE) {
+        scope.launch {
+            performInitialSync(messagesPerChat)
+        }
     }
 
     /**

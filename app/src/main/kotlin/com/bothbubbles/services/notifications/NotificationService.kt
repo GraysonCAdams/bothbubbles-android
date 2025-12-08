@@ -49,6 +49,7 @@ class NotificationService @Inject constructor(
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_SERVICE = "service"
         const val CHANNEL_FACETIME = "facetime"
+        const val CHANNEL_SYNC_STATUS = "sync_status"
 
         const val ACTION_REPLY = "com.bothbubbles.action.REPLY"
         const val ACTION_MARK_READ = "com.bothbubbles.action.MARK_READ"
@@ -64,6 +65,8 @@ class NotificationService @Inject constructor(
 
         private const val GROUP_MESSAGES = "messages_group"
         private const val FACETIME_NOTIFICATION_ID_PREFIX = 1000000
+        private const val SYNC_COMPLETE_NOTIFICATION_ID = 2000001
+        private const val SMS_IMPORT_COMPLETE_NOTIFICATION_ID = 2000002
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
@@ -127,7 +130,16 @@ class NotificationService @Inject constructor(
             enableLights(true)
         }
 
-        notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel, faceTimeChannel))
+        val syncStatusChannel = NotificationChannel(
+            CHANNEL_SYNC_STATUS,
+            "Sync Status",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Notifications about message import and sync completion"
+            setShowBadge(false)
+        }
+
+        notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel, faceTimeChannel, syncStatusChannel))
     }
 
     /**
@@ -431,6 +443,64 @@ class NotificationService @Inject constructor(
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build()
+    }
+
+    /**
+     * Show notification when BlueBubbles initial sync completes
+     */
+    fun showBlueBubblesSyncCompleteNotification(messageCount: Int) {
+        if (!hasNotificationPermission()) return
+
+        // Create intent to open the app
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            SYNC_COMPLETE_NOTIFICATION_ID,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_SYNC_STATUS)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("BlueBubbles import complete")
+            .setContentText("Imported $messageCount messages from your BlueBubbles server")
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        notificationManager.notify(SYNC_COMPLETE_NOTIFICATION_ID, notification)
+    }
+
+    /**
+     * Show notification when SMS import completes
+     */
+    fun showSmsImportCompleteNotification() {
+        if (!hasNotificationPermission()) return
+
+        // Create intent to open the app
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            SMS_IMPORT_COMPLETE_NOTIFICATION_ID,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_SYNC_STATUS)
+            .setSmallIcon(android.R.drawable.stat_sys_download_done)
+            .setContentTitle("SMS import complete")
+            .setContentText("Your SMS messages have been imported successfully")
+            .setContentIntent(contentPendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+
+        notificationManager.notify(SMS_IMPORT_COMPLETE_NOTIFICATION_ID, notification)
     }
 
     /**

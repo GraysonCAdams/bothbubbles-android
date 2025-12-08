@@ -12,6 +12,8 @@ import android.telecom.TelecomManager
 import android.util.Log
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -25,6 +27,104 @@ class AndroidContactsService @Inject constructor(
 ) {
     companion object {
         private const val TAG = "AndroidContactsService"
+
+        // Short codes (5-6 digit numbers) used by businesses for SMS
+        private val SHORT_CODE_PATTERN = Regex("""^\d{5,6}$""")
+
+        // Alphanumeric sender IDs (e.g., "GOOGLE", "AMZN", "BANK")
+        private val ALPHANUMERIC_SENDER_PATTERN = Regex("""^[A-Za-z]{3,11}$""")
+
+        /**
+         * Check if an address is a short code or alphanumeric sender ID.
+         * These should not be looked up in contacts as Android's fuzzy phone matching
+         * can produce false positive matches (e.g., "60484" matching a contact with
+         * that pattern in their number, returning "Google" or "Microsoft").
+         */
+        fun isShortCodeOrAlphanumericSender(address: String): Boolean {
+            val normalized = address.replace(Regex("[^0-9a-zA-Z]"), "")
+            return SHORT_CODE_PATTERN.matches(normalized) ||
+                   ALPHANUMERIC_SENDER_PATTERN.matches(normalized)
+        }
+    }
+
+    /**
+     * Get all phone numbers and emails that belong to starred (favorite) contacts.
+     * Runs on IO dispatcher. Returns a set of addresses for quick lookup.
+     */
+    suspend fun getAllStarredAddresses(): Set<String> = withContext(Dispatchers.IO) {
+        if (!hasReadPermission()) {
+            Log.w(TAG, "READ_CONTACTS permission not granted")
+            return@withContext emptySet()
+        }
+
+        val starredAddresses = mutableSetOf<String>()
+
+        try {
+            // First get all starred contact IDs
+            val starredContactIds = mutableSetOf<Long>()
+            context.contentResolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(ContactsContract.Contacts._ID),
+                "${ContactsContract.Contacts.STARRED} = 1",
+                null,
+                null
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(ContactsContract.Contacts._ID)
+                while (cursor.moveToNext()) {
+                    if (idIndex >= 0) {
+                        starredContactIds.add(cursor.getLong(idIndex))
+                    }
+                }
+            }
+
+            if (starredContactIds.isEmpty()) {
+                return@withContext emptySet()
+            }
+
+            // Get phone numbers for starred contacts
+            val phoneSelection = "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} IN (${starredContactIds.joinToString(",")})"
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Phone.NUMBER),
+                phoneSelection,
+                null,
+                null
+            )?.use { cursor ->
+                val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    if (numberIndex >= 0) {
+                        cursor.getString(numberIndex)?.let { number ->
+                            // Store both raw and normalized versions
+                            starredAddresses.add(number)
+                            starredAddresses.add(number.replace(Regex("[^0-9+]"), ""))
+                        }
+                    }
+                }
+            }
+
+            // Get emails for starred contacts
+            val emailSelection = "${ContactsContract.CommonDataKinds.Email.CONTACT_ID} IN (${starredContactIds.joinToString(",")})"
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Email.ADDRESS),
+                emailSelection,
+                null,
+                null
+            )?.use { cursor ->
+                val emailIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS)
+                while (cursor.moveToNext()) {
+                    if (emailIndex >= 0) {
+                        cursor.getString(emailIndex)?.let { email ->
+                            starredAddresses.add(email.lowercase())
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching starred addresses", e)
+        }
+
+        starredAddresses
     }
 
     /**
@@ -94,10 +194,13 @@ class AndroidContactsService @Inject constructor(
 
     /**
      * Get the contact ID for a phone number or email address.
-     * Returns null if contact not found.
+     * Returns null if contact not found or if address is a short code.
      */
     fun getContactId(address: String): Long? {
         if (!hasReadPermission()) return null
+        if (address.isBlank()) return null
+        // Skip short codes to avoid false positive matches from fuzzy phone lookup
+        if (isShortCodeOrAlphanumericSender(address)) return null
 
         return try {
             // Try phone lookup first
@@ -155,14 +258,86 @@ class AndroidContactsService @Inject constructor(
     }
 
     /**
+     * Get the photo URI for a contact by phone number or email address.
+     * Returns null if contact not found, no photo set, permission denied, or if address is a short code.
+     */
+    fun getContactPhotoUri(address: String): String? {
+        if (!hasReadPermission()) {
+            Log.w(TAG, "READ_CONTACTS permission not granted")
+            return null
+        }
+        if (address.isBlank()) return null
+        // Skip short codes to avoid false positive matches from fuzzy phone lookup
+        if (isShortCodeOrAlphanumericSender(address)) return null
+
+        return try {
+            // Try phone lookup first
+            val phoneUri = Uri.withAppendedPath(
+                ContactsContract.PhoneLookup.CONTENT_FILTER_URI,
+                Uri.encode(address)
+            )
+            context.contentResolver.query(
+                phoneUri,
+                arrayOf(ContactsContract.PhoneLookup.PHOTO_URI),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val photoIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.PHOTO_URI)
+                    if (photoIndex >= 0) {
+                        val photoUri = cursor.getString(photoIndex)
+                        if (!photoUri.isNullOrBlank()) {
+                            return photoUri
+                        }
+                    }
+                }
+            }
+
+            // Try email lookup if it looks like an email
+            if (address.contains("@")) {
+                val emailUri = Uri.withAppendedPath(
+                    ContactsContract.CommonDataKinds.Email.CONTENT_FILTER_URI,
+                    Uri.encode(address)
+                )
+                context.contentResolver.query(
+                    emailUri,
+                    arrayOf(ContactsContract.CommonDataKinds.Email.PHOTO_URI),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val photoIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.PHOTO_URI)
+                        if (photoIndex >= 0) {
+                            val photoUri = cursor.getString(photoIndex)
+                            if (!photoUri.isNullOrBlank()) {
+                                return photoUri
+                            }
+                        }
+                    }
+                }
+            }
+
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Error getting photo URI for $address", e)
+            null
+        }
+    }
+
+    /**
      * Get the display name for a contact by phone number or email address.
-     * Returns null if contact not found or permission denied.
+     * Returns null if contact not found, permission denied, or if address is a short code.
      */
     fun getContactDisplayName(address: String): String? {
         if (!hasReadPermission()) {
             Log.w(TAG, "READ_CONTACTS permission not granted")
             return null
         }
+        if (address.isBlank()) return null
+        // Skip short codes to avoid false positive matches from fuzzy phone lookup
+        if (isShortCodeOrAlphanumericSender(address)) return null
 
         return try {
             // Try phone lookup first

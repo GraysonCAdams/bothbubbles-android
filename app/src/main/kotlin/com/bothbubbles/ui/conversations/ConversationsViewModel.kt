@@ -1,6 +1,9 @@
 package com.bothbubbles.ui.conversations
 
 import android.app.Application
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.net.Uri
 import android.provider.ContactsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -29,15 +32,18 @@ import com.bothbubbles.ui.components.determineConnectionBannerState
 import com.bothbubbles.ui.components.determineSmsBannerState
 import com.bothbubbles.ui.components.UrlParsingUtils
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import android.text.format.DateFormat
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
@@ -58,7 +64,8 @@ class ConversationsViewModel @Inject constructor(
     private val smsPermissionHelper: SmsPermissionHelper,
     private val linkPreviewRepository: LinkPreviewRepository,
     private val smsRepository: SmsRepository,
-    private val androidContactsService: AndroidContactsService
+    private val androidContactsService: AndroidContactsService,
+    private val notificationService: NotificationService
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ConversationsUiState())
@@ -71,7 +78,16 @@ class ConversationsViewModel @Inject constructor(
     // Track if we've ever successfully connected (for banner logic)
     private var wasEverConnected = false
 
+    // Grace period to avoid flashing "not connected" banner on app startup
+    private val _startupGracePeriodPassed = MutableStateFlow(false)
+
     init {
+        // Start grace period timer - don't show "not connected" banner immediately on app start
+        viewModelScope.launch {
+            delay(2500) // 2.5 second grace period
+            _startupGracePeriodPassed.value = true
+        }
+
         loadConversations()
         observeConnectionState()
         observeConnectionBannerState()
@@ -170,6 +186,11 @@ class ConversationsViewModel @Inject constructor(
     private fun loadUserProfile() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
+                // Check for READ_CONTACTS permission first
+                if (!androidContactsService.hasReadPermission()) {
+                    return@withContext
+                }
+
                 try {
                     val contentResolver = application.contentResolver
 
@@ -203,14 +224,43 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Refresh all contact info from device contacts.
+     * Called when:
+     * - READ_CONTACTS permission is newly granted
+     * - App resumes (to catch contact changes made while app was backgrounded)
+     */
+    fun refreshAllContacts() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                // Refresh user profile
+                loadUserProfile()
+
+                // Refresh all handle contact info (names and photos)
+                chatRepository.refreshAllContactInfo()
+            }
+        }
+    }
+
+    /**
+     * Called when the app resumes or when contacts permission state might have changed.
+     * Checks permission and refreshes contact data if available.
+     */
+    fun onPermissionStateChanged() {
+        if (androidContactsService.hasReadPermission()) {
+            refreshAllContacts()
+        }
+    }
+
     private fun loadConversations() {
         viewModelScope.launch {
             combine(
                 unifiedChatGroupDao.observeActiveGroups(),
                 chatDao.observeActiveGroupChats(),
+                chatDao.getAllChats(), // Reactive flow for all chats (needed for 1:1 pin/unpin updates)
                 _searchQuery,
                 _typingChats
-            ) { unifiedGroups, groupChats, query, typingChats ->
+            ) { unifiedGroups, groupChats, allChats, query, typingChats ->
                 val conversations = mutableListOf<ConversationUiModel>()
                 val handledChatGuids = mutableSetOf<String>()
 
@@ -218,6 +268,8 @@ class ConversationsViewModel @Inject constructor(
                 for (group in unifiedGroups) {
                     val chatGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
                     handledChatGuids.addAll(chatGuids)
+                    // Also mark primaryChatGuid as handled (in case it's not in members due to data inconsistency)
+                    handledChatGuids.add(group.primaryChatGuid)
 
                     val uiModel = unifiedGroupToUiModel(group, chatGuids, typingChats)
                     if (uiModel != null) {
@@ -233,7 +285,6 @@ class ConversationsViewModel @Inject constructor(
                 }
 
                 // Add any orphan 1:1 chats not in unified groups
-                val allChats = chatDao.getAllChats().first()
                 for (chat in allChats) {
                     if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
                         conversations.add(chat.toUiModel(typingChats))
@@ -252,10 +303,13 @@ class ConversationsViewModel @Inject constructor(
                 }
 
                 // Sort: pinned first, then by last message time
-                filtered.sortedWith(
-                    compareByDescending<ConversationUiModel> { it.isPinned }
-                        .thenByDescending { it.lastMessageTimestamp }
-                )
+                // Deduplicate by guid to prevent LazyColumn key crashes
+                filtered
+                    .distinctBy { it.guid }
+                    .sortedWith(
+                        compareByDescending<ConversationUiModel> { it.isPinned }
+                            .thenByDescending { it.lastMessageTimestamp }
+                    )
             }.collect { conversations ->
                 _uiState.update { state ->
                     state.copy(
@@ -296,9 +350,12 @@ class ConversationsViewModel @Inject constructor(
         // Use the primary chat for display info
         val primaryChat = chats.find { it.guid == group.primaryChatGuid } ?: chats.first()
 
-        // Get participants from primary chat
-        val participants = chatDao.getParticipantsForChat(primaryChat.guid)
-        val primaryParticipant = participants.firstOrNull()
+        // Get participants from ALL chats in the unified group (not just primary)
+        // This ensures we find contact info even if it's only linked to one of the chats
+        val allParticipants = chatRepository.getParticipantsForChats(chatGuids)
+
+        // Prefer participant with cached contact info, otherwise use first available
+        val primaryParticipant = chatRepository.getBestParticipant(allParticipants)
         val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: group.identifier
 
         // Determine display name
@@ -376,7 +433,7 @@ class ConversationsViewModel @Inject constructor(
             draftText = chatWithDraft?.textFieldText,
             lastMessageType = messageType,
             lastMessageStatus = messageStatus,
-            participantNames = participants.map { it.displayName },
+            participantNames = allParticipants.map { it.displayName },
             address = address,
             hasInferredName = primaryParticipant?.hasInferredName == true,
             inferredName = primaryParticipant?.inferredName,
@@ -418,14 +475,20 @@ class ConversationsViewModel @Inject constructor(
             combine(
                 socketService.connectionState,
                 socketService.retryAttempt,
-                settingsDataStore.dismissedSetupBanner
-            ) { connectionState, retryAttempt, isSetupBannerDismissed ->
-                determineConnectionBannerState(
-                    connectionState = connectionState,
-                    retryAttempt = retryAttempt,
-                    isSetupBannerDismissed = isSetupBannerDismissed,
-                    wasEverConnected = wasEverConnected
-                )
+                settingsDataStore.dismissedSetupBanner,
+                _startupGracePeriodPassed
+            ) { connectionState, retryAttempt, isSetupBannerDismissed, gracePeriodPassed ->
+                // During startup grace period, suppress reconnecting banner to avoid flash
+                if (!gracePeriodPassed && connectionState != ConnectionState.CONNECTED) {
+                    ConnectionBannerState.Connected // Effectively hide the banner
+                } else {
+                    determineConnectionBannerState(
+                        connectionState = connectionState,
+                        retryAttempt = retryAttempt,
+                        isSetupBannerDismissed = isSetupBannerDismissed,
+                        wasEverConnected = wasEverConnected
+                    )
+                }
             }.collect { bannerState ->
                 _uiState.update { it.copy(connectionBannerState = bannerState) }
             }
@@ -518,6 +581,10 @@ class ConversationsViewModel @Inject constructor(
                         }
                     }
                     is SyncState.Completed -> {
+                        // Capture state before updating to check if this was initial sync
+                        val wasInitialSync = _uiState.value.isInitialSync
+                        val messageCount = _uiState.value.syncedMessages
+
                         _uiState.update {
                             it.copy(
                                 isSyncing = false,
@@ -531,6 +598,11 @@ class ConversationsViewModel @Inject constructor(
                                 syncError = null,
                                 isSyncCorrupted = false
                             )
+                        }
+
+                        // Show notification for first-time initial sync completion
+                        if (wasInitialSync && messageCount > 0) {
+                            notificationService.showBlueBubblesSyncCompleteNotification(messageCount)
                         }
                     }
                     is SyncState.Error -> {
@@ -751,6 +823,8 @@ class ConversationsViewModel @Inject constructor(
                     }
                     // Mark as completed ONLY after successful import
                     settingsDataStore.setHasCompletedInitialSmsImport(true)
+                    // Show notification for first-time SMS import completion
+                    notificationService.showSmsImportCompleteNotification()
                 },
                 onFailure = { e ->
                     _uiState.update {
@@ -820,6 +894,53 @@ class ConversationsViewModel @Inject constructor(
     fun canPinChat(chatGuid: String): Boolean {
         val conversation = _uiState.value.conversations.find { it.guid == chatGuid }
         return conversation?.hasContact == true
+    }
+
+    /**
+     * Set a custom photo for a group chat.
+     * Saves the image to local storage and updates the chat entity.
+     */
+    fun setGroupPhoto(chatGuid: String, uri: Uri) {
+        viewModelScope.launch {
+            try {
+                val avatarPath = saveGroupPhoto(chatGuid, uri)
+                if (avatarPath != null) {
+                    chatDao.updateCustomAvatarPath(chatGuid, avatarPath)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ConversationsViewModel", "Failed to set group photo", e)
+            }
+        }
+    }
+
+    /**
+     * Save group photo to local storage.
+     * @return The path to the saved file, or null if failed
+     */
+    private fun saveGroupPhoto(chatGuid: String, uri: Uri): String? {
+        return try {
+            val avatarsDir = File(application.filesDir, "group_avatars")
+            if (!avatarsDir.exists()) {
+                avatarsDir.mkdirs()
+            }
+
+            // Sanitize chatGuid for filename
+            val sanitizedGuid = chatGuid.replace(Regex("[^a-zA-Z0-9.-]"), "_")
+            val photoFile = File(avatarsDir, "${sanitizedGuid}.jpg")
+
+            // Copy and compress the image
+            application.contentResolver.openInputStream(uri)?.use { input ->
+                val bitmap = BitmapFactory.decodeStream(input)
+                photoFile.outputStream().use { output ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, output)
+                }
+            }
+
+            photoFile.absolutePath
+        } catch (e: Exception) {
+            android.util.Log.e("ConversationsViewModel", "Failed to save group photo", e)
+            null
+        }
     }
 
     fun toggleMute(chatGuid: String) {
@@ -915,8 +1036,9 @@ class ConversationsViewModel @Inject constructor(
     fun refreshContactInfo(address: String) {
         viewModelScope.launch {
             val displayName = androidContactsService.getContactDisplayName(address)
-            if (displayName != null) {
-                chatRepository.updateHandleCachedContactInfo(address, displayName)
+            val photoUri = androidContactsService.getContactPhotoUri(address)
+            if (displayName != null || photoUri != null) {
+                chatRepository.updateHandleCachedContactInfo(address, displayName, photoUri)
             }
         }
     }
@@ -929,6 +1051,7 @@ class ConversationsViewModel @Inject constructor(
         // Get participants for this chat
         val participants = chatDao.getParticipantsForChat(guid)
         val participantNames = participants.map { it.displayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
         val primaryParticipant = participants.firstOrNull()
         val address = primaryParticipant?.address ?: chatIdentifier ?: ""
         val avatarPath = primaryParticipant?.cachedAvatarPath
@@ -1009,6 +1132,7 @@ class ConversationsViewModel @Inject constructor(
             lastMessageType = messageType,
             lastMessageStatus = messageStatus,
             participantNames = participantNames,
+            participantAvatarPaths = participantAvatarPaths,
             address = address,
             hasInferredName = primaryParticipant?.hasInferredName == true,
             inferredName = primaryParticipant?.inferredName,
@@ -1242,6 +1366,7 @@ data class ConversationUiModel(
     val lastMessageType: MessageType = MessageType.TEXT,
     val lastMessageStatus: MessageStatus = MessageStatus.NONE,
     val participantNames: List<String> = emptyList(),
+    val participantAvatarPaths: List<String?> = emptyList(), // Avatar paths for group participants
     val address: String = "", // Primary address (phone/email) for the chat
     val hasInferredName: Boolean = false, // True if displaying an inferred "Maybe: X" name
     val inferredName: String? = null, // Raw inferred name without "Maybe:" prefix (for add contact)

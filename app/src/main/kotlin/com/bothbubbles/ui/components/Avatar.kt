@@ -11,7 +11,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Group
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.SignalCellularAlt
+import androidx.compose.material.icons.filled.CellTower
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -29,6 +29,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import android.net.Uri
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
@@ -58,9 +59,6 @@ fun Avatar(
     val backgroundColor = remember(name) { getAvatarColor(name) }
     val showPersonIcon = remember(name) { isPhoneNumber(name) }
 
-    // Track image load state for crossfade animation
-    var imageLoaded by remember(avatarPath) { mutableStateOf(false) }
-
     Box(
         modifier = modifier
             .size(size)
@@ -68,73 +66,51 @@ fun Avatar(
             .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
-        // Crossfade between placeholder and loaded image
-        Crossfade(
-            targetState = imageLoaded && avatarPath != null,
-            animationSpec = tween(durationMillis = 200),
-            label = "avatarCrossfade"
-        ) { showImage ->
-            Box(
-                modifier = Modifier.size(size),
-                contentAlignment = Alignment.Center
-            ) {
-                if (showImage && avatarPath != null) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(avatarPath)
-                            .crossfade(200)
-                            .build(),
-                        contentDescription = "Avatar for $name",
-                        modifier = Modifier.size(size),
-                        contentScale = ContentScale.Crop,
-                        onState = { state ->
-                            if (state is AsyncImagePainter.State.Success) {
-                                imageLoaded = true
-                            }
-                        }
-                    )
-                } else {
-                    // Placeholder: initials or person icon
-                    if (showPersonIcon) {
-                        Icon(
-                            Icons.Default.Person,
-                            contentDescription = "Contact",
-                            tint = Color.White,
-                            modifier = Modifier.size(size * 0.55f)
-                        )
-                    } else {
-                        Text(
-                            text = initials,
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontSize = (size.value / 2.5f).sp
-                            ),
-                            color = Color.White
-                        )
-                    }
-                }
-            }
+        // Show placeholder (initials or person icon)
+        if (showPersonIcon) {
+            Icon(
+                Icons.Default.Person,
+                contentDescription = "Contact",
+                tint = Color.White,
+                modifier = Modifier.size(size * 0.55f)
+            )
+        } else {
+            Text(
+                text = initials,
+                style = MaterialTheme.typography.titleMedium.copy(
+                    fontSize = (size.value / 2.5f).sp
+                ),
+                color = Color.White
+            )
         }
 
-        // Pre-load image in background
-        if (avatarPath != null && !imageLoaded) {
+        // Overlay with contact photo if available
+        if (avatarPath != null) {
+            val avatarUri = remember(avatarPath) { Uri.parse(avatarPath) }
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
-                    .data(avatarPath)
+                    .data(avatarUri)
+                    .crossfade(true)
                     .build(),
-                contentDescription = null,
-                modifier = Modifier.size(0.dp), // Invisible, just for loading
-                onState = { state ->
-                    if (state is AsyncImagePainter.State.Success) {
-                        imageLoaded = true
-                    }
-                }
+                contentDescription = "Avatar for $name",
+                modifier = Modifier
+                    .size(size)
+                    .clip(CircleShape),
+                contentScale = ContentScale.Crop
             )
         }
     }
 }
 
 private fun getInitials(name: String): String {
-    val parts = name.trim().split(" ").filter { it.isNotBlank() }
+    // Strip emojis and other non-letter/non-digit characters at the start of each word
+    val cleanedName = name.trim()
+        .split(" ")
+        .map { word -> word.filter { it.isLetterOrDigit() } }
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+
+    val parts = cleanedName.split(" ").filter { it.isNotBlank() }
     return when {
         parts.size >= 2 -> "${parts.first().first()}${parts.last().first()}"
         parts.size == 1 && parts.first().length >= 2 -> parts.first().take(2)
@@ -418,7 +394,7 @@ fun AvatarWithMessageType(
                 Icon(
                     imageVector = when (messageSourceType) {
                         MessageSourceType.IMESSAGE -> Icons.Default.Cloud
-                        MessageSourceType.SMS -> Icons.Default.SignalCellularAlt
+                        MessageSourceType.SMS -> Icons.Default.CellTower
                         else -> Icons.Default.Cloud
                     },
                     contentDescription = when (messageSourceType) {
