@@ -26,11 +26,17 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -55,6 +61,7 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -72,6 +79,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -101,6 +110,7 @@ import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.effects.bubble.BubbleEffectWrapper
 import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
 import com.bothbubbles.ui.theme.BothBubblesTheme
+import com.bothbubbles.ui.theme.BubbleColors
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -488,23 +498,82 @@ fun ChatScreen(
                     }
                 )
 
-                if (isRecording) {
-                    VoiceMemoRecordingBar(
-                        duration = recordingDuration,
-                        amplitudeHistory = amplitudeHistory,
-                        onCancel = {
-                            // Stop recording and enter preview mode
+                // Determine input mode for unified handling
+                val inputMode = when {
+                    isRecording -> InputMode.RECORDING
+                    isPreviewingVoiceMemo -> InputMode.PREVIEW
+                    else -> InputMode.NORMAL
+                }
+
+                // Smart reply chips - hide during recording/preview with animation
+                AnimatedVisibility(
+                    visible = inputMode == InputMode.NORMAL,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    SmartReplyChips(
+                        suggestions = smartReplySuggestions,
+                        onSuggestionClick = { suggestion ->
+                            viewModel.updateDraft(suggestion.text)
+                            suggestion.templateId?.let { viewModel.recordTemplateUsage(it) }
+                        }
+                    )
+                }
+
+                // Unified input area with animated content transitions
+                UnifiedInputArea(
+                    mode = inputMode,
+                    // Normal mode props
+                    text = draftText,
+                    onTextChange = viewModel::updateDraft,
+                    onSendClick = {
+                        viewModel.sendMessage()
+                        pendingAttachments = emptyList()
+                        showAttachmentPicker = false
+                        showEmojiPicker = false
+                    },
+                    onSendLongPress = {
+                        if (!uiState.isLocalSmsChat) {
+                            showEffectPicker = true
+                        }
+                    },
+                    onAttachClick = {
+                        showAttachmentPicker = !showAttachmentPicker
+                        if (showAttachmentPicker) showEmojiPicker = false
+                    },
+                    onEmojiClick = {
+                        showEmojiPicker = !showEmojiPicker
+                        if (showEmojiPicker) showAttachmentPicker = false
+                    },
+                    onImageClick = { imagePickerLauncher.launch("image/*") },
+                    onVoiceMemoClick = {
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    onVoiceMemoPressStart = {
+                        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                            startVoiceMemoRecording(
+                                context = context,
+                                onRecorderCreated = { recorder, file ->
+                                    mediaRecorder = recorder
+                                    recordingFile = file
+                                    isRecording = true
+                                    mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
+                                },
+                                onError = { error ->
+                                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                }
+                            )
+                        }
+                    },
+                    onVoiceMemoPressEnd = {
+                        if (isRecording) {
                             try {
                                 mediaRecorder?.stop()
                                 mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                            } catch (_: Exception) {
-                                // May throw if no audio was recorded
-                            }
+                            } catch (_: Exception) { }
                             mediaRecorder?.release()
                             mediaRecorder = null
                             isRecording = false
-
-                            // Enter preview mode
                             recordingFile?.let { file ->
                                 if (file.exists() && file.length() > 0) {
                                     isPreviewingVoiceMemo = true
@@ -514,190 +583,117 @@ fun ChatScreen(
                                     recordingFile = null
                                 }
                             }
-                        },
-                        onSend = {
+                        }
+                    },
+                    isSending = uiState.isSending,
+                    isLocalSmsChat = uiState.isLocalSmsChat,
+                    hasAttachments = pendingAttachments.isNotEmpty(),
+                    attachments = pendingAttachments,
+                    onRemoveAttachment = { uri ->
+                        pendingAttachments = pendingAttachments - uri
+                        viewModel.removeAttachment(uri)
+                    },
+                    onClearAllAttachments = {
+                        pendingAttachments = emptyList()
+                        viewModel.clearAttachments()
+                    },
+                    isPickerExpanded = showAttachmentPicker,
+                    isEmojiPickerExpanded = showEmojiPicker,
+                    // Recording mode props
+                    recordingDuration = recordingDuration,
+                    amplitudeHistory = amplitudeHistory,
+                    onRecordingCancel = {
+                        try {
                             mediaRecorder?.stop()
                             mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                            mediaRecorder?.release()
-                            mediaRecorder = null
-                            isRecording = false
-                            recordingFile?.let { file ->
-                                val uri = Uri.fromFile(file)
-                                pendingAttachments = pendingAttachments + uri
-                                viewModel.addAttachment(uri)
-                                viewModel.sendMessage()
-                                pendingAttachments = emptyList()
-                            }
-                            recordingFile = null
-                        }
-                    )
-                } else if (isPreviewingVoiceMemo) {
-                    VoiceMemoPreviewBar(
-                        duration = playbackDuration,
-                        playbackPosition = playbackPosition,
-                        isPlaying = isPlayingVoiceMemo,
-                        onPlayPause = {
-                            if (isPlayingVoiceMemo) {
-                                // Pause playback
-                                mediaPlayer?.pause()
-                                isPlayingVoiceMemo = false
+                        } catch (_: Exception) { }
+                        mediaRecorder?.release()
+                        mediaRecorder = null
+                        isRecording = false
+                        recordingFile?.let { file ->
+                            if (file.exists() && file.length() > 0) {
+                                isPreviewingVoiceMemo = true
+                                playbackDuration = recordingDuration
                             } else {
-                                // Start or resume playback
-                                if (mediaPlayer == null) {
-                                    recordingFile?.let { file ->
-                                        mediaPlayer = MediaPlayer().apply {
-                                            setDataSource(file.absolutePath)
-                                            prepare()
-                                            start()
-                                        }
-                                        playbackDuration = mediaPlayer?.duration?.toLong() ?: recordingDuration
-                                    }
-                                } else {
-                                    mediaPlayer?.start()
-                                }
-                                isPlayingVoiceMemo = true
+                                file.delete()
+                                recordingFile = null
                             }
-                        },
-                        onReRecord = {
-                            // Stop and release player
-                            mediaPlayer?.release()
-                            mediaPlayer = null
-                            isPlayingVoiceMemo = false
-                            playbackPosition = 0L
-
-                            // Delete old recording
-                            recordingFile?.delete()
-                            recordingFile = null
-                            isPreviewingVoiceMemo = false
-
-                            // Start new recording
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        },
-                        onSend = {
-                            // Stop player if playing
-                            mediaPlayer?.release()
-                            mediaPlayer = null
-                            isPlayingVoiceMemo = false
-                            playbackPosition = 0L
-                            isPreviewingVoiceMemo = false
-
-                            recordingFile?.let { file ->
-                                val uri = Uri.fromFile(file)
-                                pendingAttachments = pendingAttachments + uri
-                                viewModel.addAttachment(uri)
-                                viewModel.sendMessage()
-                                pendingAttachments = emptyList()
-                            }
-                            recordingFile = null
-                        },
-                        onCancel = {
-                            // Exit preview mode and delete recording
-                            mediaPlayer?.release()
-                            mediaPlayer = null
-                            isPlayingVoiceMemo = false
-                            playbackPosition = 0L
-                            isPreviewingVoiceMemo = false
-                            recordingFile?.delete()
-                            recordingFile = null
                         }
-                    )
-                } else {
-                    Column {
-                        // Smart reply suggestions (ML Kit + user templates, max 3, right-aligned)
-                        SmartReplyChips(
-                            suggestions = smartReplySuggestions,
-                            onSuggestionClick = { suggestion ->
-                                viewModel.updateDraft(suggestion.text)
-                                suggestion.templateId?.let { viewModel.recordTemplateUsage(it) }
-                            }
-                        )
-
-                        MessageInputArea(
-                            text = draftText,
-                            onTextChange = viewModel::updateDraft,
-                            onSendClick = {
-                                viewModel.sendMessage()
-                                pendingAttachments = emptyList()
-                                showAttachmentPicker = false
-                                showEmojiPicker = false
-                            },
-                        onSendLongPress = {
-                            // Open effect picker on long press (iMessage only)
-                            if (!uiState.isLocalSmsChat) {
-                                showEffectPicker = true
-                            }
-                        },
-                        onAttachClick = {
-                            showAttachmentPicker = !showAttachmentPicker
-                            if (showAttachmentPicker) showEmojiPicker = false
-                        },
-                        onEmojiClick = {
-                            showEmojiPicker = !showEmojiPicker
-                            if (showEmojiPicker) showAttachmentPicker = false
-                        },
-                        onImageClick = { imagePickerLauncher.launch("image/*") },
-                        onVoiceMemoClick = {
-                            audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        },
-                        onVoiceMemoPressStart = {
-                            // Start recording on press (if permission granted)
-                            if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                                startVoiceMemoRecording(
-                                    context = context,
-                                    onRecorderCreated = { recorder, file ->
-                                        mediaRecorder = recorder
-                                        recordingFile = file
-                                        isRecording = true
-                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                                    },
-                                    onError = { error ->
-                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
-                            }
-                        },
-                        onVoiceMemoPressEnd = {
-                            // Stop recording on release and enter preview mode
-                            if (isRecording) {
-                                try {
-                                    mediaRecorder?.stop()
-                                    mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                                } catch (_: Exception) {
-                                    // May throw if no audio was recorded
-                                }
-                                mediaRecorder?.release()
-                                mediaRecorder = null
-                                isRecording = false
-
-                                // Enter preview mode
-                                recordingFile?.let { file ->
-                                    if (file.exists() && file.length() > 0) {
-                                        isPreviewingVoiceMemo = true
-                                        playbackDuration = recordingDuration
-                                    } else {
-                                        file.delete()
-                                        recordingFile = null
-                                    }
-                                }
-                            }
-                        },
-                        isSending = uiState.isSending,
-                        isLocalSmsChat = uiState.isLocalSmsChat,
-                        hasAttachments = pendingAttachments.isNotEmpty(),
-                        attachments = pendingAttachments,
-                        onRemoveAttachment = { uri ->
-                            pendingAttachments = pendingAttachments - uri
-                            viewModel.removeAttachment(uri)
-                        },
-                        onClearAllAttachments = {
+                    },
+                    onRecordingSend = {
+                        mediaRecorder?.stop()
+                        mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
+                        mediaRecorder?.release()
+                        mediaRecorder = null
+                        isRecording = false
+                        recordingFile?.let { file ->
+                            val uri = Uri.fromFile(file)
+                            pendingAttachments = pendingAttachments + uri
+                            viewModel.addAttachment(uri)
+                            viewModel.sendMessage()
                             pendingAttachments = emptyList()
-                            viewModel.clearAttachments()
-                        },
-                        isPickerExpanded = showAttachmentPicker,
-                        isEmojiPickerExpanded = showEmojiPicker
-                    )
+                        }
+                        recordingFile = null
+                    },
+                    // Preview mode props
+                    previewDuration = playbackDuration,
+                    playbackPosition = playbackPosition,
+                    isPlaying = isPlayingVoiceMemo,
+                    onPlayPause = {
+                        if (isPlayingVoiceMemo) {
+                            mediaPlayer?.pause()
+                            isPlayingVoiceMemo = false
+                        } else {
+                            if (mediaPlayer == null) {
+                                recordingFile?.let { file ->
+                                    mediaPlayer = MediaPlayer().apply {
+                                        setDataSource(file.absolutePath)
+                                        prepare()
+                                        start()
+                                    }
+                                    playbackDuration = mediaPlayer?.duration?.toLong() ?: recordingDuration
+                                }
+                            } else {
+                                mediaPlayer?.start()
+                            }
+                            isPlayingVoiceMemo = true
+                        }
+                    },
+                    onReRecord = {
+                        mediaPlayer?.release()
+                        mediaPlayer = null
+                        isPlayingVoiceMemo = false
+                        playbackPosition = 0L
+                        recordingFile?.delete()
+                        recordingFile = null
+                        isPreviewingVoiceMemo = false
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    },
+                    onPreviewSend = {
+                        mediaPlayer?.release()
+                        mediaPlayer = null
+                        isPlayingVoiceMemo = false
+                        playbackPosition = 0L
+                        isPreviewingVoiceMemo = false
+                        recordingFile?.let { file ->
+                            val uri = Uri.fromFile(file)
+                            pendingAttachments = pendingAttachments + uri
+                            viewModel.addAttachment(uri)
+                            viewModel.sendMessage()
+                            pendingAttachments = emptyList()
+                        }
+                        recordingFile = null
+                    },
+                    onPreviewCancel = {
+                        mediaPlayer?.release()
+                        mediaPlayer = null
+                        isPlayingVoiceMemo = false
+                        playbackPosition = 0L
+                        isPreviewingVoiceMemo = false
+                        recordingFile?.delete()
+                        recordingFile = null
                     }
-                }
+                )
             }
         }
     ) { padding ->
@@ -707,6 +703,24 @@ fun ChatScreen(
                 val messageIndex = uiState.searchMatchIndices[uiState.currentSearchMatchIndex]
                 listState.animateScrollToItem(messageIndex)
             }
+        }
+
+        // Load more messages when scrolling near the top (older messages)
+        // Since reverseLayout=true, higher indices = older messages at the visual top
+        LaunchedEffect(listState) {
+            snapshotFlow {
+                val layoutInfo = listState.layoutInfo
+                val totalItems = layoutInfo.totalItemsCount
+                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                // Trigger when within 5 items of the end
+                lastVisibleItem >= totalItems - 5 && totalItems > 0
+            }
+                .distinctUntilChanged()
+                .collect { shouldLoadMore ->
+                    if (shouldLoadMore && uiState.canLoadMore && !uiState.isLoadingMore) {
+                        viewModel.loadMoreMessages()
+                    }
+                }
         }
 
         // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
@@ -758,7 +772,9 @@ fun ChatScreen(
             // iOS-style sending indicator bar
             SendingIndicatorBar(
                 isVisible = uiState.isSending,
-                isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode
+                isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
+                hasAttachments = uiState.isSendingWithAttachments,
+                progress = uiState.sendProgress
             )
 
             // SMS fallback mode banner
@@ -890,6 +906,14 @@ fun ChatScreen(
                                 MessageGroupPosition.MIDDLE, MessageGroupPosition.LAST -> 2.dp
                             }
 
+                            // Determine if sender name should be shown in group chats
+                            // Show when: group chat, incoming message, and sender changed from previous (older) message
+                            val showSenderName = uiState.isGroup && !message.isFromMe && message.senderName != null && run {
+                                val previousMessage = uiState.messages.getOrNull(index + 1)
+                                // Show name if previous message was from me, or from a different sender, or doesn't exist
+                                previousMessage == null || previousMessage.isFromMe || previousMessage.senderName != message.senderName
+                            }
+
                             Column(
                                 modifier = Modifier
                                     .padding(top = topPadding)
@@ -901,6 +925,16 @@ fun ChatScreen(
                                 if (showTimeSeparator) {
                                     DateSeparator(
                                         date = formatTimeSeparator(message.dateCreated)
+                                    )
+                                }
+
+                                // Show sender name for group chat incoming messages
+                                if (showSenderName) {
+                                    Text(
+                                        text = message.senderName!!,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(start = 16.dp, bottom = 2.dp)
                                     )
                                 }
 
@@ -991,6 +1025,20 @@ fun ChatScreen(
                                             isFromMe = message.isFromMe
                                         )
                                     }
+                                }
+                            }
+                        }
+
+                        // Loading more indicator - shows skeleton bubbles at top when loading older messages
+                        // Since reverseLayout=true, adding at end puts it at visual top
+                        if (uiState.isLoadingMore) {
+                            item(key = "loading_more") {
+                                Column(
+                                    modifier = Modifier.padding(vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    MessageBubbleSkeleton(isFromMe = false)
+                                    MessageBubbleSkeleton(isFromMe = true)
                                 }
                             }
                         }
@@ -1185,18 +1233,26 @@ fun ChatScreen(
 }
 
 /**
- * Message input area matching the screenshot design.
- * - Dark rounded text field with:
- *   - "+" attachment button on left (inside field)
- *   - Emoji and image buttons on right (inside field)
- * - Voice memo button on right for iMessage (replaced by send when text entered)
+ * Input mode for the unified input area
+ */
+private enum class InputMode {
+    NORMAL,     // Standard text input
+    RECORDING,  // Voice memo recording in progress
+    PREVIEW     // Voice memo preview/playback
+}
+
+/**
+ * Unified input area that handles all three input modes (normal, recording, preview)
+ * with smooth animated transitions and consistent dimensions.
  */
 @Composable
-private fun MessageInputArea(
+private fun UnifiedInputArea(
+    mode: InputMode,
+    // Normal mode props
     text: String,
     onTextChange: (String) -> Unit,
     onSendClick: () -> Unit,
-    onSendLongPress: () -> Unit = {},
+    onSendLongPress: () -> Unit,
     onAttachClick: () -> Unit,
     onEmojiClick: () -> Unit,
     onImageClick: () -> Unit,
@@ -1209,13 +1265,27 @@ private fun MessageInputArea(
     attachments: List<Uri>,
     onRemoveAttachment: (Uri) -> Unit,
     onClearAllAttachments: () -> Unit,
-    isPickerExpanded: Boolean = false,
-    isEmojiPickerExpanded: Boolean = false,
+    isPickerExpanded: Boolean,
+    isEmojiPickerExpanded: Boolean,
+    // Recording mode props
+    recordingDuration: Long,
+    amplitudeHistory: List<Float>,
+    onRecordingCancel: () -> Unit,
+    onRecordingSend: () -> Unit,
+    // Preview mode props
+    previewDuration: Long,
+    playbackPosition: Long,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onReRecord: () -> Unit,
+    onPreviewSend: () -> Unit,
+    onPreviewCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isMmsMode = isLocalSmsChat && (hasAttachments || text.length > 160)
     val hasContent = text.isNotBlank() || hasAttachments
     val inputColors = BothBubblesTheme.bubbleColors
+    val bubbleColors = BothBubblesTheme.bubbleColors
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -1225,12 +1295,15 @@ private fun MessageInputArea(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            // Attachment previews
-            if (attachments.isNotEmpty()) {
+            // Attachment previews (only in normal mode)
+            AnimatedVisibility(
+                visible = mode == InputMode.NORMAL && attachments.isNotEmpty(),
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
                 Column(
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // Header with count and Clear All button
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1258,7 +1331,6 @@ private fun MessageInputArea(
                         }
                     }
 
-                    // Attachment thumbnails
                     LazyRow(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1275,97 +1347,181 @@ private fun MessageInputArea(
                 }
             }
 
-            // Input row
+            // Main input row with fixed structure
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .heightIn(min = 64.dp) // Fixed minimum height for consistency
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Rounded text input field with inline buttons (Google Messages style)
-                Surface(
-                    modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp),
-                    shape = RoundedCornerShape(24.dp),
-                    color = inputColors.inputFieldBackground
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Add attachment button (inside text field on left)
-                        IconButton(
-                            onClick = onAttachClick,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isPickerExpanded) Icons.Default.Close else Icons.Default.Add,
-                                contentDescription = stringResource(R.string.attach_file),
-                                tint = if (isPickerExpanded) {
-                                    MaterialTheme.colorScheme.primary
+                // Left side button - animated between add/cancel
+                AnimatedContent(
+                    targetState = mode,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(150)) +
+                            slideInHorizontally(animationSpec = tween(200)) { -it / 2 })
+                            .togetherWith(fadeOut(animationSpec = tween(150)) +
+                                slideOutHorizontally(animationSpec = tween(200)) { -it / 2 })
+                    },
+                    label = "left_button"
+                ) { currentMode ->
+                    when (currentMode) {
+                        InputMode.NORMAL -> {
+                            // Circular add attachment button
+                            Surface(
+                                onClick = onAttachClick,
+                                modifier = Modifier.size(40.dp),
+                                shape = CircleShape,
+                                color = if (isPickerExpanded) {
+                                    MaterialTheme.colorScheme.primaryContainer
                                 } else {
-                                    inputColors.inputIcon
-                                },
-                                modifier = Modifier.size(24.dp)
+                                    inputColors.inputFieldBackground
+                                }
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (isPickerExpanded) Icons.Default.Close else Icons.Default.Add,
+                                        contentDescription = stringResource(R.string.attach_file),
+                                        tint = if (isPickerExpanded) {
+                                            MaterialTheme.colorScheme.onPrimaryContainer
+                                        } else {
+                                            inputColors.inputIcon
+                                        },
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                        InputMode.RECORDING, InputMode.PREVIEW -> {
+                            // Cancel button for recording/preview modes
+                            Surface(
+                                onClick = if (currentMode == InputMode.RECORDING) onRecordingCancel else onPreviewCancel,
+                                modifier = Modifier.size(40.dp),
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = stringResource(R.string.action_cancel),
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // Center content - animated between text field / recording / preview
+                AnimatedContent(
+                    targetState = mode,
+                    transitionSpec = {
+                        (fadeIn(animationSpec = tween(200)) +
+                            slideInHorizontally(animationSpec = tween(250)) { it / 3 })
+                            .togetherWith(fadeOut(animationSpec = tween(150)) +
+                                slideOutHorizontally(animationSpec = tween(200)) { -it / 3 })
+                    },
+                    modifier = Modifier.weight(1f),
+                    label = "center_content"
+                ) { currentMode ->
+                    when (currentMode) {
+                        InputMode.NORMAL -> {
+                            // Normal text input field
+                            Surface(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .heightIn(min = 48.dp),
+                                shape = RoundedCornerShape(24.dp),
+                                color = inputColors.inputFieldBackground
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    TextField(
+                                        value = text,
+                                        onValueChange = onTextChange,
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = {
+                                            Text(
+                                                text = stringResource(
+                                                    if (isLocalSmsChat) R.string.message_placeholder_text
+                                                    else R.string.message_placeholder_imessage
+                                                ),
+                                                color = inputColors.inputPlaceholder
+                                            )
+                                        },
+                                        colors = TextFieldDefaults.colors(
+                                            focusedContainerColor = Color.Transparent,
+                                            unfocusedContainerColor = Color.Transparent,
+                                            focusedIndicatorColor = Color.Transparent,
+                                            unfocusedIndicatorColor = Color.Transparent,
+                                            focusedTextColor = inputColors.inputText,
+                                            unfocusedTextColor = inputColors.inputText,
+                                            cursorColor = MaterialTheme.colorScheme.primary
+                                        ),
+                                        maxLines = 4
+                                    )
+
+                                    IconButton(
+                                        onClick = onEmojiClick,
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.EmojiEmotions,
+                                            contentDescription = stringResource(R.string.emoji),
+                                            tint = if (isEmojiPickerExpanded) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                inputColors.inputIcon
+                                            },
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+
+                                    IconButton(
+                                        onClick = onImageClick,
+                                        modifier = Modifier.size(40.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.Image,
+                                            contentDescription = stringResource(R.string.attach_image),
+                                            tint = inputColors.inputIcon,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        InputMode.RECORDING -> {
+                            // Recording indicator with waveform
+                            RecordingContent(
+                                duration = recordingDuration,
+                                amplitudeHistory = amplitudeHistory,
+                                inputColors = inputColors
                             )
                         }
-
-                        // Text input
-                        TextField(
-                            value = text,
-                            onValueChange = onTextChange,
-                            modifier = Modifier.weight(1f),
-                            placeholder = {
-                                Text(
-                                    text = stringResource(
-                                        if (isLocalSmsChat) R.string.message_placeholder_text
-                                        else R.string.message_placeholder_imessage
-                                    ),
-                                    color = inputColors.inputPlaceholder
-                                )
-                            },
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                                focusedTextColor = inputColors.inputText,
-                                unfocusedTextColor = inputColors.inputText,
-                                cursorColor = MaterialTheme.colorScheme.primary
-                            ),
-                            maxLines = 4
-                        )
-
-                        // Emoji button
-                        IconButton(
-                            onClick = onEmojiClick,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                Icons.Outlined.EmojiEmotions,
-                                contentDescription = stringResource(R.string.emoji),
-                                tint = if (isEmojiPickerExpanded) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    inputColors.inputIcon
-                                },
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-
-                        // Image button
-                        IconButton(
-                            onClick = onImageClick,
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                Icons.Outlined.Image,
-                                contentDescription = stringResource(R.string.attach_image),
-                                tint = inputColors.inputIcon,
-                                modifier = Modifier.size(24.dp)
+                        InputMode.PREVIEW -> {
+                            // Preview/playback controls
+                            PreviewContent(
+                                duration = previewDuration,
+                                playbackPosition = playbackPosition,
+                                isPlaying = isPlaying,
+                                onPlayPause = onPlayPause,
+                                onReRecord = onReRecord,
+                                inputColors = inputColors
                             )
                         }
                     }
@@ -1373,23 +1529,29 @@ private fun MessageInputArea(
 
                 Spacer(modifier = Modifier.width(8.dp))
 
-                // Voice memo button or Send button (animated transition)
+                // Right side action button - voice memo or send (stays in fixed position)
                 Crossfade(
-                    targetState = hasContent,
-                    label = "input_action_button"
+                    targetState = when {
+                        mode == InputMode.RECORDING || mode == InputMode.PREVIEW -> true
+                        hasContent -> true
+                        else -> false
+                    },
+                    label = "action_button"
                 ) { showSend ->
                     if (showSend) {
-                        // Show send button when there's content
                         SendButton(
-                            onClick = onSendClick,
-                            onLongPress = onSendLongPress,
-                            isSending = isSending,
+                            onClick = when (mode) {
+                                InputMode.RECORDING -> onRecordingSend
+                                InputMode.PREVIEW -> onPreviewSend
+                                InputMode.NORMAL -> onSendClick
+                            },
+                            onLongPress = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
+                            isSending = isSending && mode == InputMode.NORMAL,
                             isSmsMode = isLocalSmsChat,
-                            isMmsMode = isMmsMode,
-                            showEffectHint = !isLocalSmsChat
+                            isMmsMode = isMmsMode && mode == InputMode.NORMAL,
+                            showEffectHint = !isLocalSmsChat && mode == InputMode.NORMAL
                         )
                     } else {
-                        // Show voice memo button for all threads when no content
                         VoiceMemoButton(
                             onClick = onVoiceMemoClick,
                             onPressStart = onVoiceMemoPressStart,
@@ -1398,6 +1560,189 @@ private fun MessageInputArea(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Recording mode center content with pulsing indicator and waveform
+ */
+@Composable
+private fun RecordingContent(
+    duration: Long,
+    amplitudeHistory: List<Float>,
+    inputColors: BubbleColors,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "recording")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse"
+    )
+
+    val formattedDuration = remember(duration) {
+        val seconds = (duration / 1000) % 60
+        val minutes = (duration / 1000) / 60
+        String.format("%d:%02d", minutes, seconds)
+    }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = inputColors.inputFieldBackground
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Pulsing red recording dot
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .background(
+                        color = Color.Red.copy(alpha = pulseAlpha),
+                        shape = CircleShape
+                    )
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Real-time waveform visualization
+            Row(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                amplitudeHistory.forEachIndexed { index, amplitude ->
+                    val targetHeight = (4f + amplitude * 20f).coerceIn(4f, 24f)
+                    val animatedHeight by animateFloatAsState(
+                        targetValue = targetHeight,
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        ),
+                        label = "bar_$index"
+                    )
+
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .height(animatedHeight.dp)
+                            .background(
+                                color = Color.Red.copy(alpha = 0.8f),
+                                shape = RoundedCornerShape(1.5.dp)
+                            )
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            // Duration display
+            Text(
+                text = formattedDuration,
+                style = MaterialTheme.typography.bodyMedium,
+                color = inputColors.inputText
+            )
+        }
+    }
+}
+
+/**
+ * Preview mode center content with playback controls
+ */
+@Composable
+private fun PreviewContent(
+    duration: Long,
+    playbackPosition: Long,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onReRecord: () -> Unit,
+    inputColors: BubbleColors,
+    modifier: Modifier = Modifier
+) {
+    val formattedDuration = remember(duration) {
+        val seconds = (duration / 1000) % 60
+        val minutes = (duration / 1000) / 60
+        String.format("%d:%02d", minutes, seconds)
+    }
+
+    val formattedPosition = remember(playbackPosition) {
+        val seconds = (playbackPosition / 1000) % 60
+        val minutes = (playbackPosition / 1000) / 60
+        String.format("%d:%02d", minutes, seconds)
+    }
+
+    val progress = if (duration > 0) (playbackPosition.toFloat() / duration).coerceIn(0f, 1f) else 0f
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 48.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = inputColors.inputFieldBackground
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Play/Pause button
+            IconButton(
+                onClick = onPlayPause,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Progress bar
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier
+                    .weight(1f)
+                    .height(4.dp)
+                    .clip(RoundedCornerShape(2.dp)),
+                color = MaterialTheme.colorScheme.primary,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            // Time display
+            Text(
+                text = if (isPlaying) formattedPosition else formattedDuration,
+                style = MaterialTheme.typography.bodySmall,
+                color = inputColors.inputText,
+                modifier = Modifier.width(36.dp)
+            )
+
+            // Re-record button
+            IconButton(
+                onClick = onReRecord,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.RestartAlt,
+                    contentDescription = "Re-record",
+                    tint = inputColors.inputIcon,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -1602,11 +1947,12 @@ private fun SendButton(
     showEffectHint: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // Protocol-based coloring: green for SMS, blue for iMessage
+    // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
+    val bubbleColors = BothBubblesTheme.bubbleColors
     val containerColor = if (isSmsMode) {
         Color(0xFF34C759) // Green for SMS/MMS
     } else {
-        MaterialTheme.colorScheme.primary // Blue for iMessage
+        bubbleColors.iMessageSent // Deep blue matching iMessage bubbles
     }
     val contentColor = Color.White
 
@@ -1698,11 +2044,12 @@ private fun VoiceMemoButton(
     isSmsMode: Boolean,
     modifier: Modifier = Modifier
 ) {
-    // Protocol-based coloring: green for SMS, blue for iMessage
+    // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
+    val bubbleColors = BothBubblesTheme.bubbleColors
     val containerColor = if (isSmsMode) {
         Color(0xFF34C759) // Green for SMS/MMS
     } else {
-        MaterialTheme.colorScheme.primary // Blue for iMessage
+        bubbleColors.iMessageSent // Deep blue matching iMessage bubbles
     }
 
     Box(
@@ -1788,67 +2135,81 @@ private fun EmptyStateMessages(
 }
 
 /**
- * iOS-style sending indicator bar that appears at the top when sending a message.
- * Shows an indeterminate progress bar with "Sending..." text.
+ * Thin progress bar that appears at the top when sending a message.
+ * - For attachment uploads: shows real progress (0-100%)
+ * - For text-only messages: hidden initially, shows at 25% if send takes > 300ms
  */
 @Composable
 private fun SendingIndicatorBar(
     isVisible: Boolean,
     isLocalSmsChat: Boolean,
+    hasAttachments: Boolean,
+    progress: Float = 0f,
     modifier: Modifier = Modifier
 ) {
+    val progressColor = if (isLocalSmsChat) {
+        Color(0xFF34C759) // Green for SMS
+    } else {
+        MaterialTheme.colorScheme.primary
+    }
+    val trackColor = progressColor.copy(alpha = 0.3f)
+
+    // For text-only messages, delay showing the progress bar
+    var showTextOnlyProgress by remember { mutableStateOf(false) }
+    var completingProgress by remember { mutableStateOf(false) }
+
+    // Animated progress for smooth transitions
+    val animatedProgress by animateFloatAsState(
+        targetValue = when {
+            completingProgress -> 1f
+            hasAttachments -> progress
+            showTextOnlyProgress -> 0.25f
+            else -> 0f
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "sendProgress"
+    )
+
+    // Handle text-only message delay
+    LaunchedEffect(isVisible, hasAttachments) {
+        if (isVisible && !hasAttachments) {
+            // Text-only: wait before showing progress
+            delay(300)
+            if (isVisible) {
+                showTextOnlyProgress = true
+            }
+        } else {
+            showTextOnlyProgress = false
+        }
+    }
+
+    // Handle completion animation
+    LaunchedEffect(isVisible) {
+        if (!isVisible && (showTextOnlyProgress || completingProgress)) {
+            // Send completed - animate to 100% then hide
+            completingProgress = true
+            delay(200)
+            completingProgress = false
+            showTextOnlyProgress = false
+        }
+    }
+
+    // Determine if bar should be visible
+    val shouldShow = isVisible && (hasAttachments || showTextOnlyProgress) || completingProgress
+
     AnimatedVisibility(
-        visible = isVisible,
+        visible = shouldShow,
         enter = expandVertically(),
         exit = shrinkVertically()
     ) {
-        Surface(
-            modifier = modifier.fillMaxWidth(),
-            color = if (isLocalSmsChat) {
-                Color(0xFF34C759).copy(alpha = 0.15f) // Green tint for SMS
-            } else {
-                MaterialTheme.colorScheme.primaryContainer
-            },
-            tonalElevation = 1.dp
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                // Progress bar
-                LinearProgressIndicator(
-                    modifier = Modifier.fillMaxWidth(),
-                    color = if (isLocalSmsChat) {
-                        Color(0xFF34C759) // Green for SMS
-                    } else {
-                        MaterialTheme.colorScheme.primary
-                    },
-                    trackColor = if (isLocalSmsChat) {
-                        Color(0xFF34C759).copy(alpha = 0.3f)
-                    } else {
-                        MaterialTheme.colorScheme.primary.copy(alpha = 0.3f)
-                    }
-                )
-
-                // Sending text
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (isLocalSmsChat) "Sending SMS..." else "Sending...",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isLocalSmsChat) {
-                            Color(0xFF34C759)
-                        } else {
-                            MaterialTheme.colorScheme.primary
-                        }
-                    )
-                }
-            }
-        }
+        LinearProgressIndicator(
+            progress = { animatedProgress.coerceIn(0f, 1f) },
+            modifier = modifier
+                .fillMaxWidth()
+                .height(3.dp),
+            color = progressColor,
+            trackColor = trackColor
+        )
     }
 }
 
@@ -2020,251 +2381,6 @@ private fun SmsFallbackBanner(
                         Text("Try iMessage again")
                     }
                 }
-            }
-        }
-    }
-}
-
-/**
- * Voice memo recording bar that replaces the input area during recording.
- * Shows real-time waveform based on audio amplitude, duration, and cancel/send buttons.
- */
-@Composable
-private fun VoiceMemoRecordingBar(
-    duration: Long,
-    amplitudeHistory: List<Float>,
-    onCancel: () -> Unit,
-    onSend: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "recording")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(500, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulse"
-    )
-
-    val formattedDuration = remember(duration) {
-        val seconds = (duration / 1000) % 60
-        val minutes = (duration / 1000) / 60
-        String.format("%d:%02d", minutes, seconds)
-    }
-
-    val inputColors = BothBubblesTheme.bubbleColors
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 0.dp,
-        color = inputColors.inputBackground
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Cancel button (stops recording and enters preview mode)
-            IconButton(onClick = onCancel) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = stringResource(R.string.action_cancel),
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Recording indicator with real-time waveform
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Red recording dot
-                Box(
-                    modifier = Modifier
-                        .size(12.dp)
-                        .background(
-                            color = Color.Red.copy(alpha = pulseAlpha),
-                            shape = CircleShape
-                        )
-                )
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Real-time waveform bars based on audio amplitude
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    amplitudeHistory.forEachIndexed { index, amplitude ->
-                        // Animate height changes smoothly
-                        val targetHeight = (4f + amplitude * 20f).coerceIn(4f, 24f)
-                        val animatedHeight by animateFloatAsState(
-                            targetValue = targetHeight,
-                            animationSpec = tween(durationMillis = 100, easing = LinearEasing),
-                            label = "bar_$index"
-                        )
-
-                        Box(
-                            modifier = Modifier
-                                .width(3.dp)
-                                .height(animatedHeight.dp)
-                                .background(
-                                    color = MaterialTheme.colorScheme.primary,
-                                    shape = RoundedCornerShape(1.5.dp)
-                                )
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Duration
-                Text(
-                    text = formattedDuration,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = inputColors.inputText
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Send button - uses MD3 FilledIconButton
-            FilledIconButton(
-                onClick = onSend,
-                modifier = Modifier.size(44.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * Voice memo preview bar that allows playback, re-record, or send.
- * Shown after the user stops recording (X button while recording).
- */
-@Composable
-private fun VoiceMemoPreviewBar(
-    duration: Long,
-    playbackPosition: Long,
-    isPlaying: Boolean,
-    onPlayPause: () -> Unit,
-    onReRecord: () -> Unit,
-    onSend: () -> Unit,
-    onCancel: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val formattedDuration = remember(duration) {
-        val seconds = (duration / 1000) % 60
-        val minutes = (duration / 1000) / 60
-        String.format("%d:%02d", minutes, seconds)
-    }
-
-    val formattedPosition = remember(playbackPosition) {
-        val seconds = (playbackPosition / 1000) % 60
-        val minutes = (playbackPosition / 1000) / 60
-        String.format("%d:%02d", minutes, seconds)
-    }
-
-    val progress = if (duration > 0) (playbackPosition.toFloat() / duration).coerceIn(0f, 1f) else 0f
-
-    val inputColors = BothBubblesTheme.bubbleColors
-
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        tonalElevation = 0.dp,
-        color = inputColors.inputBackground
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Cancel button (exits preview mode and deletes recording)
-            IconButton(onClick = onCancel) {
-                Icon(
-                    Icons.Default.Close,
-                    contentDescription = stringResource(R.string.action_cancel),
-                    tint = MaterialTheme.colorScheme.error
-                )
-            }
-
-            Spacer(modifier = Modifier.width(4.dp))
-
-            // Play/Pause button
-            IconButton(onClick = onPlayPause) {
-                Icon(
-                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Pause" else "Play",
-                    tint = MaterialTheme.colorScheme.primary
-                )
-            }
-
-            // Progress bar and time
-            Row(
-                modifier = Modifier.weight(1f),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Progress bar
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp)),
-                    color = MaterialTheme.colorScheme.primary,
-                    trackColor = MaterialTheme.colorScheme.surfaceVariant,
-                )
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Time display
-                Text(
-                    text = if (isPlaying) formattedPosition else formattedDuration,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = inputColors.inputText
-                )
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Re-record button
-            IconButton(onClick = onReRecord) {
-                Icon(
-                    Icons.Default.RestartAlt,
-                    contentDescription = "Re-record",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Send button
-            FilledIconButton(
-                onClick = onSend,
-                modifier = Modifier.size(44.dp),
-                colors = IconButtonDefaults.filledIconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    contentColor = MaterialTheme.colorScheme.onPrimary
-                )
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    modifier = Modifier.size(20.dp)
-                )
             }
         }
     }

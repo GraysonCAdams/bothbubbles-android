@@ -155,6 +155,26 @@ interface ChatDao {
     """)
     fun observeActiveGroupChats(): Flow<List<ChatEntity>>
 
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity>
+
+    @Query("""
+        SELECT COUNT(*) FROM chats
+        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
+    """)
+    suspend fun getGroupChatCount(): Int
+
+    @Query("""
+        SELECT COUNT(*) FROM chats
+        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
+    """)
+    fun observeGroupChatCount(): Flow<Int>
+
     // ===== Participants =====
 
     @Query("""
@@ -350,6 +370,22 @@ interface ChatDao {
     @Query("UPDATE chats SET is_spam = 0, spam_score = 0 WHERE guid = :guid")
     suspend fun clearSpamStatus(guid: String)
 
+    // ===== Data Cleanup =====
+
+    /**
+     * Clear invalid display names that contain internal identifiers.
+     * This fixes display names like "38772(smsfp)", "+17035439474(smsft)", "c46271", "8a5f87", etc.
+     * When display_name is null, the app falls back to the phone number from chat_identifier.
+     */
+    @Query("""
+        UPDATE chats
+        SET display_name = NULL
+        WHERE display_name LIKE '%(sms%)%'
+           OR display_name LIKE '%(ft%)%'
+           OR (LENGTH(display_name) BETWEEN 5 AND 8 AND display_name GLOB '[0-9a-z][0-9a-z]*' AND display_name NOT GLOB '*[A-Z ]*')
+    """)
+    suspend fun clearInvalidDisplayNames(): Int
+
     // ===== Message Categorization =====
 
     @Query("""
@@ -361,6 +397,13 @@ interface ChatDao {
 
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND category = :category")
     fun getChatCountByCategory(category: String): Flow<Int>
+
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND category IS NULL
+        ORDER BY latest_message_date DESC
+    """)
+    suspend fun getUncategorizedChats(): List<ChatEntity>
 
     @Query("""
         UPDATE chats

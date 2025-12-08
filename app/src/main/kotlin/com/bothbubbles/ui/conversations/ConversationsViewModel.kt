@@ -73,6 +73,10 @@ class ConversationsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ConversationsUiState())
     val uiState: StateFlow<ConversationsUiState> = _uiState.asStateFlow()
 
+    // Event to trigger scroll when a chat is pinned (emits target index to scroll to)
+    private val _scrollToIndexEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val scrollToIndexEvent: SharedFlow<Int> = _scrollToIndexEvent.asSharedFlow()
+
     private val _searchQuery = MutableStateFlow("")
     private val _typingChats = MutableStateFlow<Set<String>>(emptySet())
     private val _smsStateRefreshTrigger = MutableStateFlow(0)
@@ -100,6 +104,7 @@ class ConversationsViewModel @Inject constructor(
         observeSwipeSettings()
         observeMessageSearch()
         observeAppTitleSetting()
+        observeCategorizationEnabled()
         loadUserProfile()
         checkPrivateApiPrompt()
         checkInitialSmsImport()
@@ -110,6 +115,14 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.useSimpleAppTitle.collect { useSimple ->
                 _uiState.update { it.copy(useSimpleAppTitle = useSimple) }
+            }
+        }
+    }
+
+    private fun observeCategorizationEnabled() {
+        viewModelScope.launch {
+            settingsDataStore.categorizationEnabled.collect { enabled ->
+                _uiState.update { it.copy(categorizationEnabled = enabled) }
             }
         }
     }
@@ -263,12 +276,15 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
+            // Clean up invalid display names before loading (runs once, fast, idempotent)
+            chatRepository.cleanupInvalidDisplayNames()
+
             try {
                 // Load first page of unified groups (1:1 merged iMessage+SMS)
                 val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, 0)
 
-                // Load all group chats (typically few, no pagination needed)
-                val groupChats = chatDao.observeActiveGroupChats().first()
+                // Load first page of group chats
+                val groupChats = chatDao.getGroupChatsPaginated(PAGE_SIZE, 0)
 
                 // Load first page of non-group chats (for orphans not in unified groups)
                 val nonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, 0)
@@ -282,8 +298,12 @@ class ConversationsViewModel @Inject constructor(
 
                 // Check if more data exists beyond first page
                 val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
+                val totalGroupChats = chatDao.getGroupChatCount()
                 val totalNonGroup = chatDao.getNonGroupChatCount()
-                val hasMore = (unifiedGroups.size + nonGroupChats.size) < (totalUnified + totalNonGroup)
+                val loadedCount = unifiedGroups.size + groupChats.size + nonGroupChats.size
+                val totalCount = totalUnified + totalGroupChats + totalNonGroup
+                val hasMore = loadedCount < totalCount
+
 
                 _uiState.update { state ->
                     state.copy(
@@ -303,19 +323,23 @@ class ConversationsViewModel @Inject constructor(
     /**
      * Observe data changes to refresh loaded conversations reactively.
      * Triggers on any change to unified groups, chats, or typing indicators.
+     * Skips refresh while loading more pages to avoid jankiness.
      */
     private fun observeDataChanges() {
         viewModelScope.launch {
             combine(
                 unifiedChatGroupDao.observeActiveGroupCount(),
+                chatDao.observeGroupChatCount(),
                 chatDao.observeNonGroupChatCount(),
-                chatDao.observeActiveGroupChats(),
                 _typingChats,
                 _searchQuery
             ) { _, _, _, _, _ -> Unit }
-            .debounce(200)
+            .debounce(300) // Increased debounce to reduce jank
             .collect {
-                refreshAllLoadedPages()
+                // Skip refresh while loading more to avoid items popping in during scroll
+                if (!_uiState.value.isLoadingMore) {
+                    refreshAllLoadedPages()
+                }
             }
         }
     }
@@ -332,8 +356,8 @@ class ConversationsViewModel @Inject constructor(
             // Re-fetch all loaded unified groups
             val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(totalLoaded, 0)
 
-            // Re-fetch all group chats
-            val groupChats = chatDao.observeActiveGroupChats().first()
+            // Re-fetch all loaded group chats
+            val groupChats = chatDao.getGroupChatsPaginated(totalLoaded, 0)
 
             // Re-fetch all loaded non-group chats
             val nonGroupChats = chatDao.getNonGroupChatsPaginated(totalLoaded, 0)
@@ -360,8 +384,11 @@ class ConversationsViewModel @Inject constructor(
 
             // Check if more data exists
             val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
+            val totalGroupChats = chatDao.getGroupChatCount()
             val totalNonGroup = chatDao.getNonGroupChatCount()
-            val hasMore = (unifiedGroups.size + nonGroupChats.size) < (totalUnified + totalNonGroup)
+            val loadedCount = unifiedGroups.size + groupChats.size + nonGroupChats.size
+            val totalCount = totalUnified + totalGroupChats + totalNonGroup
+            val hasMore = loadedCount < totalCount
 
             _uiState.update { state ->
                 state.copy(
@@ -390,12 +417,15 @@ class ConversationsViewModel @Inject constructor(
                 // Load next page of unified groups
                 val moreUnifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, offset)
 
+                // Load next page of group chats
+                val moreGroupChats = chatDao.getGroupChatsPaginated(PAGE_SIZE, offset)
+
                 // Load next page of non-group chats
                 val moreNonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
                 val newConversations = buildConversationList(
                     unifiedGroups = moreUnifiedGroups,
-                    groupChats = emptyList(), // Group chats already loaded in full
+                    groupChats = moreGroupChats,
                     nonGroupChats = moreNonGroupChats,
                     typingChats = _typingChats.value
                 )
@@ -515,9 +545,10 @@ class ConversationsViewModel @Inject constructor(
 
         // Determine display name - prioritize contact card name (cachedDisplayName) above all else
         // Priority: 1. Device contact name, 2. Cached group/chat name, 3. Inferred name, 4. Formatted phone
+        // Use PhoneNumberFormatter.format() which strips service suffixes and formats the number
         val displayName = primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
-            ?: group.displayName?.takeIf { it.isNotBlank() }
-            ?: primaryChat.displayName?.takeIf { it.isNotBlank() }
+            ?: group.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
+            ?: primaryChat.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
             ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
             ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
             ?: address.let { PhoneNumberFormatter.format(it) }
@@ -582,6 +613,7 @@ class ConversationsViewModel @Inject constructor(
             lastMessageTimestamp = latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L,
             unreadCount = totalUnread.takeIf { it > 0 } ?: group.unreadCount,
             isPinned = anyPinned,
+            pinIndex = group.pinIndex ?: chats.mapNotNull { it.pinIndex }.minOrNull() ?: Int.MAX_VALUE,
             isMuted = allMuted,
             isGroup = false,
             isTyping = anyTyping,
@@ -878,9 +910,12 @@ class ConversationsViewModel @Inject constructor(
 
                                 // Resolve display name for 1:1 vs group chats
                                 val resolvedDisplayName = if (!chat.isGroup && primaryParticipant != null) {
-                                    primaryParticipant.displayName
+                                    primaryParticipant.displayName.takeIf { it.isNotBlank() }
+                                        ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                                        ?: primaryParticipant.address.let { PhoneNumberFormatter.format(it) }
                                 } else {
-                                    chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                                    chat.displayName?.takeIf { it.isNotBlank() }
+                                        ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
                                         ?: primaryParticipant?.address?.let { PhoneNumberFormatter.format(it) } ?: ""
                                 }
 
@@ -926,18 +961,50 @@ class ConversationsViewModel @Inject constructor(
 
     fun snoozeChat(chatGuid: String, durationMs: Long) {
         viewModelScope.launch {
+            val snoozeUntil = if (durationMs == -1L) -1L else System.currentTimeMillis() + durationMs
+
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(isSnoozed = true, snoozeUntil = snoozeUntil)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.snoozeChat(chatGuid, durationMs)
         }
     }
 
     fun unsnoozeChat(chatGuid: String) {
         viewModelScope.launch {
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(isSnoozed = false, snoozeUntil = null)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.unsnoozeChat(chatGuid)
         }
     }
 
     fun markAsUnread(chatGuid: String) {
         viewModelScope.launch {
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(unreadCount = 1)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.markChatAsUnread(chatGuid)
         }
     }
@@ -1032,14 +1099,49 @@ class ConversationsViewModel @Inject constructor(
 
     fun togglePin(chatGuid: String) {
         viewModelScope.launch {
-            val chat = chatRepository.getChat(chatGuid)
-            chat?.let {
-                // If already pinned, always allow unpinning
-                // If not pinned, only allow pinning if the contact is saved
-                if (it.isPinned || canPinChat(chatGuid)) {
-                    chatRepository.setPinned(chatGuid, !it.isPinned)
-                }
+            val conversation = _uiState.value.conversations.find { it.guid == chatGuid }
+            if (conversation == null) return@launch
+
+            // If already pinned, always allow unpinning
+            // If not pinned, only allow pinning if the contact is saved
+            if (!conversation.isPinned && !conversation.hasContact) return@launch
+
+            val newPinState = !conversation.isPinned
+
+            // Calculate new pin index: add to end when pinning, clear when unpinning
+            val currentPinnedCount = _uiState.value.conversations.count { it.isPinned }
+            val newPinIndex = if (newPinState) {
+                val maxPinIndex = _uiState.value.conversations
+                    .filter { it.isPinned }
+                    .maxOfOrNull { it.pinIndex } ?: -1
+                maxPinIndex + 1
+            } else {
+                Int.MAX_VALUE
             }
+
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(isPinned = newPinState, pinIndex = newPinIndex)
+                    else conv
+                }.sortedWith(
+                    compareByDescending<ConversationUiModel> { it.isPinned }
+                        .thenBy { it.pinIndex }
+                        .thenByDescending { it.lastMessageTimestamp }
+                )
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Emit scroll event when pinning (not unpinning)
+            if (newPinState) {
+                // If more than 3 pins, scroll to the new pin position (end of pins)
+                // Otherwise scroll to top
+                val scrollIndex = if (currentPinnedCount >= 3) newPinIndex else 0
+                _scrollToIndexEvent.tryEmit(scrollIndex)
+            }
+
+            // Persist to database in background
+            chatRepository.setPinned(chatGuid, newPinState, if (newPinState) newPinIndex else null)
         }
     }
 
@@ -1051,6 +1153,36 @@ class ConversationsViewModel @Inject constructor(
     fun canPinChat(chatGuid: String): Boolean {
         val conversation = _uiState.value.conversations.find { it.guid == chatGuid }
         return conversation?.hasContact == true
+    }
+
+    /**
+     * Reorder pinned conversations by updating their pin indices.
+     * @param reorderedGuids The new order of pinned conversation GUIDs
+     */
+    fun reorderPins(reorderedGuids: List<String>) {
+        viewModelScope.launch {
+            // Optimistically update UI immediately
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    val newIndex = reorderedGuids.indexOf(conv.guid)
+                    if (newIndex >= 0) {
+                        conv.copy(pinIndex = newIndex)
+                    } else {
+                        conv
+                    }
+                }.sortedWith(
+                    compareByDescending<ConversationUiModel> { it.isPinned }
+                        .thenBy { it.pinIndex }
+                        .thenByDescending { it.lastMessageTimestamp }
+                )
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database
+            reorderedGuids.forEachIndexed { index, guid ->
+                chatRepository.setPinned(guid, true, index)
+            }
+        }
     }
 
     /**
@@ -1102,34 +1234,79 @@ class ConversationsViewModel @Inject constructor(
 
     fun toggleMute(chatGuid: String) {
         viewModelScope.launch {
-            val chat = chatRepository.getChat(chatGuid)
-            chat?.let {
-                val currentlyMuted = it.muteType != null
-                chatRepository.setMuted(chatGuid, !currentlyMuted)
+            val conversation = _uiState.value.conversations.find { it.guid == chatGuid }
+            if (conversation == null) return@launch
+
+            val newMuteState = !conversation.isMuted
+
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(isMuted = newMuteState)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
             }
+
+            // Persist to database in background
+            chatRepository.setMuted(chatGuid, newMuteState)
         }
     }
 
     fun archiveChat(chatGuid: String) {
         viewModelScope.launch {
+            // Optimistically remove from list immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.filter { it.guid != chatGuid }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.setArchived(chatGuid, true)
         }
     }
 
     fun deleteChat(chatGuid: String) {
         viewModelScope.launch {
+            // Optimistically remove from list immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.filter { it.guid != chatGuid }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.deleteChat(chatGuid)
         }
     }
 
     fun markAsRead(chatGuid: String) {
         viewModelScope.launch {
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid == chatGuid) conv.copy(unreadCount = 0)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatRepository.markChatAsRead(chatGuid)
         }
     }
 
     fun markChatsAsUnread(chatGuids: Set<String>) {
         viewModelScope.launch {
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid in chatGuids) conv.copy(unreadCount = 1)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatGuids.forEach { chatGuid ->
                 chatRepository.markChatAsUnread(chatGuid)
             }
@@ -1138,6 +1315,16 @@ class ConversationsViewModel @Inject constructor(
 
     fun markChatsAsRead(chatGuids: Set<String>) {
         viewModelScope.launch {
+            // Optimistically update UI immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.map { conv ->
+                    if (conv.guid in chatGuids) conv.copy(unreadCount = 0)
+                    else conv
+                }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatGuids.forEach { chatGuid ->
                 chatRepository.markChatAsRead(chatGuid)
             }
@@ -1146,6 +1333,13 @@ class ConversationsViewModel @Inject constructor(
 
     fun blockChats(chatGuids: Set<String>) {
         viewModelScope.launch {
+            // Optimistically remove from list immediately for instant feedback
+            _uiState.update { state ->
+                val updatedConversations = state.conversations.filter { it.guid !in chatGuids }
+                state.copy(conversations = updatedConversations)
+            }
+
+            // Persist to database in background
             chatGuids.forEach { chatGuid ->
                 // Get the phone number for this chat
                 val address = chatRepository.getChatParticipantAddress(chatGuid)
@@ -1244,17 +1438,18 @@ class ConversationsViewModel @Inject constructor(
         // For 1:1 chats, use the participant's display name (includes "Maybe:" prefix for inferred names)
         // For group chats, use the chat's display name, then fall back to joined participant names
         // Use takeIf to convert empty strings to null for proper fallback
+        // Strip service suffixes from display names as a safety net
         val resolvedDisplayName = if (!isGroup && primaryParticipant != null) {
             primaryParticipant.displayName.takeIf { it.isNotBlank() }
                 ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) }
                 ?: address.let { PhoneNumberFormatter.format(it) }
         } else if (isGroup) {
             // For group chats: explicit name > joined participant names > formatted identifier
-            displayName?.takeIf { it.isNotBlank() }
+            displayName?.let { PhoneNumberFormatter.stripServiceSuffix(it) }?.takeIf { it.isNotBlank() }
                 ?: participantNames.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(", ")
                 ?: "Group Chat"
         } else {
-            displayName?.takeIf { it.isNotBlank() }
+            displayName?.let { PhoneNumberFormatter.stripServiceSuffix(it) }?.takeIf { it.isNotBlank() }
                 ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) }
                 ?: address.let { PhoneNumberFormatter.format(it) }
         }
@@ -1290,6 +1485,7 @@ class ConversationsViewModel @Inject constructor(
             lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,
             unreadCount = unreadCount,
             isPinned = isPinned,
+            pinIndex = pinIndex ?: Int.MAX_VALUE,
             isMuted = muteType != null,
             isGroup = isGroup,
             isTyping = guid in typingChats,
@@ -1375,6 +1571,7 @@ class ConversationsViewModel @Inject constructor(
         return (mergedChats + groupChats)
             .sortedWith(
                 compareByDescending<ConversationUiModel> { it.isPinned }
+                    .thenBy { it.pinIndex }
                     .thenByDescending { it.lastMessageTimestamp }
             )
     }
@@ -1396,8 +1593,9 @@ class ConversationsViewModel @Inject constructor(
         // Any typing indicator from any chat
         val anyTyping = chats.any { it.isTyping }
 
-        // Any pinned
+        // Any pinned - use lowest pinIndex from pinned chats
         val anyPinned = chats.any { it.isPinned }
+        val minPinIndex = chats.filter { it.isPinned }.minOfOrNull { it.pinIndex } ?: Int.MAX_VALUE
 
         // All muted
         val allMuted = chats.all { it.isMuted }
@@ -1420,6 +1618,7 @@ class ConversationsViewModel @Inject constructor(
             avatarPath = avatarPath,
             unreadCount = totalUnread,
             isPinned = anyPinned,
+            pinIndex = minPinIndex,
             isMuted = allMuted,
             isTyping = anyTyping,
             hasDraft = hasDraft,
@@ -1466,7 +1665,9 @@ data class ConversationsUiState(
     // SMS import state
     val isImportingSms: Boolean = false,
     val smsImportProgress: Float = 0f,
-    val smsImportError: String? = null
+    val smsImportError: String? = null,
+    // Categorization state
+    val categorizationEnabled: Boolean = false
 )
 
 /**
@@ -1528,6 +1729,7 @@ data class ConversationUiModel(
     val lastMessageTimestamp: Long,
     val unreadCount: Int,
     val isPinned: Boolean,
+    val pinIndex: Int = Int.MAX_VALUE, // Order for pinned items (lower = earlier)
     val isMuted: Boolean,
     val isGroup: Boolean,
     val isTyping: Boolean,

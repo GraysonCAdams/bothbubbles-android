@@ -13,6 +13,7 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -28,7 +29,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -145,8 +148,15 @@ fun AttachmentPickerPanel(
         ),
         modifier = modifier
     ) {
+        // Track drag offset for dismiss gesture
+        var dragOffset by remember { mutableFloatStateOf(0f) }
+        val density = LocalDensity.current
+        val dismissThreshold = with(density) { 80.dp.toPx() } // Dismiss after 80dp drag down
+
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = with(density) { dragOffset.coerceAtLeast(0f).toDp() }),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
             tonalElevation = 8.dp
@@ -156,15 +166,40 @@ fun AttachmentPickerPanel(
                     .fillMaxWidth()
                     .padding(16.dp)
             ) {
-                // Drag handle
+                // Drag handle - with gesture detection for pull-down to dismiss
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)
-                        .width(32.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                )
+                        .fillMaxWidth()
+                        .height(24.dp) // Larger hit target
+                        .pointerInput(Unit) {
+                            detectVerticalDragGestures(
+                                onDragEnd = {
+                                    if (dragOffset > dismissThreshold) {
+                                        onDismiss()
+                                    }
+                                    dragOffset = 0f
+                                },
+                                onDragCancel = {
+                                    dragOffset = 0f
+                                },
+                                onVerticalDrag = { _, dragAmount ->
+                                    // Only track downward drags
+                                    dragOffset = (dragOffset + dragAmount).coerceAtLeast(0f)
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Visual handle indicator
+                    Box(
+                        modifier = Modifier
+                            .width(32.dp)
+                            .height(4.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(16.dp))
 

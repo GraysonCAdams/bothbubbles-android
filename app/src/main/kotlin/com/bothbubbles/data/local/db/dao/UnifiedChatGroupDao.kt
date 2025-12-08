@@ -268,4 +268,16 @@ interface UnifiedChatGroupDao {
         WHERE id NOT IN (SELECT DISTINCT group_id FROM unified_chat_members)
     """)
     suspend fun deleteOrphanedGroups(): Int
+
+    /**
+     * Clear invalid display names that contain service suffixes.
+     * When display_name is null, the app falls back to formatted phone numbers.
+     */
+    @Query("""
+        UPDATE unified_chat_groups
+        SET display_name = NULL
+        WHERE display_name LIKE '%(sms%)%'
+           OR display_name LIKE '%(ft%)%'
+    """)
+    suspend fun clearInvalidDisplayNames(): Int
 }

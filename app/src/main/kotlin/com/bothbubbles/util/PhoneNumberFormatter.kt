@@ -53,22 +53,25 @@ object PhoneNumberFormatter {
      * @return Formatted phone number (e.g., "(617) 555-1234") or original if parsing fails
      */
     fun format(phoneNumber: String, countryCode: String? = null): String {
-        val util = phoneUtil ?: return phoneNumber
+        val util = phoneUtil ?: return stripServiceSuffix(phoneNumber)
 
         // Skip formatting for email addresses
         if (phoneNumber.contains("@")) {
             return phoneNumber
         }
 
+        // Strip any service suffixes like (smsfp), (smsft), (smsft_fi), etc.
+        val cleanedNumber = stripServiceSuffix(phoneNumber)
+
         // Skip if it's clearly not a phone number
-        val digitsOnly = phoneNumber.replace(Regex("[^0-9]"), "")
+        val digitsOnly = cleanedNumber.replace(Regex("[^0-9]"), "")
         if (digitsOnly.length < 7) {
-            return phoneNumber
+            return cleanedNumber
         }
 
         return try {
             val region = countryCode?.uppercase() ?: defaultCountryCode
-            val parsedNumber: Phonenumber.PhoneNumber = util.parse(phoneNumber, region)
+            val parsedNumber: Phonenumber.PhoneNumber = util.parse(cleanedNumber, region)
 
             // Use national format for the number's own country
             if (util.isValidNumber(parsedNumber)) {
@@ -86,9 +89,23 @@ object PhoneNumberFormatter {
                 util.format(parsedNumber, PhoneNumberUtil.PhoneNumberFormat.NATIONAL)
             }
         } catch (e: NumberParseException) {
-            // Return original if parsing fails
-            phoneNumber
+            // Return cleaned number if parsing fails
+            cleanedNumber
         }
+    }
+
+    /**
+     * Strip service suffixes from phone numbers/identifiers.
+     * Removes patterns like (smsfp), (smsft), (smsft_fi), (smsft_rm), etc.
+     * These are internal identifiers added by the BlueBubbles server for SMS text forwarding chats.
+     *
+     * This is a public utility that can be used to clean any string that might contain
+     * service suffixes before displaying to the user.
+     */
+    fun stripServiceSuffix(identifier: String): String {
+        // Pattern matches (sms*) or (ft*) suffixes at the end of the string
+        // Examples: (smsfp), (smsft), (smsft_fi), (smsft_rm), (smsfp_rm), (ft_rm)
+        return identifier.replace(Regex("\\((sms|ft)[a-z_]*\\)$", RegexOption.IGNORE_CASE), "")
     }
 
     /**
@@ -117,14 +134,17 @@ object PhoneNumberFormatter {
             return null
         }
 
-        val digitsOnly = phoneNumber.replace(Regex("[^0-9]"), "")
+        // Strip any service suffixes before normalizing
+        val cleanedNumber = stripServiceSuffix(phoneNumber)
+
+        val digitsOnly = cleanedNumber.replace(Regex("[^0-9]"), "")
         if (digitsOnly.length < 7) {
             return null
         }
 
         return try {
             val region = countryCode?.uppercase() ?: defaultCountryCode
-            val parsedNumber = util.parse(phoneNumber, region)
+            val parsedNumber = util.parse(cleanedNumber, region)
 
             if (util.isValidNumber(parsedNumber)) {
                 util.format(parsedNumber, PhoneNumberUtil.PhoneNumberFormat.E164)
@@ -146,19 +166,23 @@ object PhoneNumberFormatter {
      * @return True if the addresses match the same contact
      */
     fun isSameContact(address1: String, address2: String): Boolean {
+        // Strip service suffixes before comparison
+        val clean1 = stripServiceSuffix(address1)
+        val clean2 = stripServiceSuffix(address2)
+
         // Direct string match (handles email-to-email)
-        if (address1.equals(address2, ignoreCase = true)) {
+        if (clean1.equals(clean2, ignoreCase = true)) {
             return true
         }
 
         // Both are emails - already checked above with ignoreCase
-        if (address1.contains("@") || address2.contains("@")) {
+        if (clean1.contains("@") || clean2.contains("@")) {
             return false
         }
 
         // Try normalizing both as phone numbers
-        val normalized1 = normalize(address1)
-        val normalized2 = normalize(address2)
+        val normalized1 = normalize(clean1)
+        val normalized2 = normalize(clean2)
 
         // If both normalize successfully, compare normalized forms
         if (normalized1 != null && normalized2 != null) {
@@ -166,8 +190,8 @@ object PhoneNumberFormatter {
         }
 
         // Fallback: compare digits only (last 10 digits for US-style matching)
-        val digits1 = address1.replace(Regex("[^0-9]"), "")
-        val digits2 = address2.replace(Regex("[^0-9]"), "")
+        val digits1 = clean1.replace(Regex("[^0-9]"), "")
+        val digits2 = clean2.replace(Regex("[^0-9]"), "")
 
         // Match if last 10 digits are the same (handles +1 vs no country code)
         if (digits1.length >= 10 && digits2.length >= 10) {
@@ -190,18 +214,21 @@ object PhoneNumberFormatter {
             return address.lowercase()
         }
 
+        // Strip service suffixes before processing
+        val cleanedAddress = stripServiceSuffix(address)
+
         // Phone numbers: normalize to E.164
-        val normalized = normalize(address)
+        val normalized = normalize(cleanedAddress)
         if (normalized != null) {
             return normalized
         }
 
         // Fallback: use last 10 digits or original
-        val digits = address.replace(Regex("[^0-9]"), "")
+        val digits = cleanedAddress.replace(Regex("[^0-9]"), "")
         return if (digits.length >= 10) {
             digits.takeLast(10)
         } else {
-            address.lowercase()
+            cleanedAddress.lowercase()
         }
     }
 }

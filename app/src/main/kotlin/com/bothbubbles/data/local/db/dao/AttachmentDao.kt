@@ -16,6 +16,9 @@ interface AttachmentDao {
     @Query("SELECT * FROM attachments WHERE message_guid = :messageGuid")
     suspend fun getAttachmentsForMessage(messageGuid: String): List<AttachmentEntity>
 
+    @Query("SELECT * FROM attachments WHERE message_guid IN (:messageGuids)")
+    suspend fun getAttachmentsForMessages(messageGuids: List<String>): List<AttachmentEntity>
+
     @Query("SELECT * FROM attachments WHERE message_guid = :messageGuid")
     fun observeAttachmentsForMessage(messageGuid: String): Flow<List<AttachmentEntity>>
 
@@ -45,6 +48,16 @@ interface AttachmentDao {
         ORDER BY m.date_created DESC
     """)
     fun getVideosForChat(chatGuid: String): Flow<List<AttachmentEntity>>
+
+    @Query("""
+        SELECT a.* FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid
+          AND (a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%')
+          AND a.local_path IS NOT NULL
+        ORDER BY m.date_created DESC
+    """)
+    suspend fun getCachedMediaForChat(chatGuid: String): List<AttachmentEntity>
 
     @Query("""
         SELECT COUNT(*) FROM attachments a

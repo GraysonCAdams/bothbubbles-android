@@ -15,6 +15,7 @@ import com.bothbubbles.data.remote.api.dto.ChatDto
 import com.bothbubbles.data.remote.api.dto.ChatQueryRequest
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -302,6 +303,24 @@ class ChatRepository @Inject constructor(
         chatDao.updateLatestMessageDate(chatGuid, date)
     }
 
+    // ===== Data Cleanup =====
+
+    /**
+     * Clear invalid display names from the database.
+     * This fixes existing data where display names contain internal identifiers
+     * like "(smsfp)", "(smsft)", or look like chat GUIDs (e.g., "c46271").
+     * Should be called once on app startup.
+     */
+    suspend fun cleanupInvalidDisplayNames(): Int {
+        val chatCount = chatDao.clearInvalidDisplayNames()
+        val groupCount = unifiedChatGroupDao.clearInvalidDisplayNames()
+        val totalCount = chatCount + groupCount
+        if (totalCount > 0) {
+            Log.i(TAG, "Cleaned up $totalCount invalid display names (chats: $chatCount, groups: $groupCount)")
+        }
+        return totalCount
+    }
+
     // ===== Private Helpers =====
 
     /**
@@ -420,10 +439,15 @@ class ChatRepository @Inject constructor(
 
             if (group == null) {
                 // Create new unified group with this iMessage chat as primary
+                // Clean the displayName: strip service suffixes
+                val cleanedDisplayName = displayName
+                    ?.let { PhoneNumberFormatter.stripServiceSuffix(it) }
+                    ?.takeIf { it.isValidDisplayName() }
+
                 val newGroup = UnifiedChatGroupEntity(
                     identifier = normalizedPhone,
                     primaryChatGuid = chatGuid,
-                    displayName = displayName
+                    displayName = cleanedDisplayName
                 )
                 // Use atomic method to prevent FOREIGN KEY errors
                 group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
@@ -457,10 +481,15 @@ class ChatRepository @Inject constructor(
     }
 
     private fun ChatDto.toEntity(): ChatEntity {
+        // Clean the displayName: strip service suffixes and validate
+        val cleanedDisplayName = displayName
+            ?.let { PhoneNumberFormatter.stripServiceSuffix(it) }
+            ?.takeIf { it.isValidDisplayName() }
+
         return ChatEntity(
             guid = guid,
             chatIdentifier = chatIdentifier,
-            displayName = displayName,
+            displayName = cleanedDisplayName,
             isGroup = (participants?.size ?: 0) > 1,
             lastMessageDate = lastMessage?.dateCreated,
             lastMessageText = lastMessage?.text,
@@ -474,4 +503,34 @@ class ChatRepository @Inject constructor(
             autoSendTypingIndicators = true
         )
     }
+}
+
+/**
+ * Check if a string is a valid display name (not an internal identifier).
+ * Filters out:
+ * - Blank strings
+ * - Internal iMessage identifiers like "(smsft_rm)", "(ft_rm)", etc.
+ * - SMS forwarding service suffixes like "(smsfp)", "(smsft)", "(smsft_fi)"
+ * - Chat protocol prefixes
+ * - Short alphanumeric strings that look like chat GUIDs
+ */
+private fun String.isValidDisplayName(): Boolean {
+    if (isBlank()) return false
+
+    // Filter out internal identifiers wrapped in parentheses (e.g., "(smsft_rm)")
+    if (startsWith("(") && endsWith(")")) return false
+
+    // Filter out protocol-like strings
+    if (contains(";-;") || contains(";+;")) return false
+
+    // Filter out SMS/FT service suffixes (e.g., "38772(smsfp)", "+17035439474(smsft)", "12345(smsft_fi)")
+    // These are internal identifiers the server includes for SMS text forwarding chats
+    // Pattern matches (sms*) or (ft*) at end of string
+    if (Regex("\\((sms|ft)[a-z_]*\\)$", RegexOption.IGNORE_CASE).containsMatchIn(this)) return false
+
+    // Filter out short alphanumeric strings that look like chat GUIDs (e.g., "c46271")
+    // Valid display names are typically longer and contain more than just alphanumerics
+    if (Regex("^[a-z][0-9a-z]{4,7}$").matches(this)) return false
+
+    return true
 }

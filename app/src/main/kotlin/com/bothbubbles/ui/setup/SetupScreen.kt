@@ -65,7 +65,7 @@ fun SetupScreen(
         }
     }
 
-    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 5 })
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 6 })
 
     // Sync pager state with viewmodel
     LaunchedEffect(uiState.currentPage) {
@@ -99,7 +99,8 @@ fun SetupScreen(
                 if (!skipWelcome || !uiState.allPermissionsGranted) add(1)  // Permissions
                 add(2)  // Server Connection (always shown)
                 if (!skipSmsSetup) add(3)  // SMS Setup
-                add(4)  // Sync (always shown when server connected)
+                if (!skipSmsSetup) add(4)  // Categorization
+                add(5)  // Sync (always shown when server connected)
             }
         }
 
@@ -154,7 +155,7 @@ fun SetupScreen(
                     onNext = {
                         coroutineScope.launch {
                             // Skip SMS setup page if in reconnect mode
-                            pagerState.animateScrollToPage(if (skipSmsSetup) 4 else 3)
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 5 else 3)
                         }
                         Unit
                     },
@@ -187,18 +188,26 @@ fun SetupScreen(
                         onSetupComplete()
                     }
                 )
-                4 -> SyncPage(
+                4 -> CategorizationPage(
+                    uiState = uiState,
+                    onDownloadMlModel = viewModel::downloadMlModel,
+                    onSkip = {
+                        viewModel.skipMlDownload()
+                        coroutineScope.launch { pagerState.animateScrollToPage(5) }
+                    },
+                    onMlCellularUpdateChange = viewModel::updateMlCellularAutoUpdate,
+                    onNext = { coroutineScope.launch { pagerState.animateScrollToPage(5) } },
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(3) } }
+                )
+                5 -> SyncPage(
                     uiState = uiState,
                     onMessagesPerChatChange = viewModel::updateMessagesPerChat,
                     onSkipEmptyChatsChange = viewModel::updateSkipEmptyChats,
                     onStartSync = viewModel::startSync,
-                    onDownloadMlModel = viewModel::downloadMlModel,
-                    onSkipMlDownload = viewModel::skipMlDownload,
-                    onMlCellularUpdateChange = viewModel::updateMlCellularAutoUpdate,
                     onBack = {
                         coroutineScope.launch {
-                            // Go back to Server Connection if SMS setup was skipped
-                            pagerState.animateScrollToPage(if (skipSmsSetup) 2 else 3)
+                            // Go back to Categorization if SMS setup was not skipped, else Server Connection
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 2 else 4)
                         }
                     }
                 )
@@ -1023,14 +1032,298 @@ private fun SmsSetupPage(
 }
 
 @Composable
+private fun CategorizationPage(
+    uiState: SetupUiState,
+    onDownloadMlModel: () -> Unit,
+    onSkip: () -> Unit,
+    onMlCellularUpdateChange: (Boolean) -> Unit,
+    onNext: () -> Unit,
+    onBack: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Icon
+        Surface(
+            modifier = Modifier.size(80.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Outlined.Psychology,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Smart Message Categorization",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "Automatically organize messages from businesses and services into helpful categories.",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Category preview cards
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                CategoryPreviewItem(
+                    icon = Icons.Default.Receipt,
+                    title = "Transactions",
+                    description = "Bank alerts, payments, receipts"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                CategoryPreviewItem(
+                    icon = Icons.Default.LocalShipping,
+                    title = "Deliveries",
+                    description = "Package tracking, shipping updates"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                CategoryPreviewItem(
+                    icon = Icons.Default.LocalOffer,
+                    title = "Promotions",
+                    description = "Marketing, deals, offers"
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                CategoryPreviewItem(
+                    icon = Icons.Default.Alarm,
+                    title = "Reminders",
+                    description = "Appointments, verification codes"
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Download info card (if ML model not yet downloaded)
+        if (!uiState.mlModelDownloaded) {
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                color = if (uiState.isOnWifi) {
+                    MaterialTheme.colorScheme.primaryContainer
+                } else {
+                    MaterialTheme.colorScheme.tertiaryContainer
+                }
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            if (uiState.isOnWifi) Icons.Default.Wifi else Icons.Default.SignalCellularAlt,
+                            contentDescription = null,
+                            tint = if (uiState.isOnWifi) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onTertiaryContainer
+                            }
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Requires ~20 MB download",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = if (uiState.isOnWifi) {
+                                MaterialTheme.colorScheme.onPrimaryContainer
+                            } else {
+                                MaterialTheme.colorScheme.onTertiaryContainer
+                            }
+                        )
+                    }
+
+                    if (!uiState.isOnWifi) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = uiState.mlEnableCellularUpdates,
+                                onCheckedChange = onMlCellularUpdateChange
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Allow downloads on cellular",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Error message
+            if (uiState.mlDownloadError != null) {
+                Spacer(modifier = Modifier.height(16.dp))
+                Surface(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer
+                ) {
+                    Row(
+                        modifier = Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Error,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = uiState.mlDownloadError,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Navigation buttons
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Back")
+            }
+
+            if (uiState.mlModelDownloaded || uiState.mlSetupComplete) {
+                // Already downloaded, just continue
+                Button(
+                    onClick = onNext,
+                    modifier = Modifier.height(48.dp)
+                ) {
+                    Text("Continue")
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                }
+            } else {
+                // Download or skip options
+                Column(horizontalAlignment = Alignment.End) {
+                    Button(
+                        onClick = onDownloadMlModel,
+                        enabled = !uiState.mlDownloading,
+                        modifier = Modifier.height(48.dp)
+                    ) {
+                        if (uiState.mlDownloading) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = MaterialTheme.colorScheme.onPrimary
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Downloading...")
+                        } else {
+                            Icon(Icons.Default.Download, contentDescription = null)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Enable")
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    TextButton(
+                        onClick = onSkip,
+                        enabled = !uiState.mlDownloading
+                    ) {
+                        Text("Skip", fontSize = 14.sp)
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Note about enabling later
+        if (!uiState.mlModelDownloaded && !uiState.mlSetupComplete) {
+            Text(
+                text = "You can enable this later in Settings",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+                textAlign = TextAlign.Center
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun CategoryPreviewItem(
+    icon: ImageVector,
+    title: String,
+    description: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Surface(
+            modifier = Modifier.size(40.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primaryContainer
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+            )
+        }
+    }
+}
+
+@Composable
 private fun SyncPage(
     uiState: SetupUiState,
     onMessagesPerChatChange: (Int) -> Unit,
     onSkipEmptyChatsChange: (Boolean) -> Unit,
     onStartSync: () -> Unit,
-    onDownloadMlModel: () -> Unit,
-    onSkipMlDownload: () -> Unit,
-    onMlCellularUpdateChange: (Boolean) -> Unit,
     onBack: () -> Unit
 ) {
     Column(
@@ -1040,16 +1333,6 @@ private fun SyncPage(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         when {
-            // ML Download view (shown after sync completes if ML step is needed)
-            uiState.syncProgress >= 1f && uiState.shouldShowMlStep && !uiState.mlSetupComplete -> {
-                MlDownloadSection(
-                    uiState = uiState,
-                    onDownload = onDownloadMlModel,
-                    onSkip = onSkipMlDownload,
-                    onCellularUpdateChange = onMlCellularUpdateChange
-                )
-            }
-
             // Syncing view
             uiState.isSyncing -> {
                 Spacer(modifier = Modifier.weight(1f))

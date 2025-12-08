@@ -124,7 +124,9 @@ class MessageRepository @Inject constructor(
             guid = chatGuid,
             limit = limit,
             offset = offset,
-            sort = "DESC"
+            sort = "DESC",
+            before = before,
+            after = after
         )
 
         val body = response.body()
@@ -585,6 +587,8 @@ class MessageRepository @Inject constructor(
         // Replace temp GUID with server GUID if we got one
         lastResponse?.let { serverMessage ->
             messageDao.replaceGuid(tempGuid, serverMessage.guid)
+            // Sync attachments from the server response to local database
+            syncMessageAttachments(serverMessage)
             serverMessage.toEntity(chatGuid)
         } ?: run {
             messageDao.updateErrorStatus(tempGuid, 0)

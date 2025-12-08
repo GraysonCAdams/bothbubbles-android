@@ -10,6 +10,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.categorization.CategorizationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -61,7 +62,8 @@ class SyncService @Inject constructor(
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val categorizationRepository: CategorizationRepository
 ) {
     companion object {
         private const val TAG = "SyncService"
@@ -88,6 +90,9 @@ class SyncService @Inject constructor(
      * is fetched, those chats are immediately queued for message syncing.
      * Progress is persisted per-chat so sync can resume after app restart.
      *
+     * When SMS is enabled and not yet imported, SMS import runs concurrently
+     * with iMessage sync for faster initial setup.
+     *
      * @param messagesPerChat Number of messages to sync per chat
      * @param onProgress Optional callback for progress updates (0-100). When provided,
      *                   internal _syncState updates are suppressed (caller manages state).
@@ -101,6 +106,15 @@ class SyncService @Inject constructor(
         // Mark sync as started and store settings for potential resume
         settingsDataStore.setInitialSyncStarted(true)
         settingsDataStore.setInitialSyncMessagesPerChat(messagesPerChat)
+
+        // Check if we should also run SMS import concurrently
+        val smsEnabled = settingsDataStore.smsEnabled.first()
+        val smsAlreadyImported = settingsDataStore.hasCompletedInitialSmsImport.first()
+        val shouldImportSms = smsEnabled && !smsAlreadyImported && onProgress == null
+
+        if (shouldImportSms) {
+            Log.i(TAG, "SMS enabled and not imported - will run concurrent SMS import")
+        }
 
         // Only update internal state if no external progress handler
         if (onProgress == null) {
@@ -119,6 +133,41 @@ class SyncService @Inject constructor(
         val processedChats = AtomicInteger(0)
         val syncedMessages = AtomicInteger(0)
 
+        // SMS progress tracking (only used when SMS import runs concurrently)
+        val smsCurrentThread = AtomicInteger(0)
+        val smsTotalThreads = AtomicInteger(0)
+        val smsComplete = AtomicInteger(0) // 0 = in progress, 1 = complete
+
+        // Helper to update combined progress when SMS is running concurrently
+        fun updateCombinedProgress(iMessageProgressPercent: Int, stage: String, chatName: String? = null) {
+            if (shouldImportSms) {
+                val smsPct = if (smsTotalThreads.get() > 0) {
+                    (smsCurrentThread.get() * 100) / smsTotalThreads.get()
+                } else if (smsComplete.get() == 1) 100 else 0
+                // Combined: average of iMessage and SMS progress
+                val combinedProgress = (iMessageProgressPercent + smsPct) / 2
+                _syncState.value = SyncState.Syncing(
+                    progress = combinedProgress / 100f,
+                    stage = "iMessage: $iMessageProgressPercent% | SMS: ${smsCurrentThread.get()}/${smsTotalThreads.get()}",
+                    totalChats = totalChatsFound.get(),
+                    processedChats = processedChats.get(),
+                    syncedMessages = syncedMessages.get(),
+                    currentChatName = chatName,
+                    isInitialSync = true
+                )
+            } else {
+                _syncState.value = SyncState.Syncing(
+                    progress = iMessageProgressPercent / 100f,
+                    stage = stage,
+                    totalChats = totalChatsFound.get(),
+                    processedChats = processedChats.get(),
+                    syncedMessages = syncedMessages.get(),
+                    currentChatName = chatName,
+                    isInitialSync = true
+                )
+            }
+        }
+
         // Channel to queue chats for message syncing as they're fetched
         val chatQueue = Channel<ChatSyncTask>(Channel.UNLIMITED)
 
@@ -126,16 +175,35 @@ class SyncService @Inject constructor(
         val syncSemaphore = Semaphore(MESSAGE_SYNC_CONCURRENCY)
 
         coroutineScope {
+            // Optional: Run SMS import concurrently if enabled
+            val smsJob = if (shouldImportSms) {
+                async {
+                    Log.i(TAG, "Starting concurrent SMS import")
+                    smsRepository.importAllThreads(
+                        onProgress = { current, total ->
+                            smsCurrentThread.set(current)
+                            smsTotalThreads.set(total)
+                        }
+                    ).fold(
+                        onSuccess = { count ->
+                            smsComplete.set(1)
+                            settingsDataStore.setHasCompletedInitialSmsImport(true)
+                            Log.i(TAG, "Concurrent SMS import completed: $count threads")
+                        },
+                        onFailure = { e ->
+                            Log.e(TAG, "Concurrent SMS import failed", e)
+                            // Don't mark as complete so it can retry later
+                        }
+                    )
+                }
+            } else null
+
             // Producer: Fetch chats page by page and queue them for message syncing
             val chatFetcher = async {
                 var offset = 0
 
                 if (onProgress == null) {
-                    _syncState.value = SyncState.Syncing(
-                        progress = 0.05f,
-                        stage = "Fetching conversations...",
-                        isInitialSync = true
-                    )
+                    updateCombinedProgress(5, "Fetching conversations...")
                 } else {
                     onProgress(5, 0, 0, 0)
                 }
@@ -163,14 +231,7 @@ class SyncService @Inject constructor(
                     // Update progress - chat fetching is ~20% of total work
                     val fetchProgressPercent = minOf(20, 5 + (15 * offset / maxOf(totalChatsFound.get(), 100)))
                     if (onProgress == null) {
-                        _syncState.value = SyncState.Syncing(
-                            progress = fetchProgressPercent / 100f,
-                            stage = "Fetching conversations...",
-                            totalChats = totalChatsFound.get(),
-                            processedChats = processedChats.get(),
-                            syncedMessages = syncedMessages.get(),
-                            isInitialSync = true
-                        )
+                        updateCombinedProgress(fetchProgressPercent, "Fetching conversations...")
                     } else {
                         onProgress(fetchProgressPercent, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
                     }
@@ -209,15 +270,7 @@ class SyncService @Inject constructor(
                             } else 20
 
                             if (onProgress == null) {
-                                _syncState.value = SyncState.Syncing(
-                                    progress = messageProgressPercent / 100f,
-                                    stage = "Syncing messages...",
-                                    totalChats = total,
-                                    processedChats = processed,
-                                    syncedMessages = syncedMessages.get(),
-                                    currentChatName = task.displayName,
-                                    isInitialSync = true
-                                )
+                                updateCombinedProgress(messageProgressPercent, "Syncing messages...", task.displayName)
                             } else {
                                 onProgress(messageProgressPercent, processed, total, syncedMessages.get())
                             }
@@ -230,9 +283,12 @@ class SyncService @Inject constructor(
                 syncJobs.forEach { it.await() }
             }
 
-            // Wait for both producer and consumer to complete
+            // Wait for iMessage sync (both producer and consumer) to complete
             chatFetcher.await()
             messageSyncer.await()
+
+            // Wait for SMS import if it was started
+            smsJob?.await()
         }
 
         Log.i(TAG, "Synced messages for ${processedChats.get()}/${totalChatsFound.get()} chats (${syncedMessages.get()} messages)")
@@ -244,6 +300,14 @@ class SyncService @Inject constructor(
 
         // Mark initial sync as complete
         settingsDataStore.setInitialSyncComplete(true)
+
+        // Run retroactive categorization after sync completes (only if enabled)
+        val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
+        if (categorizationEnabled) {
+            Log.i(TAG, "Starting retroactive categorization after sync...")
+            val categorized = categorizationRepository.categorizeAllChats()
+            Log.i(TAG, "Retroactive categorization complete: $categorized chats")
+        }
 
         // Only update internal state if no external progress handler
         if (onProgress == null) {
@@ -350,6 +414,15 @@ class SyncService @Inject constructor(
         _lastSyncTime.value = syncTime
 
         settingsDataStore.setInitialSyncComplete(true)
+
+        // Run retroactive categorization after resume sync completes (only if enabled)
+        val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
+        if (categorizationEnabled) {
+            Log.i(TAG, "Starting retroactive categorization after resume sync...")
+            val categorized = categorizationRepository.categorizeAllChats()
+            Log.i(TAG, "Retroactive categorization complete: $categorized chats")
+        }
+
         _syncState.value = SyncState.Completed
     }.onFailure { e ->
         Log.e(TAG, "Resume sync failed", e)

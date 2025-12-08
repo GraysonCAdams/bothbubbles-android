@@ -110,6 +110,7 @@ dependencies {
 
     // Images - Coil
     implementation(libs.coil.compose)
+    implementation(libs.coil.gif)
 
     // CameraX
     implementation(libs.camerax.core)

@@ -48,6 +48,142 @@ class AndroidContactsService @Inject constructor(
     }
 
     /**
+     * Represents a contact from the Android phone contacts.
+     */
+    data class PhoneContact(
+        val contactId: Long,
+        val displayName: String,
+        val phoneNumbers: List<String>,
+        val emails: List<String>,
+        val photoUri: String?,
+        val isStarred: Boolean
+    )
+
+    /**
+     * Get all contacts from the phone with valid display names.
+     * Returns contacts with at least one phone number or email address.
+     * Runs on IO dispatcher. Results are sorted by display name.
+     */
+    suspend fun getAllContacts(): List<PhoneContact> = withContext(Dispatchers.IO) {
+        if (!hasReadPermission()) {
+            Log.w(TAG, "READ_CONTACTS permission not granted")
+            return@withContext emptyList()
+        }
+
+        val contactsMap = mutableMapOf<Long, PhoneContact>()
+
+        try {
+            // Query all contacts with valid display names
+            context.contentResolver.query(
+                ContactsContract.Contacts.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.Contacts._ID,
+                    ContactsContract.Contacts.DISPLAY_NAME_PRIMARY,
+                    ContactsContract.Contacts.PHOTO_URI,
+                    ContactsContract.Contacts.STARRED,
+                    ContactsContract.Contacts.HAS_PHONE_NUMBER
+                ),
+                "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} IS NOT NULL AND ${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} != ''",
+                null,
+                "${ContactsContract.Contacts.DISPLAY_NAME_PRIMARY} COLLATE LOCALIZED ASC"
+            )?.use { cursor ->
+                val idIndex = cursor.getColumnIndex(ContactsContract.Contacts._ID)
+                val nameIndex = cursor.getColumnIndex(ContactsContract.Contacts.DISPLAY_NAME_PRIMARY)
+                val photoIndex = cursor.getColumnIndex(ContactsContract.Contacts.PHOTO_URI)
+                val starredIndex = cursor.getColumnIndex(ContactsContract.Contacts.STARRED)
+                val hasPhoneIndex = cursor.getColumnIndex(ContactsContract.Contacts.HAS_PHONE_NUMBER)
+
+                while (cursor.moveToNext()) {
+                    val contactId = if (idIndex >= 0) cursor.getLong(idIndex) else continue
+                    val displayName = if (nameIndex >= 0) cursor.getString(nameIndex)?.takeIf { it.isNotBlank() } else null
+                    if (displayName == null) continue
+
+                    val photoUri = if (photoIndex >= 0) cursor.getString(photoIndex) else null
+                    val isStarred = if (starredIndex >= 0) cursor.getInt(starredIndex) == 1 else false
+                    val hasPhone = if (hasPhoneIndex >= 0) cursor.getInt(hasPhoneIndex) == 1 else false
+
+                    contactsMap[contactId] = PhoneContact(
+                        contactId = contactId,
+                        displayName = displayName,
+                        phoneNumbers = emptyList(),
+                        emails = emptyList(),
+                        photoUri = photoUri,
+                        isStarred = isStarred
+                    )
+                }
+            }
+
+            if (contactsMap.isEmpty()) {
+                return@withContext emptyList()
+            }
+
+            // Batch query phone numbers for all contacts
+            val contactIds = contactsMap.keys.joinToString(",")
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                ),
+                "${ContactsContract.CommonDataKinds.Phone.CONTACT_ID} IN ($contactIds)",
+                null,
+                null
+            )?.use { cursor ->
+                val contactIdIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
+                val numberIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Phone.NUMBER)
+
+                while (cursor.moveToNext()) {
+                    val contactId = if (contactIdIndex >= 0) cursor.getLong(contactIdIndex) else continue
+                    val number = if (numberIndex >= 0) cursor.getString(numberIndex)?.takeIf { it.isNotBlank() } else null
+                    if (number == null) continue
+
+                    contactsMap[contactId]?.let { contact ->
+                        contactsMap[contactId] = contact.copy(
+                            phoneNumbers = contact.phoneNumbers + number
+                        )
+                    }
+                }
+            }
+
+            // Batch query emails for all contacts
+            context.contentResolver.query(
+                ContactsContract.CommonDataKinds.Email.CONTENT_URI,
+                arrayOf(
+                    ContactsContract.CommonDataKinds.Email.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Email.ADDRESS
+                ),
+                "${ContactsContract.CommonDataKinds.Email.CONTACT_ID} IN ($contactIds)",
+                null,
+                null
+            )?.use { cursor ->
+                val contactIdIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.CONTACT_ID)
+                val emailIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.ADDRESS)
+
+                while (cursor.moveToNext()) {
+                    val contactId = if (contactIdIndex >= 0) cursor.getLong(contactIdIndex) else continue
+                    val email = if (emailIndex >= 0) cursor.getString(emailIndex)?.takeIf { it.isNotBlank() } else null
+                    if (email == null) continue
+
+                    contactsMap[contactId]?.let { contact ->
+                        contactsMap[contactId] = contact.copy(
+                            emails = contact.emails + email
+                        )
+                    }
+                }
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error fetching contacts", e)
+            return@withContext emptyList()
+        }
+
+        // Return only contacts that have at least one phone number or email
+        contactsMap.values
+            .filter { it.phoneNumbers.isNotEmpty() || it.emails.isNotEmpty() }
+            .sortedBy { it.displayName.uppercase() }
+    }
+
+    /**
      * Get all phone numbers and emails that belong to starred (favorite) contacts.
      * Runs on IO dispatcher. Returns a set of addresses for quick lookup.
      */

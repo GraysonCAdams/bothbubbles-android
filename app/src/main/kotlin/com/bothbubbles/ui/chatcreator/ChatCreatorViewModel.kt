@@ -14,6 +14,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -44,9 +45,6 @@ class ChatCreatorViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatCreatorUiState())
     val uiState: StateFlow<ChatCreatorUiState> = _uiState.asStateFlow()
-
-    // Cached starred addresses for quick lookup
-    private var starredAddresses: Set<String> = emptySet()
 
     init {
         loadContacts()
@@ -123,12 +121,74 @@ class ChatCreatorViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            // Pre-fetch all starred addresses once (on IO thread)
-            starredAddresses = androidContactsService.getAllStarredAddresses()
+            // Load contacts from phone contacts (not from handles)
+            val phoneContacts = androidContactsService.getAllContacts()
 
-            // Observe handles and group chats from database
+            // Build a lookup map for iMessage availability from cached handles
+            val handleServiceMap = mutableMapOf<String, String>()
+            handleDao.getAllHandlesOnce().forEach { handle ->
+                val normalized = normalizeAddress(handle.address)
+                // Prefer iMessage when we know it's available
+                if (handle.isIMessage || !handleServiceMap.containsKey(normalized)) {
+                    handleServiceMap[normalized] = handle.service
+                }
+            }
+
+            // Get recent addresses from handle cross-references
+            val recentHandles = handleDao.getRecentContacts().first()
+            val recentAddresses = recentHandles.map { normalizeAddress(it.address) }.toSet()
+
+            // Convert phone contacts to ContactUiModel entries
+            // Each contact can have multiple phone numbers and emails
+            val allContacts = mutableListOf<ContactUiModel>()
+            for (contact in phoneContacts) {
+                // Add phone numbers
+                for (phone in contact.phoneNumbers) {
+                    val normalized = normalizeAddress(phone)
+                    val service = handleServiceMap[normalized] ?: "SMS"
+                    val isRecent = recentAddresses.contains(normalized)
+                    allContacts.add(
+                        ContactUiModel(
+                            address = phone,
+                            normalizedAddress = normalized,
+                            formattedAddress = formatPhoneNumber(phone),
+                            displayName = contact.displayName,
+                            service = service,
+                            avatarPath = contact.photoUri,
+                            isFavorite = contact.isStarred,
+                            isRecent = isRecent
+                        )
+                    )
+                }
+                // Add emails
+                for (email in contact.emails) {
+                    val normalized = normalizeAddress(email)
+                    val isRecent = recentAddresses.contains(normalized)
+                    allContacts.add(
+                        ContactUiModel(
+                            address = email,
+                            normalizedAddress = normalized,
+                            formattedAddress = email,
+                            displayName = contact.displayName,
+                            service = "iMessage", // Emails are always iMessage
+                            avatarPath = contact.photoUri,
+                            isFavorite = contact.isStarred,
+                            isRecent = isRecent
+                        )
+                    )
+                }
+            }
+
+            // De-duplicate by normalized address
+            val deduped = allContacts
+                .groupBy { it.normalizedAddress }
+                .map { (_, group) ->
+                    // Prefer iMessage handle when both exist
+                    group.find { it.service == "iMessage" } ?: group.first()
+                }
+
+            // Observe search query and group chats
             combine(
-                handleDao.getAllHandles(),
                 _searchQuery.flatMapLatest { query ->
                     if (query.isNotBlank()) {
                         chatDao.searchGroupChats(query)
@@ -137,21 +197,29 @@ class ChatCreatorViewModel @Inject constructor(
                     }
                 },
                 _searchQuery
-            ) { handles, groupChats, query ->
-                val contacts = handles.map { it.toContactUiModel(starredAddresses) }
-
+            ) { groupChats, query ->
+                // Filter by search query
                 val filtered = if (query.isNotBlank()) {
-                    contacts.filter { contact ->
+                    deduped.filter { contact ->
                         contact.displayName.contains(query, ignoreCase = true) ||
                             contact.address.contains(query, ignoreCase = true) ||
                             contact.formattedAddress.contains(query, ignoreCase = true)
                     }
                 } else {
-                    contacts
+                    deduped
                 }
 
-                // Group by first letter of display name
-                val grouped = filtered
+                // Split into recent (up to 4) and rest
+                val recent = filtered
+                    .filter { it.isRecent }
+                    .take(4)
+                val recentNormalizedAddresses = recent.map { it.normalizedAddress }.toSet()
+
+                // Rest excludes the recent ones we're showing at the top
+                val rest = filtered.filter { !recentNormalizedAddresses.contains(it.normalizedAddress) }
+
+                // Group rest by first letter of display name (excluding favorites)
+                val grouped = rest
                     .filter { !it.isFavorite }
                     .sortedBy { it.displayName.uppercase() }
                     .groupBy { contact ->
@@ -160,27 +228,41 @@ class ChatCreatorViewModel @Inject constructor(
                     }
                     .toSortedMap()
 
-                val favorites = filtered.filter { it.isFavorite }
+                val favorites = rest.filter { it.isFavorite }.sortedBy { it.displayName.uppercase() }
 
                 // Convert group chats to UI model
                 val groupChatModels = groupChats.map { it.toGroupChatUiModel() }
 
-                // Return data that needs to be merged into state
-                Triple(grouped, favorites, groupChatModels) to query
-            }.collect { (data, query) ->
-                val (grouped, favorites, groupChatModels) = data
-                // Preserve existing state fields that shouldn't be overwritten
+                // Return all data
+                data class ContactsData(
+                    val recent: List<ContactUiModel>,
+                    val grouped: Map<String, List<ContactUiModel>>,
+                    val favorites: List<ContactUiModel>,
+                    val groupChats: List<GroupChatUiModel>,
+                    val query: String
+                )
+                ContactsData(recent, grouped, favorites, groupChatModels, query)
+            }.collect { data ->
                 _uiState.update { currentState ->
                     currentState.copy(
-                        searchQuery = query,
-                        groupedContacts = grouped,
-                        favoriteContacts = favorites,
-                        groupChats = groupChatModels,
+                        searchQuery = data.query,
+                        recentContacts = data.recent,
+                        groupedContacts = data.grouped,
+                        favoriteContacts = data.favorites,
+                        groupChats = data.groupChats,
                         isLoading = false
                     )
                 }
             }
         }
+    }
+
+    /**
+     * Format a phone number for display.
+     */
+    private fun formatPhoneNumber(phone: String): String {
+        // Simple formatting - the phone number is already stored as-is from contacts
+        return PhoneNumberFormatter.format(phone)
     }
 
     fun updateSearchQuery(query: String) {
@@ -316,29 +398,18 @@ class ChatCreatorViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
-    private fun HandleEntity.toContactUiModel(starredSet: Set<String>): ContactUiModel {
-        // Determine service label
-        val serviceLabel = when {
-            service.equals("SMS", ignoreCase = true) -> "SMS"
-            // Could add RCS detection here if available
-            else -> null // iMessage doesn't need a label
+    /**
+     * Normalize an address for de-duplication purposes.
+     * Strips non-essential characters from phone numbers, lowercases emails.
+     */
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            // Email - just lowercase
+            address.lowercase()
+        } else {
+            // Phone number - strip non-digits except leading +
+            address.replace(Regex("[^0-9+]"), "")
         }
-
-        // Check if contact is starred using the pre-fetched set (fast O(1) lookup)
-        val normalizedAddress = address.replace(Regex("[^0-9+]"), "")
-        val isFavorite = starredSet.contains(address) ||
-                starredSet.contains(normalizedAddress) ||
-                starredSet.contains(address.lowercase())
-
-        return ContactUiModel(
-            address = address,
-            formattedAddress = formattedAddress ?: address,
-            displayName = displayName,
-            service = service,
-            avatarPath = cachedAvatarPath,
-            isFavorite = isFavorite,
-            serviceLabel = serviceLabel
-        )
     }
 
     private fun ChatEntity.toGroupChatUiModel(): GroupChatUiModel {
@@ -383,7 +454,7 @@ class ChatCreatorViewModel @Inject constructor(
             // Already selected - remove it
             removeRecipient(contact.address)
         } else {
-            // Not selected - add it
+            // Not selected - add it with cached service immediately
             val recipient = SelectedRecipient(
                 address = contact.address,
                 displayName = contact.displayName,
@@ -392,6 +463,44 @@ class ChatCreatorViewModel @Inject constructor(
                 isManualEntry = false
             )
             addRecipientInternal(recipient)
+
+            // If phone number and not already iMessage, check availability async
+            // This allows the chip to update color if iMessage becomes available
+            if (contact.address.isPhoneNumber() && !contact.service.equals("iMessage", ignoreCase = true)) {
+                checkAndUpdateRecipientService(contact.address)
+            }
+        }
+    }
+
+    /**
+     * Asynchronously check iMessage availability for a recipient and update their service if available.
+     * This allows the chip color to update after selection.
+     */
+    private fun checkAndUpdateRecipientService(address: String) {
+        viewModelScope.launch {
+            val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
+            val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+
+            if (!smsOnlyMode && isConnected) {
+                try {
+                    val response = api.checkIMessageAvailability(address)
+                    if (response.isSuccessful && response.body()?.data == true) {
+                        // Update the recipient's service to iMessage
+                        _uiState.update { state ->
+                            val updated = state.selectedRecipients.map { recipient ->
+                                if (recipient.address == address) {
+                                    recipient.copy(service = "iMessage")
+                                } else {
+                                    recipient
+                                }
+                            }
+                            state.copy(selectedRecipients = updated)
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to check iMessage availability for $address", e)
+                }
+            }
         }
     }
 
@@ -546,6 +655,7 @@ class ChatCreatorViewModel @Inject constructor(
 
 data class ChatCreatorUiState(
     val searchQuery: String = "",
+    val recentContacts: List<ContactUiModel> = emptyList(),  // Recent conversations (up to 4)
     val groupedContacts: Map<String, List<ContactUiModel>> = emptyMap(),
     val favoriteContacts: List<ContactUiModel> = emptyList(),
     val groupChats: List<GroupChatUiModel> = emptyList(),

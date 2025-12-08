@@ -118,6 +118,9 @@ data class AttachmentUiModel(
     val isAudio: Boolean
         get() = mimeType?.startsWith("audio/") == true
 
+    val isGif: Boolean
+        get() = mimeType == "image/gif"
+
     val isVCard: Boolean
         get() = mimeType == "text/vcard" || mimeType == "text/x-vcard" ||
                 transferName?.lowercase()?.endsWith(".vcf") == true

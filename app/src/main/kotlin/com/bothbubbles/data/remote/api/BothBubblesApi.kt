@@ -39,7 +39,9 @@ interface BothBubblesApi {
         @Query("limit") limit: Int = 25,
         @Query("offset") offset: Int = 0,
         @Query("sort") sort: String = "DESC",
-        @Query("with") with: String = "attachment,handle,attributedBody,messageSummaryInfo"
+        @Query("with") with: String = "attachment,handle,attributedBody,messageSummaryInfo",
+        @Query("before") before: Long? = null,
+        @Query("after") after: Long? = null
     ): Response<ApiResponse<List<MessageDto>>>
 
     @POST("api/v1/chat/{guid}/read")

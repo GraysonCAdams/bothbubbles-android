@@ -1,16 +1,21 @@
 package com.bothbubbles.ui.components
 
+import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.TableChart
 import androidx.compose.material.icons.filled.Slideshow
@@ -27,9 +32,19 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.media3.common.MediaItem
+import androidx.media3.common.Player
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
@@ -69,14 +84,19 @@ fun AttachmentContent(
             downloadProgress = downloadProgress,
             modifier = modifier
         )
+        attachment.isGif -> GifAttachment(
+            attachment = attachment,
+            onClick = { onMediaClick(attachment.guid) },
+            modifier = modifier
+        )
         attachment.isImage -> ImageAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
             modifier = modifier
         )
-        attachment.isVideo -> VideoAttachment(
+        attachment.isVideo -> InlineVideoAttachment(
             attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
+            onFullscreenClick = { onMediaClick(attachment.guid) },
             modifier = modifier
         )
         attachment.isAudio -> AudioAttachment(
@@ -327,22 +347,21 @@ private fun ImageAttachment(
 
     val imageUrl = attachment.localPath ?: attachment.webUrl
 
+    // Calculate aspect ratio for proper sizing
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        1f
+    }
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
         if (imageUrl != null) {
-            // Calculate aspect ratio for proper sizing
-            val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
-                attachment.width.toFloat() / attachment.height.toFloat()
-            } else {
-                1f
-            }
-
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
@@ -366,7 +385,9 @@ private fun ImageAttachment(
         if (isLoading) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .widthIn(max = 250.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center
             ) {
@@ -383,6 +404,7 @@ private fun ImageAttachment(
             Box(
                 modifier = Modifier
                     .size(100.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                 contentAlignment = Alignment.Center
             ) {
@@ -406,8 +428,332 @@ private fun ImageAttachment(
     }
 }
 
+/**
+ * GIF attachment that loops automatically and opens previewer on tap.
+ */
 @Composable
-private fun VideoAttachment(
+private fun GifAttachment(
+    attachment: AttachmentUiModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var isError by remember { mutableStateOf(false) }
+
+    val imageUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio for proper sizing
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = 250.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (imageUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = attachment.transferName ?: "GIF",
+                modifier = Modifier
+                    .widthIn(max = 250.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
+                    isError = state is AsyncImagePainter.State.Error
+                }
+            )
+        } else {
+            isError = true
+        }
+
+        // Loading indicator
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = 250.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // GIF badge
+        if (!isLoading && !isError) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "GIF",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Error state
+        if (isError) {
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    if (attachment.friendlySize.isNotEmpty()) {
+                        Text(
+                            text = attachment.friendlySize,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Inline video player with mute/unmute and fullscreen controls.
+ * Double-tap opens fullscreen media viewer.
+ */
+@Composable
+private fun InlineVideoAttachment(
+    attachment: AttachmentUiModel,
+    onFullscreenClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val videoUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        16f / 9f // Default video aspect ratio
+    }
+
+    var isMuted by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var showPlayButton by remember { mutableStateOf(true) }
+
+    // Create ExoPlayer
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_ALL
+            volume = 0f // Start muted
+        }
+    }
+
+    // Set media item when URL is available
+    LaunchedEffect(videoUrl) {
+        videoUrl?.let { url ->
+            exoPlayer.setMediaItem(MediaItem.fromUri(url))
+            exoPlayer.prepare()
+        }
+    }
+
+    // Handle lifecycle
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    exoPlayer.pause()
+                    isPlaying = false
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // Don't auto-resume
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
+    }
+
+    // Update volume when mute state changes
+    LaunchedEffect(isMuted) {
+        exoPlayer.volume = if (isMuted) 0f else 1f
+    }
+
+    if (videoUrl == null) {
+        // Fallback to thumbnail view if no URL
+        VideoThumbnailAttachment(
+            attachment = attachment,
+            onClick = onFullscreenClick,
+            modifier = modifier
+        )
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = 250.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        // Toggle play/pause on single tap
+                        if (isPlaying) {
+                            exoPlayer.pause()
+                            isPlaying = false
+                            showPlayButton = true
+                        } else {
+                            exoPlayer.play()
+                            isPlaying = true
+                            showPlayButton = false
+                        }
+                    },
+                    onDoubleTap = {
+                        // Open fullscreen on double tap
+                        exoPlayer.pause()
+                        isPlaying = false
+                        onFullscreenClick()
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Video player
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                }
+            },
+            modifier = Modifier
+                .widthIn(max = 250.dp)
+                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+        )
+
+        // Play button overlay (shown when paused)
+        if (showPlayButton) {
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Play video",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+
+        // Mute/Unmute button (top-left corner)
+        Surface(
+            onClick = { isMuted = !isMuted },
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    contentDescription = if (isMuted) "Unmute" else "Mute",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // Fullscreen button (top-right corner)
+        Surface(
+            onClick = {
+                exoPlayer.pause()
+                isPlaying = false
+                onFullscreenClick()
+            },
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Fullscreen,
+                    contentDescription = "Fullscreen",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // File size badge (bottom-right)
+        if (attachment.friendlySize.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = attachment.friendlySize,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Video thumbnail attachment (fallback when video URL not available).
+ */
+@Composable
+private fun VideoThumbnailAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -783,15 +1129,21 @@ fun BorderlessMediaContent(
             maxWidth = maxWidth,
             modifier = modifier
         )
+        attachment.isGif -> BorderlessGifAttachment(
+            attachment = attachment,
+            onClick = { onMediaClick(attachment.guid) },
+            maxWidth = maxWidth,
+            modifier = modifier
+        )
         attachment.isImage -> BorderlessImageAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
             maxWidth = maxWidth,
             modifier = modifier
         )
-        attachment.isVideo -> BorderlessVideoAttachment(
+        attachment.isVideo -> BorderlessInlineVideoAttachment(
             attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
+            onFullscreenClick = { onMediaClick(attachment.guid) },
             maxWidth = maxWidth,
             modifier = modifier
         )
@@ -934,8 +1286,8 @@ private fun BorderlessImageAttachment(
     Box(
         modifier = modifier
             .widthIn(max = maxWidth)
+            .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
             .clip(RoundedCornerShape(12.dp))
-            // NO background color - borderless
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -946,10 +1298,8 @@ private fun BorderlessImageAttachment(
                     .crossfade(true)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
-                modifier = Modifier
-                    .widthIn(max = maxWidth)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
-                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -963,8 +1313,7 @@ private fun BorderlessImageAttachment(
         if (isLoading) {
             Box(
                 modifier = Modifier
-                    .widthIn(max = maxWidth)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .fillMaxSize()
                     .background(MaterialTheme.colorScheme.surfaceContainerLow),
                 contentAlignment = Alignment.Center
             ) {
@@ -981,6 +1330,7 @@ private fun BorderlessImageAttachment(
             Box(
                 modifier = Modifier
                     .size(100.dp)
+                    .clip(RoundedCornerShape(12.dp))
                     .background(MaterialTheme.colorScheme.surfaceContainerLow),
                 contentAlignment = Alignment.Center
             ) {
@@ -1005,11 +1355,335 @@ private fun BorderlessImageAttachment(
 }
 
 /**
- * Renders a video attachment without bubble container styling.
- * Shows thumbnail with play button, only subtle rounded corners.
+ * Borderless GIF attachment that loops and opens previewer on tap.
  */
 @Composable
-private fun BorderlessVideoAttachment(
+private fun BorderlessGifAttachment(
+    attachment: AttachmentUiModel,
+    onClick: () -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var isError by remember { mutableStateOf(false) }
+
+    val imageUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio for proper sizing
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        if (imageUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = attachment.transferName ?: "GIF",
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .clip(RoundedCornerShape(12.dp)),
+                contentScale = ContentScale.Fit,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
+                    isError = state is AsyncImagePainter.State.Error
+                }
+            )
+        } else {
+            isError = true
+        }
+
+        // Loading indicator
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(32.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
+        }
+
+        // GIF badge
+        if (!isLoading && !isError) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = "GIF",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Error state
+        if (isError) {
+            Box(
+                modifier = Modifier
+                    .size(100.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
+                    if (attachment.friendlySize.isNotEmpty()) {
+                        Text(
+                            text = attachment.friendlySize,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Borderless inline video player with mute/unmute and fullscreen controls.
+ * Double-tap opens fullscreen media viewer.
+ */
+@Composable
+private fun BorderlessInlineVideoAttachment(
+    attachment: AttachmentUiModel,
+    onFullscreenClick: () -> Unit,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    val videoUrl = attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        16f / 9f // Default video aspect ratio
+    }
+
+    var isMuted by remember { mutableStateOf(true) }
+    var isPlaying by remember { mutableStateOf(false) }
+    var showPlayButton by remember { mutableStateOf(true) }
+
+    // Create ExoPlayer
+    val exoPlayer = remember {
+        ExoPlayer.Builder(context).build().apply {
+            repeatMode = Player.REPEAT_MODE_ALL
+            volume = 0f // Start muted
+        }
+    }
+
+    // Set media item when URL is available
+    LaunchedEffect(videoUrl) {
+        videoUrl?.let { url ->
+            exoPlayer.setMediaItem(MediaItem.fromUri(url))
+            exoPlayer.prepare()
+        }
+    }
+
+    // Handle lifecycle
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> {
+                    exoPlayer.pause()
+                    isPlaying = false
+                }
+                Lifecycle.Event.ON_RESUME -> {
+                    // Don't auto-resume
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            exoPlayer.release()
+        }
+    }
+
+    // Update volume when mute state changes
+    LaunchedEffect(isMuted) {
+        exoPlayer.volume = if (isMuted) 0f else 1f
+    }
+
+    if (videoUrl == null) {
+        // Fallback to thumbnail view if no URL
+        BorderlessVideoThumbnailAttachment(
+            attachment = attachment,
+            onClick = onFullscreenClick,
+            maxWidth = maxWidth,
+            modifier = modifier
+        )
+        return
+    }
+
+    Box(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        // Toggle play/pause on single tap
+                        if (isPlaying) {
+                            exoPlayer.pause()
+                            isPlaying = false
+                            showPlayButton = true
+                        } else {
+                            exoPlayer.play()
+                            isPlaying = true
+                            showPlayButton = false
+                        }
+                    },
+                    onDoubleTap = {
+                        // Open fullscreen on double tap
+                        exoPlayer.pause()
+                        isPlaying = false
+                        onFullscreenClick()
+                    }
+                )
+            },
+        contentAlignment = Alignment.Center
+    ) {
+        // Video player
+        AndroidView(
+            factory = { ctx ->
+                PlayerView(ctx).apply {
+                    player = exoPlayer
+                    useController = false
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                }
+            },
+            modifier = Modifier
+                .widthIn(max = maxWidth)
+                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+        )
+
+        // Play button overlay (shown when paused)
+        if (showPlayButton) {
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = "Play video",
+                        tint = Color.White,
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+            }
+        }
+
+        // Mute/Unmute button (top-left corner)
+        Surface(
+            onClick = { isMuted = !isMuted },
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    contentDescription = if (isMuted) "Unmute" else "Mute",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // Fullscreen button (top-right corner)
+        Surface(
+            onClick = {
+                exoPlayer.pause()
+                isPlaying = false
+                onFullscreenClick()
+            },
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(8.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.Fullscreen,
+                    contentDescription = "Fullscreen",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // File size badge (bottom-right)
+        if (attachment.friendlySize.isNotEmpty()) {
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(8.dp)
+            ) {
+                Text(
+                    text = attachment.friendlySize,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Borderless video thumbnail attachment (fallback when video URL not available).
+ */
+@Composable
+private fun BorderlessVideoThumbnailAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp,

@@ -32,36 +32,69 @@ class MediaViewerViewModel @Inject constructor(
     val uiState: StateFlow<MediaViewerUiState> = _uiState.asStateFlow()
 
     init {
-        loadAttachment()
+        loadMediaList()
     }
 
-    private fun loadAttachment() {
+    private fun loadMediaList() {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
-            if (attachment == null) {
+            // Load all cached media for this chat
+            val mediaList = attachmentDao.getCachedMediaForChat(chatGuid)
+
+            // Find the index of the initially selected attachment
+            val initialIndex = mediaList.indexOfFirst { it.guid == attachmentGuid }.coerceAtLeast(0)
+            val currentAttachment = mediaList.getOrNull(initialIndex)
+
+            if (currentAttachment == null) {
+                // Fall back to loading just the single attachment if not in cached list
+                val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
+                if (attachment == null) {
+                    _uiState.update {
+                        it.copy(
+                            isLoading = false,
+                            error = "Attachment not found"
+                        )
+                    }
+                    return@launch
+                }
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        error = "Attachment not found"
+                        mediaList = listOf(attachment),
+                        currentIndex = 0,
+                        attachment = attachment,
+                        title = attachment.transferName ?: "Media"
                     )
                 }
-                return@launch
+                // If attachment isn't downloaded yet, start download
+                if (attachment.localPath == null && attachment.webUrl != null) {
+                    downloadAttachment()
+                }
+            } else {
+                _uiState.update {
+                    it.copy(
+                        isLoading = false,
+                        mediaList = mediaList,
+                        currentIndex = initialIndex,
+                        attachment = currentAttachment,
+                        title = currentAttachment.transferName ?: "Media"
+                    )
+                }
             }
+        }
+    }
 
-            _uiState.update {
-                it.copy(
-                    isLoading = false,
-                    attachment = attachment,
-                    title = attachment.transferName ?: "Media"
-                )
-            }
+    fun onPageChanged(index: Int) {
+        val mediaList = _uiState.value.mediaList
+        val attachment = mediaList.getOrNull(index) ?: return
 
-            // If attachment isn't downloaded yet, start download
-            if (attachment.localPath == null && attachment.webUrl != null) {
-                downloadAttachment()
-            }
+        _uiState.update {
+            it.copy(
+                currentIndex = index,
+                attachment = attachment,
+                title = attachment.transferName ?: "Media"
+            )
         }
     }
 
@@ -104,11 +137,15 @@ data class MediaViewerUiState(
     val isLoading: Boolean = true,
     val isDownloading: Boolean = false,
     val downloadProgress: Float = 0f,
+    val mediaList: List<AttachmentEntity> = emptyList(),
+    val currentIndex: Int = 0,
     val attachment: AttachmentEntity? = null,
     val localFile: File? = null,
     val title: String = "",
     val error: String? = null
 ) {
+    val mediaCount: Int get() = mediaList.size
+    val hasMultipleMedia: Boolean get() = mediaList.size > 1
     val mediaUrl: String?
         get() = attachment?.localPath ?: attachment?.webUrl
 

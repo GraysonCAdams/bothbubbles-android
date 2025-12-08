@@ -39,11 +39,18 @@ import androidx.compose.material.icons.outlined.*
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.snapshotFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -216,19 +223,19 @@ fun ConversationsScreen(
         }
     }
 
-    // Detect when scrolled near bottom to trigger load more
-    val shouldLoadMore by remember {
-        derivedStateOf {
+    // Trigger load more when scrolled near bottom
+    LaunchedEffect(listState) {
+        snapshotFlow {
             val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
             val totalItems = listState.layoutInfo.totalItemsCount
-            lastVisibleItem != null && lastVisibleItem.index >= totalItems - 5
+            val shouldLoad = lastVisibleItem != null && totalItems > 0 && lastVisibleItem.index >= totalItems - 5
+            Triple(lastVisibleItem?.index ?: -1, totalItems, shouldLoad)
         }
-    }
-
-    // Trigger load more when near bottom
-    LaunchedEffect(shouldLoadMore) {
-        if (shouldLoadMore && !uiState.isLoadingMore && uiState.canLoadMore) {
-            viewModel.loadMoreConversations()
+        .distinctUntilChanged()
+        .collect { (_, _, shouldLoadMore) ->
+            if (shouldLoadMore) {
+                viewModel.loadMoreConversations()
+            }
         }
     }
 
@@ -242,6 +249,13 @@ fun ConversationsScreen(
             listState.animateScrollToItem(0)
         }
         previousConversationCount = conversationCount
+    }
+
+    // Scroll to position when a chat is pinned
+    LaunchedEffect(Unit) {
+        viewModel.scrollToIndexEvent.collect { index ->
+            listState.animateScrollToItem(index)
+        }
     }
     val density = LocalDensity.current
     val pullThreshold = with(density) { 80.dp.toPx() } // Distance to pull before triggering search
@@ -311,6 +325,11 @@ fun ConversationsScreen(
 
     // Contact quick actions popup state
     var quickActionsContact by remember { mutableStateOf<ContactInfo?>(null) }
+
+    // Swipe action confirmation state
+    var pendingSwipeAction by remember { mutableStateOf<Pair<String, SwipeActionType>?>(null) }
+    // Batch action confirmation state (for selection mode)
+    var pendingBatchAction by remember { mutableStateOf<SwipeActionType?>(null) }
     var isQuickActionContactStarred by remember { mutableStateOf(false) }
 
     // Group photo picker state
@@ -403,14 +422,8 @@ fun ConversationsScreen(
                                     selectedConversations = emptySet()
                                 },
                                 onSnooze = { showBatchSnoozeDialog = true },
-                                onArchive = {
-                                    selectedConversations.forEach { viewModel.archiveChat(it) }
-                                    selectedConversations = emptySet()
-                                },
-                                onDelete = {
-                                    selectedConversations.forEach { viewModel.deleteChat(it) }
-                                    selectedConversations = emptySet()
-                                },
+                                onArchive = { pendingBatchAction = SwipeActionType.ARCHIVE },
+                                onDelete = { pendingBatchAction = SwipeActionType.DELETE },
                                 onMarkAsRead = {
                                     viewModel.markChatsAsRead(selectedConversations)
                                     selectedConversations = emptySet()
@@ -541,58 +554,59 @@ fun ConversationsScreen(
                                             )
                                         }
 
-                                        // Divider with "Categories" label
-                                        HorizontalDivider(
-                                            modifier = Modifier.padding(vertical = 8.dp),
-                                            color = MaterialTheme.colorScheme.outlineVariant
-                                        )
-                                        Text(
-                                            text = "Categories",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-                                        )
-
-                                        // Category filters
-                                        MessageCategory.entries.forEach { category ->
-                                            val isSelected = categoryFilter == category
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                                    ) {
-                                                        Icon(
-                                                            imageVector = category.icon,
-                                                            contentDescription = null,
-                                                            tint = if (isSelected) {
-                                                                MaterialTheme.colorScheme.primary
-                                                            } else {
-                                                                MaterialTheme.colorScheme.onSurfaceVariant
-                                                            },
-                                                            modifier = Modifier.size(20.dp)
-                                                        )
-                                                        Text(
-                                                            text = category.displayName,
-                                                            color = if (isSelected) {
-                                                                MaterialTheme.colorScheme.primary
-                                                            } else {
-                                                                MaterialTheme.colorScheme.onSurface
-                                                            },
-                                                            fontWeight = if (isSelected) {
-                                                                FontWeight.Medium
-                                                            } else {
-                                                                FontWeight.Normal
-                                                            }
-                                                        )
-                                                    }
-                                                },
-                                                onClick = {
-                                                    categoryFilter = category
-                                                    conversationFilter = ConversationFilter.ALL // Reset status filter
-                                                    showFilterDropdown = false
-                                                }
+                                        // Category filters (only shown when categorization is enabled)
+                                        if (uiState.categorizationEnabled) {
+                                            HorizontalDivider(
+                                                modifier = Modifier.padding(vertical = 8.dp),
+                                                color = MaterialTheme.colorScheme.outlineVariant
                                             )
+                                            Text(
+                                                text = "Categories",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                                            )
+
+                                            MessageCategory.entries.forEach { category ->
+                                                val isSelected = categoryFilter == category
+                                                DropdownMenuItem(
+                                                    text = {
+                                                        Row(
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = category.icon,
+                                                                contentDescription = null,
+                                                                tint = if (isSelected) {
+                                                                    MaterialTheme.colorScheme.primary
+                                                                } else {
+                                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                                },
+                                                                modifier = Modifier.size(20.dp)
+                                                            )
+                                                            Text(
+                                                                text = category.displayName,
+                                                                color = if (isSelected) {
+                                                                    MaterialTheme.colorScheme.primary
+                                                                } else {
+                                                                    MaterialTheme.colorScheme.onSurface
+                                                                },
+                                                                fontWeight = if (isSelected) {
+                                                                    FontWeight.Medium
+                                                                } else {
+                                                                    FontWeight.Normal
+                                                                }
+                                                            )
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        categoryFilter = category
+                                                        conversationFilter = ConversationFilter.ALL // Reset status filter
+                                                        showFilterDropdown = false
+                                                    }
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -625,12 +639,12 @@ fun ConversationsScreen(
                 // Calculate bottom padding based on visible progress bars
                 // Each bar is ~80dp, animate the offset so FAB stays above them
                 val progressBarHeight = 80.dp
+                val visibleProgressBars = listOf(
+                    uiState.isSyncing && !isSearchActive,
+                    uiState.isImportingSms
+                ).count { it }
                 val fabBottomPadding by animateDpAsState(
-                    targetValue = when {
-                        uiState.isSyncing && !isSearchActive -> progressBarHeight
-                        uiState.isImportingSms -> progressBarHeight
-                        else -> 0.dp
-                    },
+                    targetValue = progressBarHeight * visibleProgressBars,
                     animationSpec = tween(durationMillis = 300),
                     label = "fabPadding"
                 )
@@ -791,6 +805,12 @@ fun ConversationsScreen(
                                         viewModel.togglePin(guid)
                                     }
                                 },
+                                onReorder = { reorderedGuids ->
+                                    // Disable reordering in selection mode
+                                    if (!isSelectionMode) {
+                                        viewModel.reorderPins(reorderedGuids)
+                                    }
+                                },
                                 onAvatarClick = { conversation ->
                                     // Disable avatar popup in selection mode
                                     if (!isSelectionMode) {
@@ -899,7 +919,12 @@ fun ConversationsScreen(
                                     selectedConversations = selectedConversations + conversation.guid
                                 },
                                 onSwipeAction = { action ->
-                                    viewModel.handleSwipeAction(conversation.guid, action)
+                                    when (action) {
+                                        SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
+                                            pendingSwipeAction = conversation.guid to action
+                                        }
+                                        else -> viewModel.handleSwipeAction(conversation.guid, action)
+                                    }
                                 },
                                 onAvatarClick = {
                                     quickActionsContact = ContactInfo(
@@ -1063,6 +1088,112 @@ fun ConversationsScreen(
                         )
                     ) {
                         Text("Reset App")
+                    }
+                }
+            )
+        }
+
+        // Swipe action confirmation dialog
+        pendingSwipeAction?.let { (chatGuid, action) ->
+            val isDelete = action == SwipeActionType.DELETE
+            AlertDialog(
+                onDismissRequest = { pendingSwipeAction = null },
+                icon = {
+                    Icon(
+                        if (isDelete) Icons.Default.Delete else Icons.Default.Archive,
+                        contentDescription = null,
+                        tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = {
+                    Text(if (isDelete) "Delete Conversation?" else "Archive Conversation?")
+                },
+                text = {
+                    Text(
+                        if (isDelete) {
+                            "This conversation will be permanently deleted. This cannot be undone."
+                        } else {
+                            "This conversation will be moved to the archive."
+                        }
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            viewModel.handleSwipeAction(chatGuid, action)
+                            pendingSwipeAction = null
+                        },
+                        colors = if (isDelete) {
+                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        } else {
+                            ButtonDefaults.buttonColors()
+                        }
+                    ) {
+                        Text(if (isDelete) "Delete" else "Archive")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingSwipeAction = null }) {
+                        Text("Cancel")
+                    }
+                }
+            )
+        }
+
+        // Batch action confirmation dialog (for selection mode)
+        pendingBatchAction?.let { action ->
+            val isDelete = action == SwipeActionType.DELETE
+            val count = selectedConversations.size
+            AlertDialog(
+                onDismissRequest = { pendingBatchAction = null },
+                icon = {
+                    Icon(
+                        if (isDelete) Icons.Default.Delete else Icons.Default.Archive,
+                        contentDescription = null,
+                        tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                    )
+                },
+                title = {
+                    Text(
+                        if (isDelete) {
+                            "Delete $count Conversation${if (count > 1) "s" else ""}?"
+                        } else {
+                            "Archive $count Conversation${if (count > 1) "s" else ""}?"
+                        }
+                    )
+                },
+                text = {
+                    Text(
+                        if (isDelete) {
+                            "These conversations will be permanently deleted. This cannot be undone."
+                        } else {
+                            "These conversations will be moved to the archive."
+                        }
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            if (isDelete) {
+                                selectedConversations.forEach { viewModel.deleteChat(it) }
+                            } else {
+                                selectedConversations.forEach { viewModel.archiveChat(it) }
+                            }
+                            selectedConversations = emptySet()
+                            pendingBatchAction = null
+                        },
+                        colors = if (isDelete) {
+                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+                        } else {
+                            ButtonDefaults.buttonColors()
+                        }
+                    ) {
+                        Text(if (isDelete) "Delete" else "Archive")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { pendingBatchAction = null }) {
+                        Text("Cancel")
                     }
                 }
             )
@@ -2154,7 +2285,7 @@ private fun GoogleStyleConversationTile(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Trailing content - timestamp and unread badge
+            // Trailing content - timestamp and unread badge / message status
             Column(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -2175,9 +2306,11 @@ private fun GoogleStyleConversationTile(
                     )
                 }
 
-                // Unread badge
+                // Unread badge or message status indicator
                 if (conversation.unreadCount > 0) {
                     UnreadBadge(count = conversation.unreadCount)
+                } else if (conversation.isFromMe && conversation.lastMessageStatus != MessageStatus.NONE) {
+                    MessageStatusIndicator(status = conversation.lastMessageStatus)
                 }
             }
         }
@@ -2227,35 +2360,179 @@ private fun UnreadBadge(
     }
 }
 
+/**
+ * Displays message status indicator (sent, delivered, read) for outgoing messages.
+ * Uses standard messaging conventions:
+ * - Single check for sent
+ * - Double check for delivered
+ * - Blue double check for read
+ */
+@Composable
+private fun MessageStatusIndicator(
+    status: MessageStatus,
+    modifier: Modifier = Modifier
+) {
+    val icon = when (status) {
+        MessageStatus.SENDING -> Icons.Filled.Schedule
+        MessageStatus.SENT -> Icons.Filled.Done
+        MessageStatus.DELIVERED -> Icons.Filled.DoneAll
+        MessageStatus.READ -> Icons.Filled.DoneAll
+        MessageStatus.FAILED -> Icons.Filled.ErrorOutline
+        MessageStatus.NONE -> null
+    }
+
+    val tint = when (status) {
+        MessageStatus.READ -> MaterialTheme.colorScheme.primary
+        MessageStatus.FAILED -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    if (icon != null) {
+        Icon(
+            imageVector = icon,
+            contentDescription = when (status) {
+                MessageStatus.SENDING -> "Sending"
+                MessageStatus.SENT -> "Sent"
+                MessageStatus.DELIVERED -> "Delivered"
+                MessageStatus.READ -> "Read"
+                MessageStatus.FAILED -> "Failed"
+                MessageStatus.NONE -> null
+            },
+            tint = tint,
+            modifier = modifier.size(16.dp)
+        )
+    }
+}
+
 @Composable
 private fun PinnedConversationsRow(
     conversations: List<ConversationUiModel>,
     onConversationClick: (ConversationUiModel) -> Unit,
-    onConversationLongClick: (String) -> Unit = {},
+    onConversationLongClick: (String) -> Unit = {}, // Kept for compatibility but unused - drag gesture handles long press
     onUnpin: (String) -> Unit = {},
+    onReorder: (List<String>) -> Unit = {},
     onAvatarClick: (ConversationUiModel) -> Unit = {},
     selectedConversations: Set<String> = emptySet(),
     isSelectionMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
+    // Item width including spacing (100dp item + 12dp spacing)
+    val itemWidth = 112.dp
+    val density = LocalDensity.current
+    val itemWidthPx = with(density) { itemWidth.toPx() }
+
+    // Drag state
+    var draggedItemIndex by remember { mutableIntStateOf(-1) }
+    var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // Mutable list for reordering during drag
+    var currentOrder by remember(conversations) { mutableStateOf(conversations.map { it.guid }) }
+
+    // Reset order when conversations change
+    LaunchedEffect(conversations) {
+        currentOrder = conversations.map { it.guid }
+    }
+
+    // Map guid to conversation for lookup
+    val conversationMap = remember(conversations) { conversations.associateBy { it.guid } }
+
     LazyRow(
         modifier = modifier.fillMaxWidth(),
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
+        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+        userScrollEnabled = !isDragging
     ) {
-        items(
-            items = conversations,
-            key = { it.guid }
-        ) { conversation ->
-            PinnedConversationItem(
-                conversation = conversation,
-                onClick = { onConversationClick(conversation) },
-                onLongClick = { onConversationLongClick(conversation.guid) },
-                onUnpin = { onUnpin(conversation.guid) },
-                onAvatarClick = { onAvatarClick(conversation) },
-                isSelected = conversation.guid in selectedConversations,
-                isSelectionMode = isSelectionMode
+        itemsIndexed(
+            items = currentOrder,
+            key = { _, guid -> guid }
+        ) { index, guid ->
+            val conversation = conversationMap[guid] ?: return@itemsIndexed
+
+            val isBeingDragged = index == draggedItemIndex && isDragging
+
+            // Calculate visual offset for dragged item
+            val offsetX = if (isBeingDragged) dragOffsetX else 0f
+
+            // Scale up dragged item for visual feedback
+            val scale by animateFloatAsState(
+                targetValue = if (isBeingDragged) 1.08f else 1f,
+                animationSpec = tween(150),
+                label = "dragScale"
             )
+
+            // Elevation for shadow effect during drag
+            val elevation by animateDpAsState(
+                targetValue = if (isBeingDragged) 8.dp else 0.dp,
+                animationSpec = tween(150),
+                label = "dragElevation"
+            )
+
+            Box(
+                modifier = Modifier
+                    .zIndex(if (isBeingDragged) 1f else 0f)
+                    .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), 0) }
+                    .scale(scale)
+                    .shadow(elevation, RoundedCornerShape(12.dp))
+            ) {
+                PinnedConversationItem(
+                    conversation = conversation,
+                    onClick = { if (!isDragging) onConversationClick(conversation) },
+                    onUnpin = { onUnpin(conversation.guid) },
+                    onAvatarClick = { onAvatarClick(conversation) },
+                    isSelected = conversation.guid in selectedConversations,
+                    isSelectionMode = isSelectionMode,
+                    isDragging = isBeingDragged,
+                    onDragStart = {
+                        if (!isSelectionMode) {
+                            draggedItemIndex = index
+                            isDragging = true
+                            dragOffsetX = 0f
+                        }
+                    },
+                    onDrag = { dragAmount ->
+                        if (isDragging && draggedItemIndex >= 0) {
+                            dragOffsetX += dragAmount
+
+                            // Calculate if we should swap with neighbor
+                            val draggedPosition = draggedItemIndex
+                            val offsetInItems = (dragOffsetX / itemWidthPx).toInt()
+                            val newPosition = (draggedPosition + offsetInItems).coerceIn(0, currentOrder.size - 1)
+
+                            if (newPosition != draggedPosition) {
+                                // Swap items in current order
+                                val mutableList = currentOrder.toMutableList()
+                                val item = mutableList.removeAt(draggedPosition)
+                                mutableList.add(newPosition, item)
+                                currentOrder = mutableList
+
+                                // Update dragged index and reset offset for smooth movement
+                                draggedItemIndex = newPosition
+                                dragOffsetX -= offsetInItems * itemWidthPx
+                            }
+                        }
+                    },
+                    onDragEnd = {
+                        if (isDragging && draggedItemIndex >= 0) {
+                            // Only call onReorder if the order actually changed
+                            val originalOrder = conversations.map { it.guid }
+                            if (currentOrder != originalOrder) {
+                                onReorder(currentOrder)
+                            }
+                        }
+                        isDragging = false
+                        draggedItemIndex = -1
+                        dragOffsetX = 0f
+                    },
+                    onDragCancel = {
+                        // Reset to original order on cancel
+                        currentOrder = conversations.map { it.guid }
+                        isDragging = false
+                        draggedItemIndex = -1
+                        dragOffsetX = 0f
+                    }
+                )
+            }
         }
     }
 }
@@ -2265,24 +2542,55 @@ private fun PinnedConversationsRow(
 private fun PinnedConversationItem(
     conversation: ConversationUiModel,
     onClick: () -> Unit,
-    onLongClick: () -> Unit = {},
     onUnpin: () -> Unit = {},
     onAvatarClick: () -> Unit = {},
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
+    isDragging: Boolean = false,
+    onDragStart: () -> Unit = {},
+    onDrag: (Float) -> Unit = {},
+    onDragEnd: () -> Unit = {},
+    onDragCancel: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
+    // Track accumulated drag distance to distinguish from long-press-to-unpin
+    var totalDragDistance by remember { mutableFloatStateOf(0f) }
+    val dragThreshold = with(LocalDensity.current) { 16.dp.toPx() }
 
     Box(modifier = modifier) {
         Column(
             modifier = Modifier
                 .width(100.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .combinedClickable(
-                    onClick = onClick,
-                    onLongClick = { showContextMenu = true }
-                )
+                .pointerInput(isSelectionMode) {
+                    if (!isSelectionMode) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = {
+                                totalDragDistance = 0f
+                                onDragStart()
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                onDrag(dragAmount.x)
+                                totalDragDistance += kotlin.math.abs(dragAmount.x) + kotlin.math.abs(dragAmount.y)
+                            },
+                            onDragEnd = {
+                                if (totalDragDistance < dragThreshold) {
+                                    // User long-pressed without significant dragging - show context menu
+                                    showContextMenu = true
+                                }
+                                onDragEnd()
+                                totalDragDistance = 0f
+                            },
+                            onDragCancel = {
+                                onDragCancel()
+                                totalDragDistance = 0f
+                            }
+                        )
+                    }
+                }
+                .clickable(enabled = !isDragging) { onClick() }
                 .padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
@@ -2293,10 +2601,7 @@ private fun PinnedConversationItem(
             Box(
                 modifier = Modifier
                     .size(76.dp) // Size includes badge overflow
-                    .combinedClickable(
-                        onClick = onClick,
-                        onLongClick = { showContextMenu = true }
-                    )
+                    .clickable(enabled = !isDragging) { onClick() }
             ) {
                 if (isSelected) {
                     // Show checkmark when selected - use muted color

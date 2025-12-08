@@ -9,6 +9,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -37,6 +39,7 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -50,6 +53,26 @@ fun MediaViewerScreen(
 
     // Controls visibility state
     var showControls by remember { mutableStateOf(true) }
+
+    // Pager state for swiping between media
+    val pagerState = rememberPagerState(
+        initialPage = uiState.currentIndex,
+        pageCount = { uiState.mediaCount.coerceAtLeast(1) }
+    )
+
+    // Sync pager with ViewModel when page changes
+    LaunchedEffect(pagerState.currentPage) {
+        if (pagerState.currentPage != uiState.currentIndex && uiState.mediaList.isNotEmpty()) {
+            viewModel.onPageChanged(pagerState.currentPage)
+        }
+    }
+
+    // Scroll to initial page when media list loads
+    LaunchedEffect(uiState.currentIndex, uiState.mediaList.size) {
+        if (uiState.mediaList.isNotEmpty() && pagerState.currentPage != uiState.currentIndex) {
+            pagerState.scrollToPage(uiState.currentIndex)
+        }
+    }
 
     // Error handling
     LaunchedEffect(uiState.error) {
@@ -71,26 +94,7 @@ fun MediaViewerScreen(
                     color = Color.White
                 )
             }
-            uiState.isDownloading -> {
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    CircularProgressIndicator(
-                        progress = { uiState.downloadProgress },
-                        modifier = Modifier.size(64.dp),
-                        color = Color.White,
-                        strokeWidth = 4.dp
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "${(uiState.downloadProgress * 100).toInt()}%",
-                        color = Color.White,
-                        style = MaterialTheme.typography.bodyLarge
-                    )
-                }
-            }
-            !uiState.hasValidMedia -> {
+            uiState.mediaList.isEmpty() -> {
                 Column(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -106,80 +110,20 @@ fun MediaViewerScreen(
                         text = "Media not available",
                         color = Color.White.copy(alpha = 0.7f)
                     )
-                    if (uiState.attachment?.webUrl != null && uiState.attachment?.localPath == null) {
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Button(onClick = { viewModel.downloadAttachment() }) {
-                            Text("Download")
-                        }
-                    }
                 }
             }
-            uiState.isImage -> {
-                ZoomableImage(
-                    imageUrl = uiState.mediaUrl!!,
-                    contentDescription = uiState.title,
-                    onTap = { showControls = !showControls }
-                )
-            }
-            uiState.isVideo -> {
-                VideoPlayer(
-                    videoUrl = uiState.mediaUrl!!,
-                    onTap = { showControls = !showControls }
-                )
-            }
-            uiState.isAudio -> {
-                AudioPlayer(
-                    audioUrl = uiState.mediaUrl!!,
-                    title = uiState.title
-                )
-            }
             else -> {
-                // Generic file - show info and open button
-                Column(
-                    modifier = Modifier.align(Alignment.Center),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        Icons.Default.InsertDriveFile,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = uiState.title,
-                        color = Color.White,
-                        style = MaterialTheme.typography.titleMedium
-                    )
-                    uiState.attachment?.let { attachment ->
-                        Text(
-                            text = attachment.friendlySize,
-                            color = Color.White.copy(alpha = 0.7f),
-                            style = MaterialTheme.typography.bodyMedium
+                HorizontalPager(
+                    state = pagerState,
+                    modifier = Modifier.fillMaxSize(),
+                    key = { index -> uiState.mediaList.getOrNull(index)?.guid ?: index }
+                ) { page ->
+                    val attachment = uiState.mediaList.getOrNull(page)
+                    if (attachment != null) {
+                        MediaPage(
+                            attachment = attachment,
+                            onTap = { showControls = !showControls }
                         )
-                    }
-                    Spacer(modifier = Modifier.height(24.dp))
-                    Button(
-                        onClick = {
-                            uiState.attachment?.localPath?.let { path ->
-                                val file = File(path)
-                                val uri = FileProvider.getUriForFile(
-                                    context,
-                                    "${context.packageName}.fileprovider",
-                                    file
-                                )
-                                val intent = Intent(Intent.ACTION_VIEW).apply {
-                                    setDataAndType(uri, uiState.attachment?.mimeType)
-                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                                }
-                                context.startActivity(intent)
-                            }
-                        },
-                        enabled = uiState.attachment?.localPath != null
-                    ) {
-                        Icon(Icons.Default.OpenInNew, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Open")
                     }
                 }
             }
@@ -241,6 +185,30 @@ fun MediaViewerScreen(
                     containerColor = Color.Black.copy(alpha = 0.5f)
                 )
             )
+        }
+
+        // Page indicator at bottom
+        if (uiState.hasMultipleMedia) {
+            AnimatedVisibility(
+                visible = showControls,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(bottom = 32.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.Black.copy(alpha = 0.5f)
+                ) {
+                    Text(
+                        text = "${uiState.currentIndex + 1} / ${uiState.mediaCount}",
+                        color = Color.White,
+                        style = MaterialTheme.typography.labelLarge,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -509,5 +477,50 @@ private fun formatDuration(millis: Long): String {
         String.format("%d:%02d:%02d", hours, minutes, seconds)
     } else {
         String.format("%d:%02d", minutes, seconds)
+    }
+}
+
+@Composable
+private fun MediaPage(
+    attachment: AttachmentEntity,
+    onTap: () -> Unit
+) {
+    val mediaUrl = attachment.localPath ?: attachment.webUrl
+
+    Box(
+        modifier = Modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center
+    ) {
+        when {
+            mediaUrl == null -> {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+            attachment.isImage -> {
+                ZoomableImage(
+                    imageUrl = mediaUrl,
+                    contentDescription = attachment.transferName ?: "Image",
+                    onTap = onTap
+                )
+            }
+            attachment.isVideo -> {
+                VideoPlayer(
+                    videoUrl = mediaUrl,
+                    onTap = onTap
+                )
+            }
+            else -> {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = null,
+                    tint = Color.White.copy(alpha = 0.5f),
+                    modifier = Modifier.size(64.dp)
+                )
+            }
+        }
     }
 }

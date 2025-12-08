@@ -9,6 +9,8 @@ import android.os.Build
 import android.util.Log
 import com.bothbubbles.R
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.services.AppLifecycleTracker
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -29,7 +31,8 @@ import javax.inject.Singleton
 @Singleton
 class SoundManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val appLifecycleTracker: Lazy<AppLifecycleTracker>
 ) {
     companion object {
         private const val TAG = "SoundManager"
@@ -81,10 +84,16 @@ class SoundManager @Inject constructor(
 
     /**
      * Play the send message sound.
+     * Only plays when app is in foreground (in-app sounds).
+     * Background notifications use system default sounds.
      * Respects DND, sound mode, and user settings.
      */
     fun playSendSound() {
         scope.launch {
+            if (!appLifecycleTracker.get().isAppInForeground) {
+                Log.d(TAG, "App in background - skipping send sound (use system notification)")
+                return@launch
+            }
             if (settingsDataStore.messageSoundsEnabled.first()) {
                 playSound(sendSoundId)
             }
@@ -93,10 +102,16 @@ class SoundManager @Inject constructor(
 
     /**
      * Play the receive message sound.
+     * Only plays when app is in foreground (in-app sounds).
+     * Background notifications use system default sounds.
      * Respects DND, sound mode, and user settings.
      */
     fun playReceiveSound() {
         scope.launch {
+            if (!appLifecycleTracker.get().isAppInForeground) {
+                Log.d(TAG, "App in background - skipping receive sound (use system notification)")
+                return@launch
+            }
             if (settingsDataStore.messageSoundsEnabled.first()) {
                 playSound(receiveSoundId)
             }

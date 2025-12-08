@@ -12,8 +12,11 @@ import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.CreateChatRequest
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -29,7 +32,8 @@ class GroupCreatorViewModel @Inject constructor(
     private val chatDao: ChatDao,
     private val api: BothBubblesApi,
     private val socketService: SocketService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
 
     companion object {
@@ -68,20 +72,75 @@ class GroupCreatorViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            combine(
-                handleDao.getAllHandles(),
-                _searchQuery
-            ) { handles, query ->
-                val contacts = handles.map { it.toContactUiModel() }
+            // Load contacts from phone contacts (not from handles)
+            val phoneContacts = androidContactsService.getAllContacts()
 
+            // Build a lookup map for iMessage availability from cached handles
+            val handleServiceMap = mutableMapOf<String, String>()
+            handleDao.getAllHandlesOnce().forEach { handle ->
+                val normalized = normalizeAddress(handle.address)
+                // Prefer iMessage when we know it's available
+                if (handle.isIMessage || !handleServiceMap.containsKey(normalized)) {
+                    handleServiceMap[normalized] = handle.service
+                }
+            }
+
+            // Convert phone contacts to ContactUiModel entries
+            val allContacts = mutableListOf<ContactUiModel>()
+            for (contact in phoneContacts) {
+                // Add phone numbers
+                for (phone in contact.phoneNumbers) {
+                    val normalized = normalizeAddress(phone)
+                    val service = handleServiceMap[normalized] ?: "SMS"
+                    allContacts.add(
+                        ContactUiModel(
+                            address = phone,
+                            normalizedAddress = normalized,
+                            formattedAddress = PhoneNumberFormatter.format(phone),
+                            displayName = contact.displayName,
+                            service = service,
+                            avatarPath = contact.photoUri,
+                            isFavorite = contact.isStarred,
+                            isRecent = false
+                        )
+                    )
+                }
+                // Add emails
+                for (email in contact.emails) {
+                    val normalized = normalizeAddress(email)
+                    allContacts.add(
+                        ContactUiModel(
+                            address = email,
+                            normalizedAddress = normalized,
+                            formattedAddress = email,
+                            displayName = contact.displayName,
+                            service = "iMessage", // Emails are always iMessage
+                            avatarPath = contact.photoUri,
+                            isFavorite = contact.isStarred,
+                            isRecent = false
+                        )
+                    )
+                }
+            }
+
+            // De-duplicate by normalized address
+            val deduped = allContacts
+                .groupBy { it.normalizedAddress }
+                .map { (_, group) ->
+                    // Prefer iMessage handle when both exist
+                    group.find { it.service == "iMessage" } ?: group.first()
+                }
+
+            // Observe search query changes
+            _searchQuery.collect { query ->
                 val filtered = if (query.isNotBlank()) {
-                    contacts.filter { contact ->
+                    deduped.filter { contact ->
                         contact.displayName.contains(query, ignoreCase = true) ||
                             contact.address.contains(query, ignoreCase = true) ||
                             contact.formattedAddress.contains(query, ignoreCase = true)
                     }
                 } else {
-                    contacts
+                    deduped
                 }
 
                 // Group by first letter of display name
@@ -93,17 +152,13 @@ class GroupCreatorViewModel @Inject constructor(
                     }
                     .toSortedMap()
 
-                _uiState.value.copy(
-                    searchQuery = query,
-                    groupedContacts = grouped,
-                    isLoading = false
-                )
-            }.collect { state ->
-                _uiState.value = state.copy(
-                    selectedParticipants = _uiState.value.selectedParticipants,
-                    manualAddressEntry = _uiState.value.manualAddressEntry,
-                    isCheckingAvailability = _uiState.value.isCheckingAvailability
-                )
+                _uiState.update { state ->
+                    state.copy(
+                        searchQuery = query,
+                        groupedContacts = grouped,
+                        isLoading = false
+                    )
+                }
             }
         }
 
@@ -115,6 +170,17 @@ class GroupCreatorViewModel @Inject constructor(
                 .collect { query ->
                     checkIfValidAddress(query)
                 }
+        }
+    }
+
+    /**
+     * Normalize an address for de-duplication purposes.
+     */
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            address.lowercase()
+        } else {
+            address.replace(Regex("[^0-9+]"), "")
         }
     }
 
@@ -348,23 +414,6 @@ class GroupCreatorViewModel @Inject constructor(
      */
     fun getParticipantsJson(): String {
         return Json.encodeToString(_uiState.value.selectedParticipants)
-    }
-
-    private fun HandleEntity.toContactUiModel(): ContactUiModel {
-        val serviceLabel = when {
-            service.equals("SMS", ignoreCase = true) -> "SMS"
-            else -> null
-        }
-
-        return ContactUiModel(
-            address = address,
-            formattedAddress = formattedAddress ?: address,
-            displayName = displayName,
-            service = service,
-            avatarPath = cachedAvatarPath,
-            isFavorite = false,
-            serviceLabel = serviceLabel
-        )
     }
 
     private fun String.isPhoneNumber(): Boolean {

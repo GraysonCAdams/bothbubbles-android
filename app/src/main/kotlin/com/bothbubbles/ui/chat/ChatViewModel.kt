@@ -157,6 +157,7 @@ class ChatViewModel @Inject constructor(
         loadMessages()
         syncMessages()
         observeTypingIndicators()
+        observeNewMessages()
         markAsRead()
         determineChatType()
         observeParticipantsForSaveContactBanner()
@@ -164,6 +165,7 @@ class ChatViewModel @Inject constructor(
         observeConnectionState()
         observeSmartReplies()
         observeAutoDownloadSetting()
+        observeUploadProgress()
     }
 
     /**
@@ -177,6 +179,25 @@ class ChatViewModel @Inject constructor(
                     // Auto-download pending attachments for this chat
                     downloadPendingAttachments()
                 }
+            }
+        }
+    }
+
+    /**
+     * Observe upload progress from MessageRepository for determinate progress bar.
+     */
+    private fun observeUploadProgress() {
+        viewModelScope.launch {
+            messageRepository.uploadProgress.collect { progress ->
+                val overallProgress = if (progress != null) {
+                    // Calculate overall progress accounting for multiple attachments
+                    val attachmentBase = progress.attachmentIndex.toFloat() / progress.totalAttachments
+                    val currentProgress = progress.progress / progress.totalAttachments
+                    attachmentBase + currentProgress
+                } else {
+                    0f
+                }
+                _uiState.update { it.copy(sendProgress = overallProgress) }
             }
         }
     }
@@ -588,11 +609,15 @@ class ChatViewModel @Inject constructor(
                     // Group SMS reactions by target message GUID
                     val smsReactionsByMessage = smsReactions.groupBy { it.targetMessageGuid }
 
+                    // Batch load all attachments in a single query
+                    val allAttachments = attachmentDao.getAttachmentsForMessages(
+                        regularMessages.map { it.guid }
+                    ).groupBy { it.messageGuid }
+
                     regularMessages.map { message ->
                         val messageReactions = reactionsByMessage[message.guid].orEmpty()
                         val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
-                        // Fetch attachments for this message
-                        val attachments = attachmentDao.getAttachmentsForMessage(message.guid)
+                        val attachments = allAttachments[message.guid].orEmpty()
                         message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName)
                     }
                 }
@@ -613,9 +638,22 @@ class ChatViewModel @Inject constructor(
      * Matches patterns like:
      *   - Adding: Loved "Hello there!"
      *   - Removing: Removed a heart from "Hello there!"
+     *   - Custom emoji (iOS 16.4+): Reacted with 😂 to "Hello" or Reacted with 😂 to an image
      */
     private fun parseSmsReaction(text: String): Triple<Tapback, String, Boolean>? {
         val trimmedText = text.trim()
+
+        // Pattern for custom emoji reactions (iOS 16.4+):
+        // - "Reacted EMOJI to an image" (attachments)
+        // - "Reacted EMOJI to "quoted text"" (text messages)
+        // - "Reacted with EMOJI to ..." (alternate format)
+        // These are filtered out but can't be displayed as standard tapbacks since they're arbitrary emojis
+        val customEmojiPattern = Regex("""^Reacted( with)? .+ to (".*"|an? .+)$""")
+        if (customEmojiPattern.matches(trimmedText)) {
+            // Return LOVE as a placeholder - the message will be filtered from view
+            // The quoted text won't match anything, preventing duplicate display
+            return Triple(Tapback.LOVE, "__custom_emoji_reaction__", false)
+        }
 
         // Pattern for adding reactions: <Verb> "<quoted text>"
         val addPattern = Regex("""^(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned)\s+"(.+)"$""")
@@ -704,6 +742,99 @@ class ChatViewModel @Inject constructor(
                 .collect { event ->
                     _uiState.update { it.copy(isTyping = event.isTyping) }
                 }
+        }
+    }
+
+    /**
+     * Observe new messages from socket events for immediate UI updates.
+     * This supplements the Room Flow observation to ensure messages appear instantly
+     * even if Room's Flow invalidation is delayed or there are chatGuid mismatches.
+     *
+     * When we receive a new message for this chat, we:
+     * 1. Ensure the message is saved with our local chatGuid (in case of format mismatch)
+     * 2. Force refresh the message list from Room
+     * 3. Play the receive sound and mark as read
+     */
+    private fun observeNewMessages() {
+        viewModelScope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.NewMessage>()
+                .filter { event ->
+                    // Match if the event chatGuid is in our merged chat GUIDs
+                    event.chatGuid in mergedChatGuids ||
+                        event.chatGuid == chatGuid
+                }
+                .collect { event ->
+                    // Force refresh messages from Room in case the Flow didn't auto-update
+                    // This happens when Room's invalidation tracking doesn't trigger
+                    forceRefreshMessages()
+
+                    // Note: Sound is already played by SocketService.onNewMessage
+                    // We don't play it again here to avoid double sounds
+
+                    // Mark as read since user is viewing the chat
+                    markAsRead()
+                }
+        }
+    }
+
+    /**
+     * Force a one-time refresh of messages from Room.
+     * This is used when we know new messages have arrived but Room's Flow hasn't emitted.
+     */
+    private suspend fun forceRefreshMessages() {
+        val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
+        val participants = participantsFlow.first()
+        val handleIdToName = participants.associate { it.id to it.displayName }
+
+        val messagesFlow = if (isMergedChat) {
+            messageRepository.observeMessagesForChats(mergedChatGuids, limit = 50, offset = 0)
+        } else {
+            messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
+        }
+
+        val messages = messagesFlow.first()
+
+        // Process messages same as in loadMessages()
+        val iMessageReactions = messages.filter { it.isReaction }
+        val (smsReactionMessages, regularMessages) = messages
+            .filter { !it.isReaction }
+            .partition { msg -> msg.text?.let { parseSmsReaction(it) } != null }
+
+        val smsReactions = smsReactionMessages.mapNotNull { msg ->
+            val (tapback, quotedText, isRemoval) = parseSmsReaction(msg.text ?: "") ?: return@mapNotNull null
+            if (isRemoval) return@mapNotNull null
+            val targetGuid = findOriginalMessageGuid(quotedText, regularMessages)
+            if (targetGuid != null) {
+                SyntheticReaction(
+                    targetMessageGuid = targetGuid,
+                    tapback = tapback,
+                    isFromMe = msg.isFromMe,
+                    senderName = null
+                )
+            } else null
+        }
+
+        val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
+        val smsReactionsByMessage = smsReactions.groupBy { it.targetMessageGuid }
+
+        // Batch load all attachments in a single query
+        val allAttachments = attachmentDao.getAttachmentsForMessages(
+            regularMessages.map { it.guid }
+        ).groupBy { it.messageGuid }
+
+        val messageModels = regularMessages.map { message ->
+            val messageReactions = reactionsByMessage[message.guid].orEmpty()
+            val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
+            val attachments = allAttachments[message.guid].orEmpty()
+            message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName)
+        }
+
+        _uiState.update { state ->
+            state.copy(
+                isLoading = false,
+                messages = messageModels
+            )
         }
     }
 
@@ -846,7 +977,7 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             _draftText.value = ""
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty()) }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -860,13 +991,14 @@ class ChatViewModel @Inject constructor(
                 effectId = effectId
             ).fold(
                 onSuccess = {
-                    _uiState.update { it.copy(isSending = false, attachmentCount = 0) }
+                    _uiState.update { it.copy(isSending = false, isSendingWithAttachments = false, attachmentCount = 0) }
                     soundManager.playSendSound()
                 },
                 onFailure = { e ->
                     _uiState.update {
                         it.copy(
                             isSending = false,
+                            isSendingWithAttachments = false,
                             attachmentCount = 0,
                             error = e.message
                         )
@@ -887,7 +1019,7 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             _draftText.value = ""
-            _uiState.update { it.copy(isSending = true) }
+            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty()) }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -900,13 +1032,14 @@ class ChatViewModel @Inject constructor(
                 deliveryMode = deliveryMode
             ).fold(
                 onSuccess = {
-                    _uiState.update { it.copy(isSending = false, attachmentCount = 0) }
+                    _uiState.update { it.copy(isSending = false, isSendingWithAttachments = false, attachmentCount = 0) }
                     soundManager.playSendSound()
                 },
                 onFailure = { e ->
                     _uiState.update {
                         it.copy(
                             isSending = false,
+                            isSendingWithAttachments = false,
                             attachmentCount = 0,
                             error = e.message
                         )
@@ -1555,6 +1688,8 @@ data class ChatUiState(
     val isLoadingMore: Boolean = false,
     val isSyncingMessages: Boolean = false,
     val isSending: Boolean = false,
+    val isSendingWithAttachments: Boolean = false, // True if current send includes attachments
+    val sendProgress: Float = 0f, // 0.0 to 1.0 progress for uploads
     val canLoadMore: Boolean = true,
     val messages: List<MessageUiModel> = emptyList(),
     val isTyping: Boolean = false,

@@ -306,7 +306,7 @@ class SetupViewModel @Inject constructor(
     }
 
     /**
-     * Start ML model download
+     * Start ML model download and enable categorization
      */
     fun downloadMlModel() {
         viewModelScope.launch {
@@ -318,19 +318,19 @@ class SetupViewModel @Inject constructor(
             if (success) {
                 // Save to settings
                 settingsDataStore.setMlModelDownloaded(true)
+                // Enable categorization
+                settingsDataStore.setCategorizationEnabled(true)
                 // If downloaded on cellular and user checked the box, enable cellular updates
                 if (!isOnWifi() && _uiState.value.mlEnableCellularUpdates) {
                     settingsDataStore.setMlAutoUpdateOnCellular(true)
                 }
                 // Schedule periodic ML model updates
                 MlModelUpdateWorker.schedule(context)
-                // Complete setup now that ML is downloaded
-                settingsDataStore.setSetupComplete(true)
+                // Mark ML setup complete (setup finishes after sync)
                 _uiState.update {
                     it.copy(
                         mlDownloading = false,
-                        mlModelDownloaded = true,
-                        isSyncComplete = true
+                        mlModelDownloaded = true
                     )
                 }
             } else {
@@ -345,17 +345,13 @@ class SetupViewModel @Inject constructor(
     }
 
     /**
-     * Skip ML model download - complete setup without ML
+     * Skip ML model download - categorization stays disabled
      */
     fun skipMlDownload() {
-        viewModelScope.launch {
-            settingsDataStore.setSetupComplete(true)
-            _uiState.update {
-                it.copy(
-                    mlDownloadSkipped = true,
-                    isSyncComplete = true
-                )
-            }
+        _uiState.update {
+            it.copy(
+                mlDownloadSkipped = true
+            )
         }
     }
 
@@ -411,6 +407,7 @@ class SetupViewModel @Inject constructor(
                 }
 
                 // Start initial sync in SyncService's own scope (survives ViewModel destruction)
+                // Categorization runs automatically after sync completes in SyncService
                 syncService.startInitialSync(
                     messagesPerChat = _uiState.value.messagesPerChat
                 )
@@ -427,7 +424,7 @@ class SetupViewModel @Inject constructor(
 
     fun nextPage() {
         val currentPage = _uiState.value.currentPage
-        if (currentPage < 4) {
+        if (currentPage < 5) {
             _uiState.update { it.copy(currentPage = currentPage + 1) }
         }
     }
@@ -440,7 +437,7 @@ class SetupViewModel @Inject constructor(
     }
 
     fun setPage(page: Int) {
-        _uiState.update { it.copy(currentPage = page.coerceIn(0, 4)) }
+        _uiState.update { it.copy(currentPage = page.coerceIn(0, 5)) }
     }
 }
 

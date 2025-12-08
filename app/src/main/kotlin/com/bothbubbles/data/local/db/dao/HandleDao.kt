@@ -39,6 +39,21 @@ interface HandleDao {
     """)
     fun searchHandles(query: String): Flow<List<HandleEntity>>
 
+    /**
+     * Get handles that have recent 1-on-1 conversations, ordered by most recent.
+     * Used for the "Recent" section in the chat creator.
+     */
+    @Query("""
+        SELECT h.* FROM handles h
+        INNER JOIN chat_handle_cross_ref chr ON h.id = chr.handle_id
+        INNER JOIN chats c ON chr.chat_guid = c.guid
+        WHERE c.is_group = 0 AND c.date_deleted IS NULL
+        GROUP BY h.address
+        ORDER BY MAX(c.latest_message_date) DESC
+        LIMIT 4
+    """)
+    fun getRecentContacts(): Flow<List<HandleEntity>>
+
     @Query("SELECT COUNT(*) FROM handles")
     suspend fun getHandleCount(): Int
 
