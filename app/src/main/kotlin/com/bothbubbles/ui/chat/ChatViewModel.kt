@@ -483,6 +483,9 @@ class ChatViewModel @Inject constructor(
                         state.copy(
                             chatTitle = chatTitle,
                             isGroup = it.isGroup,
+                            avatarPath = participants.firstOrNull()?.cachedAvatarPath,
+                            participantNames = participants.map { p -> p.displayName },
+                            participantAvatarPaths = participants.map { p -> p.cachedAvatarPath },
                             isArchived = it.isArchived,
                             isStarred = it.isStarred,
                             participantPhone = it.chatIdentifier,
@@ -1545,6 +1548,9 @@ class ChatViewModel @Inject constructor(
 data class ChatUiState(
     val chatTitle: String = "",
     val isGroup: Boolean = false,
+    val avatarPath: String? = null,
+    val participantNames: List<String> = emptyList(),
+    val participantAvatarPaths: List<String?> = emptyList(),
     val isLoading: Boolean = true,
     val isLoadingMore: Boolean = false,
     val isSyncingMessages: Boolean = false,

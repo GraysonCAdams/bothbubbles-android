@@ -143,6 +143,8 @@ fun ConversationsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val context = LocalContext.current
+
 
     // Refresh state when screen resumes (to catch permission/default app changes)
     DisposableEffect(lifecycleOwner) {
@@ -211,6 +213,22 @@ fun ConversationsScreen(
     val isFabExpanded by remember {
         derivedStateOf {
             listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 50
+        }
+    }
+
+    // Detect when scrolled near bottom to trigger load more
+    val shouldLoadMore by remember {
+        derivedStateOf {
+            val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
+            val totalItems = listState.layoutInfo.totalItemsCount
+            lastVisibleItem != null && lastVisibleItem.index >= totalItems - 5
+        }
+    }
+
+    // Trigger load more when near bottom
+    LaunchedEffect(shouldLoadMore) {
+        if (shouldLoadMore && !uiState.isLoadingMore && uiState.canLoadMore) {
+            viewModel.loadMoreConversations()
         }
     }
 
@@ -424,10 +442,15 @@ fun ConversationsScreen(
                                 isPinEnabled = canPinAny
                             )
                         } else {
-                            // Main header row
+                            // Main header row - tappable to scroll to top
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .clickable {
+                                        coroutineScope.launch {
+                                            listState.animateScrollToItem(0)
+                                        }
+                                    }
                                     .padding(horizontal = 16.dp, vertical = 12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -585,12 +608,14 @@ fun ConversationsScreen(
                                     )
                                 }
 
-                                // Profile avatar with split ring
-                                ProfileAvatarWithRing(
-                                    onClick = { isSettingsOpen = true },
-                                    userAvatarPath = uiState.userProfileAvatarUri,
-                                    userName = uiState.userProfileName
-                                )
+                                // Settings button
+                                IconButton(onClick = { isSettingsOpen = true }) {
+                                    Icon(
+                                        Icons.Outlined.Settings,
+                                        contentDescription = "Settings",
+                                        tint = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
                             }
                         }
                     }
@@ -896,6 +921,23 @@ fun ConversationsScreen(
                             )
                         }
                     } // End of itemsIndexed
+
+                    // Loading indicator when fetching more conversations
+                    if (uiState.isLoadingMore) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            }
+                        }
+                    }
                 } // End of LazyColumn
                 } // End of Column
                 } // End of else (showFilterEmptyState)
@@ -1742,21 +1784,8 @@ private fun ProfileAvatarWithRing(
                 .background(iMessageBlue.copy(alpha = 0.15f)),
             contentAlignment = Alignment.Center
         ) {
-            if (userAvatarPath != null) {
-                val avatarUri = remember(userAvatarPath) { android.net.Uri.parse(userAvatarPath) }
-                coil.compose.AsyncImage(
-                    model = coil.request.ImageRequest.Builder(LocalContext.current)
-                        .data(avatarUri)
-                        .crossfade(true)
-                        .build(),
-                    contentDescription = "Profile",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clip(CircleShape),
-                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
-                )
-            } else if (userName != null) {
-                // Show initials
+            // Always show placeholder first
+            if (userName != null) {
                 val initials = userName.split(" ")
                     .filter { it.isNotBlank() }
                     .take(2)
@@ -1772,6 +1801,22 @@ private fun ProfileAvatarWithRing(
                     contentDescription = "Profile",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(24.dp)
+                )
+            }
+
+            // Overlay with profile photo if available
+            if (userAvatarPath != null) {
+                val avatarUri = remember(userAvatarPath) { android.net.Uri.parse(userAvatarPath) }
+                coil.compose.AsyncImage(
+                    model = coil.request.ImageRequest.Builder(LocalContext.current)
+                        .data(avatarUri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Profile",
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape),
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
                 )
             }
         }

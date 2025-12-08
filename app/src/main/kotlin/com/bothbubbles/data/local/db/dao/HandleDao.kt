@@ -101,10 +101,30 @@ interface HandleDao {
 
     // ===== Upsert =====
 
+    /**
+     * Upsert a handle, preserving existing good values.
+     * When updating, new values only override existing if they are non-blank.
+     * This prevents accidental data loss from transient lookup failures.
+     */
     suspend fun upsertHandle(handle: HandleEntity): Long {
         val existing = getHandleByAddressAndService(handle.address, handle.service)
         return if (existing != null) {
-            updateHandle(handle.copy(id = existing.id))
+            // Smart merge: prefer new non-blank values, otherwise keep existing
+            val merged = existing.copy(
+                originalRowId = handle.originalRowId ?: existing.originalRowId,
+                formattedAddress = handle.formattedAddress?.takeIf { it.isNotBlank() } ?: existing.formattedAddress,
+                country = handle.country?.takeIf { it.isNotBlank() } ?: existing.country,
+                color = handle.color ?: existing.color,
+                defaultEmail = handle.defaultEmail?.takeIf { it.isNotBlank() } ?: existing.defaultEmail,
+                defaultPhone = handle.defaultPhone?.takeIf { it.isNotBlank() } ?: existing.defaultPhone,
+                // Contact info: prefer new non-blank values, otherwise keep existing
+                cachedDisplayName = handle.cachedDisplayName?.takeIf { it.isNotBlank() } ?: existing.cachedDisplayName,
+                cachedAvatarPath = handle.cachedAvatarPath?.takeIf { it.isNotBlank() } ?: existing.cachedAvatarPath,
+                inferredName = handle.inferredName?.takeIf { it.isNotBlank() } ?: existing.inferredName
+                // Note: spamReportCount and isWhitelisted are preserved from existing
+                // They are managed by dedicated methods (incrementSpamReportCount, updateWhitelisted)
+            )
+            updateHandle(merged)
             existing.id
         } else {
             insertHandle(handle)

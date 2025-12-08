@@ -25,6 +25,29 @@ interface ChatDao {
 
     @Query("""
         SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getNonGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity>
+
+    @Query("""
+        SELECT COUNT(*) FROM chats
+        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
+    """)
+    suspend fun getNonGroupChatCount(): Int
+
+    /**
+     * Observable version of non-group chat count for triggering reactive updates.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM chats
+        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
+    """)
+    fun observeNonGroupChatCount(): Flow<Int>
+
+    @Query("""
+        SELECT * FROM chats
         WHERE date_deleted IS NULL AND is_pinned = 1
         ORDER BY pin_index ASC
     """)

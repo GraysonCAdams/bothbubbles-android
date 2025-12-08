@@ -355,7 +355,8 @@ class AndroidContactsService @Inject constructor(
                 if (cursor.moveToFirst()) {
                     val nameIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
                     if (nameIndex >= 0) {
-                        return cursor.getString(nameIndex)
+                        // Return null for blank names to ensure proper fallback
+                        return cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                     }
                 }
             }
@@ -376,7 +377,8 @@ class AndroidContactsService @Inject constructor(
                     if (cursor.moveToFirst()) {
                         val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.DISPLAY_NAME)
                         if (nameIndex >= 0) {
-                            return cursor.getString(nameIndex)
+                            // Return null for blank names to ensure proper fallback
+                            return cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                         }
                     }
                 }

@@ -48,6 +48,8 @@ import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
+private const val PAGE_SIZE = 25
+
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class ConversationsViewModel @Inject constructor(
@@ -88,7 +90,8 @@ class ConversationsViewModel @Inject constructor(
             _startupGracePeriodPassed.value = true
         }
 
-        loadConversations()
+        loadInitialConversations()
+        observeDataChanges()
         observeConnectionState()
         observeConnectionBannerState()
         observeSmsBannerState()
@@ -252,73 +255,225 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
-    private fun loadConversations() {
+    /**
+     * Load the first page of conversations on startup.
+     * Uses paginated queries to avoid loading all conversations at once.
+     */
+    private fun loadInitialConversations() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoading = true) }
+
+            try {
+                // Load first page of unified groups (1:1 merged iMessage+SMS)
+                val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, 0)
+
+                // Load all group chats (typically few, no pagination needed)
+                val groupChats = chatDao.observeActiveGroupChats().first()
+
+                // Load first page of non-group chats (for orphans not in unified groups)
+                val nonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, 0)
+
+                val conversations = buildConversationList(
+                    unifiedGroups = unifiedGroups,
+                    groupChats = groupChats,
+                    nonGroupChats = nonGroupChats,
+                    typingChats = _typingChats.value
+                )
+
+                // Check if more data exists beyond first page
+                val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
+                val totalNonGroup = chatDao.getNonGroupChatCount()
+                val hasMore = (unifiedGroups.size + nonGroupChats.size) < (totalUnified + totalNonGroup)
+
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        conversations = conversations,
+                        canLoadMore = hasMore,
+                        currentPage = 0
+                    )
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("ConversationsViewModel", "Failed to load conversations", e)
+                _uiState.update { it.copy(isLoading = false, error = e.message) }
+            }
+        }
+    }
+
+    /**
+     * Observe data changes to refresh loaded conversations reactively.
+     * Triggers on any change to unified groups, chats, or typing indicators.
+     */
+    private fun observeDataChanges() {
         viewModelScope.launch {
             combine(
-                unifiedChatGroupDao.observeActiveGroups(),
+                unifiedChatGroupDao.observeActiveGroupCount(),
+                chatDao.observeNonGroupChatCount(),
                 chatDao.observeActiveGroupChats(),
-                chatDao.getAllChats(), // Reactive flow for all chats (needed for 1:1 pin/unpin updates)
-                _searchQuery,
-                _typingChats
-            ) { unifiedGroups, groupChats, allChats, query, typingChats ->
-                val conversations = mutableListOf<ConversationUiModel>()
-                val handledChatGuids = mutableSetOf<String>()
+                _typingChats,
+                _searchQuery
+            ) { _, _, _, _, _ -> Unit }
+            .debounce(200)
+            .collect {
+                refreshAllLoadedPages()
+            }
+        }
+    }
 
-                // Process unified chat groups (single-contact iMessage+SMS merged)
-                for (group in unifiedGroups) {
-                    val chatGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
-                    handledChatGuids.addAll(chatGuids)
-                    // Also mark primaryChatGuid as handled (in case it's not in members due to data inconsistency)
-                    handledChatGuids.add(group.primaryChatGuid)
+    /**
+     * Refresh all currently loaded pages to pick up data changes.
+     * Called when sync updates data or when new messages arrive.
+     */
+    private suspend fun refreshAllLoadedPages() {
+        val currentPage = _uiState.value.currentPage
+        val totalLoaded = (currentPage + 1) * PAGE_SIZE
 
-                    val uiModel = unifiedGroupToUiModel(group, chatGuids, typingChats)
-                    if (uiModel != null) {
-                        conversations.add(uiModel)
-                    }
+        try {
+            // Re-fetch all loaded unified groups
+            val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(totalLoaded, 0)
+
+            // Re-fetch all group chats
+            val groupChats = chatDao.observeActiveGroupChats().first()
+
+            // Re-fetch all loaded non-group chats
+            val nonGroupChats = chatDao.getNonGroupChatsPaginated(totalLoaded, 0)
+
+            val typingChats = _typingChats.value
+            val query = _searchQuery.value
+
+            val conversations = buildConversationList(
+                unifiedGroups = unifiedGroups,
+                groupChats = groupChats,
+                nonGroupChats = nonGroupChats,
+                typingChats = typingChats
+            )
+
+            // Apply search filter if active
+            val filtered = if (query.isBlank()) {
+                conversations
+            } else {
+                conversations.filter { conv ->
+                    conv.displayName.contains(query, ignoreCase = true) ||
+                    conv.address.contains(query, ignoreCase = true)
                 }
+            }
 
-                // Add group chats (not unified - they stay separate)
-                for (chat in groupChats) {
-                    if (chat.guid !in handledChatGuids) {
-                        conversations.add(chat.toUiModel(typingChats))
-                    }
-                }
+            // Check if more data exists
+            val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
+            val totalNonGroup = chatDao.getNonGroupChatCount()
+            val hasMore = (unifiedGroups.size + nonGroupChats.size) < (totalUnified + totalNonGroup)
 
-                // Add any orphan 1:1 chats not in unified groups
-                for (chat in allChats) {
-                    if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
-                        conversations.add(chat.toUiModel(typingChats))
-                        handledChatGuids.add(chat.guid)
-                    }
-                }
+            _uiState.update { state ->
+                state.copy(
+                    conversations = filtered,
+                    canLoadMore = hasMore
+                )
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("ConversationsViewModel", "Failed to refresh conversations", e)
+        }
+    }
 
-                // Filter by search query
-                val filtered = if (query.isBlank()) {
-                    conversations
-                } else {
-                    conversations.filter { conv ->
-                        conv.displayName.contains(query, ignoreCase = true) ||
-                        conv.address.contains(query, ignoreCase = true)
-                    }
-                }
+    /**
+     * Load more conversations when user scrolls near the bottom.
+     */
+    fun loadMoreConversations() {
+        if (_uiState.value.isLoadingMore || !_uiState.value.canLoadMore) return
 
-                // Sort: pinned first, then by last message time
-                // Deduplicate by guid to prevent LazyColumn key crashes
-                filtered
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMore = true) }
+
+            try {
+                val nextPage = _uiState.value.currentPage + 1
+                val offset = nextPage * PAGE_SIZE
+
+                // Load next page of unified groups
+                val moreUnifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, offset)
+
+                // Load next page of non-group chats
+                val moreNonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, offset)
+
+                val newConversations = buildConversationList(
+                    unifiedGroups = moreUnifiedGroups,
+                    groupChats = emptyList(), // Group chats already loaded in full
+                    nonGroupChats = moreNonGroupChats,
+                    typingChats = _typingChats.value
+                )
+
+                // Merge with existing, deduplicate, and sort
+                val existingGuids = _uiState.value.conversations.map { it.guid }.toSet()
+                val uniqueNew = newConversations.filter { it.guid !in existingGuids }
+
+                val merged = (_uiState.value.conversations + uniqueNew)
                     .distinctBy { it.guid }
                     .sortedWith(
                         compareByDescending<ConversationUiModel> { it.isPinned }
                             .thenByDescending { it.lastMessageTimestamp }
                     )
-            }.collect { conversations ->
+
                 _uiState.update { state ->
                     state.copy(
-                        isLoading = false,
-                        conversations = conversations
+                        isLoadingMore = false,
+                        conversations = merged,
+                        currentPage = nextPage,
+                        canLoadMore = newConversations.isNotEmpty()
                     )
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("ConversationsViewModel", "Failed to load more conversations", e)
+                _uiState.update { it.copy(isLoadingMore = false) }
             }
         }
+    }
+
+    /**
+     * Build conversation list from paginated entities.
+     * Converts unified groups, group chats, and orphan 1:1 chats to UI models.
+     */
+    private suspend fun buildConversationList(
+        unifiedGroups: List<UnifiedChatGroupEntity>,
+        groupChats: List<ChatEntity>,
+        nonGroupChats: List<ChatEntity>,
+        typingChats: Set<String>
+    ): List<ConversationUiModel> {
+        val conversations = mutableListOf<ConversationUiModel>()
+        val handledChatGuids = mutableSetOf<String>()
+
+        // Process unified chat groups (single-contact iMessage+SMS merged)
+        for (group in unifiedGroups) {
+            val chatGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
+            handledChatGuids.addAll(chatGuids)
+            handledChatGuids.add(group.primaryChatGuid)
+
+            val uiModel = unifiedGroupToUiModel(group, chatGuids, typingChats)
+            if (uiModel != null) {
+                conversations.add(uiModel)
+            }
+        }
+
+        // Add group chats (not unified - they stay separate)
+        for (chat in groupChats) {
+            if (chat.guid !in handledChatGuids) {
+                conversations.add(chat.toUiModel(typingChats))
+                handledChatGuids.add(chat.guid)
+            }
+        }
+
+        // Add orphan 1:1 chats not in unified groups
+        for (chat in nonGroupChats) {
+            if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
+                conversations.add(chat.toUiModel(typingChats))
+                handledChatGuids.add(chat.guid)
+            }
+        }
+
+        // Sort: pinned first, then by last message time
+        return conversations
+            .distinctBy { it.guid }
+            .sortedWith(
+                compareByDescending<ConversationUiModel> { it.isPinned }
+                    .thenByDescending { it.lastMessageTimestamp }
+            )
     }
 
     /**
@@ -358,10 +513,12 @@ class ConversationsViewModel @Inject constructor(
         val primaryParticipant = chatRepository.getBestParticipant(allParticipants)
         val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: group.identifier
 
-        // Determine display name
-        val displayName = group.displayName
-            ?: primaryParticipant?.displayName
-            ?: primaryChat.displayName
+        // Determine display name - prioritize contact card name (cachedDisplayName) above all else
+        // Priority: 1. Device contact name, 2. Cached group/chat name, 3. Inferred name, 4. Formatted phone
+        val displayName = primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
+            ?: group.displayName?.takeIf { it.isNotBlank() }
+            ?: primaryChat.displayName?.takeIf { it.isNotBlank() }
+            ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
             ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
             ?: address.let { PhoneNumberFormatter.format(it) }
 
@@ -1085,11 +1242,21 @@ class ConversationsViewModel @Inject constructor(
         }
 
         // For 1:1 chats, use the participant's display name (includes "Maybe:" prefix for inferred names)
-        // For group chats, use the chat's display name
+        // For group chats, use the chat's display name, then fall back to joined participant names
+        // Use takeIf to convert empty strings to null for proper fallback
         val resolvedDisplayName = if (!isGroup && primaryParticipant != null) {
-            primaryParticipant.displayName
+            primaryParticipant.displayName.takeIf { it.isNotBlank() }
+                ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                ?: address.let { PhoneNumberFormatter.format(it) }
+        } else if (isGroup) {
+            // For group chats: explicit name > joined participant names > formatted identifier
+            displayName?.takeIf { it.isNotBlank() }
+                ?: participantNames.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                ?: "Group Chat"
         } else {
-            displayName ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: address.let { PhoneNumberFormatter.format(it) }
+            displayName?.takeIf { it.isNotBlank() }
+                ?: chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                ?: address.let { PhoneNumberFormatter.format(it) }
         }
 
         // Fetch link preview data for LINK type messages
@@ -1269,6 +1436,10 @@ data class ConversationsUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
     val isSyncing: Boolean = false,
+    // Pagination state
+    val isLoadingMore: Boolean = false,
+    val canLoadMore: Boolean = true,
+    val currentPage: Int = 0,
     val syncProgress: Float? = null,
     val syncStage: String? = null,
     // Detailed sync info for initial sync

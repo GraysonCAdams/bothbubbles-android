@@ -81,6 +81,7 @@ import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.components.AttachmentPickerPanel
 import com.bothbubbles.ui.components.EmojiPickerPanel
 import com.bothbubbles.ui.components.Avatar
+import com.bothbubbles.ui.components.GroupAvatar
 import com.bothbubbles.ui.components.DateSeparator
 import com.bothbubbles.ui.components.ForwardableChatInfo
 import com.bothbubbles.ui.components.ForwardMessageDialog
@@ -357,10 +358,19 @@ fun ChatScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.clickable(onClick = onDetailsClick)
                     ) {
-                        Avatar(
-                            name = uiState.chatTitle,
-                            size = 40.dp
-                        )
+                        if (uiState.isGroup && uiState.participantNames.size > 1) {
+                            GroupAvatar(
+                                names = uiState.participantNames.ifEmpty { listOf(uiState.chatTitle) },
+                                avatarPaths = uiState.participantAvatarPaths,
+                                size = 40.dp
+                            )
+                        } else {
+                            Avatar(
+                                name = uiState.chatTitle,
+                                avatarPath = uiState.avatarPath,
+                                size = 40.dp
+                            )
+                        }
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Row(

@@ -24,6 +24,20 @@ interface UnifiedChatGroupDao {
 
     @Query("""
         SELECT * FROM unified_chat_groups
+        WHERE is_archived = 0
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getActiveGroupsPaginated(limit: Int, offset: Int): List<UnifiedChatGroupEntity>
+
+    @Query("""
+        SELECT COUNT(*) FROM unified_chat_groups
+        WHERE is_archived = 0
+    """)
+    suspend fun getActiveGroupCount(): Int
+
+    @Query("""
+        SELECT * FROM unified_chat_groups
         ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
     """)
     fun observeAllGroups(): Flow<List<UnifiedChatGroupEntity>>
