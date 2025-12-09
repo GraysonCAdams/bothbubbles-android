@@ -298,7 +298,6 @@ fun ConversationDetailsScreen(
                 // Could navigate to 1:1 chat with this participant
                 selectedParticipant = null
             },
-            onStarToggle = { /* Starring handled elsewhere */ },
             onContactAdded = {
                 viewModel.refreshContactInfo(participant.address)
             }

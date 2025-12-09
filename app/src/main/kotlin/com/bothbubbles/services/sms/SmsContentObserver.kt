@@ -12,6 +12,7 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -36,7 +37,8 @@ class SmsContentObserver @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val notificationService: NotificationService,
-    private val activeConversationManager: ActiveConversationManager
+    private val activeConversationManager: ActiveConversationManager,
+    private val androidContactsService: AndroidContactsService
 ) {
     companion object {
         private const val TAG = "SmsContentObserver"
@@ -194,13 +196,18 @@ class SmsContentObserver @Inject constructor(
                             // Check if user is currently viewing this conversation
                             Log.i(TAG, "Chat $chatGuid is currently active, skipping SMS notification")
                         } else {
+                            // Resolve sender name and avatar from contacts
+                            val senderName = androidContactsService.getContactDisplayName(address)
+                            val senderAvatarUri = androidContactsService.getContactPhotoUri(address)
+
                             notificationService.showMessageNotification(
                                 chatGuid = chatGuid,
-                                chatTitle = chat?.displayName ?: address,
+                                chatTitle = chat?.displayName ?: senderName ?: address,
                                 messageText = body ?: "",
                                 messageGuid = existingGuid,
-                                senderName = null,
-                                senderAddress = normalizedAddress
+                                senderName = senderName,
+                                senderAddress = normalizedAddress,
+                                avatarUri = senderAvatarUri
                             )
                         }
                     }
@@ -324,13 +331,18 @@ class SmsContentObserver @Inject constructor(
                             // Check if user is currently viewing this conversation
                             Log.i(TAG, "Chat $chatGuid is currently active, skipping MMS notification")
                         } else {
+                            // Resolve sender name and avatar from contacts
+                            val senderName = androidContactsService.getContactDisplayName(primaryAddress)
+                            val senderAvatarUri = androidContactsService.getContactPhotoUri(primaryAddress)
+
                             notificationService.showMessageNotification(
                                 chatGuid = chatGuid,
-                                chatTitle = chat?.displayName ?: primaryAddress,
+                                chatTitle = chat?.displayName ?: senderName ?: primaryAddress,
                                 messageText = textContent ?: "[MMS]",
                                 messageGuid = existingGuid,
-                                senderName = if (isGroup) primaryAddress else null,
-                                senderAddress = primaryAddress
+                                senderName = if (isGroup) (senderName ?: primaryAddress) else senderName,
+                                senderAddress = primaryAddress,
+                                avatarUri = senderAvatarUri
                             )
                         }
                     }

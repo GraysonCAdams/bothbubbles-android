@@ -1,13 +1,27 @@
 package com.bothbubbles.ui.components
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,12 +36,19 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bothbubbles.ui.conversations.MessageStatus
+import kotlinx.coroutines.launch
+import kotlin.math.absoluteValue
+import kotlin.math.roundToInt
 
 /**
  * Available swipe actions for conversation tiles
@@ -86,30 +107,41 @@ data class SwipeConfig(
 )
 
 /**
- * A conversation list tile with configurable swipe actions
+ * A generic swipe wrapper that adds configurable swipe actions to any content.
+ * Use this to wrap conversation tiles or other list items with swipe gestures.
+ *
+ * @param isPinned Current pin state for contextual action
+ * @param isMuted Current mute state for contextual action
+ * @param isRead Current read state for contextual action
+ * @param isSnoozed Current snooze state for contextual action
+ * @param onSwipeAction Callback when swipe action is triggered
+ * @param swipeConfig Configuration for swipe behavior and actions
+ * @param content The content to wrap, receives hasRoundedCorners flag
  */
+/**
+ * Gesture intent for direction detection
+ */
+private enum class SwipeGestureIntent {
+    UNDETERMINED,
+    HORIZONTAL_SWIPE,
+    VERTICAL_SCROLL
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun SwipeableConversationTile(
-    title: String,
-    subtitle: String,
-    timestamp: String,
-    unreadCount: Int = 0,
     isPinned: Boolean = false,
     isMuted: Boolean = false,
+    isRead: Boolean = true,
     isSnoozed: Boolean = false,
-    isTyping: Boolean = false,
-    messageStatus: MessageStatus = MessageStatus.NONE,
-    avatarContent: @Composable () -> Unit,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
     onSwipeAction: (SwipeActionType) -> Unit,
-    onAvatarClick: (() -> Unit)? = null,
     swipeConfig: SwipeConfig = SwipeConfig(),
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    content: @Composable (hasRoundedCorners: Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val isRead = unreadCount == 0
+    val density = LocalDensity.current
+    val coroutineScope = rememberCoroutineScope()
 
     // Get contextual actions based on current state
     val leftAction = SwipeActionType.getContextualAction(
@@ -128,77 +160,162 @@ fun SwipeableConversationTile(
     )
 
     if (!swipeConfig.enabled || (leftAction == SwipeActionType.NONE && rightAction == SwipeActionType.NONE)) {
-        // No swipe actions, render simple tile
-        ConversationTileContent(
-            title = title,
-            subtitle = subtitle,
-            timestamp = timestamp,
-            unreadCount = unreadCount,
-            isPinned = isPinned,
-            isMuted = isMuted,
-            isTyping = isTyping,
-            messageStatus = messageStatus,
-            avatarContent = avatarContent,
-            onClick = onClick,
-            onLongClick = onLongClick,
-            onAvatarClick = onAvatarClick
-        )
+        // No swipe actions, render content without swipe wrapper
+        content(false)
         return
     }
 
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { dismissValue ->
-            when (dismissValue) {
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    if (rightAction != SwipeActionType.NONE) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSwipeAction(rightAction)
-                    }
-                    false // Don't dismiss, reset
-                }
-                SwipeToDismissBoxValue.EndToStart -> {
-                    if (leftAction != SwipeActionType.NONE) {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                        onSwipeAction(leftAction)
-                    }
-                    // Always reset - the action is already triggered, let the list update naturally
-                    false
-                }
-                SwipeToDismissBoxValue.Settled -> false
-            }
-        },
-        positionalThreshold = { it * swipeConfig.sensitivity }
-    )
+    // Swipe offset animation
+    val swipeOffset = remember { Animatable(0f) }
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = rightAction != SwipeActionType.NONE,
-        enableDismissFromEndToStart = leftAction != SwipeActionType.NONE,
-        backgroundContent = {
-            SwipeBackground(
-                dismissDirection = dismissState.dismissDirection,
-                targetValue = dismissState.targetValue,
-                leftAction = leftAction,
-                rightAction = rightAction
-            )
-        },
+    // Direction detection thresholds
+    val detectionDistancePx = with(density) { 15.dp.toPx() }
+    val directionRatio = 1.5f // Horizontal must be 1.5x greater than vertical
+
+    // Calculate swipe threshold (how far to swipe to trigger action)
+    var containerWidthPx by remember { mutableFloatStateOf(0f) }
+    val swipeThresholdPx by remember(containerWidthPx, swipeConfig.sensitivity) {
+        derivedStateOf { containerWidthPx * swipeConfig.sensitivity }
+    }
+
+    // Track haptic feedback state
+    var hasTriggeredHaptic by remember { mutableStateOf(false) }
+
+    // Determine swipe direction for background display
+    val currentDirection by remember {
+        derivedStateOf {
+            when {
+                swipeOffset.value > 20 -> SwipeToDismissBoxValue.StartToEnd
+                swipeOffset.value < -20 -> SwipeToDismissBoxValue.EndToStart
+                else -> SwipeToDismissBoxValue.Settled
+            }
+        }
+    }
+
+    // Determine if past threshold
+    val targetValue by remember {
+        derivedStateOf {
+            when {
+                swipeOffset.value > swipeThresholdPx -> SwipeToDismissBoxValue.StartToEnd
+                swipeOffset.value < -swipeThresholdPx -> SwipeToDismissBoxValue.EndToStart
+                else -> SwipeToDismissBoxValue.Settled
+            }
+        }
+    }
+
+    Box(
         modifier = modifier
+            .fillMaxWidth()
+            .onSizeChanged { size -> containerWidthPx = size.width.toFloat() }
+            .pointerInput(swipeConfig.enabled, leftAction, rightAction) {
+                awaitEachGesture {
+                    val down = awaitFirstDown(requireUnconsumed = false)
+
+                    var cumulativeX = 0f
+                    var cumulativeY = 0f
+                    var gestureIntent = SwipeGestureIntent.UNDETERMINED
+                    hasTriggeredHaptic = false
+
+                    try {
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull() ?: break
+
+                            if (!change.pressed) {
+                                // Pointer released - handle action if horizontal swipe was active
+                                if (gestureIntent == SwipeGestureIntent.HORIZONTAL_SWIPE) {
+                                    coroutineScope.launch {
+                                        val offset = swipeOffset.value
+                                        when {
+                                            offset > swipeThresholdPx && rightAction != SwipeActionType.NONE -> {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onSwipeAction(rightAction)
+                                            }
+                                            offset < -swipeThresholdPx && leftAction != SwipeActionType.NONE -> {
+                                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                onSwipeAction(leftAction)
+                                            }
+                                        }
+                                        // Animate back to settled
+                                        swipeOffset.animateTo(
+                                            0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessMedium
+                                            )
+                                        )
+                                        hasTriggeredHaptic = false
+                                    }
+                                }
+                                break
+                            }
+
+                            val dragDelta = change.positionChange()
+                            cumulativeX += dragDelta.x
+                            cumulativeY += dragDelta.y
+
+                            // Determine intent once we've moved enough
+                            if (gestureIntent == SwipeGestureIntent.UNDETERMINED) {
+                                val totalDistance = kotlin.math.sqrt(cumulativeX * cumulativeX + cumulativeY * cumulativeY)
+                                if (totalDistance >= detectionDistancePx) {
+                                    // Check if horizontal clearly dominates vertical
+                                    gestureIntent = if (cumulativeX.absoluteValue > cumulativeY.absoluteValue * directionRatio) {
+                                        SwipeGestureIntent.HORIZONTAL_SWIPE
+                                    } else {
+                                        SwipeGestureIntent.VERTICAL_SCROLL
+                                    }
+                                }
+                            }
+
+                            // Only handle swipe if we determined it's horizontal
+                            if (gestureIntent == SwipeGestureIntent.HORIZONTAL_SWIPE) {
+                                change.consume()
+                                coroutineScope.launch {
+                                    val newOffset = swipeOffset.value + dragDelta.x
+                                    // Constrain based on available actions
+                                    val constrainedOffset = when {
+                                        rightAction == SwipeActionType.NONE && newOffset > 0 -> 0f
+                                        leftAction == SwipeActionType.NONE && newOffset < 0 -> 0f
+                                        else -> newOffset
+                                    }
+                                    swipeOffset.snapTo(constrainedOffset)
+
+                                    // Haptic feedback at threshold
+                                    val isPastThreshold = constrainedOffset.absoluteValue > swipeThresholdPx
+                                    if (isPastThreshold && !hasTriggeredHaptic) {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        hasTriggeredHaptic = true
+                                    } else if (!isPastThreshold) {
+                                        hasTriggeredHaptic = false
+                                    }
+                                }
+                            }
+                            // If VERTICAL_SCROLL, don't consume - let LazyColumn handle it
+                        }
+                    } catch (_: Exception) {
+                        // Gesture cancelled - reset
+                        coroutineScope.launch {
+                            swipeOffset.animateTo(0f)
+                            hasTriggeredHaptic = false
+                        }
+                    }
+                }
+            }
     ) {
-        ConversationTileContent(
-            title = title,
-            subtitle = subtitle,
-            timestamp = timestamp,
-            unreadCount = unreadCount,
-            isPinned = isPinned,
-            isMuted = isMuted,
-            isTyping = isTyping,
-            messageStatus = messageStatus,
-            avatarContent = avatarContent,
-            onClick = onClick,
-            onLongClick = onLongClick,
-            onAvatarClick = onAvatarClick,
-            hasRoundedCorners = true
+        // Background with swipe action icons
+        SwipeBackground(
+            dismissDirection = currentDirection,
+            targetValue = targetValue,
+            leftAction = leftAction,
+            rightAction = rightAction
         )
+
+        // Foreground content with offset
+        Box(
+            modifier = Modifier.offset { IntOffset(swipeOffset.value.roundToInt(), 0) }
+        ) {
+            content(true)
+        }
     }
 }
 
@@ -273,173 +390,48 @@ private fun SwipeBackground(
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun ConversationTileContent(
-    title: String,
-    subtitle: String,
-    timestamp: String,
-    unreadCount: Int,
-    isPinned: Boolean,
-    isMuted: Boolean,
-    isTyping: Boolean,
-    messageStatus: MessageStatus = MessageStatus.NONE,
-    avatarContent: @Composable () -> Unit,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-    onAvatarClick: (() -> Unit)? = null,
-    hasRoundedCorners: Boolean = false
-) {
-    Surface(
-        color = MaterialTheme.colorScheme.surface,
-        shape = if (hasRoundedCorners) RoundedCornerShape(16.dp) else RoundedCornerShape(0.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .then(if (hasRoundedCorners) Modifier.padding(vertical = 4.dp) else Modifier)
-            .combinedClickable(
-                onClick = onClick,
-                onLongClick = onLongClick
-            )
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Avatar - clickable/long-clickable if handler provided
-            // Size is 60dp to accommodate the message type badge overflow (56dp avatar + 4dp)
-            Box(
-                modifier = Modifier
-                    .size(60.dp)
-                    .then(
-                        if (onAvatarClick != null) {
-                            Modifier.combinedClickable(
-                                onClick = onAvatarClick,
-                                onLongClick = onAvatarClick
-                            )
-                        } else {
-                            Modifier
-                        }
-                    )
-            ) {
-                avatarContent()
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Content
-            Column(modifier = Modifier.weight(1f)) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Text(
-                        text = title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = if (unreadCount > 0) FontWeight.ExtraBold else FontWeight.Normal,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false)
-                    )
-
-                    if (isPinned) {
-                        Icon(
-                            Icons.Default.PushPin,
-                            contentDescription = "Pinned",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-
-                    if (isMuted) {
-                        Icon(
-                            Icons.Outlined.NotificationsOff,
-                            contentDescription = "Muted",
-                            tint = MaterialTheme.colorScheme.outline,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(2.dp))
-
-                if (isTyping) {
-                    Text(
-                        text = "typing...",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
-                } else {
-                    Row(
-                        verticalAlignment = Alignment.Top,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // Message status indicator
-                        if (messageStatus != MessageStatus.NONE) {
-                            MessageStatusIndicator(status = messageStatus)
-                        }
-                        Text(
-                            text = subtitle,
-                            style = MaterialTheme.typography.bodyMedium.copy(
-                                lineHeight = 18.sp
-                            ),
-                            color = if (unreadCount > 0)
-                                MaterialTheme.colorScheme.onSurface
-                            else
-                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                            fontWeight = if (unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            maxLines = 2,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            // Timestamp and badge
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(
-                    text = timestamp,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (unreadCount > 0)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                if (unreadCount > 0) {
-                    UnreadBadge(count = unreadCount)
-                }
-            }
-        }
-    }
-}
-
 @Composable
 fun UnreadBadge(
     count: Int,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        color = MaterialTheme.colorScheme.inverseSurface,
-        shape = CircleShape,
-        modifier = modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+    // Pop-in animation with scale + fade (snappy Android 16 style)
+    AnimatedVisibility(
+        visible = count > 0,
+        enter = scaleIn(
+            initialScale = 0.5f,
+            animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
+        ) + fadeIn(tween(100)),
+        exit = scaleOut(
+            targetScale = 0.5f,
+            animationSpec = tween(100)
+        ) + fadeOut(tween(100)),
+        modifier = modifier
     ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(
-                text = if (count > 99) "99+" else count.toString(),
-                style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold
-                ),
-                color = MaterialTheme.colorScheme.inverseOnSurface,
-                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-            )
+        Surface(
+            color = MaterialTheme.colorScheme.inverseSurface,
+            shape = CircleShape,
+            modifier = Modifier.defaultMinSize(minWidth = 22.dp, minHeight = 22.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                // Animated count changes with crossfade
+                AnimatedContent(
+                    targetState = count,
+                    transitionSpec = {
+                        fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+                    },
+                    label = "badgeCount"
+                ) { targetCount ->
+                    Text(
+                        text = if (targetCount > 99) "99+" else targetCount.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
+                }
+            }
         }
     }
 }
@@ -474,21 +466,37 @@ fun PinnedConversationTile(
                 Box {
                     avatarContent()
 
-                    if (unreadCount > 0) {
+                    // Unread badge with pop-in animation
+                    AnimatedVisibility(
+                        visible = unreadCount > 0,
+                        enter = scaleIn(
+                            initialScale = 0.5f,
+                            animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
+                        ) + fadeIn(tween(100)),
+                        exit = scaleOut(targetScale = 0.5f, animationSpec = tween(100)) + fadeOut(tween(100)),
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 4.dp, y = (-4).dp)
+                    ) {
                         Surface(
                             color = MaterialTheme.colorScheme.primary,
                             shape = CircleShape,
-                            modifier = Modifier
-                                .align(Alignment.TopEnd)
-                                .offset(x = 4.dp, y = (-4).dp)
-                                .size(18.dp)
+                            modifier = Modifier.size(18.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = if (unreadCount > 9) "9+" else unreadCount.toString(),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onPrimary
-                                )
+                                AnimatedContent(
+                                    targetState = unreadCount,
+                                    transitionSpec = {
+                                        fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+                                    },
+                                    label = "pinnedBadgeCount"
+                                ) { count ->
+                                    Text(
+                                        text = if (count > 9) "9+" else count.toString(),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onPrimary
+                                    )
+                                }
                             }
                         }
                     }
@@ -545,10 +553,11 @@ fun MessageStatusIndicator(
 ) {
     when (status) {
         MessageStatus.SENDING -> {
-            CircularProgressIndicator(
-                modifier = modifier.size(14.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
+            Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = "Sending",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = modifier.size(16.dp)
             )
         }
         MessageStatus.SENT -> {
@@ -586,3 +595,4 @@ fun MessageStatusIndicator(
         MessageStatus.NONE -> { /* No indicator */ }
     }
 }
+

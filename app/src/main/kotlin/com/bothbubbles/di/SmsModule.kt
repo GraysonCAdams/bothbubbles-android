@@ -57,7 +57,8 @@ object SmsModule {
         chatDao: ChatDao,
         messageDao: MessageDao,
         notificationService: NotificationService,
-        activeConversationManager: ActiveConversationManager
+        activeConversationManager: ActiveConversationManager,
+        androidContactsService: AndroidContactsService
     ): SmsContentObserver {
         return SmsContentObserver(
             context,
@@ -65,7 +66,8 @@ object SmsModule {
             chatDao,
             messageDao,
             notificationService,
-            activeConversationManager
+            activeConversationManager,
+            androidContactsService
         )
     }
 

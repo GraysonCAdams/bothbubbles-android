@@ -27,6 +27,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -63,6 +64,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -75,6 +77,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -103,6 +106,7 @@ import com.bothbubbles.ui.components.SpamSafetyBanner
 import com.bothbubbles.ui.components.TapbackMenu
 import com.bothbubbles.ui.components.TypingIndicator
 import com.bothbubbles.ui.components.VCardOptionsDialog
+import com.bothbubbles.ui.components.AnimatedThreadOverlay
 import com.bothbubbles.ui.components.MessageListSkeleton
 import com.bothbubbles.ui.components.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.staggeredEntrance
@@ -196,6 +200,22 @@ fun ChatScreen(
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
+
+    // Track which message is currently being swiped for reply (to hide overlaying stickers)
+    var swipingMessageGuid by remember { mutableStateOf<String?>(null) }
+
+    // Thread overlay state
+    val threadOverlayState by viewModel.threadOverlayState.collectAsStateWithLifecycle()
+
+    // Handle scroll-to-message events from thread overlay
+    LaunchedEffect(Unit) {
+        viewModel.scrollToGuid.collect { guid ->
+            val index = uiState.messages.indexOfFirst { it.guid == guid }
+            if (index >= 0) {
+                listState.animateScrollToItem(index)
+            }
+        }
+    }
 
     // Failed message retry menu state
     var selectedMessageForRetry by remember { mutableStateOf<MessageUiModel?>(null) }
@@ -626,7 +646,7 @@ fun ChatScreen(
                         }
                     },
                     isSending = uiState.isSending,
-                    isLocalSmsChat = uiState.isLocalSmsChat,
+                    isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
                     hasAttachments = pendingAttachments.isNotEmpty(),
                     attachments = pendingAttachments,
                     onRemoveAttachment = { uri ->
@@ -813,7 +833,8 @@ fun ChatScreen(
                 isVisible = uiState.isSending,
                 isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
                 hasAttachments = uiState.isSendingWithAttachments,
-                progress = uiState.sendProgress
+                progress = uiState.sendProgress,
+                pendingMessages = uiState.pendingMessages
             )
 
             // SMS fallback mode banner
@@ -899,7 +920,8 @@ fun ChatScreen(
 
                         itemsIndexed(
                             items = uiState.messages,
-                            key = { _, message -> message.guid }
+                            key = { _, message -> message.guid },
+                            contentType = { _, message -> if (message.isFromMe) 1 else 0 }
                         ) { index, message ->
                             // Enable tapback for all messages with text content
                             // For iMessage: uses native tapback API
@@ -934,28 +956,28 @@ fun ChatScreen(
                                 message = message
                             )
 
-                            // iMessage-style delivery indicator: only show on the last message
-                            // in a consecutive sequence of outgoing messages
+                            // iPhone-style delivery indicator: only show on THE last outgoing message
+                            // in the entire conversation (not just last in consecutive sequence)
                             val showDeliveryIndicator = if (message.isFromMe) {
-                                // Find the next non-reaction message (newer = lower index)
-                                val newerMessage = uiState.messages
-                                    .take(index)
-                                    .lastOrNull { !it.isReaction }
-                                // Show indicator only if no newer outgoing message exists
-                                newerMessage?.isFromMe != true
+                                // Find the index of the very last outgoing message (excluding reactions)
+                                val lastOutgoingIndex = uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
+                                index == lastOutgoingIndex
                             } else {
                                 false
                             }
 
                             // Spacing based on group position:
-                            // - Placed stickers: negative padding to overlap previous message
                             // - SINGLE/FIRST: 6dp top (gap between groups)
                             // - MIDDLE/LAST: 2dp top (tight within group)
+                            // - Placed stickers use offset instead of padding for overlap effect
                             val topPadding = when {
-                                message.isPlacedSticker -> (-20).dp  // Overlap for "slapped on" effect
+                                message.isPlacedSticker -> 0.dp  // Stickers use offset for overlap
                                 groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
                                 else -> 2.dp
                             }
+                            // Negative offset to move sticker UP to overlap the message it's placed on
+                            // (In reversed layout, sticker appears below/after its target message)
+                            val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
                             // Determine if sender name should be shown in group chats
                             // Show when: group chat, incoming message, and sender changed from previous (older) message
@@ -965,8 +987,30 @@ fun ChatScreen(
                                 previousMessage == null || previousMessage.isFromMe || previousMessage.senderName != message.senderName
                             }
 
+                            // Determine if avatar should be shown in group chats
+                            // Show on the last (newest) message in a consecutive group from same sender
+                            val showAvatar = uiState.isGroup && !message.isFromMe && run {
+                                val newerMessage = uiState.messages.getOrNull(index - 1)
+                                // Show avatar if no newer message, newer message is from me, or from different sender
+                                newerMessage == null || newerMessage.isFromMe || newerMessage.senderName != message.senderName
+                            }
+
+                            // Fade out/hide stickers when the underlying message is being interacted with
+                            // Note: associatedMessageGuid may have "p:X/" prefix (e.g., "p:0/MESSAGE_GUID")
+                            val targetGuid = message.associatedMessageGuid?.let { guid ->
+                                if (guid.contains("/")) guid.substringAfter("/") else guid
+                            }
+                            val isStickerTargetInteracting = message.isPlacedSticker && (
+                                selectedMessageForTapback?.guid == targetGuid ||
+                                swipingMessageGuid == targetGuid
+                            )
+                            val stickerFadeAlpha = if (isStickerTargetInteracting) 0f else 1f  // Hide completely during interaction
+
                             Column(
                                 modifier = Modifier
+                                    .zIndex(if (message.isPlacedSticker) 1f else 0f)  // Stickers render on top
+                                    .alpha(stickerFadeAlpha)
+                                    .offset(y = stickerOverlapOffset)
                                     .padding(top = topPadding)
                                     .staggeredEntrance(index)
                                     .animateItem()
@@ -980,12 +1024,13 @@ fun ChatScreen(
                                 }
 
                                 // Show sender name for group chat incoming messages
+                                // Add extra padding to align with message bubble (after avatar space)
                                 if (showSenderName) {
                                     Text(
                                         text = message.senderName!!,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 16.dp, bottom = 2.dp)
+                                        modifier = Modifier.padding(start = 52.dp, bottom = 2.dp) // 28dp avatar + 8dp gap + 16dp bubble padding
                                     )
                                 }
 
@@ -1031,6 +1076,9 @@ fun ChatScreen(
                                         MessageBubble(
                                             message = message,
                                             onLongPress = {
+                                                // Don't allow reactions/replies on stickers placed on other messages
+                                                if (message.isPlacedSticker) return@MessageBubble
+
                                                 if (message.hasError && message.isFromMe) {
                                                     // For failed messages, show retry menu
                                                     selectedMessageForRetry = message
@@ -1053,7 +1101,15 @@ fun ChatScreen(
                                             } else null,
                                             downloadingAttachments = downloadingAttachments,
                                             showDeliveryIndicator = showDeliveryIndicator,
-                                            onReply = { guid -> viewModel.setReplyTo(guid) }
+                                            // Don't allow reply on stickers placed on other messages
+                                            onReply = if (message.isPlacedSticker) null else { guid -> viewModel.setReplyTo(guid) },
+                                            onReplyIndicatorClick = { originGuid -> viewModel.loadThread(originGuid) },
+                                            // Track when this message is being swiped (to hide overlaying stickers)
+                                            onSwipeStateChanged = { isSwiping ->
+                                                swipingMessageGuid = if (isSwiping) message.guid else null
+                                            },
+                                            isGroupChat = uiState.isGroup,
+                                            showAvatar = showAvatar
                                         )
                                     }
 
@@ -1144,6 +1200,13 @@ fun ChatScreen(
         onEffectComplete = {
             viewModel.onScreenEffectCompleted()
         }
+    )
+
+    // Thread overlay - shows when user taps a reply indicator
+    AnimatedThreadOverlay(
+        threadChain = threadOverlayState,
+        onMessageClick = { guid -> viewModel.scrollToMessage(guid) },
+        onDismiss = { viewModel.dismissThreadOverlay() }
     )
     } // End of outer Box
 
@@ -1482,7 +1545,7 @@ private fun UnifiedInputArea(
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(horizontal = 4.dp),
+                                        .padding(start = 8.dp, end = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     // Add button with circle outline inside the text field
@@ -1987,12 +2050,13 @@ private fun SendButton(
     modifier: Modifier = Modifier
 ) {
     // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
+    // Animated color transition for snappy mode switching (Android 16 style)
     val bubbleColors = BothBubblesTheme.bubbleColors
-    val containerColor = if (isSmsMode) {
-        Color(0xFF34C759) // Green for SMS/MMS
-    } else {
-        bubbleColors.iMessageSent // Deep blue matching iMessage bubbles
-    }
+    val containerColor by animateColorAsState(
+        targetValue = if (isSmsMode) Color(0xFF34C759) else bubbleColors.iMessageSent,
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "sendButtonColor"
+    )
     val contentColor = Color.White
 
     // Press feedback animation
@@ -2084,12 +2148,13 @@ private fun VoiceMemoButton(
     modifier: Modifier = Modifier
 ) {
     // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
+    // Animated color transition for snappy mode switching (Android 16 style)
     val bubbleColors = BothBubblesTheme.bubbleColors
-    val containerColor = if (isSmsMode) {
-        Color(0xFF34C759) // Green for SMS/MMS
-    } else {
-        bubbleColors.iMessageSent // Deep blue matching iMessage bubbles
-    }
+    val containerColor by animateColorAsState(
+        targetValue = if (isSmsMode) Color(0xFF34C759) else bubbleColors.iMessageSent,
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "voiceMemoButtonColor"
+    )
 
     Box(
         modifier = modifier
@@ -2175,8 +2240,8 @@ private fun EmptyStateMessages(
 
 /**
  * Thin progress bar that appears at the top when sending a message.
- * - For attachment uploads: shows real progress (0-100%)
- * - For text-only messages: hidden initially, shows at 25% if send takes > 300ms
+ * Shows immediately at 10% when send starts, then shows real upload progress for remaining 90%.
+ * Color-coded based on message protocol (green for SMS, blue for iMessage).
  */
 @Composable
 private fun SendingIndicatorBar(
@@ -2184,62 +2249,58 @@ private fun SendingIndicatorBar(
     isLocalSmsChat: Boolean,
     hasAttachments: Boolean,
     progress: Float = 0f,
+    pendingMessages: List<PendingMessage> = emptyList(),
     modifier: Modifier = Modifier
 ) {
-    val progressColor = if (isLocalSmsChat) {
+    // Determine color from first pending message, fallback to chat type
+    val isSmsSend = pendingMessages.firstOrNull()?.isLocalSms ?: isLocalSmsChat
+    val progressColor = if (isSmsSend) {
         Color(0xFF34C759) // Green for SMS
     } else {
-        MaterialTheme.colorScheme.primary
+        MaterialTheme.colorScheme.primary // Blue for iMessage
     }
     val trackColor = progressColor.copy(alpha = 0.3f)
 
-    // For text-only messages, delay showing the progress bar
-    var showTextOnlyProgress by remember { mutableStateOf(false) }
+    // Track completion state for smooth fade-out
     var completingProgress by remember { mutableStateOf(false) }
+    var startTime by remember { mutableStateOf(0L) }
 
     // Animated progress for smooth transitions
     val animatedProgress by animateFloatAsState(
         targetValue = when {
             completingProgress -> 1f
-            hasAttachments -> progress
-            showTextOnlyProgress -> 0.25f
+            isVisible -> progress.coerceAtLeast(0.1f) // Always show at least 10%
             else -> 0f
         },
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing),
         label = "sendProgress"
     )
 
-    // Handle text-only message delay
-    LaunchedEffect(isVisible, hasAttachments) {
-        if (isVisible && !hasAttachments) {
-            // Text-only: wait before showing progress
-            delay(300)
-            if (isVisible) {
-                showTextOnlyProgress = true
-            }
-        } else {
-            showTextOnlyProgress = false
-        }
-    }
-
-    // Handle completion animation
+    // Handle visibility changes
     LaunchedEffect(isVisible) {
-        if (!isVisible && (showTextOnlyProgress || completingProgress)) {
-            // Send completed - animate to 100% then hide
-            completingProgress = true
-            delay(200)
+        if (isVisible) {
+            startTime = System.currentTimeMillis()
             completingProgress = false
-            showTextOnlyProgress = false
+        } else if (startTime > 0) {
+            // Send completed - ensure minimum visible duration then animate to 100%
+            val elapsed = System.currentTimeMillis() - startTime
+            if (elapsed < 400) {
+                delay(400 - elapsed)
+            }
+            completingProgress = true
+            delay(400) // Hold at 100% briefly before hiding
+            completingProgress = false
+            startTime = 0L
         }
     }
 
-    // Determine if bar should be visible
-    val shouldShow = isVisible && (hasAttachments || showTextOnlyProgress) || completingProgress
+    // Determine if bar should be visible - show immediately when sending
+    val shouldShow = isVisible || completingProgress
 
     AnimatedVisibility(
         visible = shouldShow,
-        enter = expandVertically(),
-        exit = shrinkVertically()
+        enter = expandVertically(animationSpec = tween(150)),
+        exit = shrinkVertically(animationSpec = tween(200))
     ) {
         LinearProgressIndicator(
             progress = { animatedProgress.coerceIn(0f, 1f) },
@@ -2363,7 +2424,7 @@ private fun SaveContactBanner(
 }
 
 /**
- * Banner shown when chat is in SMS fallback mode (iMessage unavailable).
+ * Thin, non-obtrusive banner shown when chat is in SMS fallback mode.
  */
 @Composable
 private fun SmsFallbackBanner(
@@ -2379,48 +2440,18 @@ private fun SmsFallbackBanner(
         enter = expandVertically(),
         exit = shrinkVertically()
     ) {
-        val message = when {
-            fallbackReason == FallbackReason.SERVER_DISCONNECTED || !isServerConnected ->
-                "Server disconnected - Sending as SMS"
-            fallbackReason == FallbackReason.IMESSAGE_FAILED ->
-                "iMessage failed - Sending as SMS"
-            fallbackReason == FallbackReason.USER_REQUESTED ->
-                "Sending as SMS per your request"
-            else -> "iMessage unavailable - Sending as SMS"
-        }
-        Surface(
+        Box(
             modifier = modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-            shape = RoundedCornerShape(8.dp),
-            color = MaterialTheme.colorScheme.tertiaryContainer,
-            tonalElevation = 1.dp
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
+                .padding(vertical = 4.dp),
+            contentAlignment = Alignment.Center
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Warning,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.tertiary,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = message,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                )
-                Spacer(modifier = Modifier.weight(1f, fill = true))
-                if (showExitAction) {
-                    TextButton(onClick = onExitFallback) {
-                        Text("Try iMessage again")
-                    }
-                }
-            }
+            Text(
+                text = "iMessage unavailable",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -2816,7 +2847,7 @@ private fun ReplyPreview(
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Replying to ${message.senderName ?: if (message.isFromMe) "yourself" else "message"}",
+                    text = "Replying to ${if (message.isFromMe) "yourself" else message.senderName ?: "message"}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary
                 )

@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import kotlinx.coroutines.flow.Flow
@@ -121,6 +122,7 @@ interface HandleDao {
      * When updating, new values only override existing if they are non-blank.
      * This prevents accidental data loss from transient lookup failures.
      */
+    @Transaction
     suspend fun upsertHandle(handle: HandleEntity): Long {
         val existing = getHandleByAddressAndService(handle.address, handle.service)
         return if (existing != null) {

@@ -200,7 +200,7 @@ class GroupCreatorViewModel @Inject constructor(
             if (!smsOnlyMode && isConnected && trimmedQuery.isPhoneNumber()) {
                 try {
                     val response = api.checkIMessageAvailability(trimmedQuery)
-                    if (response.isSuccessful && response.body()?.data == true) {
+                    if (response.isSuccessful && response.body()?.data?.available == true) {
                         isIMessageAvailable = true
                         service = "iMessage"
                     }

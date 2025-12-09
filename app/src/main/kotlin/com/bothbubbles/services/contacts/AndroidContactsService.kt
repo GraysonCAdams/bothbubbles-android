@@ -463,7 +463,35 @@ class AndroidContactsService @Inject constructor(
     }
 
     /**
+     * Get the nickname for a contact by contact ID.
+     * Returns null if no nickname is set.
+     */
+    private fun getContactNickname(contactId: Long): String? {
+        return try {
+            context.contentResolver.query(
+                ContactsContract.Data.CONTENT_URI,
+                arrayOf(ContactsContract.CommonDataKinds.Nickname.NAME),
+                "${ContactsContract.Data.CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(contactId.toString(), ContactsContract.CommonDataKinds.Nickname.CONTENT_ITEM_TYPE),
+                null
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nicknameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Nickname.NAME)
+                    if (nicknameIndex >= 0) {
+                        return cursor.getString(nicknameIndex)?.takeIf { it.isNotBlank() }
+                    }
+                }
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error getting nickname for contact $contactId", e)
+            null
+        }
+    }
+
+    /**
      * Get the display name for a contact by phone number or email address.
+     * Priority: nickname > display name
      * Returns null if contact not found, permission denied, or if address is a short code.
      */
     fun getContactDisplayName(address: String): String? {
@@ -483,15 +511,28 @@ class AndroidContactsService @Inject constructor(
             )
             context.contentResolver.query(
                 phoneUri,
-                arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+                arrayOf(ContactsContract.PhoneLookup._ID, ContactsContract.PhoneLookup.DISPLAY_NAME),
                 null,
                 null,
                 null
             )?.use { cursor ->
                 if (cursor.moveToFirst()) {
+                    val idIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup._ID)
                     val nameIndex = cursor.getColumnIndex(ContactsContract.PhoneLookup.DISPLAY_NAME)
+
+                    // Get contact ID to check for nickname
+                    val contactId = if (idIndex >= 0) cursor.getLong(idIndex) else -1L
+
+                    // Check for nickname first (user-set name takes priority)
+                    if (contactId >= 0) {
+                        val nickname = getContactNickname(contactId)
+                        if (nickname != null) {
+                            return nickname
+                        }
+                    }
+
+                    // Fall back to display name
                     if (nameIndex >= 0) {
-                        // Return null for blank names to ensure proper fallback
                         return cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                     }
                 }
@@ -505,15 +546,28 @@ class AndroidContactsService @Inject constructor(
                 )
                 context.contentResolver.query(
                     emailUri,
-                    arrayOf(ContactsContract.CommonDataKinds.Email.DISPLAY_NAME),
+                    arrayOf(ContactsContract.CommonDataKinds.Email.CONTACT_ID, ContactsContract.CommonDataKinds.Email.DISPLAY_NAME),
                     null,
                     null,
                     null
                 )?.use { cursor ->
                     if (cursor.moveToFirst()) {
+                        val idIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.CONTACT_ID)
                         val nameIndex = cursor.getColumnIndex(ContactsContract.CommonDataKinds.Email.DISPLAY_NAME)
+
+                        // Get contact ID to check for nickname
+                        val contactId = if (idIndex >= 0) cursor.getLong(idIndex) else -1L
+
+                        // Check for nickname first (user-set name takes priority)
+                        if (contactId >= 0) {
+                            val nickname = getContactNickname(contactId)
+                            if (nickname != null) {
+                                return nickname
+                            }
+                        }
+
+                        // Fall back to display name
                         if (nameIndex >= 0) {
-                            // Return null for blank names to ensure proper fallback
                             return cursor.getString(nameIndex)?.takeIf { it.isNotBlank() }
                         }
                     }

@@ -1,7 +1,10 @@
 package com.bothbubbles.data.repository
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -22,6 +25,10 @@ class AttachmentRepository @Inject constructor(
     private val api: BothBubblesApi,
     private val okHttpClient: OkHttpClient
 ) {
+    companion object {
+        private const val TAG = "AttachmentRepository"
+    }
+
     private val attachmentsDir: File by lazy {
         File(context.filesDir, "attachments").also { it.mkdirs() }
     }
@@ -59,7 +66,7 @@ class AttachmentRepository @Inject constructor(
             }
 
             // Get download URL from webUrl or throw
-            val downloadUrl = attachment.webUrl
+            val baseDownloadUrl = attachment.webUrl
                 ?: throw Exception("No download URL available")
 
             // Create file with proper extension
@@ -67,42 +74,172 @@ class AttachmentRepository @Inject constructor(
             val fileName = "${attachmentGuid}${extension}"
             val outputFile = File(attachmentsDir, fileName)
 
-            val request = Request.Builder()
-                .url(downloadUrl)
-                .build()
+            // For stickers, try with original=true first to get HEIC with transparency
+            // Fall back to regular download if server returns error
+            val downloadUrl = if (attachment.isSticker && !baseDownloadUrl.contains("original=true")) {
+                val separator = if (baseDownloadUrl.contains("?")) "&" else "?"
+                "${baseDownloadUrl}${separator}original=true"
+            } else {
+                baseDownloadUrl
+            }
 
-            okHttpClient.newCall(request).execute().use { downloadResponse ->
-                if (!downloadResponse.isSuccessful) {
-                    throw Exception("Download failed: ${downloadResponse.code}")
+            var succeeded = false
+            var lastError: Exception? = null
+
+            Log.d(TAG, "Downloading attachment ${attachmentGuid}, isSticker=${attachment.isSticker}")
+
+            // Try download (with original=true for stickers first)
+            try {
+                Log.d(TAG, "Attempting download from: $downloadUrl")
+                downloadFile(downloadUrl, outputFile, onProgress)
+                succeeded = true
+                Log.d(TAG, "Download succeeded, file size: ${outputFile.length()} bytes")
+            } catch (e: Exception) {
+                lastError = e
+                Log.w(TAG, "Download failed with original=true, will retry without: ${e.message}")
+            }
+
+            // If sticker download failed with original=true, retry without it
+            if (!succeeded && attachment.isSticker && downloadUrl != baseDownloadUrl) {
+                try {
+                    Log.d(TAG, "Retrying without original=true: $baseDownloadUrl")
+                    downloadFile(baseDownloadUrl, outputFile, onProgress)
+                    succeeded = true
+                    Log.d(TAG, "Fallback download succeeded, file size: ${outputFile.length()} bytes")
+                } catch (e: Exception) {
+                    lastError = e
+                    Log.e(TAG, "Fallback download also failed: ${e.message}")
                 }
+            }
 
-                val body = downloadResponse.body
-                    ?: throw Exception("Empty response body")
+            if (!succeeded) {
+                throw lastError ?: Exception("Download failed")
+            }
 
-                val totalBytes = body.contentLength()
-                var downloadedBytes = 0L
+            // Convert HEIC/HEIF to PNG for stickers (Android's HEIC support is unreliable)
+            val isHeic = isHeicFile(outputFile)
+            Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic")
+            var finalFile = if (attachment.isSticker && isHeic) {
+                Log.d(TAG, "Converting HEIC sticker to PNG...")
+                val converted = convertHeicToPng(outputFile, attachmentGuid)
+                // Check if conversion actually succeeded (PNG file exists and is larger than 0)
+                if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
+                    converted
+                } else {
+                    // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
+                    // Fall back to downloading JPEG version (no transparency but at least it displays)
+                    Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
+                    outputFile.delete()
+                    downloadFile(baseDownloadUrl, outputFile, onProgress)
+                    Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
+                    outputFile
+                }
+            } else {
+                outputFile
+            }
 
-                FileOutputStream(outputFile).use { output ->
-                    body.byteStream().use { input ->
-                        val buffer = ByteArray(8192)
-                        var bytesRead: Int
+            // Update database with file path
+            attachmentDao.updateLocalPath(attachmentGuid, finalFile.absolutePath)
 
-                        while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
-                            downloadedBytes += bytesRead
+            finalFile
+        }
+    }
 
-                            if (totalBytes > 0) {
-                                onProgress?.invoke(downloadedBytes.toFloat() / totalBytes)
-                            }
+    /**
+     * Helper to perform the actual file download
+     */
+    private fun downloadFile(
+        url: String,
+        outputFile: File,
+        onProgress: ((Float) -> Unit)?
+    ) {
+        val request = Request.Builder()
+            .url(url)
+            .build()
+
+        okHttpClient.newCall(request).execute().use { downloadResponse ->
+            if (!downloadResponse.isSuccessful) {
+                throw Exception("Download failed: ${downloadResponse.code}")
+            }
+
+            val body = downloadResponse.body
+                ?: throw Exception("Empty response body")
+
+            val totalBytes = body.contentLength()
+            var downloadedBytes = 0L
+
+            FileOutputStream(outputFile).use { output ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(8192)
+                    var bytesRead: Int
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        output.write(buffer, 0, bytesRead)
+                        downloadedBytes += bytesRead
+
+                        if (totalBytes > 0) {
+                            onProgress?.invoke(downloadedBytes.toFloat() / totalBytes)
                         }
                     }
                 }
             }
+        }
+    }
 
-            // Update database with file path
-            attachmentDao.updateLocalPath(attachmentGuid, outputFile.absolutePath)
+    /**
+     * Check if a file is HEIC/HEIF format by reading magic bytes
+     */
+    private fun isHeicFile(file: File): Boolean {
+        if (!file.exists() || file.length() < 12) return false
+        return try {
+            file.inputStream().use { input ->
+                val buffer = ByteArray(12)
+                input.read(buffer)
+                // HEIC/HEIF files have "ftyp" at offset 4 and "heic", "heix", "hevc", or "mif1" at offset 8
+                val ftyp = String(buffer, 4, 4)
+                val brand = String(buffer, 8, 4)
+                ftyp == "ftyp" && brand in listOf("heic", "heix", "hevc", "mif1", "msf1")
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
 
-            outputFile
+    /**
+     * Convert HEIC file to PNG to preserve transparency using avif-coder library
+     */
+    private fun convertHeicToPng(heicFile: File, attachmentGuid: String): File {
+        val pngFile = File(attachmentsDir, "${attachmentGuid}.png")
+        var bitmap: Bitmap? = null
+
+        try {
+            // Use avif-coder library which properly handles HEIC with alpha channels
+            val heifCoder = HeifCoder()
+            val heicBytes = heicFile.readBytes()
+            bitmap = heifCoder.decode(heicBytes)
+
+            if (bitmap == null) {
+                Log.e(TAG, "HeifCoder failed to decode HEIC")
+                return heicFile
+            }
+
+            Log.d(TAG, "HeifCoder decoded bitmap: ${bitmap.width}x${bitmap.height}, hasAlpha=${bitmap.hasAlpha()}")
+
+            FileOutputStream(pngFile).use { output ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+            }
+
+            // Delete the original HEIC file
+            heicFile.delete()
+
+            Log.d(TAG, "Converted HEIC to PNG: ${pngFile.absolutePath}, size: ${pngFile.length()} bytes")
+            return pngFile
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to convert HEIC to PNG with HeifCoder", e)
+            // Return original file if conversion fails
+            return heicFile
+        } finally {
+            bitmap?.recycle()
         }
     }
 

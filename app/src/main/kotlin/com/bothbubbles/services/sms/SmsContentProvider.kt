@@ -324,6 +324,22 @@ class SmsContentProvider @Inject constructor(
         )
     }
 
+    /**
+     * Mark MMS messages as read for a thread
+     */
+    suspend fun markMmsAsRead(threadId: Long) = withContext(Dispatchers.IO) {
+        val values = android.content.ContentValues().apply {
+            put(Telephony.Mms.READ, 1)
+            put(Telephony.Mms.SEEN, 1)
+        }
+        contentResolver.update(
+            Telephony.Mms.CONTENT_URI,
+            values,
+            "${Telephony.Mms.THREAD_ID} = ? AND ${Telephony.Mms.MESSAGE_BOX} = ? AND ${Telephony.Mms.READ} = 0",
+            arrayOf(threadId.toString(), Telephony.Mms.MESSAGE_BOX_INBOX.toString())
+        )
+    }
+
     // ===== MMS Messages =====
 
     /**

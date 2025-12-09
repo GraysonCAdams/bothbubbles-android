@@ -43,19 +43,29 @@ class AuthInterceptor @Inject constructor(
 
         // Build the actual URL by replacing the placeholder base URL with the real server address
         val baseUrl = serverAddress.toHttpUrlOrNull()
+
+        // Check if guid is already in the query (to avoid duplicate params)
+        val hasGuidParam = originalUrl.queryParameter("guid") != null
+
         val finalUrl = if (baseUrl != null) {
             // Replace the localhost placeholder with the actual server address
             // Keep the path segments from the original request
-            baseUrl.newBuilder()
+            val builder = baseUrl.newBuilder()
                 .encodedPath(originalUrl.encodedPath)
                 .encodedQuery(originalUrl.encodedQuery)
-                .addQueryParameter("guid", authKey)
-                .build()
+
+            // Only add guid if not already present
+            if (!hasGuidParam) {
+                builder.addQueryParameter("guid", authKey)
+            }
+            builder.build()
         } else {
             // Fallback: just add auth to original URL (shouldn't happen if settings are configured)
-            originalUrl.newBuilder()
-                .addQueryParameter("guid", authKey)
-                .build()
+            val builder = originalUrl.newBuilder()
+            if (!hasGuidParam) {
+                builder.addQueryParameter("guid", authKey)
+            }
+            builder.build()
         }
 
         // Build new request with updated URL and headers

@@ -13,7 +13,10 @@ import androidx.room.PrimaryKey
         Index(value = ["chat_guid"]),
         Index(value = ["date_created"]),
         Index(value = ["handle_id"]),
-        Index(value = ["associated_message_guid"])
+        Index(value = ["associated_message_guid"]),
+        Index(value = ["thread_originator_guid"]),
+        Index(value = ["message_source"]),
+        Index(value = ["chat_guid", "date_deleted"])
     ],
     foreignKeys = [
         ForeignKey(

@@ -100,6 +100,14 @@ data class HandleDto(
 )
 
 /**
+ * iMessage availability response
+ */
+@JsonClass(generateAdapter = true)
+data class IMessageAvailabilityResponse(
+    @Json(name = "available") val available: Boolean = false
+)
+
+/**
  * Attachment DTO
  */
 @JsonClass(generateAdapter = true)

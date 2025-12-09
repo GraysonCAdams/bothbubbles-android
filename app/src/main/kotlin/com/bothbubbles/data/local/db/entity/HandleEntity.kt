@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bothbubbles.util.PhoneNumberFormatter
 
 @Entity(
     tableName = "handles",
@@ -76,22 +77,24 @@ data class HandleEntity(
         get() = service.equals("iMessage", ignoreCase = true)
 
     /**
-     * Display name with priority: saved contact > "Maybe: inferred" > formatted address > raw address
+     * Display name with priority: saved contact > "Maybe: inferred" > formatted address > formatted raw address
+     * The final fallback formats the address to strip service suffixes and pretty-print phone numbers.
      */
     val displayName: String
         get() = cachedDisplayName
             ?: inferredName?.let { "Maybe: $it" }
             ?: formattedAddress
-            ?: address
+            ?: PhoneNumberFormatter.format(address)
 
     /**
      * Raw display name WITHOUT "Maybe:" prefix - use for contact cards, intents, and avatars
+     * The final fallback formats the address to strip service suffixes and pretty-print phone numbers.
      */
     val rawDisplayName: String
         get() = cachedDisplayName
             ?: inferredName
             ?: formattedAddress
-            ?: address
+            ?: PhoneNumberFormatter.format(address)
 
     /**
      * Whether this handle has an inferred (unconfirmed) name

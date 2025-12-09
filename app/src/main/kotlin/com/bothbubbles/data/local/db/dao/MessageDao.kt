@@ -69,6 +69,28 @@ interface MessageDao {
     """)
     fun getRepliesForMessage(messageGuid: String): Flow<List<MessageEntity>>
 
+    /**
+     * Batch fetch messages by their GUIDs.
+     * Used for efficiently loading reply preview data.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE guid IN (:guids) AND date_deleted IS NULL
+    """)
+    suspend fun getMessagesByGuids(guids: List<String>): List<MessageEntity>
+
+    /**
+     * Get all messages in a thread (the original message + all replies to it).
+     * Used for displaying the thread overlay when user taps a reply indicator.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE (guid = :originGuid OR thread_originator_guid = :originGuid)
+        AND date_deleted IS NULL
+        ORDER BY date_created ASC
+    """)
+    suspend fun getThreadMessages(originGuid: String): List<MessageEntity>
+
     @Query("""
         SELECT * FROM messages
         WHERE chat_guid = :chatGuid AND date_deleted IS NULL

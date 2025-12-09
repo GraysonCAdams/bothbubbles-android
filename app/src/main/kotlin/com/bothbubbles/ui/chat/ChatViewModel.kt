@@ -34,7 +34,9 @@ import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.smartreply.SmartReplyService
+import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.MessageDto
+import android.util.Log
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
@@ -45,8 +47,10 @@ import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.components.AttachmentUiModel
 import com.bothbubbles.ui.components.MessageUiModel
 import com.bothbubbles.ui.components.ReactionUiModel
+import com.bothbubbles.ui.components.ReplyPreviewData
 import com.bothbubbles.ui.components.SuggestionItem
 import com.bothbubbles.ui.components.Tapback
+import com.bothbubbles.ui.components.ThreadChain
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -59,6 +63,7 @@ import java.util.*
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
@@ -80,8 +85,14 @@ class ChatViewModel @Inject constructor(
     private val scheduledMessageDao: ScheduledMessageDao,
     private val workManager: WorkManager,
     private val handleDao: HandleDao,
-    private val activeConversationManager: ActiveConversationManager
+    private val activeConversationManager: ActiveConversationManager,
+    private val api: BothBubblesApi
 ) : ViewModel() {
+
+    companion object {
+        private const val TAG = "ChatViewModel"
+        private const val AVAILABILITY_CHECK_COOLDOWN = 5 * 60 * 1000L // 5 minutes
+    }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
 
@@ -101,6 +112,12 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    // Dynamic message limit for pagination - increases as user scrolls up to load older messages
+    private val _messageLimit = MutableStateFlow(50)
+
+    // Trigger to refresh messages (incremented when attachments are downloaded)
+    private val _attachmentRefreshTrigger = MutableStateFlow(0)
 
     // Separate draft text flow for TextField performance - avoids full screen recomposition on each keystroke
     private val _draftText = MutableStateFlow("")
@@ -169,6 +186,17 @@ class ChatViewModel @Inject constructor(
     private val screenEffectQueue = mutableListOf<ScreenEffectState>()
     private var isPlayingScreenEffect = false
 
+    // Thread overlay state - shows the thread chain when user taps a reply indicator
+    private val _threadOverlayState = MutableStateFlow<ThreadChain?>(null)
+    val threadOverlayState: StateFlow<ThreadChain?> = _threadOverlayState.asStateFlow()
+
+    // Scroll-to-message event - emitted when user taps a message in thread overlay
+    private val _scrollToGuid = MutableSharedFlow<String>()
+    val scrollToGuid: SharedFlow<String> = _scrollToGuid.asSharedFlow()
+
+    // iMessage availability check cooldown (per-session, resets on ViewModel creation)
+    private var lastAvailabilityCheck: Long = 0
+
     init {
         // Track this conversation as active to suppress notifications while viewing
         activeConversationManager.setActiveConversation(chatGuid, mergedChatGuids.toSet())
@@ -192,6 +220,13 @@ class ChatViewModel @Inject constructor(
         observeAutoDownloadSetting()
         observeUploadProgress()
         saveCurrentChatState()
+
+        // Check if iMessage is available again (for chats in SMS fallback mode)
+        // Delay slightly to ensure chat data is loaded first
+        viewModelScope.launch {
+            delay(500) // Wait for loadChat() to populate participantPhone
+            checkAndMaybeExitFallback()
+        }
     }
 
     /**
@@ -241,19 +276,31 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Observe upload progress from MessageRepository for determinate progress bar.
+     * Updates the first pending message with attachments and recalculates aggregate progress.
      */
     private fun observeUploadProgress() {
         viewModelScope.launch {
             messageRepository.uploadProgress.collect { progress ->
-                val overallProgress = if (progress != null) {
-                    // Calculate overall progress accounting for multiple attachments
+                if (progress != null) {
+                    // Calculate individual message progress (0.0 to 1.0)
                     val attachmentBase = progress.attachmentIndex.toFloat() / progress.totalAttachments
                     val currentProgress = progress.progress / progress.totalAttachments
-                    attachmentBase + currentProgress
-                } else {
-                    0f
+                    val messageProgress = attachmentBase + currentProgress
+
+                    // Update the first pending message with attachments
+                    _uiState.update { state ->
+                        val pendingList = state.pendingMessages.toMutableList()
+                        val attachmentIndex = pendingList.indexOfFirst { it.hasAttachments }
+                        if (attachmentIndex >= 0) {
+                            pendingList[attachmentIndex] = pendingList[attachmentIndex].copy(progress = messageProgress)
+                        }
+                        state.copy(
+                            pendingMessages = pendingList,
+                            sendProgress = calculateAggregateProgress(pendingList)
+                        )
+                    }
                 }
-                _uiState.update { it.copy(sendProgress = overallProgress) }
+                // Don't reset progress to 0 when progress is null - let completion handlers manage that
             }
         }
     }
@@ -264,7 +311,7 @@ class ChatViewModel @Inject constructor(
      */
     private fun downloadPendingAttachments() {
         viewModelScope.launch {
-            if (isMergedChat) {
+            val result = if (isMergedChat) {
                 // Download from all merged chats
                 attachmentRepository.downloadPendingForChats(mergedChatGuids) { downloaded, total ->
                     // Progress updates are handled per-attachment, this is overall progress
@@ -272,6 +319,12 @@ class ChatViewModel @Inject constructor(
             } else {
                 attachmentRepository.downloadPendingForChat(chatGuid) { downloaded, total ->
                     // Progress updates are handled per-attachment, this is overall progress
+                }
+            }
+            // Trigger message refresh so UI shows downloaded attachments
+            result.onSuccess { downloadedCount ->
+                if (downloadedCount > 0) {
+                    _attachmentRefreshTrigger.value++
                 }
             }
         }
@@ -292,6 +345,8 @@ class ChatViewModel @Inject constructor(
                 onSuccess = {
                     // Remove from progress map (download complete)
                     _attachmentDownloadProgress.update { it - attachmentGuid }
+                    // Trigger message refresh so UI shows the downloaded attachment
+                    _attachmentRefreshTrigger.value++
                 },
                 onFailure = { e ->
                     // Remove from progress map and show error
@@ -380,6 +435,56 @@ class ChatViewModel @Inject constructor(
                         fallbackReason = entry?.reason
                     )
                 }
+            }
+        }
+    }
+
+    /**
+     * Check if iMessage is available for this chat and auto-exit fallback mode if so.
+     * Only checks if:
+     * 1. Chat is in SMS fallback due to IMESSAGE_FAILED reason
+     * 2. Cooldown has passed (5 minutes)
+     * 3. Server is connected
+     */
+    private fun checkAndMaybeExitFallback() {
+        val fallbackState = chatFallbackTracker.getFallbackState(chatGuid)
+
+        // Only check for IMESSAGE_FAILED fallback, not server disconnected or user requested
+        if (fallbackState?.reason != FallbackReason.IMESSAGE_FAILED) return
+
+        val now = System.currentTimeMillis()
+        if (now - lastAvailabilityCheck < AVAILABILITY_CHECK_COOLDOWN) {
+            Log.d(TAG, "Skipping availability check - cooldown not passed")
+            return
+        }
+        lastAvailabilityCheck = now
+
+        viewModelScope.launch {
+            // Get the primary address from chat identifier or first participant
+            val address = _uiState.value.participantPhone
+            if (address.isNullOrBlank()) {
+                Log.d(TAG, "No address found for availability check")
+                return@launch
+            }
+
+            // Only check if server is connected
+            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
+                Log.d(TAG, "Server not connected, skipping availability check")
+                return@launch
+            }
+
+            try {
+                Log.d(TAG, "Checking iMessage availability for $address")
+                val response = api.checkIMessageAvailability(address)
+                if (response.isSuccessful && response.body()?.data?.available == true) {
+                    Log.d(TAG, "iMessage now available for $address, exiting fallback mode")
+                    chatFallbackTracker.exitFallback(chatGuid)
+                    _uiState.update { it.copy(isInSmsFallbackMode = false, fallbackReason = null) }
+                } else {
+                    Log.d(TAG, "iMessage still unavailable for $address")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to check iMessage availability", e)
             }
         }
     }
@@ -537,6 +642,74 @@ class ChatViewModel @Inject constructor(
         chatFallbackTracker.exitFallbackMode(chatGuid)
     }
 
+    // ===== Thread Overlay Functions =====
+
+    /**
+     * Load a thread chain for display in the thread overlay.
+     * Called when user taps a reply indicator.
+     */
+    fun loadThread(originGuid: String) {
+        viewModelScope.launch {
+            val threadMessages = messageRepository.getThreadMessages(originGuid)
+            val origin = threadMessages.find { it.guid == originGuid }
+            val replies = threadMessages.filter { it.threadOriginatorGuid == originGuid }
+
+            // Get participants for sender name and avatar resolution
+            val participants = chatRepository.getParticipantsForChats(mergedChatGuids)
+            val handleIdToName = participants.associate { it.id to it.displayName }
+            val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+            val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+
+            // Batch load attachments for all thread messages
+            val allAttachments = attachmentDao.getAttachmentsForMessages(
+                threadMessages.map { it.guid }
+            ).groupBy { it.messageGuid }
+
+            // Filter out placed stickers from thread overlay - they're visual overlays, not actual replies
+            val filteredReplies = replies.filter { msg ->
+                val msgAttachments = allAttachments[msg.guid].orEmpty()
+                val isPlacedSticker = msg.associatedMessageGuid != null &&
+                    msgAttachments.any { it.mimeType?.contains("sticker") == true }
+                !isPlacedSticker
+            }
+
+            _threadOverlayState.value = ThreadChain(
+                originMessage = origin?.toUiModel(
+                    attachments = allAttachments[origin.guid].orEmpty(),
+                    handleIdToName = handleIdToName,
+                    addressToName = addressToName,
+                    addressToAvatarPath = addressToAvatarPath
+                ),
+                replies = filteredReplies.map { msg ->
+                    msg.toUiModel(
+                        attachments = allAttachments[msg.guid].orEmpty(),
+                        handleIdToName = handleIdToName,
+                        addressToName = addressToName,
+                        addressToAvatarPath = addressToAvatarPath
+                    )
+                }
+            )
+        }
+    }
+
+    /**
+     * Dismiss the thread overlay.
+     */
+    fun dismissThreadOverlay() {
+        _threadOverlayState.value = null
+    }
+
+    /**
+     * Scroll to a specific message in the main chat.
+     * Called when user taps a message in the thread overlay.
+     */
+    fun scrollToMessage(guid: String) {
+        viewModelScope.launch {
+            dismissThreadOverlay()
+            _scrollToGuid.emit(guid)
+        }
+    }
+
     private fun loadChat() {
         viewModelScope.launch {
             var draftLoaded = false
@@ -603,26 +776,34 @@ class ChatViewModel @Inject constructor(
 
     private fun loadMessages() {
         viewModelScope.launch {
-            // For merged chats, observe messages from all chats
-            val messagesFlow = if (isMergedChat) {
-                messageRepository.observeMessagesForChats(mergedChatGuids, limit = 50, offset = 0)
-            } else {
-                messageRepository.observeMessagesForChat(chatGuid, limit = 50, offset = 0)
-            }
-
             // Observe participants from all chats in merged conversation
             val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
 
-            // Combine messages with participants to get sender names
-            combine(
-                messagesFlow,
-                participantsFlow
-            ) { messages, participants ->
+            // Use flatMapLatest to react to message limit changes for pagination
+            // When _messageLimit increases, automatically re-query with larger limit
+            // Also react to attachment refresh trigger (when downloads complete)
+            combine(_messageLimit, _attachmentRefreshTrigger) { limit, _ -> limit }
+            .flatMapLatest { limit ->
+                // For merged chats, observe messages from all chats
+                val messagesFlow = if (isMergedChat) {
+                    messageRepository.observeMessagesForChats(mergedChatGuids, limit = limit, offset = 0)
+                } else {
+                    messageRepository.observeMessagesForChat(chatGuid, limit = limit, offset = 0)
+                }
+
+                // Combine messages with participants to get sender names and avatar paths
+                combine(
+                    messagesFlow,
+                    participantsFlow
+                ) { messages, participants ->
                 // Build a map from handleId to displayName for quick lookup
                 val handleIdToName = participants.associate { it.id to it.displayName }.toMutableMap()
 
                 // Build a map by normalized address for looking up sender names from senderAddress
                 val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+
+                // Build a map by normalized address for looking up avatar paths
+                val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
                 // For messages with handleId not in participants, look up the handle and match by address
                 val missingHandleIds = messages
@@ -646,10 +827,10 @@ class ChatViewModel @Inject constructor(
                     }
                 }
 
-                Triple(messages, handleIdToName.toMap(), addressToName)
+                ParticipantMaps(messages, handleIdToName.toMap(), addressToName, addressToAvatarPath)
             }
                 .distinctUntilChanged()
-                .map { (messages, handleIdToName, addressToName) ->
+                .map { (messages, handleIdToName, addressToName, addressToAvatarPath) ->
                     // Separate actual reactions (iMessage tapbacks)
                     val iMessageReactions = messages.filter { it.isReaction }
 
@@ -696,21 +877,80 @@ class ChatViewModel @Inject constructor(
                         regularMessages.map { it.guid }
                     ).groupBy { it.messageGuid }
 
+                    // Collect all unique threadOriginatorGuids for reply preview loading
+                    val replyGuids = regularMessages
+                        .mapNotNull { it.threadOriginatorGuid }
+                        .distinct()
+
+                    // Build a map of guid -> message for quick lookup (from loaded messages)
+                    val loadedMessagesMap = regularMessages.associateBy { it.guid }
+
+                    // Batch fetch original messages that are not in the loaded set
+                    val missingGuids = replyGuids.filter { it !in loadedMessagesMap }
+                    val fetchedOriginals = if (missingGuids.isNotEmpty()) {
+                        messageRepository.getMessagesByGuids(missingGuids).associateBy { it.guid }
+                    } else {
+                        emptyMap()
+                    }
+
+                    // Combine loaded and fetched messages for reply preview lookup
+                    val allMessagesMap = loadedMessagesMap + fetchedOriginals
+
+                    // Build reply preview data map
+                    val replyPreviewMap = replyGuids.mapNotNull { originGuid ->
+                        val originalMessage = allMessagesMap[originGuid]
+                        if (originalMessage != null) {
+                            originGuid to ReplyPreviewData(
+                                originalGuid = originGuid,
+                                previewText = originalMessage.text?.take(50),
+                                senderName = resolveSenderName(
+                                    originalMessage.senderAddress,
+                                    originalMessage.handleId,
+                                    addressToName,
+                                    handleIdToName
+                                ),
+                                isFromMe = originalMessage.isFromMe,
+                                hasAttachment = originalMessage.hasAttachments,
+                                isNotLoaded = false
+                            )
+                        } else {
+                            // Original message not found - mark as not loaded
+                            originGuid to ReplyPreviewData(
+                                originalGuid = originGuid,
+                                previewText = null,
+                                senderName = null,
+                                isFromMe = false,
+                                hasAttachment = false,
+                                isNotLoaded = true
+                            )
+                        }
+                    }.toMap()
+
                     regularMessages.map { message ->
                         val messageReactions = reactionsByMessage[message.guid].orEmpty()
                         val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
                         val attachments = allAttachments[message.guid].orEmpty()
-                        message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName, addressToName)
-                    }
-                }
-                .collect { messageModels ->
-                    _uiState.update { state ->
-                        state.copy(
-                            isLoading = false,
-                            messages = messageModels
+                        val replyPreview = message.threadOriginatorGuid?.let { replyPreviewMap[it] }
+                        message.toUiModel(
+                            reactions = messageReactions,
+                            smsReactions = messageSmsReactions,
+                            attachments = attachments,
+                            handleIdToName = handleIdToName,
+                            addressToName = addressToName,
+                            addressToAvatarPath = addressToAvatarPath,
+                            replyPreview = replyPreview
                         )
                     }
                 }
+            } // End flatMapLatest
+            .collect { messageModels ->
+                _uiState.update { state ->
+                    state.copy(
+                        isLoading = false,
+                        messages = messageModels
+                    )
+                }
+            }
         }
     }
 
@@ -820,7 +1060,18 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             socketService.events
                 .filterIsInstance<SocketEvent.TypingIndicator>()
-                .filter { it.chatGuid == chatGuid }
+                .filter { event ->
+                    // Use normalized GUID comparison to handle format differences
+                    // Server may send "+1234567890" but local has "+1-234-567-890"
+                    val normalizedEventGuid = normalizeGuid(event.chatGuid)
+                    mergedChatGuids.any { normalizeGuid(it) == normalizedEventGuid } ||
+                        normalizeGuid(chatGuid) == normalizedEventGuid ||
+                        // Fallback: match by address/phone number only
+                        extractAddress(event.chatGuid)?.let { eventAddress ->
+                            mergedChatGuids.any { extractAddress(it) == eventAddress } ||
+                                extractAddress(chatGuid) == eventAddress
+                        } == true
+                }
                 .collect { event ->
                     _uiState.update { it.copy(isTyping = event.isTyping) }
                 }
@@ -883,10 +1134,11 @@ class ChatViewModel @Inject constructor(
         // Convert DTO to Entity
         val messageEntity = messageDto.toMessageEntity(eventChatGuid)
 
-        // Get participant info for sender name resolution
+        // Get participant info for sender name and avatar resolution
         val participants = chatRepository.observeParticipantsForChats(mergedChatGuids).first()
         val handleIdToName = participants.associate { it.id to it.displayName }
         val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+        val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
         // Load attachments for this message
         val attachments = if (messageEntity.hasAttachments) {
@@ -901,7 +1153,8 @@ class ChatViewModel @Inject constructor(
             smsReactions = emptyList(),
             attachments = attachments,
             handleIdToName = handleIdToName,
-            addressToName = addressToName
+            addressToName = addressToName,
+            addressToAvatarPath = addressToAvatarPath
         )
 
         // Add to UI state at the correct position (beginning for DESC sort)
@@ -1049,6 +1302,7 @@ class ChatViewModel @Inject constructor(
         val participants = participantsFlow.first()
         val handleIdToName = participants.associate { it.id to it.displayName }
         val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+        val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
         val messagesFlow = if (isMergedChat) {
             messageRepository.observeMessagesForChats(mergedChatGuids, limit = 50, offset = 0)
@@ -1090,7 +1344,14 @@ class ChatViewModel @Inject constructor(
             val messageReactions = reactionsByMessage[message.guid].orEmpty()
             val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
             val attachments = allAttachments[message.guid].orEmpty()
-            message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName, addressToName)
+            message.toUiModel(
+                reactions = messageReactions,
+                smsReactions = messageSmsReactions,
+                attachments = attachments,
+                handleIdToName = handleIdToName,
+                addressToName = addressToName,
+                addressToAvatarPath = addressToAvatarPath
+            )
         }
 
         _uiState.update { state ->
@@ -1103,7 +1364,23 @@ class ChatViewModel @Inject constructor(
 
     private fun markAsRead() {
         viewModelScope.launch {
-            chatRepository.markChatAsRead(chatGuid)
+            // Mark all chats in merged conversation as read
+            for (guid in mergedChatGuids) {
+                try {
+                    val chat = chatRepository.getChat(guid)
+
+                    if (chat?.isLocalSms == true) {
+                        // Local SMS/MMS chat - mark in Android system
+                        smsRepository.markThreadAsRead(guid)
+                    } else {
+                        // iMessage or server SMS - mark via server API
+                        chatRepository.markChatAsRead(guid)
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.w("ChatViewModel", "Failed to mark $guid as read", e)
+                    // Continue with other chats
+                }
+            }
         }
     }
 
@@ -1282,8 +1559,29 @@ class ChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
+            // Generate tracking ID for this send operation
+            val trackingId = "track-${UUID.randomUUID()}"
+            val isLocalSms = _uiState.value.isLocalSmsChat
+
+            // Add to pending messages immediately (triggers 10% progress display)
+            val pendingMessage = PendingMessage(
+                tempGuid = trackingId,
+                progress = 0f,
+                hasAttachments = attachments.isNotEmpty(),
+                isLocalSms = isLocalSms
+            )
+
             _draftText.value = ""
-            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty(), replyingToGuid = null) }
+            _uiState.update { state ->
+                val newPending = state.pendingMessages + pendingMessage
+                state.copy(
+                    isSending = true,
+                    isSendingWithAttachments = newPending.any { it.hasAttachments },
+                    replyingToGuid = null,
+                    pendingMessages = newPending,
+                    sendProgress = calculateAggregateProgress(newPending)
+                )
+            }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -1298,21 +1596,47 @@ class ChatViewModel @Inject constructor(
                 effectId = effectId
             ).fold(
                 onSuccess = {
-                    _uiState.update { it.copy(isSending = false, isSendingWithAttachments = false, attachmentCount = 0) }
+                    // Remove from pending and play sound on server acknowledgment
+                    _uiState.update { state ->
+                        val newPending = state.pendingMessages.filter { it.tempGuid != trackingId }
+                        state.copy(
+                            isSending = newPending.isNotEmpty(),
+                            isSendingWithAttachments = newPending.any { it.hasAttachments },
+                            attachmentCount = 0,
+                            pendingMessages = newPending,
+                            sendProgress = if (newPending.isEmpty()) 1f else calculateAggregateProgress(newPending)
+                        )
+                    }
                     soundManager.playSendSound()
                 },
                 onFailure = { e ->
-                    _uiState.update {
-                        it.copy(
-                            isSending = false,
-                            isSendingWithAttachments = false,
+                    // Remove from pending on failure (no sound)
+                    _uiState.update { state ->
+                        val newPending = state.pendingMessages.filter { it.tempGuid != trackingId }
+                        state.copy(
+                            isSending = newPending.isNotEmpty(),
+                            isSendingWithAttachments = newPending.any { it.hasAttachments },
                             attachmentCount = 0,
+                            pendingMessages = newPending,
+                            sendProgress = if (newPending.isEmpty()) 0f else calculateAggregateProgress(newPending),
                             error = e.message
                         )
                     }
                 }
             )
         }
+    }
+
+    /**
+     * Calculate aggregate progress across all pending messages.
+     * Each message contributes: 10% base + 90% * its progress
+     */
+    private fun calculateAggregateProgress(pendingMessages: List<PendingMessage>): Float {
+        if (pendingMessages.isEmpty()) return 0f
+        val totalProgress = pendingMessages.sumOf { msg ->
+            (0.1f + 0.9f * msg.progress).toDouble()
+        }
+        return (totalProgress / pendingMessages.size).toFloat()
     }
 
     /**
@@ -1325,8 +1649,30 @@ class ChatViewModel @Inject constructor(
         if (text.isBlank() && attachments.isEmpty()) return
 
         viewModelScope.launch {
+            // Generate tracking ID for this send operation
+            val trackingId = "track-${UUID.randomUUID()}"
+            val isLocalSms = deliveryMode == MessageDeliveryMode.LOCAL_SMS ||
+                            deliveryMode == MessageDeliveryMode.LOCAL_MMS ||
+                            _uiState.value.isLocalSmsChat
+
+            // Add to pending messages immediately (triggers 10% progress display)
+            val pendingMessage = PendingMessage(
+                tempGuid = trackingId,
+                progress = 0f,
+                hasAttachments = attachments.isNotEmpty(),
+                isLocalSms = isLocalSms
+            )
+
             _draftText.value = ""
-            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty()) }
+            _uiState.update { state ->
+                val newPending = state.pendingMessages + pendingMessage
+                state.copy(
+                    isSending = true,
+                    isSendingWithAttachments = newPending.any { it.hasAttachments },
+                    pendingMessages = newPending,
+                    sendProgress = calculateAggregateProgress(newPending)
+                )
+            }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -1339,15 +1685,29 @@ class ChatViewModel @Inject constructor(
                 deliveryMode = deliveryMode
             ).fold(
                 onSuccess = {
-                    _uiState.update { it.copy(isSending = false, isSendingWithAttachments = false, attachmentCount = 0) }
+                    // Remove from pending and play sound on server acknowledgment
+                    _uiState.update { state ->
+                        val newPending = state.pendingMessages.filter { it.tempGuid != trackingId }
+                        state.copy(
+                            isSending = newPending.isNotEmpty(),
+                            isSendingWithAttachments = newPending.any { it.hasAttachments },
+                            attachmentCount = 0,
+                            pendingMessages = newPending,
+                            sendProgress = if (newPending.isEmpty()) 1f else calculateAggregateProgress(newPending)
+                        )
+                    }
                     soundManager.playSendSound()
                 },
                 onFailure = { e ->
-                    _uiState.update {
-                        it.copy(
-                            isSending = false,
-                            isSendingWithAttachments = false,
+                    // Remove from pending on failure (no sound)
+                    _uiState.update { state ->
+                        val newPending = state.pendingMessages.filter { it.tempGuid != trackingId }
+                        state.copy(
+                            isSending = newPending.isNotEmpty(),
+                            isSendingWithAttachments = newPending.any { it.hasAttachments },
                             attachmentCount = 0,
+                            pendingMessages = newPending,
+                            sendProgress = if (newPending.isEmpty()) 0f else calculateAggregateProgress(newPending),
                             error = e.message
                         )
                     }
@@ -1493,6 +1853,10 @@ class ChatViewModel @Inject constructor(
                 limit = 50
             ).fold(
                 onSuccess = { messages ->
+                    // Increase the message limit to include newly fetched older messages
+                    // This triggers flatMapLatest in loadMessages() to re-query with expanded limit
+                    _messageLimit.value += messages.size
+
                     _uiState.update { state ->
                         state.copy(
                             isLoadingMore = false,
@@ -1695,7 +2059,9 @@ class ChatViewModel @Inject constructor(
         smsReactions: List<SyntheticReaction> = emptyList(),
         attachments: List<AttachmentEntity> = emptyList(),
         handleIdToName: Map<Long, String> = emptyMap(),
-        addressToName: Map<String, String> = emptyMap()
+        addressToName: Map<String, String> = emptyMap(),
+        addressToAvatarPath: Map<String, String?> = emptyMap(),
+        replyPreview: ReplyPreviewData? = null
     ): MessageUiModel {
         // Build a set of removed reactions: (isFromMe, tapbackType)
         // These are reactions that have been explicitly removed (3xxx codes)
@@ -1776,12 +2142,16 @@ class ChatViewModel @Inject constructor(
             attachments = attachmentUiModels,
             // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
             senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
+            senderAvatarPath = resolveSenderAvatarPath(senderAddress, addressToAvatarPath),
             messageSource = messageSource,
             reactions = allReactions,
             myReactions = myReactions,
             expressiveSendStyleId = expressiveSendStyleId,
             effectPlayed = datePlayed != null,
-            associatedMessageGuid = associatedMessageGuid
+            associatedMessageGuid = associatedMessageGuid,
+            // Reply indicator fields
+            threadOriginatorGuid = threadOriginatorGuid,
+            replyPreview = replyPreview
         )
     }
 
@@ -1895,6 +2265,20 @@ class ChatViewModel @Inject constructor(
 
         // 2. Fall back to handleId lookup
         return handleId?.let { handleIdToName[it] }
+    }
+
+    /**
+     * Resolve sender avatar path from address.
+     */
+    private fun resolveSenderAvatarPath(
+        senderAddress: String?,
+        addressToAvatarPath: Map<String, String?>
+    ): String? {
+        senderAddress?.let { address ->
+            val normalized = normalizeAddress(address)
+            return addressToAvatarPath[normalized]
+        }
+        return null
     }
 
     /**
@@ -2037,6 +2421,23 @@ class ChatViewModel @Inject constructor(
     }
 }
 
+private data class ParticipantMaps(
+    val messages: List<MessageEntity>,
+    val handleIdToName: Map<Long, String>,
+    val addressToName: Map<String, String>,
+    val addressToAvatarPath: Map<String, String?>
+)
+
+/**
+ * Tracks a pending outgoing message for progress bar display.
+ */
+data class PendingMessage(
+    val tempGuid: String,
+    val progress: Float,  // 0.0 to 1.0 (individual message progress)
+    val hasAttachments: Boolean,
+    val isLocalSms: Boolean  // Track protocol for color coding
+)
+
 data class ChatUiState(
     val chatTitle: String = "",
     val isGroup: Boolean = false,
@@ -2049,6 +2450,7 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val isSendingWithAttachments: Boolean = false, // True if current send includes attachments
     val sendProgress: Float = 0f, // 0.0 to 1.0 progress for uploads
+    val pendingMessages: List<PendingMessage> = emptyList(), // Track multiple pending sends
     val canLoadMore: Boolean = true,
     val messages: List<MessageUiModel> = emptyList(),
     val isTyping: Boolean = false,

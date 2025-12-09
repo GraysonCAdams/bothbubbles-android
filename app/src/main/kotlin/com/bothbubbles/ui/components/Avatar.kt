@@ -84,14 +84,17 @@ fun Avatar(
             )
         }
 
-        // Overlay with contact photo if available
+        // Overlay with contact photo if available (fast crossfade for Android 16 style)
         if (avatarPath != null) {
-            val avatarUri = remember(avatarPath) { Uri.parse(avatarPath) }
+            val context = LocalContext.current
+            val imageRequest = remember(avatarPath) {
+                ImageRequest.Builder(context)
+                    .data(Uri.parse(avatarPath))
+                    .crossfade(150)  // Fast 150ms crossfade
+                    .build()
+            }
             AsyncImage(
-                model = ImageRequest.Builder(LocalContext.current)
-                    .data(avatarUri)
-                    .crossfade(true)
-                    .build(),
+                model = imageRequest,
                 contentDescription = "Avatar for $name",
                 modifier = Modifier
                     .size(size)

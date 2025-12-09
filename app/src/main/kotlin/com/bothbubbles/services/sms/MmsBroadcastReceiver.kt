@@ -223,13 +223,18 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 val notificationText = notification.subject?.takeIf { it.isNotBlank() }
                     ?: "Incoming MMS"
 
+                // Resolve sender name and avatar from contacts
+                val senderName = androidContactsService.getContactDisplayName(address)
+                val senderAvatarUri = androidContactsService.getContactPhotoUri(address)
+
                 notificationService.showMessageNotification(
                     chatGuid = chatGuid,
-                    chatTitle = chat?.displayName ?: address,
+                    chatTitle = chat?.displayName ?: senderName ?: address,
                     messageText = notificationText,
                     messageGuid = "mms-pending-$mmsId",
-                    senderName = null,
-                    senderAddress = address
+                    senderName = senderName,
+                    senderAddress = address,
+                    avatarUri = senderAvatarUri
                 )
             }
 

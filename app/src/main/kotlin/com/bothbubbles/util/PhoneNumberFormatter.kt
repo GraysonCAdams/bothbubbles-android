@@ -96,16 +96,20 @@ object PhoneNumberFormatter {
 
     /**
      * Strip service suffixes from phone numbers/identifiers.
-     * Removes patterns like (smsfp), (smsft), (smsft_fi), (smsft_rm), etc.
+     * Removes patterns like (smsfp), (smsft), (smsft_fi), (smsft_rm), (filtered), etc.
      * These are internal identifiers added by the BlueBubbles server for SMS text forwarding chats.
      *
      * This is a public utility that can be used to clean any string that might contain
      * service suffixes before displaying to the user.
      */
     fun stripServiceSuffix(identifier: String): String {
-        // Pattern matches (sms*) or (ft*) suffixes at the end of the string
-        // Examples: (smsfp), (smsft), (smsft_fi), (smsft_rm), (smsfp_rm), (ft_rm)
-        return identifier.replace(Regex("\\((sms|ft)[a-z_]*\\)$", RegexOption.IGNORE_CASE), "")
+        // Pattern matches one or more consecutive service suffixes at the end of the string
+        // Patterns: (smsfp), (smsft), (smsft_fi), (smsft_rm), (smsfp_rm), (ft_rm), (filtered)
+        // Handles duplicates like (smsft)(smsft) or (filtered)(filtered)
+        return identifier.replace(
+            Regex("(\\((sms|ft)[a-z_]*\\)|\\(filtered\\))+$", RegexOption.IGNORE_CASE),
+            ""
+        )
     }
 
     /**

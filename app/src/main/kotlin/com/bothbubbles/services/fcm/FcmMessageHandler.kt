@@ -150,8 +150,8 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
-        // Resolve sender name - try contact lookup first
-        val senderName = resolveSenderName(senderAddress, data["senderName"])
+        // Resolve sender name and avatar - try contact lookup first
+        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, data["senderName"])
 
         val chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: senderName ?: ""
 
@@ -181,7 +181,8 @@ class FcmMessageHandler @Inject constructor(
             messageGuid = messageGuid,
             senderName = displaySenderName,
             senderAddress = senderAddress,
-            isGroup = isGroup
+            isGroup = isGroup,
+            avatarUri = senderAvatarUri
         )
 
         // Trigger socket reconnect to sync full data
@@ -189,37 +190,38 @@ class FcmMessageHandler @Inject constructor(
     }
 
     /**
-     * Resolve sender name from address.
+     * Resolve sender name and avatar from address.
      * Priority: device contact > cached contact name > server-provided name > formatted address
+     * Returns Pair of (name, avatarUri)
      */
-    private suspend fun resolveSenderName(address: String?, serverProvidedName: String?): String? {
-        if (address.isNullOrBlank()) return serverProvidedName
+    private suspend fun resolveSenderNameAndAvatar(address: String?, serverProvidedName: String?): Pair<String?, String?> {
+        if (address.isNullOrBlank()) return serverProvidedName to null
 
         // Try live contact lookup first
         val contactName = androidContactsService.getContactDisplayName(address)
         if (contactName != null) {
+            val photoUri = androidContactsService.getContactPhotoUri(address)
             // Cache the contact name for future lookups
             val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
             localHandle?.let { handle ->
-                val photoUri = androidContactsService.getContactPhotoUri(address)
                 handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
             }
-            return contactName
+            return contactName to photoUri
         }
 
-        // Check for cached contact name in local handle
+        // Check for cached contact info in local handle
         val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
         if (localHandle?.cachedDisplayName != null) {
-            return localHandle.cachedDisplayName
+            return localHandle.cachedDisplayName to localHandle.cachedAvatarPath
         }
 
         // Fall back to inferred name
         if (localHandle?.inferredName != null) {
-            return localHandle.displayName // includes "Maybe:" prefix
+            return localHandle.displayName to localHandle.cachedAvatarPath // includes "Maybe:" prefix
         }
 
         // Fall back to server-provided name or formatted address
-        return serverProvidedName ?: PhoneNumberFormatter.format(address)
+        return (serverProvidedName ?: PhoneNumberFormatter.format(address)) to null
     }
 
     private fun handleUpdatedMessage(data: Map<String, String>) {

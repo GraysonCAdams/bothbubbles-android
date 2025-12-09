@@ -1,6 +1,7 @@
 package com.bothbubbles.services.socket
 
 import android.util.Log
+import com.bothbubbles.BuildConfig
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.services.developer.DeveloperEventLog
@@ -238,13 +239,15 @@ class SocketService @Inject constructor(
                     on(Socket.EVENT_DISCONNECT, onDisconnect)
                     on(Socket.EVENT_CONNECT_ERROR, onConnectError)
 
-                    // Debug: Log ALL incoming events to see what the server sends
-                    onAnyIncoming { args: Array<Any?> ->
-                        val eventName = args.getOrNull(0)?.toString() ?: "unknown"
-                        Log.i(TAG, ">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
-                        args.drop(1).forEachIndexed { index: Int, arg: Any? ->
-                            val preview = arg?.toString()?.take(200) ?: "null"
-                            Log.d(TAG, "    arg[$index]: $preview")
+                    // Debug: Log ALL incoming events to see what the server sends (only in debug builds)
+                    if (BuildConfig.DEBUG) {
+                        onAnyIncoming { args: Array<Any?> ->
+                            val eventName = args.getOrNull(0)?.toString() ?: "unknown"
+                            Log.i(TAG, ">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
+                            args.drop(1).forEachIndexed { index: Int, arg: Any? ->
+                                val preview = arg?.toString()?.take(200) ?: "null"
+                                Log.d(TAG, "    arg[$index]: $preview")
+                            }
                         }
                     }
 
@@ -446,8 +449,9 @@ class SocketService @Inject constructor(
             developerEventLog.get().logSocketEvent("new-message", "guid: ${message.guid?.take(20)}...")
 
             // Play receive sound for messages from others (not from me)
+            // Only plays if user is viewing this conversation; otherwise notification handles sound
             if (message.isFromMe != true) {
-                soundManager.get().playReceiveSound()
+                soundManager.get().playReceiveSound(chatGuid)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing new message", e)
@@ -464,6 +468,7 @@ class SocketService @Inject constructor(
                 val chatGuid = message.chats?.firstOrNull()?.guid ?: ""
                 Log.d(TAG, "Message updated: ${message.guid}")
                 _events.tryEmit(SocketEvent.MessageUpdated(message, chatGuid))
+                developerEventLog.get().logSocketEvent("updated-message", "guid: ${message.guid?.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message update", e)
@@ -479,6 +484,7 @@ class SocketService @Inject constructor(
             if (messageGuid.isNotBlank()) {
                 Log.d(TAG, "Message deleted: $messageGuid")
                 _events.tryEmit(SocketEvent.MessageDeleted(messageGuid, chatGuid))
+                developerEventLog.get().logSocketEvent("message-deleted", "guid: ${messageGuid.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message deletion", e)
@@ -494,6 +500,7 @@ class SocketService @Inject constructor(
             if (tempGuid.isNotBlank()) {
                 Log.e(TAG, "Message send error: $tempGuid - $errorMessage")
                 _events.tryEmit(SocketEvent.MessageSendError(tempGuid, errorMessage))
+                developerEventLog.get().logSocketEvent("message-send-error", "guid: ${tempGuid.take(20)}..., error: $errorMessage")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message send error", e)
@@ -503,11 +510,15 @@ class SocketService @Inject constructor(
     private val onTypingIndicator = Emitter.Listener { args ->
         try {
             val data = args.firstOrNull() as? JSONObject ?: return@Listener
-            val chatGuid = data.optString("chatGuid", "")
+            // Server sends "guid" not "chatGuid" for typing indicators
+            val chatGuid = data.optString("guid", "").ifBlank {
+                data.optString("chatGuid", "")
+            }
             val isTyping = data.optBoolean("display", false)
 
             if (chatGuid.isNotBlank()) {
                 _events.tryEmit(SocketEvent.TypingIndicator(chatGuid, isTyping))
+                developerEventLog.get().logSocketEvent("typing-indicator", "chat: ${chatGuid.take(20)}..., typing: $isTyping")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing typing indicator", e)
@@ -521,6 +532,7 @@ class SocketService @Inject constructor(
 
             if (chatGuid.isNotBlank()) {
                 _events.tryEmit(SocketEvent.ChatRead(chatGuid))
+                developerEventLog.get().logSocketEvent("chat-read-status-changed", "chat: ${chatGuid.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing chat read status", e)
@@ -535,6 +547,7 @@ class SocketService @Inject constructor(
 
             if (chatGuid.isNotBlank() && handleAddress.isNotBlank()) {
                 _events.tryEmit(SocketEvent.ParticipantAdded(chatGuid, handleAddress))
+                developerEventLog.get().logSocketEvent("participant-added", "chat: ${chatGuid.take(20)}..., handle: $handleAddress")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing participant added", e)
@@ -549,6 +562,7 @@ class SocketService @Inject constructor(
 
             if (chatGuid.isNotBlank() && handleAddress.isNotBlank()) {
                 _events.tryEmit(SocketEvent.ParticipantRemoved(chatGuid, handleAddress))
+                developerEventLog.get().logSocketEvent("participant-removed", "chat: ${chatGuid.take(20)}..., handle: $handleAddress")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing participant removed", e)
@@ -564,6 +578,7 @@ class SocketService @Inject constructor(
             if (chatGuid.isNotBlank() && handleAddress.isNotBlank()) {
                 Log.d(TAG, "Participant left: $handleAddress from $chatGuid")
                 _events.tryEmit(SocketEvent.ParticipantLeft(chatGuid, handleAddress))
+                developerEventLog.get().logSocketEvent("participant-left", "chat: ${chatGuid.take(20)}..., handle: $handleAddress")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing participant left", e)
@@ -578,6 +593,7 @@ class SocketService @Inject constructor(
 
             if (chatGuid.isNotBlank()) {
                 _events.tryEmit(SocketEvent.GroupNameChanged(chatGuid, newName))
+                developerEventLog.get().logSocketEvent("group-name-change", "chat: ${chatGuid.take(20)}..., name: $newName")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing group name change", e)
@@ -591,6 +607,7 @@ class SocketService @Inject constructor(
 
             if (chatGuid.isNotBlank()) {
                 _events.tryEmit(SocketEvent.GroupIconChanged(chatGuid))
+                developerEventLog.get().logSocketEvent("group-icon-changed", "chat: ${chatGuid.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing group icon change", e)
@@ -605,6 +622,7 @@ class SocketService @Inject constructor(
             if (chatGuid.isNotBlank()) {
                 Log.d(TAG, "Group icon removed: $chatGuid")
                 _events.tryEmit(SocketEvent.GroupIconRemoved(chatGuid))
+                developerEventLog.get().logSocketEvent("group-icon-removed", "chat: ${chatGuid.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing group icon removed", e)
@@ -618,6 +636,7 @@ class SocketService @Inject constructor(
 
             if (version.isNotBlank()) {
                 _events.tryEmit(SocketEvent.ServerUpdate(version))
+                developerEventLog.get().logSocketEvent("server-update", "version: $version")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing server update", e)
@@ -633,6 +652,7 @@ class SocketService @Inject constructor(
             if (caller.isNotBlank()) {
                 Log.d(TAG, "Incoming FaceTime from: $caller")
                 _events.tryEmit(SocketEvent.IncomingFaceTime(caller, timestamp))
+                developerEventLog.get().logSocketEvent("incoming-facetime", "caller: $caller")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing incoming FaceTime", e)
@@ -658,6 +678,7 @@ class SocketService @Inject constructor(
             if (callUuid.isNotBlank()) {
                 Log.d(TAG, "FaceTime call: $callUuid, status: $status")
                 _events.tryEmit(SocketEvent.FaceTimeCall(callUuid, callerName, callerAddress, status))
+                developerEventLog.get().logSocketEvent("ft-call-status-changed", "uuid: ${callUuid.take(8)}..., status: $status")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing FaceTime call event", e)
@@ -672,6 +693,7 @@ class SocketService @Inject constructor(
 
             Log.i(TAG, "iCloud account status: alias=$alias, active=$active")
             _events.tryEmit(SocketEvent.ICloudAccountStatus(alias, active))
+            developerEventLog.get().logSocketEvent("icloud-account", "alias: $alias, active: $active")
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing iCloud account status", e)
         }
@@ -690,6 +712,7 @@ class SocketService @Inject constructor(
             if (messageId >= 0 && chatGuid.isNotBlank()) {
                 Log.d(TAG, "Scheduled message created: $messageId for chat $chatGuid at $scheduledAt")
                 _events.tryEmit(SocketEvent.ScheduledMessageCreated(messageId, chatGuid, text, scheduledAt))
+                developerEventLog.get().logSocketEvent("scheduled-message-created", "id: $messageId, chat: ${chatGuid.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing scheduled message created", e)
@@ -706,6 +729,7 @@ class SocketService @Inject constructor(
             if (messageId >= 0) {
                 Log.d(TAG, "Scheduled message sent: $messageId -> $sentMessageGuid")
                 _events.tryEmit(SocketEvent.ScheduledMessageSent(messageId, chatGuid, sentMessageGuid))
+                developerEventLog.get().logSocketEvent("scheduled-message-sent", "id: $messageId, msgGuid: ${sentMessageGuid?.take(20)}...")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing scheduled message sent", e)
@@ -722,6 +746,7 @@ class SocketService @Inject constructor(
             if (messageId >= 0) {
                 Log.e(TAG, "Scheduled message error: $messageId - $errorMessage")
                 _events.tryEmit(SocketEvent.ScheduledMessageError(messageId, chatGuid, errorMessage))
+                developerEventLog.get().logSocketEvent("scheduled-message-error", "id: $messageId, error: $errorMessage")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing scheduled message error", e)
@@ -737,6 +762,7 @@ class SocketService @Inject constructor(
             if (messageId >= 0) {
                 Log.d(TAG, "Scheduled message deleted: $messageId")
                 _events.tryEmit(SocketEvent.ScheduledMessageDeleted(messageId, chatGuid))
+                developerEventLog.get().logSocketEvent("scheduled-message-deleted", "id: $messageId")
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing scheduled message deleted", e)

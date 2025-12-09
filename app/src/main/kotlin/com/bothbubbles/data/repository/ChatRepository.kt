@@ -131,12 +131,10 @@ class ChatRepository @Inject constructor(
 
         val chats = body.data.orEmpty().map { it.toEntity() }
 
-        // Insert chats and their participants
-        chats.forEach { chat ->
-            chatDao.insertChat(chat)
-        }
+        // Batch insert all chats (more efficient than individual inserts)
+        chatDao.insertChats(chats)
 
-        // Also sync participants (handles)
+        // Sync participants (handles) for each chat
         body.data.orEmpty().forEach { chatDto ->
             syncChatParticipants(chatDto)
         }
@@ -373,15 +371,19 @@ class ChatRepository @Inject constructor(
 
     private suspend fun syncChatParticipants(chatDto: ChatDto) {
         chatDto.participants?.forEach { handleDto ->
-            // Look up contact info from device contacts
-            val contactName = androidContactsService.getContactDisplayName(handleDto.address)
-            val contactPhotoUri = androidContactsService.getContactPhotoUri(handleDto.address)
+            // Strip service suffixes (e.g., "(filtered)", "(smsft)") before contact lookup
+            val cleanAddress = PhoneNumberFormatter.stripServiceSuffix(handleDto.address)
+
+            // Look up contact info from device contacts using clean address
+            val contactName = androidContactsService.getContactDisplayName(cleanAddress)
+            val contactPhotoUri = androidContactsService.getContactPhotoUri(cleanAddress)
 
             val handle = HandleEntity(
-                address = handleDto.address,
+                address = handleDto.address,  // Keep original for server sync
                 service = handleDto.service,
                 country = handleDto.country,
-                formattedAddress = handleDto.formattedAddress,
+                formattedAddress = handleDto.formattedAddress
+                    ?: PhoneNumberFormatter.format(cleanAddress),  // Generate if server doesn't provide
                 defaultEmail = handleDto.defaultEmail,
                 defaultPhone = handleDto.defaultPhone,
                 originalRowId = handleDto.originalRowId,

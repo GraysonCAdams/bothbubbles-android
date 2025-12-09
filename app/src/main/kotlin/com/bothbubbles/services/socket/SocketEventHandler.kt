@@ -86,6 +86,8 @@ class SocketEventHandler @Inject constructor(
 ) {
     companion object {
         private const val TAG = "SocketEventHandler"
+        // Cached regex for whitespace splitting (avoids recompilation on each call)
+        private val WHITESPACE_REGEX = Regex("\\s+")
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -237,7 +239,7 @@ class SocketEventHandler @Inject constructor(
             // Categorize the message for filtering purposes
             categorizationRepository.evaluateAndCategorize(event.chatGuid, senderAddress, messageText)
 
-            val senderName = resolveSenderName(event.message)
+            val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(event.message)
 
             // Check for invisible ink effect - hide actual content in notification
             val isInvisibleInk = MessageEffect.fromStyleId(savedMessage.expressiveSendStyleId) == MessageEffect.Bubble.InvisibleInk
@@ -281,6 +283,7 @@ class SocketEventHandler @Inject constructor(
                 senderName = displaySenderName,
                 senderAddress = senderAddress,
                 isGroup = chat?.isGroup ?: false,
+                avatarUri = senderAvatarUri,
                 linkPreviewTitle = linkTitle,
                 linkPreviewDomain = linkDomain
             )
@@ -291,7 +294,7 @@ class SocketEventHandler @Inject constructor(
      * Extract the first name from a full name, excluding emojis and non-letter characters.
      */
     private fun extractFirstName(fullName: String): String {
-        val words = fullName.trim().split(Regex("\\s+"))
+        val words = fullName.trim().split(WHITESPACE_REGEX)
         for (word in words) {
             val cleaned = word.filter { it.isLetterOrDigit() }
             if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
@@ -302,47 +305,48 @@ class SocketEventHandler @Inject constructor(
     }
 
     /**
-     * Resolve the sender's display name from the message.
+     * Resolve the sender's display name and avatar from the message.
      * Priority: device contact name > local cached contact name > inferred name > formatted address > raw address
+     * Returns Pair of (name, avatarUri)
      */
-    private suspend fun resolveSenderName(message: MessageDto): String? {
+    private suspend fun resolveSenderNameAndAvatar(message: MessageDto): Pair<String?, String?> {
         // Try to get from embedded handle
         message.handle?.let { handleDto ->
             val address = handleDto.address
 
-            // Look up local handle entity for cached contact name
+            // Look up local handle entity for cached contact info
             val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
             if (localHandle?.cachedDisplayName != null) {
-                return localHandle.cachedDisplayName
+                return localHandle.cachedDisplayName to localHandle.cachedAvatarPath
             }
 
             // Cached name not available - do a live contact lookup
             val contactName = androidContactsService.getContactDisplayName(address)
             if (contactName != null) {
-                // Cache the contact name for future lookups
+                val photoUri = androidContactsService.getContactPhotoUri(address)
+                // Cache the contact info for future lookups
                 localHandle?.let { handle ->
-                    val photoUri = androidContactsService.getContactPhotoUri(address)
                     handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
                 }
-                return contactName
+                return contactName to photoUri
             }
 
             // Fall back to inferred name (with "Maybe:" prefix via displayName property)
             if (localHandle?.inferredName != null) {
-                return localHandle.displayName
+                return localHandle.displayName to localHandle.cachedAvatarPath
             }
 
             // Fall back to server-provided formatted address or raw address
-            return handleDto.formattedAddress ?: address
+            return (handleDto.formattedAddress ?: address) to null
         }
 
         // No embedded handle - try by handleId if available
         message.handleId?.let { handleId ->
             val handle = handleDao.getHandleById(handleId)
             if (handle != null) {
-                // Check for cached contact name first
+                // Check for cached contact info first
                 if (handle.cachedDisplayName != null) {
-                    return handle.cachedDisplayName
+                    return handle.cachedDisplayName to handle.cachedAvatarPath
                 }
 
                 // Do a live contact lookup
@@ -350,14 +354,14 @@ class SocketEventHandler @Inject constructor(
                 if (contactName != null) {
                     val photoUri = androidContactsService.getContactPhotoUri(handle.address)
                     handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
-                    return contactName
+                    return contactName to photoUri
                 }
 
-                return handle.displayName
+                return handle.displayName to handle.cachedAvatarPath
             }
         }
 
-        return null
+        return null to null
     }
 
     private suspend fun handleMessageUpdated(event: SocketEvent.MessageUpdated) {

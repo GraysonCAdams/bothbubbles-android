@@ -13,7 +13,8 @@ import androidx.room.PrimaryKey
         Index(value = ["is_starred"]),
         Index(value = ["latest_message_date"]),
         Index(value = ["is_spam"]),
-        Index(value = ["category"])
+        Index(value = ["category"]),
+        Index(value = ["is_archived"])
     ]
 )
 data class ChatEntity(

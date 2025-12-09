@@ -80,7 +80,7 @@ class ChatCreatorViewModel @Inject constructor(
             if (!smsOnlyMode && isConnected && trimmedQuery.isPhoneNumber()) {
                 try {
                     val response = api.checkIMessageAvailability(trimmedQuery)
-                    if (response.isSuccessful && response.body()?.data == true) {
+                    if (response.isSuccessful && response.body()?.data?.available == true) {
                         isIMessageAvailable = true
                         service = "iMessage"
                     }
@@ -316,6 +316,7 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun startConversationWithAddress(address: String, service: String) {
         viewModelScope.launch {
+            Log.d(TAG, "startConversationWithAddress: address=$address, service=$service")
             _uiState.update { it.copy(isLoading = true) }
 
             try {
@@ -345,6 +346,7 @@ class ChatCreatorViewModel @Inject constructor(
                         chatDao.insertChat(newChat)
                     }
 
+                    Log.d(TAG, "SMS chat created/found: $chatGuid")
                     _uiState.update {
                         it.copy(
                             isLoading = false,
@@ -353,6 +355,7 @@ class ChatCreatorViewModel @Inject constructor(
                     }
                 } else {
                     // Use BlueBubbles server to create iMessage chat
+                    Log.d(TAG, "Creating iMessage chat via server API")
                     val response = api.createChat(
                         CreateChatRequest(
                             addresses = listOf(address),
@@ -361,8 +364,10 @@ class ChatCreatorViewModel @Inject constructor(
                     )
 
                     val body = response.body()
+                    Log.d(TAG, "createChat response: code=${response.code()}, message=${body?.message}, data=${body?.data}")
                     if (response.isSuccessful && body?.data != null) {
                         val chatGuid = body.data.guid
+                        Log.d(TAG, "iMessage chat created: $chatGuid")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
@@ -370,10 +375,12 @@ class ChatCreatorViewModel @Inject constructor(
                             )
                         }
                     } else {
+                        val errorMsg = body?.message ?: "Failed to create chat"
+                        Log.e(TAG, "Failed to create iMessage chat: $errorMsg")
                         _uiState.update {
                             it.copy(
                                 isLoading = false,
-                                error = body?.message ?: "Failed to create chat"
+                                error = errorMsg
                             )
                         }
                     }
@@ -473,23 +480,28 @@ class ChatCreatorViewModel @Inject constructor(
     }
 
     /**
-     * Asynchronously check iMessage availability for a recipient and update their service if available.
-     * This allows the chip color to update after selection.
+     * Asynchronously check iMessage availability for a recipient and update their service.
+     * This allows the chip color to update after selection (bidirectional: SMS↔iMessage).
      */
     private fun checkAndUpdateRecipientService(address: String) {
         viewModelScope.launch {
             val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
             val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+            Log.d(TAG, "checkAndUpdateRecipientService: address=$address, smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
 
             if (!smsOnlyMode && isConnected) {
                 try {
                     val response = api.checkIMessageAvailability(address)
-                    if (response.isSuccessful && response.body()?.data == true) {
-                        // Update the recipient's service to iMessage
+                    Log.d(TAG, "checkIMessageAvailability response: code=${response.code()}, data=${response.body()?.data}")
+                    if (response.isSuccessful) {
+                        val isIMessageAvailable = response.body()?.data?.available == true
+                        val newService = if (isIMessageAvailable) "iMessage" else "SMS"
+                        Log.d(TAG, "Updating recipient $address service to $newService")
+
                         _uiState.update { state ->
                             val updated = state.selectedRecipients.map { recipient ->
                                 if (recipient.address == address) {
-                                    recipient.copy(service = "iMessage")
+                                    recipient.copy(service = newService)
                                 } else {
                                     recipient
                                 }
@@ -609,6 +621,7 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun onContinue() {
         val recipients = _uiState.value.selectedRecipients
+        Log.d(TAG, "onContinue called with ${recipients.size} recipients: ${recipients.map { "${it.displayName} (${it.service})" }}")
         when {
             recipients.isEmpty() -> {
                 _uiState.update { it.copy(error = "Please add at least one recipient") }
@@ -616,6 +629,7 @@ class ChatCreatorViewModel @Inject constructor(
             recipients.size == 1 -> {
                 // Single recipient - create direct chat
                 val recipient = recipients.first()
+                Log.d(TAG, "Starting conversation with ${recipient.address} (${recipient.service})")
                 startConversationWithAddress(recipient.address, recipient.service)
             }
             else -> {

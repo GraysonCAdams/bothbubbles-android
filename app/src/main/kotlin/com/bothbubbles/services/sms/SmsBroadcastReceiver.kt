@@ -206,7 +206,8 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
             // Check if user is currently viewing this conversation
             if (activeConversationManager.isConversationActive(chatGuid)) {
-                Log.i(TAG, "Chat $chatGuid is currently active, skipping SMS notification")
+                Log.i(TAG, "Chat $chatGuid is currently active, playing in-app sound and skipping notification")
+                soundManager.playReceiveSound(chatGuid)
                 return@forEach
             }
 
@@ -220,18 +221,21 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Categorize the message for filtering purposes
             categorizationRepository.evaluateAndCategorize(chatGuid, address, fullBody)
 
+            // Resolve sender name and avatar from contacts
+            val senderName = androidContactsService.getContactDisplayName(address)
+            val senderAvatarUri = androidContactsService.getContactPhotoUri(address)
+
             // Show notification (only for non-spam, non-snoozed, notifications-enabled chats)
+            // Notification will play its own sound for inactive conversations
             notificationService.showMessageNotification(
                 chatGuid = chatGuid,
-                chatTitle = chat.displayName ?: address,
+                chatTitle = chat.displayName ?: senderName ?: address,
                 messageText = fullBody,
                 messageGuid = message.guid,
-                senderName = null,
-                senderAddress = address
+                senderName = senderName,
+                senderAddress = address,
+                avatarUri = senderAvatarUri
             )
-
-            // Play receive sound
-            soundManager.playReceiveSound()
 
             Log.d(TAG, "Saved incoming SMS from $address: ${fullBody.take(50)}...")
         }

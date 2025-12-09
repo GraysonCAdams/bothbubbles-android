@@ -8,8 +8,10 @@ import android.net.Uri
 import android.provider.CalendarContract
 import android.provider.ContactsContract
 import android.widget.Toast
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -68,6 +70,102 @@ import kotlinx.coroutines.launch
 import java.util.Calendar
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+import androidx.compose.ui.unit.sp
+
+/**
+ * Result of analyzing text for emoji-only content.
+ */
+private data class EmojiAnalysis(
+    val isEmojiOnly: Boolean,
+    val emojiCount: Int
+)
+
+/**
+ * Analyzes text to determine if it contains only emojis and counts them.
+ * Uses Unicode emoji ranges and variation selectors.
+ */
+private fun analyzeEmojis(text: String?): EmojiAnalysis {
+    if (text.isNullOrBlank()) return EmojiAnalysis(false, 0)
+
+    val trimmed = text.trim()
+    if (trimmed.isEmpty()) return EmojiAnalysis(false, 0)
+
+    var emojiCount = 0
+    var i = 0
+
+    while (i < trimmed.length) {
+        val codePoint = trimmed.codePointAt(i)
+        val charCount = Character.charCount(codePoint)
+
+        if (isEmojiCodePoint(codePoint)) {
+            emojiCount++
+            i += charCount
+            // Skip variation selectors and zero-width joiners following emojis
+            while (i < trimmed.length) {
+                val nextCodePoint = trimmed.codePointAt(i)
+                if (isVariationSelector(nextCodePoint) || isZeroWidthJoiner(nextCodePoint) || isSkinToneModifier(nextCodePoint)) {
+                    i += Character.charCount(nextCodePoint)
+                } else if (isEmojiCodePoint(nextCodePoint)) {
+                    // Part of a compound emoji (e.g., family emoji)
+                    // Don't count separately, just skip
+                    i += Character.charCount(nextCodePoint)
+                } else {
+                    break
+                }
+            }
+        } else if (Character.isWhitespace(codePoint)) {
+            // Whitespace is allowed between emojis
+            i += charCount
+        } else {
+            // Non-emoji, non-whitespace character found
+            return EmojiAnalysis(false, 0)
+        }
+    }
+
+    return EmojiAnalysis(emojiCount > 0, emojiCount)
+}
+
+private fun isEmojiCodePoint(codePoint: Int): Boolean {
+    return when {
+        // Emoticons
+        codePoint in 0x1F600..0x1F64F -> true
+        // Miscellaneous Symbols and Pictographs
+        codePoint in 0x1F300..0x1F5FF -> true
+        // Transport and Map Symbols
+        codePoint in 0x1F680..0x1F6FF -> true
+        // Supplemental Symbols and Pictographs
+        codePoint in 0x1F900..0x1F9FF -> true
+        // Symbols and Pictographs Extended-A
+        codePoint in 0x1FA00..0x1FA6F -> true
+        // Symbols and Pictographs Extended-B
+        codePoint in 0x1FA70..0x1FAFF -> true
+        // Dingbats
+        codePoint in 0x2700..0x27BF -> true
+        // Miscellaneous Symbols
+        codePoint in 0x2600..0x26FF -> true
+        // Regional Indicator Symbols (flags)
+        codePoint in 0x1F1E0..0x1F1FF -> true
+        // Various common emoji
+        codePoint in 0x2300..0x23FF -> true // Miscellaneous Technical
+        codePoint in 0x2B50..0x2B55 -> true // Stars, circles
+        codePoint == 0x00A9 || codePoint == 0x00AE -> true // © ®
+        codePoint == 0x2122 -> true // ™
+        codePoint in 0x203C..0x3299 -> true // Various symbols
+        else -> false
+    }
+}
+
+private fun isVariationSelector(codePoint: Int): Boolean {
+    return codePoint in 0xFE00..0xFE0F || codePoint == 0x20E3
+}
+
+private fun isZeroWidthJoiner(codePoint: Int): Boolean {
+    return codePoint == 0x200D
+}
+
+private fun isSkinToneModifier(codePoint: Int): Boolean {
+    return codePoint in 0x1F3FB..0x1F3FF
+}
 
 /**
  * Position of a message within a consecutive group from the same sender.
@@ -95,6 +193,28 @@ private enum class SwipeType {
 }
 
 /**
+ * Preview data for the message being replied to.
+ * Shown as a quote box above reply messages.
+ */
+data class ReplyPreviewData(
+    val originalGuid: String,
+    val previewText: String?,        // Truncated to ~50 chars
+    val senderName: String?,         // "You" or contact name
+    val isFromMe: Boolean,
+    val hasAttachment: Boolean,
+    val isNotLoaded: Boolean = false // Original not found within recent messages
+)
+
+/**
+ * Represents a thread of messages: the original message and all replies to it.
+ * Used for the thread overlay view.
+ */
+data class ThreadChain(
+    val originMessage: MessageUiModel?,      // The root message being replied to (null if deleted/not found)
+    val replies: List<MessageUiModel>        // All replies in chronological order
+)
+
+/**
  * UI model for a message bubble
  */
 data class MessageUiModel(
@@ -111,16 +231,24 @@ data class MessageUiModel(
     val isReaction: Boolean,
     val attachments: List<AttachmentUiModel>,
     val senderName: String?,
+    val senderAvatarPath: String? = null,
     val messageSource: String,
     val reactions: List<ReactionUiModel> = emptyList(),
     val myReactions: Set<Tapback> = emptySet(),
     val expressiveSendStyleId: String? = null,
     val effectPlayed: Boolean = false,
-    val associatedMessageGuid: String? = null
+    val associatedMessageGuid: String? = null,
+    // Reply indicator fields
+    val threadOriginatorGuid: String? = null,
+    val replyPreview: ReplyPreviewData? = null
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean
         get() = associatedMessageGuid != null && attachments.any { it.isSticker }
+
+    /** True if this message is a reply to another message */
+    val isReply: Boolean
+        get() = threadOriginatorGuid != null
 }
 
 data class AttachmentUiModel(
@@ -189,7 +317,15 @@ fun MessageBubble(
     // Whether to show delivery indicator (iMessage-style: only on last message in sequence)
     showDeliveryIndicator: Boolean = true,
     // Callback for swipe-to-reply (iMessage only). Pass message GUID when triggered.
-    onReply: ((String) -> Unit)? = null
+    onReply: ((String) -> Unit)? = null,
+    // Callback when reply indicator is tapped. Pass the threadOriginatorGuid to open thread overlay.
+    onReplyIndicatorClick: ((String) -> Unit)? = null,
+    // Callback when swipe gesture starts/ends. Used to hide stickers during swipe.
+    onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    // Group chat avatar support
+    isGroupChat: Boolean = false,
+    // Show avatar only on last message in a consecutive group from same sender
+    showAvatar: Boolean = false
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -202,38 +338,83 @@ fun MessageBubble(
         MessageSegmentParser.needsSegmentation(message, firstUrl != null)
     }
 
-    if (needsSegmentation) {
-        // Use segmented rendering for messages with media/links
-        SegmentedMessageBubble(
-            message = message,
-            firstUrl = firstUrl,
-            onLongPress = onLongPress,
-            onMediaClick = onMediaClick,
-            modifier = modifier,
-            groupPosition = groupPosition,
-            searchQuery = searchQuery,
-            isCurrentSearchMatch = isCurrentSearchMatch,
-            onDownloadClick = onDownloadClick,
-            downloadingAttachments = downloadingAttachments,
-            showDeliveryIndicator = showDeliveryIndicator,
-            onReply = onReply
-        )
-    } else {
-        // Use optimized single-bubble rendering for simple text messages
-        SimpleBubbleContent(
-            message = message,
-            firstUrl = firstUrl,
-            onLongPress = onLongPress,
-            onMediaClick = onMediaClick,
-            modifier = modifier,
-            groupPosition = groupPosition,
-            searchQuery = searchQuery,
-            isCurrentSearchMatch = isCurrentSearchMatch,
-            onDownloadClick = onDownloadClick,
-            downloadingAttachments = downloadingAttachments,
-            showDeliveryIndicator = showDeliveryIndicator,
-            onReply = onReply
-        )
+    // Show avatar for received messages in group chats
+    val shouldShowAvatarSpace = isGroupChat && !message.isFromMe
+    val avatarSize = 28.dp
+
+    // Wrap content in a column to show reply indicator above the bubble
+    Column(modifier = modifier) {
+        // Reply quote indicator (shown above reply messages)
+        message.replyPreview?.let { preview ->
+            message.threadOriginatorGuid?.let { originGuid ->
+                // Add left padding to align with message bubble when avatar space is present
+                val replyPadding = if (shouldShowAvatarSpace) (avatarSize + 8.dp) else 0.dp
+                ReplyQuoteIndicator(
+                    replyPreview = preview,
+                    isFromMe = message.isFromMe,
+                    onClick = { onReplyIndicatorClick?.invoke(originGuid) },
+                    modifier = Modifier.padding(start = replyPadding)
+                )
+            }
+        }
+
+        // Main content row with optional avatar
+        Row(
+            verticalAlignment = Alignment.Bottom,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            // Avatar space for received messages in group chats
+            if (shouldShowAvatarSpace) {
+                if (showAvatar) {
+                    Avatar(
+                        name = message.senderName ?: "?",
+                        avatarPath = message.senderAvatarPath,
+                        size = avatarSize,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                } else {
+                    // Empty space to maintain alignment
+                    Spacer(modifier = Modifier.width(avatarSize + 8.dp))
+                }
+            }
+
+            // Message content
+            if (needsSegmentation) {
+                // Use segmented rendering for messages with media/links
+                SegmentedMessageBubble(
+                    message = message,
+                    firstUrl = firstUrl,
+                    onLongPress = onLongPress,
+                    onMediaClick = onMediaClick,
+                    groupPosition = groupPosition,
+                    searchQuery = searchQuery,
+                    isCurrentSearchMatch = isCurrentSearchMatch,
+                    onDownloadClick = onDownloadClick,
+                    downloadingAttachments = downloadingAttachments,
+                    showDeliveryIndicator = showDeliveryIndicator,
+                    onReply = onReply,
+                    onSwipeStateChanged = onSwipeStateChanged,
+                    modifier = Modifier.weight(1f)
+                )
+            } else {
+                // Use optimized single-bubble rendering for simple text messages
+                SimpleBubbleContent(
+                    message = message,
+                    firstUrl = firstUrl,
+                    onLongPress = onLongPress,
+                    onMediaClick = onMediaClick,
+                    groupPosition = groupPosition,
+                    searchQuery = searchQuery,
+                    isCurrentSearchMatch = isCurrentSearchMatch,
+                    onDownloadClick = onDownloadClick,
+                    downloadingAttachments = downloadingAttachments,
+                    showDeliveryIndicator = showDeliveryIndicator,
+                    onReply = onReply,
+                    onSwipeStateChanged = onSwipeStateChanged,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+        }
     }
 }
 
@@ -254,7 +435,8 @@ private fun SegmentedMessageBubble(
     onDownloadClick: ((String) -> Unit)? = null,
     downloadingAttachments: Map<String, Float> = emptyMap(),
     showDeliveryIndicator: Boolean = true,
-    onReply: ((String) -> Unit)? = null
+    onReply: ((String) -> Unit)? = null,
+    onSwipeStateChanged: ((Boolean) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -279,6 +461,10 @@ private fun SegmentedMessageBubble(
     // Track which gesture is active and haptic state
     var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
+
+    // Cumulative horizontal drag for dead zone detection (prevents accidental swipes while scrolling)
+    var cumulativeHorizontalDrag by remember { mutableFloatStateOf(0f) }
+    val deadZonePx = with(density) { 20.dp.toPx() }
 
     // Measurement state for adaptive clearance during date reveal
     var containerWidthPx by remember { mutableIntStateOf(0) }
@@ -306,11 +492,17 @@ private fun SegmentedMessageBubble(
         }
     }
 
-    // Check if reply is available (iMessage only)
-    val canReply = isIMessage && onReply != null
+    // Check if reply is available (iMessage only, not for placed stickers)
+    val canReply = isIMessage && onReply != null && !message.isPlacedSticker
+
+    // Check if swipe/tap gestures should be enabled (disabled for placed stickers)
+    val gesturesEnabled = !message.isPlacedSticker
 
     // Tap-to-show timestamp state
     var showTimestamp by remember { mutableStateOf(false) }
+
+    // Delivery status legend dialog state
+    var showStatusLegend by remember { mutableStateOf(false) }
 
     // Message type label
     val messageTypeLabel = when (message.messageSource) {
@@ -363,6 +555,7 @@ private fun SegmentedMessageBubble(
                     detectHorizontalDragGestures(
                         onDragStart = {
                             velocityTracker.resetTracking()
+                            cumulativeHorizontalDrag = 0f
                         },
                         onDragEnd = {
                             val velocity = velocityTracker.calculateVelocity().x
@@ -397,6 +590,10 @@ private fun SegmentedMessageBubble(
                                     }
                                     null -> {}
                                 }
+                                // Notify when reply swipe ends (to show overlaying stickers again)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
                                 activeSwipe = null
                                 hasTriggeredHaptic = false
                             }
@@ -405,18 +602,30 @@ private fun SegmentedMessageBubble(
                             coroutineScope.launch {
                                 replyDragOffset.animateTo(0f)
                                 dateRevealProgress.animateTo(0f)
+                                // Notify when reply swipe ends (to show overlaying stickers again)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
                                 activeSwipe = null
                                 hasTriggeredHaptic = false
                             }
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
+                            cumulativeHorizontalDrag += dragAmount
 
                             coroutineScope.launch {
-                                // Determine direction on first significant movement
-                                if (activeSwipe == null && dragAmount.absoluteValue > 5f) {
-                                    val isTowardCenter = if (message.isFromMe) dragAmount < 0 else dragAmount > 0
-                                    activeSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                // Determine direction after cumulative drag exceeds dead zone (20dp)
+                                // This prevents accidental swipes while scrolling vertically
+                                // Placed stickers don't respond to any swipe gestures
+                                if (activeSwipe == null && cumulativeHorizontalDrag.absoluteValue > deadZonePx && gesturesEnabled) {
+                                    val isTowardCenter = if (message.isFromMe) cumulativeHorizontalDrag < 0 else cumulativeHorizontalDrag > 0
+                                    val newSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                    activeSwipe = newSwipe
+                                    // Notify when reply swipe starts (to hide overlaying stickers)
+                                    if (newSwipe == SwipeType.REPLY) {
+                                        onSwipeStateChanged?.invoke(true)
+                                    }
                                 }
 
                                 when (activeSwipe) {
@@ -485,7 +694,7 @@ private fun SegmentedMessageBubble(
                                         modifier = Modifier
                                             .pointerInput(message.guid) {
                                                 detectTapGestures(
-                                                    onTap = { showTimestamp = !showTimestamp },
+                                                    onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                                     onLongPress = {
                                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                                         onLongPress()
@@ -504,7 +713,7 @@ private fun SegmentedMessageBubble(
                                         searchQuery = searchQuery,
                                         isCurrentSearchMatch = isCurrentSearchMatch && isFirstTextSegment,
                                         onLongPress = onLongPress,
-                                        onTimestampToggle = { showTimestamp = !showTimestamp },
+                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                         showSubject = isFirstTextSegment
                                     )
                                 }
@@ -582,9 +791,17 @@ private fun SegmentedMessageBubble(
                             isSent = message.isSent,
                             isDelivered = message.isDelivered,
                             isRead = message.isRead,
-                            hasError = message.hasError
+                            hasError = message.hasError,
+                            onClick = { showStatusLegend = true }
                         )
                     }
+                }
+
+                // Status legend dialog
+                if (showStatusLegend) {
+                    DeliveryStatusLegend(
+                        onDismiss = { showStatusLegend = false }
+                    )
                 }
             }
         }
@@ -677,11 +894,23 @@ private fun TextBubbleSegment(
                 }
             }
 
+            // Check for emoji-only messages with 3 or fewer emojis
+            val emojiAnalysis = remember(text) { analyzeEmojis(text) }
+            val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
+            val textStyle = if (isLargeEmoji) {
+                MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
+            } else {
+                MaterialTheme.typography.bodyLarge
+            }
+
             val hasClickableContent = detectedDates.isNotEmpty() ||
                     detectedPhoneNumbers.isNotEmpty() ||
                     detectedCodes.isNotEmpty()
 
-            val annotatedText = if (!searchQuery.isNullOrBlank() && text.contains(searchQuery, ignoreCase = true)) {
+            // Build annotated string (skip for large emoji)
+            val annotatedText = if (isLargeEmoji) {
+                null
+            } else if (!searchQuery.isNullOrBlank() && text.contains(searchQuery, ignoreCase = true)) {
                 buildSearchHighlightedText(text, searchQuery, textColor, detectedDates)
             } else if (hasClickableContent) {
                 buildAnnotatedStringWithClickables(text, detectedDates, detectedPhoneNumbers, detectedCodes, textColor)
@@ -692,7 +921,7 @@ private fun TextBubbleSegment(
             if (annotatedText != null) {
                 ClickableText(
                     text = annotatedText,
-                    style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
+                    style = textStyle.copy(color = textColor),
                     onClick = { offset ->
                         // Handle date clicks
                         annotatedText.getStringAnnotations("DATE", offset, offset).firstOrNull()?.let { annotation ->
@@ -774,7 +1003,7 @@ private fun TextBubbleSegment(
             } else {
                 Text(
                     text = text,
-                    style = MaterialTheme.typography.bodyLarge,
+                    style = textStyle,
                     color = textColor
                 )
             }
@@ -798,7 +1027,8 @@ private fun SimpleBubbleContent(
     onDownloadClick: ((String) -> Unit)? = null,
     downloadingAttachments: Map<String, Float> = emptyMap(),
     showDeliveryIndicator: Boolean = true,
-    onReply: ((String) -> Unit)? = null
+    onReply: ((String) -> Unit)? = null,
+    onSwipeStateChanged: ((Boolean) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -819,6 +1049,10 @@ private fun SimpleBubbleContent(
     // Track which gesture is active and haptic state
     var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
+
+    // Cumulative horizontal drag for dead zone detection (prevents accidental swipes while scrolling)
+    var cumulativeHorizontalDrag by remember { mutableFloatStateOf(0f) }
+    val deadZonePx = with(density) { 20.dp.toPx() }
 
     // Measurement state for adaptive clearance during date reveal
     var containerWidthPx by remember { mutableIntStateOf(0) }
@@ -846,11 +1080,17 @@ private fun SimpleBubbleContent(
         }
     }
 
-    // Check if reply is available (iMessage only)
-    val canReply = isIMessage && onReply != null
+    // Check if reply is available (iMessage only, not for placed stickers)
+    val canReply = isIMessage && onReply != null && !message.isPlacedSticker
+
+    // Check if swipe/tap gestures should be enabled (disabled for placed stickers)
+    val gesturesEnabled = !message.isPlacedSticker
 
     // Tap-to-show timestamp state (default hidden)
     var showTimestamp by remember { mutableStateOf(false) }
+
+    // Delivery status legend dialog state
+    var showStatusLegend by remember { mutableStateOf(false) }
 
     // Detect dates in message text for underlining
     val detectedDates = remember(message.text) {
@@ -927,6 +1167,7 @@ private fun SimpleBubbleContent(
                     detectHorizontalDragGestures(
                         onDragStart = {
                             velocityTracker.resetTracking()
+                            cumulativeHorizontalDrag = 0f
                         },
                         onDragEnd = {
                             val velocity = velocityTracker.calculateVelocity().x
@@ -961,6 +1202,10 @@ private fun SimpleBubbleContent(
                                     }
                                     null -> {}
                                 }
+                                // Notify when reply swipe ends (to show overlaying stickers again)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
                                 activeSwipe = null
                                 hasTriggeredHaptic = false
                             }
@@ -969,18 +1214,30 @@ private fun SimpleBubbleContent(
                             coroutineScope.launch {
                                 replyDragOffset.animateTo(0f)
                                 dateRevealProgress.animateTo(0f)
+                                // Notify when reply swipe ends (to show overlaying stickers again)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
                                 activeSwipe = null
                                 hasTriggeredHaptic = false
                             }
                         },
                         onHorizontalDrag = { change, dragAmount ->
                             velocityTracker.addPosition(change.uptimeMillis, change.position)
+                            cumulativeHorizontalDrag += dragAmount
 
                             coroutineScope.launch {
-                                // Determine direction on first significant movement
-                                if (activeSwipe == null && dragAmount.absoluteValue > 5f) {
-                                    val isTowardCenter = if (message.isFromMe) dragAmount < 0 else dragAmount > 0
-                                    activeSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                // Determine direction after cumulative drag exceeds dead zone (20dp)
+                                // This prevents accidental swipes while scrolling vertically
+                                // Placed stickers don't respond to any swipe gestures
+                                if (activeSwipe == null && cumulativeHorizontalDrag.absoluteValue > deadZonePx && gesturesEnabled) {
+                                    val isTowardCenter = if (message.isFromMe) cumulativeHorizontalDrag < 0 else cumulativeHorizontalDrag > 0
+                                    val newSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                    activeSwipe = newSwipe
+                                    // Notify when reply swipe starts (to hide overlaying stickers)
+                                    if (newSwipe == SwipeType.REPLY) {
+                                        onSwipeStateChanged?.invoke(true)
+                                    }
                                 }
 
                                 when (activeSwipe) {
@@ -1060,7 +1317,7 @@ private fun SimpleBubbleContent(
                             )
                             .pointerInput(message.guid) {
                                 detectTapGestures(
-                                    onTap = { showTimestamp = !showTimestamp },
+                                    onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                     onLongPress = {
                                         hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                         onLongPress()
@@ -1125,12 +1382,23 @@ private fun SimpleBubbleContent(
                                 else -> bubbleColors.receivedText
                             }
 
+                            // Check for emoji-only messages with 3 or fewer emojis
+                            val emojiAnalysis = remember(displayText) { analyzeEmojis(displayText) }
+                            val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
+                            val textStyle = if (isLargeEmoji) {
+                                MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
+                            } else {
+                                MaterialTheme.typography.bodyLarge
+                            }
+
                             val hasClickableContent = detectedDates.isNotEmpty() ||
                                     detectedPhoneNumbers.isNotEmpty() ||
                                     detectedCodes.isNotEmpty()
 
-                            // Build annotated string with search highlighting
-                            val annotatedText = if (!searchQuery.isNullOrBlank() && displayText.contains(searchQuery, ignoreCase = true)) {
+                            // Build annotated string with search highlighting (skip for large emoji)
+                            val annotatedText = if (isLargeEmoji) {
+                                null
+                            } else if (!searchQuery.isNullOrBlank() && displayText.contains(searchQuery, ignoreCase = true)) {
                                 buildSearchHighlightedText(
                                     text = displayText,
                                     searchQuery = searchQuery,
@@ -1152,7 +1420,7 @@ private fun SimpleBubbleContent(
                             if (annotatedText != null) {
                                 ClickableText(
                                     text = annotatedText,
-                                    style = MaterialTheme.typography.bodyLarge.copy(color = textColor),
+                                    style = textStyle.copy(color = textColor),
                                     onClick = { offset ->
                                         // Check for date clicks
                                         annotatedText.getStringAnnotations(
@@ -1205,8 +1473,8 @@ private fun SimpleBubbleContent(
                                             return@ClickableText
                                         }
 
-                                        // Default tap behavior - toggle timestamp
-                                        showTimestamp = !showTimestamp
+                                        // Default tap behavior - toggle timestamp (disabled for placed stickers)
+                                        if (gesturesEnabled) showTimestamp = !showTimestamp
                                     }
                                 )
 
@@ -1269,7 +1537,7 @@ private fun SimpleBubbleContent(
                             } else {
                                 Text(
                                     text = displayText ?: "",
-                                    style = MaterialTheme.typography.bodyLarge,
+                                    style = textStyle,
                                     color = textColor
                                 )
                             }
@@ -1317,7 +1585,7 @@ private fun SimpleBubbleContent(
             }
 
             // Delivery status indicator for outbound messages
-            // iMessage-style: only show on the last message in a consecutive sequence of outgoing messages
+            // iPhone-style: only show on the last outgoing message in the conversation
             if (message.isFromMe && showDeliveryIndicator) {
                 Row(
                     modifier = Modifier
@@ -1330,9 +1598,17 @@ private fun SimpleBubbleContent(
                         isSent = message.isSent,
                         isDelivered = message.isDelivered,
                         isRead = message.isRead,
-                        hasError = message.hasError
+                        hasError = message.hasError,
+                        onClick = { showStatusLegend = true }
                     )
                 }
+            }
+
+            // Status legend dialog
+            if (showStatusLegend) {
+                DeliveryStatusLegend(
+                    onDismiss = { showStatusLegend = false }
+                )
             }
         }
 
@@ -1686,28 +1962,150 @@ private fun DeliveryIndicator(
     isSent: Boolean,
     isDelivered: Boolean,
     isRead: Boolean,
-    hasError: Boolean
+    hasError: Boolean,
+    onClick: (() -> Unit)? = null
 ) {
-    val (icon, color) = when {
-        hasError -> Icons.Default.Error to MaterialTheme.colorScheme.error
-        isRead -> Icons.Default.DoneAll to Color(0xFF34B7F1)
-        isDelivered -> Icons.Default.DoneAll to MaterialTheme.colorScheme.onSurfaceVariant
-        isSent -> Icons.Default.Check to MaterialTheme.colorScheme.onSurfaceVariant
-        else -> Icons.Default.Schedule to MaterialTheme.colorScheme.onSurfaceVariant
+    // Determine status for animation key
+    val status = when {
+        hasError -> "error"
+        isRead -> "read"
+        isDelivered -> "delivered"
+        isSent -> "sent"
+        else -> "sending"
     }
 
-    Icon(
-        imageVector = icon,
-        contentDescription = when {
-            hasError -> "Failed"
-            isRead -> "Read"
-            isDelivered -> "Delivered"
-            isSent -> "Sent"
-            else -> "Sending"
+    val icon = when {
+        hasError -> Icons.Default.Error
+        isRead -> Icons.Default.DoneAll
+        isDelivered -> Icons.Default.DoneAll
+        isSent -> Icons.Default.Check
+        else -> Icons.Default.Schedule
+    }
+
+    // Animated color transition (150ms for snappy Android 16 feel)
+    val color by animateColorAsState(
+        targetValue = when {
+            hasError -> MaterialTheme.colorScheme.error
+            isRead -> Color(0xFF34B7F1)
+            else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
-        tint = color,
-        modifier = Modifier.size(14.dp)
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "statusColor"
     )
+
+    // Animated scale for status changes
+    val scale by animateFloatAsState(
+        targetValue = 1f,
+        animationSpec = spring(
+            dampingRatio = 0.6f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "statusScale"
+    )
+
+    AnimatedContent(
+        targetState = status,
+        transitionSpec = {
+            fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+        },
+        label = "statusIcon",
+        modifier = Modifier
+            .size(14.dp)
+            .scale(scale)
+            .then(
+                if (onClick != null) {
+                    Modifier.pointerInput(Unit) {
+                        detectTapGestures(onTap = { onClick() })
+                    }
+                } else {
+                    Modifier
+                }
+            )
+    ) { _ ->
+        Icon(
+            imageVector = icon,
+            contentDescription = when {
+                hasError -> "Failed"
+                isRead -> "Read"
+                isDelivered -> "Delivered"
+                isSent -> "Sent"
+                else -> "Sending"
+            },
+            tint = color,
+            modifier = Modifier.size(14.dp)
+        )
+    }
+}
+
+/**
+ * Legend dialog explaining message status icons.
+ * Shown when user taps on a delivery status indicator.
+ */
+@Composable
+private fun DeliveryStatusLegend(
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Message Status") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                LegendRow(
+                    icon = Icons.Default.Schedule,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "Sending"
+                )
+                LegendRow(
+                    icon = Icons.Default.Check,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "Sent"
+                )
+                LegendRow(
+                    icon = Icons.Default.DoneAll,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    label = "Delivered"
+                )
+                LegendRow(
+                    icon = Icons.Default.DoneAll,
+                    color = Color(0xFF34B7F1),
+                    label = "Read"
+                )
+                LegendRow(
+                    icon = Icons.Default.Error,
+                    color = MaterialTheme.colorScheme.error,
+                    label = "Failed"
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Got it")
+            }
+        }
+    )
+}
+
+@Composable
+private fun LegendRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    color: Color,
+    label: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector = icon,
+            contentDescription = null,
+            tint = color,
+            modifier = Modifier.size(18.dp)
+        )
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium
+        )
+    }
 }
 
 /**
@@ -1743,27 +2141,27 @@ private fun TypingDot(
 ) {
     val infiniteTransition = rememberInfiniteTransition(label = "typingDot")
 
-    val offsetY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 0f,
+    // Google Messages style: fade pulse animation (0.3 → 1.0 → 0.3)
+    val alpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.3f,
         animationSpec = infiniteRepeatable(
             animation = keyframes {
                 durationMillis = 1200
-                0f at delay using LinearEasing
-                -6f at (delay + 200) using FastOutSlowInEasing
-                0f at (delay + 400) using FastOutSlowInEasing
-                0f at 1200 using LinearEasing
+                0.3f at delay using LinearEasing
+                1f at (delay + 200) using FastOutSlowInEasing
+                0.3f at (delay + 400) using FastOutSlowInEasing
+                0.3f at 1200 using LinearEasing
             },
             repeatMode = RepeatMode.Restart
         ),
-        label = "dotBounce"
+        label = "dotFade"
     )
 
     Box(
         modifier = modifier
-            .offset(y = offsetY.dp)
             .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.onSurfaceVariant)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))
     )
 }
 
@@ -1948,5 +2346,87 @@ fun MessageTypeChip(
             color = color,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
+    }
+}
+
+/**
+ * Quote-style indicator shown above a message that is a reply.
+ * Displays a preview of the original message being replied to.
+ * Tapping opens the thread overlay.
+ */
+@Composable
+fun ReplyQuoteIndicator(
+    replyPreview: ReplyPreviewData,
+    isFromMe: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val hapticFeedback = LocalHapticFeedback.current
+
+    Surface(
+        onClick = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onClick()
+        },
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(12.dp),
+        modifier = modifier
+            .padding(
+                start = if (isFromMe) 48.dp else 0.dp,
+                end = if (isFromMe) 0.dp else 48.dp,
+                bottom = 4.dp
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Vertical accent bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(32.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(
+                        if (replyPreview.isFromMe)
+                            BothBubblesTheme.bubbleColors.iMessageSent
+                        else
+                            MaterialTheme.colorScheme.primary
+                    )
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                // Sender name
+                Text(
+                    text = if (replyPreview.isFromMe) "You" else (replyPreview.senderName ?: "Unknown"),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = if (replyPreview.isFromMe)
+                        BothBubblesTheme.bubbleColors.iMessageSent
+                    else
+                        MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+
+                // Preview text or placeholder
+                val displayText = when {
+                    replyPreview.isNotLoaded -> "Tap to view thread"
+                    replyPreview.previewText.isNullOrBlank() && replyPreview.hasAttachment -> "[Attachment]"
+                    replyPreview.previewText.isNullOrBlank() -> "[Message]"
+                    else -> replyPreview.previewText
+                }
+
+                Text(
+                    text = displayText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+        }
     }
 }

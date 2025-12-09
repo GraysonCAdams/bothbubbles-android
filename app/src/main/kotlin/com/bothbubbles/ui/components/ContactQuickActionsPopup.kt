@@ -6,6 +6,10 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,13 +23,18 @@ import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -58,7 +67,6 @@ fun ContactQuickActionsPopup(
     contactInfo: ContactInfo,
     onDismiss: () -> Unit,
     onMessageClick: () -> Unit,
-    onStarToggle: (Boolean) -> Unit = {},
     onDismissInferredName: () -> Unit = {},  // Called when user dismisses the inferred name
     onContactAdded: () -> Unit = {},  // Called when user returns from adding a contact
     onSetGroupPhoto: () -> Unit = {},  // Called when user wants to set/change group photo
@@ -73,6 +81,25 @@ fun ContactQuickActionsPopup(
         onContactAdded()
     }
 
+    // Entrance animation state
+    var animationStarted by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { animationStarted = true }
+
+    // Snappy scale + fade animation (Android 16 style)
+    val scale by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0.85f,
+        animationSpec = spring(
+            dampingRatio = 0.7f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "popupScale"
+    )
+    val alpha by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0f,
+        animationSpec = tween(150),
+        label = "popupAlpha"
+    )
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(
@@ -84,7 +111,12 @@ fun ContactQuickActionsPopup(
         Surface(
             modifier = modifier
                 .padding(horizontal = 40.dp)
-                .wrapContentSize(),
+                .wrapContentSize()
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
+                    this.alpha = alpha
+                },
             shape = RoundedCornerShape(28.dp),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp
@@ -117,12 +149,26 @@ fun ContactQuickActionsPopup(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // Display name
-                Text(
-                    text = contactInfo.displayName,
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                // Display name with optional starred indicator
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Text(
+                        text = contactInfo.displayName,
+                        style = MaterialTheme.typography.titleLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    if (contactInfo.isStarred && !contactInfo.isGroup) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Filled.Star,
+                            contentDescription = "Favorite contact",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
 
                 // Phone/email if different from display name
                 if (contactInfo.address != contactInfo.displayName && !contactInfo.isGroup) {
@@ -205,16 +251,6 @@ fun ContactQuickActionsPopup(
                             }
                         }
 
-                        // Star/Favorite button (only for non-group chats with saved contacts)
-                        if (!contactInfo.isGroup && contactInfo.hasContact) {
-                            QuickActionButton(
-                                icon = if (contactInfo.isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                                contentDescription = if (contactInfo.isStarred) "Remove from favorites" else "Add to favorites",
-                                onClick = {
-                                    onStarToggle(!contactInfo.isStarred)
-                                }
-                            )
-                        }
                     }
                 }
 

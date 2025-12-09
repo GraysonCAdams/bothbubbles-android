@@ -474,7 +474,7 @@ class SyncService @Inject constructor(
 
     /**
      * Perform incremental sync
-     * Downloads only new messages since last sync
+     * Downloads only new messages since last sync using a single API call
      */
     suspend fun performIncrementalSync(): Result<Unit> = runCatching {
         val lastSync = settingsDataStore.lastSyncTime.first()
@@ -495,27 +495,13 @@ class SyncService @Inject constructor(
 
         _syncState.value = SyncState.Syncing(0.3f, "Syncing new messages...")
 
-        // Get all chats and sync new messages
-        val allChats = chatDao.getAllChats().first()
-        val chatCount = allChats.size
-        var newMessageCount = 0
-
-        allChats.forEachIndexed { index, chat ->
-            try {
-                val result = messageRepository.syncMessagesForChat(
-                    chatGuid = chat.guid,
-                    after = lastSync,
-                    limit = 100
-                )
-                newMessageCount += result.getOrNull()?.size ?: 0
-
-                _syncState.value = SyncState.Syncing(
-                    0.3f + (0.6f * (index.toFloat() / chatCount)),
-                    "Synced $newMessageCount new messages..."
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
-            }
+        // Fetch all new messages globally in a single API call
+        val newMessageCount = messageRepository.syncMessagesGlobally(
+            after = lastSync,
+            limit = 1000
+        ).getOrElse { e ->
+            Log.e(TAG, "Global message sync failed", e)
+            0
         }
 
         // Update last sync time
@@ -715,6 +701,11 @@ class SyncService @Inject constructor(
      * Called from SetupViewModel after server connection is established.
      */
     fun startInitialSync(messagesPerChat: Int = MESSAGE_PAGE_SIZE) {
+        // Skip if sync already in progress (coalescing)
+        if (_syncState.value !is SyncState.Idle) {
+            Log.d(TAG, "Skipping initial sync - sync already in progress")
+            return
+        }
         scope.launch {
             performInitialSync(messagesPerChat)
         }
@@ -724,6 +715,11 @@ class SyncService @Inject constructor(
      * Start background sync (called periodically)
      */
     fun startBackgroundSync() {
+        // Skip if sync already in progress (coalescing)
+        if (_syncState.value !is SyncState.Idle) {
+            Log.d(TAG, "Skipping background sync - sync already in progress")
+            return
+        }
         scope.launch {
             performIncrementalSync()
         }

@@ -16,6 +16,7 @@ import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.ProgressRequestBody
 import com.bothbubbles.data.remote.api.dto.EditMessageRequest
 import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.data.remote.api.dto.MessageQueryRequest
 import com.bothbubbles.data.remote.api.dto.SendMessageRequest
 import com.bothbubbles.data.remote.api.dto.SendReactionRequest
 import com.bothbubbles.data.remote.api.dto.UnsendMessageRequest
@@ -105,6 +106,20 @@ class MessageRepository @Inject constructor(
     fun getRepliesForMessage(messageGuid: String): Flow<List<MessageEntity>> =
         messageDao.getRepliesForMessage(messageGuid)
 
+    /**
+     * Batch fetch messages by their GUIDs.
+     * Used for efficiently loading reply preview data.
+     */
+    suspend fun getMessagesByGuids(guids: List<String>): List<MessageEntity> =
+        messageDao.getMessagesByGuids(guids)
+
+    /**
+     * Get all messages in a thread (the original message + all replies to it).
+     * Used for displaying the thread overlay when user taps a reply indicator.
+     */
+    suspend fun getThreadMessages(originGuid: String): List<MessageEntity> =
+        messageDao.getThreadMessages(originGuid)
+
     fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>> =
         messageDao.searchMessages(query, limit)
 
@@ -136,10 +151,8 @@ class MessageRepository @Inject constructor(
 
         val messages = body.data.orEmpty().map { it.toEntity(chatGuid) }
 
-        // Insert messages and their attachments
-        messages.forEach { message ->
-            messageDao.insertOrUpdateMessage(message)
-        }
+        // Batch insert messages (more efficient than individual inserts)
+        messageDao.insertMessages(messages)
 
         // Sync attachments
         body.data.orEmpty().forEach { messageDto ->
@@ -147,6 +160,55 @@ class MessageRepository @Inject constructor(
         }
 
         messages
+    }
+
+    /**
+     * Fetch all messages across all chats since a given timestamp.
+     * This is much more efficient than iterating through each chat for incremental sync.
+     * Returns the number of new messages synced.
+     */
+    suspend fun syncMessagesGlobally(
+        after: Long,
+        limit: Int = 1000
+    ): Result<Int> = runCatching {
+        val response = api.queryMessages(
+            MessageQueryRequest(
+                after = after,
+                limit = limit,
+                sort = "DESC"
+            )
+        )
+
+        val body = response.body()
+        if (!response.isSuccessful || body == null) {
+            throw Exception(body?.message ?: "Failed to fetch messages")
+        }
+
+        val messageDtos = body.data.orEmpty()
+
+        // Transform messages with their chat GUIDs, filtering out ones without chats
+        val messagesWithChats = messageDtos.mapNotNull { messageDto ->
+            val chatGuid = messageDto.chats?.firstOrNull()?.guid
+            if (chatGuid != null) {
+                messageDto to messageDto.toEntity(chatGuid)
+            } else {
+                Log.w(TAG, "Message ${messageDto.guid} has no associated chat, skipping")
+                null
+            }
+        }
+
+        // Batch insert all valid messages (more efficient than individual inserts)
+        val messages = messagesWithChats.map { it.second }
+        messageDao.insertMessages(messages)
+
+        // Sync attachments for all messages
+        messagesWithChats.forEach { (messageDto, _) ->
+            syncMessageAttachments(messageDto)
+        }
+
+        val syncedCount = messagesWithChats.size
+        Log.i(TAG, "Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
+        syncedCount
     }
 
     /**
@@ -918,7 +980,8 @@ class MessageRepository @Inject constructor(
         val authKey = settingsDataStore.guidAuthKey.first()
 
         messageDto.attachments.forEach { attachmentDto ->
-            val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download?guid=$authKey"
+            // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
+            val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,

@@ -60,7 +60,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         UnifiedChatMember::class,
         SeenMessageEntity::class
     ],
-    version = 19,
+    version = 21,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -456,6 +456,33 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 19 to 20: Add index on thread_originator_guid for
+         * efficient reply/thread lookups when displaying reply indicators in chat.
+         */
+        val MIGRATION_19_20 = object : Migration(19, 20) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_thread_originator_guid ON messages(thread_originator_guid)")
+            }
+        }
+
+        /**
+         * Migration from version 20 to 21: Add performance indexes.
+         * - message_source index for filtering by message type (iMessage vs SMS)
+         * - Composite (chat_guid, date_deleted) index for efficient soft-delete queries
+         * - is_archived index for archived chat queries
+         */
+        val MIGRATION_20_21 = object : Migration(20, 21) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Index on message_source for queries filtering by message type
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_message_source ON messages(message_source)")
+                // Composite index for efficient soft-delete filtering
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_chat_guid_date_deleted ON messages(chat_guid, date_deleted)")
+                // Index on is_archived for archived chat queries
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_archived ON chats(is_archived)")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -479,7 +506,9 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_15_16,
             MIGRATION_16_17,
             MIGRATION_17_18,
-            MIGRATION_18_19
+            MIGRATION_18_19,
+            MIGRATION_19_20,
+            MIGRATION_20_21
         )
     }
 }

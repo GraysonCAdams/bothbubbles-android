@@ -52,6 +52,8 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
@@ -98,7 +100,6 @@ import com.bothbubbles.ui.components.SnoozeDurationDialog
 import com.bothbubbles.ui.components.SwipeActionType
 import com.bothbubbles.ui.components.SwipeConfig
 import com.bothbubbles.ui.components.SwipeableConversationTile
-import com.bothbubbles.ui.components.MessageStatusIndicator
 import com.bothbubbles.ui.components.ConversationListSkeleton
 import com.bothbubbles.ui.components.staggeredEntrance
 import com.bothbubbles.ui.components.UrlParsingUtils
@@ -767,6 +768,14 @@ fun ConversationsScreen(
                     label = "pullOffset"
                 )
 
+                // State for dragged pin overlay (renders on top of everything)
+                var draggedPinConversation by remember { mutableStateOf<ConversationUiModel?>(null) }
+                var draggedPinStartPosition by remember { mutableStateOf(Offset.Zero) }
+                var draggedPinOffset by remember { mutableStateOf(Offset.Zero) }
+                var isPinDragging by remember { mutableStateOf(false) }
+                val unpinThresholdPx = with(density) { 60.dp.toPx() }
+
+                Box(modifier = Modifier.fillMaxSize()) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -833,6 +842,20 @@ fun ConversationsScreen(
                                 },
                                 selectedConversations = emptySet(), // Never show selection state for pinned items
                                 isSelectionMode = isSelectionMode,
+                                onDragOverlayStart = { conversation, position ->
+                                    draggedPinConversation = conversation
+                                    draggedPinStartPosition = position
+                                    draggedPinOffset = Offset.Zero
+                                    isPinDragging = true
+                                },
+                                onDragOverlayMove = { offset ->
+                                    draggedPinOffset = offset
+                                },
+                                onDragOverlayEnd = {
+                                    isPinDragging = false
+                                    draggedPinConversation = null
+                                    draggedPinOffset = Offset.Zero
+                                },
                                 modifier = Modifier.padding(vertical = 8.dp)
                             )
                         }
@@ -878,50 +901,27 @@ fun ConversationsScreen(
                         } else {
                             // Use swipeable tile when not in selection mode
                             // Modify swipe config to disable PIN for unsaved contacts that aren't already pinned
-                            val conversationSwipeConfig = if (!conversation.hasContact && !conversation.isPinned) {
-                                // Disable PIN action for unsaved contacts
-                                uiState.swipeConfig.copy(
-                                    leftAction = if (uiState.swipeConfig.leftAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.leftAction,
-                                    rightAction = if (uiState.swipeConfig.rightAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.rightAction
-                                )
-                            } else {
+                            // Memoized to avoid recreating on every recomposition
+                            val conversationSwipeConfig = remember(
+                                conversation.hasContact,
+                                conversation.isPinned,
                                 uiState.swipeConfig
+                            ) {
+                                if (!conversation.hasContact && !conversation.isPinned) {
+                                    // Disable PIN action for unsaved contacts
+                                    uiState.swipeConfig.copy(
+                                        leftAction = if (uiState.swipeConfig.leftAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.leftAction,
+                                        rightAction = if (uiState.swipeConfig.rightAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.rightAction
+                                    )
+                                } else {
+                                    uiState.swipeConfig
+                                }
                             }
                             SwipeableConversationTile(
-                                title = formatDisplayName(conversation.displayName),
-                                subtitle = formatMessagePreview(conversation),
-                                timestamp = conversation.lastMessageTime,
-                                unreadCount = conversation.unreadCount,
                                 isPinned = conversation.isPinned,
                                 isMuted = conversation.isMuted,
+                                isRead = conversation.unreadCount == 0,
                                 isSnoozed = conversation.isSnoozed,
-                                isTyping = conversation.isTyping,
-                                messageStatus = conversation.lastMessageStatus,
-                                avatarContent = {
-                                    AvatarWithMessageType(
-                                        messageSourceType = getMessageSourceType(conversation.lastMessageSource),
-                                        backgroundColor = MaterialTheme.colorScheme.surface,
-                                        size = 56.dp
-                                    ) {
-                                        if (conversation.isGroup) {
-                                            GroupAvatar(
-                                                names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                                                avatarPaths = conversation.participantAvatarPaths,
-                                                size = 56.dp
-                                            )
-                                        } else {
-                                            Avatar(
-                                                name = conversation.rawDisplayName,
-                                                avatarPath = conversation.avatarPath,
-                                                size = 56.dp
-                                            )
-                                        }
-                                    }
-                                },
-                                onClick = { onConversationClick(conversation.guid, conversation.mergedChatGuids) },
-                                onLongClick = {
-                                    selectedConversations = selectedConversations + conversation.guid
-                                },
                                 onSwipeAction = { action ->
                                     when (action) {
                                         SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
@@ -930,24 +930,31 @@ fun ConversationsScreen(
                                         else -> viewModel.handleSwipeAction(conversation.guid, action)
                                     }
                                 },
-                                onAvatarClick = {
-                                    quickActionsContact = ContactInfo(
-                                        chatGuid = conversation.guid,
-                                        displayName = conversation.displayName,
-                                        rawDisplayName = conversation.rawDisplayName,
-                                        avatarPath = conversation.avatarPath,
-                                        address = conversation.address,
-                                        isGroup = conversation.isGroup,
-                                        participantNames = conversation.participantNames,
-                                        hasContact = conversation.hasContact,
-                                        hasInferredName = conversation.hasInferredName
-                                    )
-                                },
                                 swipeConfig = conversationSwipeConfig,
                                 modifier = Modifier
                                     .staggeredEntrance(index)
                                     .animateItem()
-                            )
+                            ) { hasRoundedCorners ->
+                                GoogleStyleConversationTile(
+                                    conversation = conversation,
+                                    onClick = { onConversationClick(conversation.guid, conversation.mergedChatGuids) },
+                                    onLongClick = { selectedConversations = selectedConversations + conversation.guid },
+                                    hasRoundedCorners = hasRoundedCorners,
+                                    onAvatarClick = {
+                                        quickActionsContact = ContactInfo(
+                                            chatGuid = conversation.guid,
+                                            displayName = conversation.displayName,
+                                            rawDisplayName = conversation.rawDisplayName,
+                                            avatarPath = conversation.avatarPath,
+                                            address = conversation.address,
+                                            isGroup = conversation.isGroup,
+                                            participantNames = conversation.participantNames,
+                                            hasContact = conversation.hasContact,
+                                            hasInferredName = conversation.hasInferredName
+                                        )
+                                    }
+                                )
+                            }
                         }
                     } // End of itemsIndexed
 
@@ -969,6 +976,72 @@ fun ConversationsScreen(
                     }
                 } // End of LazyColumn
                 } // End of Column
+
+                // Drag overlay - renders dragged pin on top of everything
+                if (isPinDragging && draggedPinConversation != null) {
+                    val conversation = draggedPinConversation!!
+                    val unpinProgress = (draggedPinOffset.y / unpinThresholdPx).coerceIn(0f, 1f)
+                    val scale = 1.08f - (unpinProgress * 0.15f)
+                    val overlayAlpha = 1f - (unpinProgress * 0.5f)
+
+                    Box(
+                        modifier = Modifier
+                            .offset {
+                                androidx.compose.ui.unit.IntOffset(
+                                    (draggedPinStartPosition.x + draggedPinOffset.x).toInt(),
+                                    (draggedPinStartPosition.y + draggedPinOffset.y.coerceAtLeast(0f)).toInt()
+                                )
+                            }
+                            .zIndex(100f)
+                            .scale(scale)
+                            .alpha(overlayAlpha)
+                            .shadow(8.dp, RoundedCornerShape(12.dp))
+                    ) {
+                        // Render the pinned item visually
+                        Column(
+                            modifier = Modifier
+                                .width(100.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            AvatarWithMessageType(
+                                messageSourceType = getMessageSourceType(conversation.lastMessageSource),
+                                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
+                                size = 56.dp
+                            ) {
+                                if (conversation.isGroup) {
+                                    GroupAvatar(
+                                        names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                                        avatarPaths = conversation.participantAvatarPaths,
+                                        size = 56.dp
+                                    )
+                                } else {
+                                    Avatar(
+                                        name = conversation.displayName,
+                                        avatarPath = conversation.avatarPath,
+                                        size = 56.dp
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = conversation.displayName,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp)
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+                    }
+                }
+                } // End of Box wrapper
                 } // End of else (showFilterEmptyState)
                 } // End of CONTENT state
             } // End of when
@@ -1024,12 +1097,6 @@ fun ConversationsScreen(
                     val conversation = uiState.conversations.find { it.guid == contact.chatGuid }
                     val mergedGuids = conversation?.mergedChatGuids ?: listOf(contact.chatGuid)
                     onConversationClick(contact.chatGuid, mergedGuids)
-                },
-                onStarToggle = { newStarred ->
-                    val success = viewModel.toggleContactStarred(contact.address, newStarred)
-                    if (success) {
-                        isQuickActionContactStarred = newStarred
-                    }
                 },
                 onDismissInferredName = {
                     viewModel.dismissInferredName(contact.address)
@@ -2107,17 +2174,26 @@ private fun GoogleStyleConversationTile(
     onLongClick: () -> Unit,
     modifier: Modifier = Modifier,
     isSelected: Boolean = false,
-    isSelectionMode: Boolean = false
+    isSelectionMode: Boolean = false,
+    hasRoundedCorners: Boolean = false,
+    onAvatarClick: (() -> Unit)? = null
 ) {
+    val shape = when {
+        isSelectionMode -> RoundedCornerShape(50)
+        hasRoundedCorners -> RoundedCornerShape(16.dp)
+        else -> RoundedCornerShape(0.dp)
+    }
+    val needsPadding = isSelectionMode || hasRoundedCorners
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (isSelectionMode) Modifier.padding(vertical = 4.dp) else Modifier)
+            .then(if (needsPadding) Modifier.padding(vertical = 4.dp) else Modifier)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
-        shape = if (isSelectionMode) RoundedCornerShape(50) else RoundedCornerShape(0.dp),
+        shape = shape,
         color = if (isSelected) {
             MaterialTheme.colorScheme.surfaceContainerHighest
         } else {
@@ -2131,7 +2207,20 @@ private fun GoogleStyleConversationTile(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Avatar with selection checkmark or regular avatar
-            Box(modifier = Modifier.size(56.dp)) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .then(
+                        if (onAvatarClick != null && !isSelected) {
+                            Modifier.combinedClickable(
+                                onClick = onAvatarClick,
+                                onLongClick = onAvatarClick
+                            )
+                        } else {
+                            Modifier
+                        }
+                    )
+            ) {
                 if (isSelected) {
                     // Show checkmark when selected - use muted color instead of saturated primary
                     Surface(
@@ -2236,15 +2325,49 @@ private fun GoogleStyleConversationTile(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Message preview
+                // Message preview with inline status indicator
                 val textColor = when {
                     conversation.hasDraft -> MaterialTheme.colorScheme.error
                     conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
                     else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 }
 
+                val showInlineStatus = conversation.isFromMe &&
+                    conversation.lastMessageStatus != MessageStatus.NONE &&
+                    conversation.unreadCount == 0 &&
+                    !conversation.isTyping
+
+                val previewText = formatMessagePreview(conversation)
+                val annotatedText = buildAnnotatedString {
+                    append(previewText)
+                    if (showInlineStatus) {
+                        append(" ")
+                        appendInlineContent("status", "[status]")
+                    }
+                }
+
+                val inlineContent = if (showInlineStatus) {
+                    mapOf(
+                        "status" to InlineTextContent(
+                            placeholder = Placeholder(
+                                width = 14.sp,
+                                height = 14.sp,
+                                placeholderVerticalAlign = PlaceholderVerticalAlign.Center
+                            )
+                        ) {
+                            InlineMessageStatusIcon(
+                                status = conversation.lastMessageStatus,
+                                tint = textColor
+                            )
+                        }
+                    )
+                } else {
+                    emptyMap()
+                }
+
                 Text(
-                    text = formatMessagePreview(conversation),
+                    text = annotatedText,
+                    inlineContent = inlineContent,
                     style = MaterialTheme.typography.bodyMedium.copy(
                         fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
                         lineHeight = 18.sp
@@ -2257,7 +2380,7 @@ private fun GoogleStyleConversationTile(
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Trailing content - timestamp and unread badge / message status
+            // Trailing content - timestamp and unread badge
             Column(
                 horizontalAlignment = Alignment.End,
                 verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -2278,11 +2401,9 @@ private fun GoogleStyleConversationTile(
                     )
                 }
 
-                // Unread badge or message status indicator
+                // Unread badge only - status indicator is now inline with text
                 if (conversation.unreadCount > 0) {
                     UnreadBadge(count = conversation.unreadCount)
-                } else if (conversation.isFromMe && conversation.lastMessageStatus != MessageStatus.NONE) {
-                    MessageStatusIndicator(status = conversation.lastMessageStatus)
                 }
             }
         }
@@ -2302,6 +2423,63 @@ private fun TypingDots() {
                     .clip(CircleShape)
                     .background(MaterialTheme.colorScheme.onPrimaryContainer)
             )
+        }
+    }
+}
+
+/**
+ * Inline message status icon for use in text with InlineTextContent.
+ * Uses clock icon for sending, checkmarks for sent/delivered/read.
+ */
+@Composable
+private fun InlineMessageStatusIcon(
+    status: MessageStatus,
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    when (status) {
+        MessageStatus.SENDING -> {
+            Icon(
+                imageVector = Icons.Default.Schedule,
+                contentDescription = "Sending",
+                tint = tint,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        MessageStatus.SENT -> {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = "Sent",
+                tint = tint,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        MessageStatus.DELIVERED -> {
+            Icon(
+                imageVector = Icons.Default.DoneAll,
+                contentDescription = "Delivered",
+                tint = tint,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        MessageStatus.READ -> {
+            Icon(
+                imageVector = Icons.Default.DoneAll,
+                contentDescription = "Read",
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        MessageStatus.FAILED -> {
+            Icon(
+                imageVector = Icons.Default.Error,
+                contentDescription = "Failed",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = modifier.fillMaxSize()
+            )
+        }
+        MessageStatus.NONE -> {
+            // No icon for NONE status
         }
     }
 }
@@ -2342,6 +2520,9 @@ private fun PinnedConversationsRow(
     onAvatarClick: (ConversationUiModel) -> Unit = {},
     selectedConversations: Set<String> = emptySet(),
     isSelectionMode: Boolean = false,
+    onDragOverlayStart: (ConversationUiModel, Offset) -> Unit = { _, _ -> },
+    onDragOverlayMove: (Offset) -> Unit = {},
+    onDragOverlayEnd: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // Item width including spacing (100dp item + 12dp spacing)
@@ -2358,6 +2539,9 @@ private fun PinnedConversationsRow(
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
+
+    // Track item positions for overlay
+    val itemPositions = remember { mutableStateMapOf<String, Offset>() }
 
     // Mutable list for reordering during drag
     var currentOrder by remember(conversations) { mutableStateOf(conversations.map { it.guid }) }
@@ -2414,10 +2598,14 @@ private fun PinnedConversationsRow(
 
             Box(
                 modifier = Modifier
+                    .onGloballyPositioned { coordinates ->
+                        itemPositions[guid] = coordinates.positionInRoot()
+                    }
                     .zIndex(if (isBeingDragged) 1f else 0f)
                     .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), offsetY.toInt()) }
                     .scale(scale)
-                    .alpha(alpha)
+                    // Make invisible when being dragged (overlay handles rendering)
+                    .alpha(if (isBeingDragged) 0f else alpha)
                     .shadow(elevation, RoundedCornerShape(12.dp))
             ) {
                 PinnedConversationItem(
@@ -2434,12 +2622,18 @@ private fun PinnedConversationsRow(
                             isDragging = true
                             dragOffsetX = 0f
                             dragOffsetY = 0f
+                            // Notify overlay with initial position
+                            val position = itemPositions[guid] ?: Offset.Zero
+                            onDragOverlayStart(conversation, position)
                         }
                     },
                     onDrag = { dragAmountX, dragAmountY ->
                         if (isDragging && draggedItemIndex >= 0) {
                             dragOffsetX += dragAmountX
                             dragOffsetY += dragAmountY
+
+                            // Update overlay position
+                            onDragOverlayMove(Offset(dragOffsetX, dragOffsetY))
 
                             // Calculate if we should swap with neighbor (horizontal reordering)
                             val draggedPosition = draggedItemIndex
@@ -2456,6 +2650,8 @@ private fun PinnedConversationsRow(
                                 // Update dragged index and reset offset for smooth movement
                                 draggedItemIndex = newPosition
                                 dragOffsetX -= offsetInItems * itemWidthPx
+                                // Update overlay offset after swap
+                                onDragOverlayMove(Offset(dragOffsetX, dragOffsetY))
                             }
                         }
                     },
@@ -2472,6 +2668,7 @@ private fun PinnedConversationsRow(
                                 }
                             }
                         }
+                        onDragOverlayEnd()
                         isDragging = false
                         draggedItemIndex = -1
                         draggedItemGuid = null
@@ -2481,6 +2678,7 @@ private fun PinnedConversationsRow(
                     onDragCancel = {
                         // Reset to original order on cancel
                         currentOrder = conversations.map { it.guid }
+                        onDragOverlayEnd()
                         isDragging = false
                         draggedItemIndex = -1
                         draggedItemGuid = null
@@ -2767,6 +2965,11 @@ private fun EmptyCategoryState(
 }
 
 private fun formatMessagePreview(conversation: ConversationUiModel): String {
+    // Show typing indicator if someone is typing
+    if (conversation.isTyping) {
+        return "typing..."
+    }
+
     val content = when (conversation.lastMessageType) {
         MessageType.IMAGE -> "Image"
         MessageType.VIDEO -> "Video"

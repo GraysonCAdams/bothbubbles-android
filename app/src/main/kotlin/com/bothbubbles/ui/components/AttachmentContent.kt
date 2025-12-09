@@ -1,6 +1,13 @@
 package com.bothbubbles.ui.components
 
 import android.view.ViewGroup
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -74,14 +81,18 @@ fun AttachmentContent(
     downloadProgress: Float = 0f
 ) {
     // Show placeholder if manual download mode and attachment needs download
-    val showPlaceholder = onDownloadClick != null && attachment.needsDownload
+    // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
+    val showPlaceholder = attachment.needsDownload && (onDownloadClick != null || attachment.isSticker)
+
+    // For stickers in auto-download mode, show as "downloading" even if not actively downloading yet
+    val effectiveIsDownloading = isDownloading || (attachment.isSticker && attachment.needsDownload && onDownloadClick == null)
 
     when {
         showPlaceholder -> AttachmentPlaceholder(
             attachment = attachment,
             isFromMe = isFromMe,
             onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
-            isDownloading = isDownloading,
+            isDownloading = effectiveIsDownloading,
             downloadProgress = downloadProgress,
             modifier = modifier
         )
@@ -164,28 +175,50 @@ private fun AttachmentPlaceholder(
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
 
-            // Download button or progress overlay
+            // Download button or progress overlay with crossfade animation
             Surface(
                 shape = CircleShape,
                 color = Color.Black.copy(alpha = 0.6f),
                 modifier = Modifier.size(56.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    if (isDownloading) {
-                        CircularProgressIndicator(
-                            progress = { downloadProgress },
-                            modifier = Modifier.size(40.dp),
-                            strokeWidth = 3.dp,
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f)
-                        )
-                    } else {
+                    // Download icon - fade out when downloading
+                    AnimatedVisibility(
+                        visible = !isDownloading,
+                        enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
+                        exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
+                    ) {
                         Icon(
                             Icons.Default.Download,
                             contentDescription = "Download attachment",
                             tint = Color.White,
                             modifier = Modifier.size(28.dp)
                         )
+                    }
+                    // Progress indicator - fade in when downloading
+                    AnimatedVisibility(
+                        visible = isDownloading,
+                        enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
+                        exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
+                    ) {
+                        if (downloadProgress > 0f) {
+                            // Determinate progress when we have actual progress
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        } else {
+                            // Indeterminate spinner when downloading but no progress yet
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
                     }
                 }
             }
@@ -264,12 +297,20 @@ private fun AttachmentPlaceholder(
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             if (isDownloading) {
-                                CircularProgressIndicator(
-                                    progress = { downloadProgress },
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
+                                if (downloadProgress > 0f) {
+                                    CircularProgressIndicator(
+                                        progress = { downloadProgress },
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                } else {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
                             } else {
                                 Icon(
                                     if (attachment.isAudio) Icons.Outlined.AudioFile
@@ -385,8 +426,12 @@ private fun ImageAttachment(
             isError = true
         }
 
-        // Loading indicator - minimal for transparent images
-        if (isLoading) {
+        // Loading indicator with fade animation - minimal for transparent images
+        AnimatedVisibility(
+            visible = isLoading,
+            enter = fadeIn(tween(150, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(100, easing = FastOutSlowInEasing))
+        ) {
             if (isTransparent) {
                 // No background for transparent images - just show spinner
                 CircularProgressIndicator(
@@ -412,8 +457,12 @@ private fun ImageAttachment(
             }
         }
 
-        // Error state - minimal for transparent images
-        if (isError) {
+        // Error state with fade animation - minimal for transparent images
+        AnimatedVisibility(
+            visible = isError,
+            enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.92f, animationSpec = tween(150)),
+            exit = fadeOut(tween(100, easing = FastOutSlowInEasing))
+        ) {
             if (isTransparent) {
                 // Compact error for transparent images
                 Icon(
@@ -547,8 +596,12 @@ private fun GifAttachment(
             }
         }
 
-        // Error state - minimal for transparent GIFs
-        if (isError) {
+        // Error state with fade animation - minimal for transparent GIFs
+        AnimatedVisibility(
+            visible = isError,
+            enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.92f, animationSpec = tween(150)),
+            exit = fadeOut(tween(100, easing = FastOutSlowInEasing))
+        ) {
             if (isTransparent) {
                 Icon(
                     Icons.Outlined.BrokenImage,
@@ -711,8 +764,12 @@ private fun InlineVideoAttachment(
                 .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
         )
 
-        // Play button overlay (shown when paused)
-        if (showPlayButton) {
+        // Play button overlay with fade + scale animation (shown when paused)
+        AnimatedVisibility(
+            visible = showPlayButton,
+            enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
+            exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
+        ) {
             Surface(
                 shape = CircleShape,
                 color = Color.Black.copy(alpha = 0.6f),
@@ -1164,7 +1221,11 @@ fun BorderlessMediaContent(
     messageGuid: String = ""
 ) {
     // Show placeholder if manual download mode and attachment needs download
-    val showPlaceholder = onDownloadClick != null && attachment.needsDownload
+    // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
+    val showPlaceholder = attachment.needsDownload && (onDownloadClick != null || attachment.isSticker)
+
+    // For stickers in auto-download mode, show as "downloading" even if not actively downloading yet
+    val effectiveIsDownloading = isDownloading || (attachment.isSticker && attachment.needsDownload && onDownloadClick == null)
 
     // Use smaller max width for placed stickers
     val effectiveMaxWidth = if (isPlacedSticker) 140.dp else maxWidth
@@ -1173,7 +1234,7 @@ fun BorderlessMediaContent(
         showPlaceholder -> BorderlessAttachmentPlaceholder(
             attachment = attachment,
             onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
-            isDownloading = isDownloading,
+            isDownloading = effectiveIsDownloading,
             downloadProgress = downloadProgress,
             maxWidth = effectiveMaxWidth,
             modifier = modifier
@@ -1246,13 +1307,24 @@ private fun BorderlessAttachmentPlaceholder(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (isDownloading) {
-                    CircularProgressIndicator(
-                        progress = { downloadProgress },
-                        modifier = Modifier.size(40.dp),
-                        strokeWidth = 3.dp,
-                        color = Color.White,
-                        trackColor = Color.White.copy(alpha = 0.3f)
-                    )
+                    if (downloadProgress > 0f) {
+                        // Determinate progress when we have actual progress
+                        CircularProgressIndicator(
+                            progress = { downloadProgress },
+                            modifier = Modifier.size(40.dp),
+                            strokeWidth = 3.dp,
+                            color = Color.White,
+                            trackColor = Color.White.copy(alpha = 0.3f)
+                        )
+                    } else {
+                        // Indeterminate spinner when downloading but no progress yet
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            strokeWidth = 3.dp,
+                            color = Color.White,
+                            trackColor = Color.White.copy(alpha = 0.3f)
+                        )
+                    }
                 } else {
                     Icon(
                         Icons.Default.Download,
@@ -1330,7 +1402,13 @@ private fun BorderlessImageAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    val imageUrl = attachment.localPath ?: attachment.webUrl
+    // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
+    // Force download first to trigger HEIC→PNG conversion
+    val imageUrl = if (attachment.isSticker) {
+        attachment.localPath  // null if not downloaded, will show error/placeholder
+    } else {
+        attachment.localPath ?: attachment.webUrl
+    }
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -1461,7 +1539,13 @@ private fun BorderlessGifAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    val imageUrl = attachment.localPath ?: attachment.webUrl
+    // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
+    // Force download first to trigger HEIC→PNG conversion
+    val imageUrl = if (attachment.isSticker) {
+        attachment.localPath  // null if not downloaded, will show error/placeholder
+    } else {
+        attachment.localPath ?: attachment.webUrl
+    }
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -1727,8 +1811,12 @@ private fun BorderlessInlineVideoAttachment(
                 .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
         )
 
-        // Play button overlay (shown when paused)
-        if (showPlayButton) {
+        // Play button overlay with fade + scale animation (shown when paused)
+        AnimatedVisibility(
+            visible = showPlayButton,
+            enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
+            exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
+        ) {
             Surface(
                 shape = CircleShape,
                 color = Color.Black.copy(alpha = 0.6f),

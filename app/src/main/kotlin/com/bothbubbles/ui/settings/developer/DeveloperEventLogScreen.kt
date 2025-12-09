@@ -119,7 +119,7 @@ fun DeveloperEventLogScreen(
                     state = listState,
                     modifier = Modifier.fillMaxSize()
                 ) {
-                    items(uiState.events, key = { it.timestamp }) { event ->
+                    items(uiState.events, key = { it.id }) { event ->
                         EventLogItem(
                             event = event,
                             onClick = { selectedEvent = event }

@@ -16,9 +16,11 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
+import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import android.util.Log
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
 import com.bothbubbles.ui.bubble.BubbleActivity
@@ -46,6 +48,7 @@ class NotificationService @Inject constructor(
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository
 ) {
     companion object {
+        private const val TAG = "NotificationService"
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_SERVICE = "service"
         const val CHANNEL_FACETIME = "facetime"
@@ -172,13 +175,15 @@ class NotificationService @Inject constructor(
             .setKey(chatGuid)
             .build()
 
-        // Build the shortcut
+        // Build the shortcut with LocusId for bubble support
+        val locusId = LocusIdCompat(chatGuid)
         val shortcut = ShortcutInfoCompat.Builder(context, shortcutId)
             .setShortLabel(chatTitle)
             .setLongLabel(chatTitle)
             .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
             .setIntent(intent)
             .setLongLived(true)
+            .setLocusId(locusId)
             .setPerson(person)
             .setCategories(setOf("com.bothbubbles.category.SHARE_TARGET"))
             .build()
@@ -222,6 +227,7 @@ class NotificationService @Inject constructor(
     ): NotificationCompat.BubbleMetadata? {
         // Bubbles require Android Q (API 29) or higher
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Log.d(TAG, "Bubbles not supported: API level ${Build.VERSION.SDK_INT} < 29")
             return null
         }
 
@@ -235,7 +241,7 @@ class NotificationService @Inject constructor(
         )
 
         // Build bubble metadata
-        return NotificationCompat.BubbleMetadata.Builder(
+        val metadata = NotificationCompat.BubbleMetadata.Builder(
             bubblePendingIntent,
             IconCompat.createWithResource(context, R.mipmap.ic_launcher)
         )
@@ -243,6 +249,9 @@ class NotificationService @Inject constructor(
             .setAutoExpandBubble(false)
             .setSuppressNotification(false)
             .build()
+
+        Log.d(TAG, "Created bubble metadata for chat: $chatGuid (title: $chatTitle)")
+        return metadata
     }
 
     /**
@@ -338,10 +347,21 @@ class NotificationService @Inject constructor(
 
         // Create messaging style for conversation-like appearance
         // Android Auto requires MessagingStyle with proper sender info
-        val sender = Person.Builder()
+        val senderBuilder = Person.Builder()
             .setName(senderName ?: chatTitle)
             .setKey(senderAddress ?: chatGuid)
-            .build()
+
+        // Add avatar to sender Person if available
+        if (avatarUri != null) {
+            try {
+                val uri = android.net.Uri.parse(avatarUri)
+                senderBuilder.setIcon(IconCompat.createWithContentUri(uri))
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to load avatar for notification: $avatarUri", e)
+            }
+        }
+
+        val sender = senderBuilder.build()
 
         val deviceUser = Person.Builder()
             .setName("Me")
@@ -357,7 +377,9 @@ class NotificationService @Inject constructor(
         val shortcutId = createConversationShortcut(chatGuid, chatTitle, isGroup)
 
         // Create bubble metadata if bubbles are enabled for this conversation
-        val bubbleMetadata = if (shouldShowBubble(chatGuid, senderAddress)) {
+        val shouldBubble = shouldShowBubble(chatGuid, senderAddress)
+        Log.d(TAG, "Bubble check: shouldBubble=$shouldBubble, filterMode=$cachedBubbleFilterMode, chatGuid=$chatGuid")
+        val bubbleMetadata = if (shouldBubble) {
             createBubbleMetadata(chatGuid, chatTitle)
         } else {
             null
@@ -381,12 +403,16 @@ class NotificationService @Inject constructor(
             .setContentIntent(contentPendingIntent)
             .addAction(replyAction)
             .addAction(markReadAction)
-            // Enable bubble support
+            // Enable bubble support - LocusId links notification to shortcut for bubbles
             .setShortcutId(shortcutId)
+            .setLocusId(LocusIdCompat(chatGuid))
 
         // Add bubble metadata if available (Android Q+)
         if (bubbleMetadata != null) {
             notificationBuilder.setBubbleMetadata(bubbleMetadata)
+            Log.d(TAG, "Attached bubble metadata to notification for chat: $chatGuid")
+        } else {
+            Log.d(TAG, "No bubble metadata for notification (chatGuid=$chatGuid)")
         }
 
         // Add copy code action if a verification code was detected

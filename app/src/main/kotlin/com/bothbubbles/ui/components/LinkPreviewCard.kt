@@ -44,6 +44,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -113,6 +114,12 @@ fun LinkPreviewCard(
         Column {
             // Thumbnail image (if available)
             preview.imageUrl?.let { imageUrl ->
+                val imageRequest = remember(imageUrl) {
+                    ImageRequest.Builder(context)
+                        .data(imageUrl)
+                        .crossfade(true)
+                        .build()
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -121,10 +128,7 @@ fun LinkPreviewCard(
                     contentAlignment = Alignment.Center
                 ) {
                     AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(imageUrl)
-                            .crossfade(true)
-                            .build(),
+                        model = imageRequest,
                         contentDescription = "Link preview image",
                         modifier = Modifier
                             .fillMaxWidth()
@@ -165,12 +169,15 @@ fun LinkPreviewCard(
                 ) {
                     // Favicon
                     preview.faviconUrl?.let { faviconUrl ->
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
+                        val faviconRequest = remember(faviconUrl) {
+                            ImageRequest.Builder(context)
                                 .data(faviconUrl)
                                 .crossfade(true)
                                 .size(32)
-                                .build(),
+                                .build()
+                        }
+                        AsyncImage(
+                            model = faviconRequest,
                             contentDescription = null,
                             modifier = Modifier
                                 .size(14.dp)
@@ -427,6 +434,12 @@ fun BorderlessLinkPreviewCard(
     ) {
         // Thumbnail image (if available)
         preview.imageUrl?.let { imageUrl ->
+            val imageRequest = remember(imageUrl) {
+                ImageRequest.Builder(context)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build()
+            }
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -434,10 +447,7 @@ fun BorderlessLinkPreviewCard(
                 contentAlignment = Alignment.Center
             ) {
                 AsyncImage(
-                    model = ImageRequest.Builder(context)
-                        .data(imageUrl)
-                        .crossfade(true)
-                        .build(),
+                    model = imageRequest,
                     contentDescription = "Link preview image",
                     modifier = Modifier
                         .fillMaxWidth()
@@ -492,12 +502,15 @@ fun BorderlessLinkPreviewCard(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     preview.faviconUrl?.let { faviconUrl ->
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
+                        val faviconRequest = remember(faviconUrl) {
+                            ImageRequest.Builder(context)
                                 .data(faviconUrl)
                                 .crossfade(true)
                                 .size(32)
-                                .build(),
+                                .build()
+                        }
+                        AsyncImage(
+                            model = faviconRequest,
                             contentDescription = null,
                             modifier = Modifier
                                 .size(14.dp)

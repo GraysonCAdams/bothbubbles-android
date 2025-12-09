@@ -111,6 +111,9 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
 
+    // HEIC/AVIF decoding with alpha support
+    implementation(libs.avif.coder)
+
     // CameraX
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)

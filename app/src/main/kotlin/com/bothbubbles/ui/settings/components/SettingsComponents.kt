@@ -1,5 +1,9 @@
 package com.bothbubbles.ui.settings.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -9,14 +13,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.services.socket.ConnectionState
+import kotlinx.coroutines.delay
 
 // Google Messages-style status colors
 private val ConnectedGreen = Color(0xFF34A853)
@@ -103,14 +114,42 @@ fun ProfileHeader(
 /**
  * Card container for settings items matching Google Messages design.
  * Uses 28dp corner radius to match Google's design language.
+ * Includes staggered entrance animation.
  */
 @Composable
 fun SettingsCard(
     modifier: Modifier = Modifier,
+    index: Int = 0,  // For staggered animation
     content: @Composable ColumnScope.() -> Unit
 ) {
+    // Staggered entrance animation
+    var appeared by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        delay(index * 30L)  // 30ms stagger
+        appeared = true
+    }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (appeared) 1f else 0f,
+        animationSpec = tween(150),
+        label = "cardAlpha"
+    )
+    val translationY by animateFloatAsState(
+        targetValue = if (appeared) 0f else 16f,
+        animationSpec = spring(
+            dampingRatio = 0.8f,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "cardTranslation"
+    )
+
     Card(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                this.alpha = alpha
+                this.translationY = translationY
+            },
         shape = RoundedCornerShape(28.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow

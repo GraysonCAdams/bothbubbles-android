@@ -98,3 +98,16 @@ data class RegisterDeviceRequest(
     @Json(name = "name") val name: String,
     @Json(name = "identifier") val identifier: String
 )
+
+/**
+ * Message query request - for fetching messages across all chats
+ */
+@JsonClass(generateAdapter = true)
+data class MessageQueryRequest(
+    @Json(name = "with") val with: List<String> = listOf("chat", "attachment", "handle", "attributedBody", "messageSummaryInfo"),
+    @Json(name = "offset") val offset: Int = 0,
+    @Json(name = "limit") val limit: Int = 100,
+    @Json(name = "sort") val sort: String = "DESC",
+    @Json(name = "after") val after: Long? = null,
+    @Json(name = "before") val before: Long? = null
+)

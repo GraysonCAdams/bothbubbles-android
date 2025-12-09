@@ -3,10 +3,11 @@ package com.bothbubbles.services.developer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import java.text.SimpleDateFormat
+import java.util.ArrayDeque
 import java.util.Date
 import java.util.Locale
+import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -22,6 +23,7 @@ enum class EventSource {
  * A logged developer event
  */
 data class DeveloperEvent(
+    val id: Long,
     val timestamp: Long = System.currentTimeMillis(),
     val source: EventSource,
     val eventType: String,
@@ -42,6 +44,9 @@ class DeveloperEventLog @Inject constructor() {
         private const val MAX_EVENTS = 500
     }
 
+    private val eventIdCounter = AtomicLong(0)
+    // Use ArrayDeque for efficient prepend operations (O(1) instead of O(n))
+    private val eventsDeque = ArrayDeque<DeveloperEvent>(MAX_EVENTS)
     private val _events = MutableStateFlow<List<DeveloperEvent>>(emptyList())
     val events: StateFlow<List<DeveloperEvent>> = _events.asStateFlow()
 
@@ -62,6 +67,7 @@ class DeveloperEventLog @Inject constructor() {
     fun logSocketEvent(eventType: String, details: String? = null) {
         if (!_isEnabled.value) return
         addEvent(DeveloperEvent(
+            id = eventIdCounter.incrementAndGet(),
             source = EventSource.SOCKET,
             eventType = eventType,
             details = details
@@ -74,6 +80,7 @@ class DeveloperEventLog @Inject constructor() {
     fun logFcmEvent(eventType: String, details: String? = null) {
         if (!_isEnabled.value) return
         addEvent(DeveloperEvent(
+            id = eventIdCounter.incrementAndGet(),
             source = EventSource.FCM,
             eventType = eventType,
             details = details
@@ -86,22 +93,31 @@ class DeveloperEventLog @Inject constructor() {
     fun logConnectionChange(source: EventSource, state: String, details: String? = null) {
         if (!_isEnabled.value) return
         addEvent(DeveloperEvent(
+            id = eventIdCounter.incrementAndGet(),
             source = source,
             eventType = "CONNECTION: $state",
             details = details
         ))
     }
 
+    @Synchronized
     private fun addEvent(event: DeveloperEvent) {
-        _events.update { currentEvents ->
-            (listOf(event) + currentEvents).take(MAX_EVENTS)
+        // Add to front of deque (O(1) operation)
+        eventsDeque.addFirst(event)
+        // Remove from back if over capacity (O(1) operation)
+        while (eventsDeque.size > MAX_EVENTS) {
+            eventsDeque.removeLast()
         }
+        // Update StateFlow with new list
+        _events.value = eventsDeque.toList()
     }
 
     /**
      * Clear all logged events
      */
+    @Synchronized
     fun clear() {
+        eventsDeque.clear()
         _events.value = emptyList()
     }
 }

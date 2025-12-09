@@ -118,6 +118,11 @@ interface BothBubblesApi {
         @Path("guid") guid: String
     ): Response<ApiResponse<Unit>>
 
+    @POST("api/v1/message/query")
+    suspend fun queryMessages(
+        @Body request: MessageQueryRequest
+    ): Response<ApiResponse<List<MessageDto>>>
+
     // ===== Attachments =====
 
     @GET("api/v1/attachment/{guid}")
@@ -151,7 +156,7 @@ interface BothBubblesApi {
     @GET("api/v1/handle/availability/imessage")
     suspend fun checkIMessageAvailability(
         @Query("address") address: String
-    ): Response<ApiResponse<Boolean>>
+    ): Response<ApiResponse<IMessageAvailabilityResponse>>
 
     // ===== Contacts =====
 

@@ -1,6 +1,8 @@
 package com.bothbubbles.ui.components
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -110,15 +112,25 @@ fun ConnectionStatusBanner(
         is ConnectionBannerState.Dismissed -> false
     }
 
+    // Animated color transition for state changes (snappy Android 16 style)
+    val bannerColor by animateColorAsState(
+        targetValue = when (state) {
+            is ConnectionBannerState.Reconnecting -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHighest
+        },
+        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        label = "bannerColor"
+    )
+
     AnimatedVisibility(
         visible = isVisible,
         enter = slideInVertically(
             initialOffsetY = { it },
-            animationSpec = tween(durationMillis = 300)
+            animationSpec = tween(durationMillis = 200)  // Faster for snappy feel
         ),
         exit = slideOutVertically(
             targetOffsetY = { it },
-            animationSpec = tween(durationMillis = 300)
+            animationSpec = tween(durationMillis = 150)
         ),
         modifier = modifier
     ) {
@@ -127,10 +139,7 @@ fun ConnectionStatusBanner(
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp, vertical = 8.dp),
             shape = RoundedCornerShape(16.dp),
-            color = when (state) {
-                is ConnectionBannerState.Reconnecting -> MaterialTheme.colorScheme.errorContainer
-                else -> MaterialTheme.colorScheme.surfaceContainerHighest
-            },
+            color = bannerColor,
             tonalElevation = 2.dp,
             shadowElevation = 4.dp
         ) {

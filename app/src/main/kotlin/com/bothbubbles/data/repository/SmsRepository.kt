@@ -459,15 +459,17 @@ class SmsRepository @Inject constructor(
     // ===== Message Operations =====
 
     /**
-     * Mark all messages in a thread as read
+     * Mark all messages in a thread as read (both SMS and MMS)
      */
     suspend fun markThreadAsRead(chatGuid: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
             val threadId = getThreadIdForChat(chatGuid)
             if (threadId != null) {
-                smsContentProvider.markThreadAsRead(threadId)
+                smsContentProvider.markThreadAsRead(threadId)  // SMS
+                smsContentProvider.markMmsAsRead(threadId)     // MMS
             }
             chatDao.updateUnreadCount(chatGuid, 0)
+            chatDao.updateUnreadStatus(chatGuid, false)
         }
     }
 

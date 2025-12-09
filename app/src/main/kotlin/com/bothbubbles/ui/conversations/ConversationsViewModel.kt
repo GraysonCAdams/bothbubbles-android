@@ -1526,14 +1526,6 @@ class ConversationsViewModel @Inject constructor(
     }
 
     /**
-     * Toggle the starred (favorite) status of a contact in Android Contacts.
-     * Returns true if the toggle was successful.
-     */
-    fun toggleContactStarred(address: String, starred: Boolean): Boolean {
-        return androidContactsService.setContactStarred(address, starred)
-    }
-
-    /**
      * Dismiss an inferred name for a contact (user indicated it was wrong).
      */
     fun dismissInferredName(address: String) {
