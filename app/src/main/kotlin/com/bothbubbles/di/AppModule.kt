@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
+import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import dagger.Module
 import dagger.Provides
@@ -96,6 +97,12 @@ object AppModule {
     @Singleton
     fun provideUnifiedChatGroupDao(database: BothBubblesDatabase): UnifiedChatGroupDao {
         return database.unifiedChatGroupDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSeenMessageDao(database: BothBubblesDatabase): SeenMessageDao {
+        return database.seenMessageDao()
     }
 
     @Provides

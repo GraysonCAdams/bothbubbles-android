@@ -170,9 +170,9 @@ class SmsSendService @Inject constructor(
             return@withContext false
         }
 
-        // Get address from metadata or chat
+        // Get address from metadata or chat GUID
         val address = retryMetadata.originalAddress
-            ?: message.chatGuid.removePrefix("sms;-;").takeIf { it.isNotBlank() }
+            ?: extractAddressFromChatGuid(message.chatGuid)
             ?: return@withContext false
 
         val text = message.text ?: return@withContext false
@@ -385,6 +385,15 @@ class SmsSendService @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Unable to update SMS provider status", e)
         }
+    }
+
+    /**
+     * Extract phone address from chat GUID
+     * Handles formats: "sms;-;+1234567890", "RCS;-;+1234567890", "iMessage;-;+1234567890"
+     */
+    private fun extractAddressFromChatGuid(chatGuid: String): String? {
+        val parts = chatGuid.split(";-;")
+        return if (parts.size == 2) parts[1].takeIf { it.isNotBlank() } else null
     }
 
     private data class ProviderMessageRef(

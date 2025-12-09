@@ -160,6 +160,14 @@ class SettingsDataStore @Inject constructor(
     }
 
     /**
+     * App version code when SMS re-sync was last performed.
+     * Used to trigger one-time re-sync on app updates to recover historical external SMS.
+     */
+    val lastSmsResyncVersion: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.LAST_SMS_RESYNC_VERSION] ?: 0
+    }
+
+    /**
      * Block messages from unknown senders (numbers not in contacts).
      * When enabled, SMS/MMS from unknown numbers are silently ignored.
      */
@@ -192,11 +200,12 @@ class SettingsDataStore @Inject constructor(
 
     /**
      * Notification provider mode.
-     * - "fcm": Use Firebase Cloud Messaging (default, requires Google Play Services)
+     * - "socket": Use socket connection for real-time events (default - FCM config is for official app only)
+     * - "fcm": Use Firebase Cloud Messaging (requires compatible Firebase config)
      * - "foreground": Use foreground service to keep socket connection alive
      */
     val notificationProvider: Flow<String> = dataStore.data.map { prefs ->
-        prefs[Keys.NOTIFICATION_PROVIDER] ?: "fcm"
+        prefs[Keys.NOTIFICATION_PROVIDER] ?: "socket"
     }
 
     val fcmToken: Flow<String> = dataStore.data.map { prefs ->
@@ -210,6 +219,10 @@ class SettingsDataStore @Inject constructor(
     // Firebase dynamic config (fetched from server)
     val firebaseProjectNumber: Flow<String> = dataStore.data.map { prefs ->
         prefs[Keys.FIREBASE_PROJECT_NUMBER] ?: ""
+    }
+
+    val firebaseProjectId: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_PROJECT_ID] ?: ""
     }
 
     val firebaseAppId: Flow<String> = dataStore.data.map { prefs ->
@@ -245,7 +258,7 @@ class SettingsDataStore @Inject constructor(
     }
 
     val swipeSensitivity: Flow<Float> = dataStore.data.map { prefs ->
-        prefs[Keys.SWIPE_SENSITIVITY] ?: 0.25f
+        prefs[Keys.SWIPE_SENSITIVITY] ?: 0.4f
     }
 
     // ===== Call Settings =====
@@ -440,6 +453,12 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun setLastSmsResyncVersion(versionCode: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LAST_SMS_RESYNC_VERSION] = versionCode
+        }
+    }
+
     suspend fun setBlockUnknownSenders(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.BLOCK_UNKNOWN_SENDERS] = enabled
@@ -484,12 +503,14 @@ class SettingsDataStore @Inject constructor(
 
     suspend fun setFirebaseConfig(
         projectNumber: String,
+        projectId: String,
         appId: String,
         apiKey: String,
         storageBucket: String
     ) {
         dataStore.edit { prefs ->
             prefs[Keys.FIREBASE_PROJECT_NUMBER] = projectNumber
+            prefs[Keys.FIREBASE_PROJECT_ID] = projectId
             prefs[Keys.FIREBASE_APP_ID] = appId
             prefs[Keys.FIREBASE_API_KEY] = apiKey
             prefs[Keys.FIREBASE_STORAGE_BUCKET] = storageBucket
@@ -499,6 +520,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun clearFirebaseConfig() {
         dataStore.edit { prefs ->
             prefs.remove(Keys.FIREBASE_PROJECT_NUMBER)
+            prefs.remove(Keys.FIREBASE_PROJECT_ID)
             prefs.remove(Keys.FIREBASE_APP_ID)
             prefs.remove(Keys.FIREBASE_API_KEY)
             prefs.remove(Keys.FIREBASE_STORAGE_BUCKET)
@@ -599,6 +621,40 @@ class SettingsDataStore @Inject constructor(
     suspend fun setMessageSoundsEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.MESSAGE_SOUNDS_ENABLED] = enabled
+        }
+    }
+
+    // ===== Conversation Filter Settings =====
+
+    /**
+     * Default conversation filter for the conversations list.
+     * Values: "all", "unread", "spam", "unknown_senders", "known_senders"
+     */
+    val conversationFilter: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.CONVERSATION_FILTER] ?: "all"
+    }
+
+    /**
+     * Default category filter for the conversations list.
+     * Values: null (no filter), or MessageCategory name (e.g., "TRANSACTIONS", "DELIVERIES")
+     */
+    val categoryFilter: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.CATEGORY_FILTER]
+    }
+
+    suspend fun setConversationFilter(filter: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.CONVERSATION_FILTER] = filter
+        }
+    }
+
+    suspend fun setCategoryFilter(category: String?) {
+        dataStore.edit { prefs ->
+            if (category != null) {
+                prefs[Keys.CATEGORY_FILTER] = category
+            } else {
+                prefs.remove(Keys.CATEGORY_FILTER)
+            }
         }
     }
 
@@ -754,6 +810,117 @@ class SettingsDataStore @Inject constructor(
         dataStore.edit { it.clear() }
     }
 
+    // ===== Developer Mode =====
+
+    val developerModeEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DEVELOPER_MODE_ENABLED] ?: false
+    }
+
+    suspend fun setDeveloperModeEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DEVELOPER_MODE_ENABLED] = enabled
+        }
+    }
+
+    // ===== State Restoration =====
+
+    val lastOpenChatGuid: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.LAST_OPEN_CHAT_GUID]
+    }
+
+    val lastOpenChatMergedGuids: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.LAST_OPEN_CHAT_MERGED_GUIDS]
+    }
+
+    val lastScrollPosition: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.LAST_SCROLL_POSITION] ?: 0
+    }
+
+    val lastScrollOffset: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.LAST_SCROLL_OFFSET] ?: 0
+    }
+
+    val appLaunchTimestamps: Flow<List<Long>> = dataStore.data.map { prefs ->
+        (prefs[Keys.APP_LAUNCH_TIMESTAMPS] ?: "")
+            .split(",")
+            .filter { it.isNotEmpty() }
+            .mapNotNull { it.toLongOrNull() }
+    }
+
+    suspend fun setLastOpenChat(chatGuid: String?, mergedGuids: String?) {
+        dataStore.edit { prefs ->
+            if (chatGuid != null) {
+                prefs[Keys.LAST_OPEN_CHAT_GUID] = chatGuid
+                if (mergedGuids != null) {
+                    prefs[Keys.LAST_OPEN_CHAT_MERGED_GUIDS] = mergedGuids
+                } else {
+                    prefs.remove(Keys.LAST_OPEN_CHAT_MERGED_GUIDS)
+                }
+            } else {
+                prefs.remove(Keys.LAST_OPEN_CHAT_GUID)
+                prefs.remove(Keys.LAST_OPEN_CHAT_MERGED_GUIDS)
+            }
+        }
+    }
+
+    suspend fun setLastScrollPosition(position: Int, offset: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LAST_SCROLL_POSITION] = position
+            prefs[Keys.LAST_SCROLL_OFFSET] = offset
+        }
+    }
+
+    suspend fun clearLastOpenChat() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.LAST_OPEN_CHAT_GUID)
+            prefs.remove(Keys.LAST_OPEN_CHAT_MERGED_GUIDS)
+            prefs.remove(Keys.LAST_SCROLL_POSITION)
+            prefs.remove(Keys.LAST_SCROLL_OFFSET)
+        }
+    }
+
+    /**
+     * Record an app launch timestamp and check if we should skip state restoration
+     * due to repeated crashes (2+ launches within 1 minute).
+     * Returns true if state restoration should be skipped.
+     */
+    suspend fun recordLaunchAndCheckCrashProtection(): Boolean {
+        val currentTime = System.currentTimeMillis()
+        val oneMinuteAgo = currentTime - 60_000L
+
+        var shouldSkipRestore = false
+
+        dataStore.edit { prefs ->
+            val existingTimestamps = (prefs[Keys.APP_LAUNCH_TIMESTAMPS] ?: "")
+                .split(",")
+                .filter { it.isNotEmpty() }
+                .mapNotNull { it.toLongOrNull() }
+                .filter { it > oneMinuteAgo } // Only keep timestamps within the last minute
+
+            // If there are already 1+ launches in the last minute, this makes 2+
+            shouldSkipRestore = existingTimestamps.isNotEmpty()
+
+            // Add current timestamp and keep only recent ones
+            val newTimestamps = (existingTimestamps + currentTime)
+                .filter { it > oneMinuteAgo }
+                .takeLast(5) // Keep max 5 timestamps
+
+            prefs[Keys.APP_LAUNCH_TIMESTAMPS] = newTimestamps.joinToString(",")
+        }
+
+        return shouldSkipRestore
+    }
+
+    /**
+     * Clear launch timestamps after successful app use (e.g., after being open for a while).
+     * Call this to reset crash protection after the app has been stable.
+     */
+    suspend fun clearLaunchTimestamps() {
+        dataStore.edit { prefs ->
+            prefs.remove(Keys.APP_LAUNCH_TIMESTAMPS)
+        }
+    }
+
     // ===== Helpers =====
 
     private fun parseHeaders(headersString: String): Map<String, String> {
@@ -806,6 +973,7 @@ class SettingsDataStore @Inject constructor(
         val SELECTED_SIM_SLOT = intPreferencesKey("selected_sim_slot")
         val HAS_COMPLETED_INITIAL_SMS_IMPORT = booleanPreferencesKey("has_completed_initial_sms_import")
         val BLOCK_UNKNOWN_SENDERS = booleanPreferencesKey("block_unknown_senders")
+        val LAST_SMS_RESYNC_VERSION = intPreferencesKey("last_sms_resync_version")
 
         // Notifications
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
@@ -817,6 +985,7 @@ class SettingsDataStore @Inject constructor(
         val FCM_TOKEN = stringPreferencesKey("fcm_token")
         val FCM_TOKEN_REGISTERED = booleanPreferencesKey("fcm_token_registered")
         val FIREBASE_PROJECT_NUMBER = stringPreferencesKey("firebase_project_number")
+        val FIREBASE_PROJECT_ID = stringPreferencesKey("firebase_project_id")
         val FIREBASE_APP_ID = stringPreferencesKey("firebase_app_id")
         val FIREBASE_API_KEY = stringPreferencesKey("firebase_api_key")
         val FIREBASE_STORAGE_BUCKET = stringPreferencesKey("firebase_storage_bucket")
@@ -846,6 +1015,10 @@ class SettingsDataStore @Inject constructor(
         // Sound Settings
         val MESSAGE_SOUNDS_ENABLED = booleanPreferencesKey("message_sounds_enabled")
 
+        // Conversation Filter Settings
+        val CONVERSATION_FILTER = stringPreferencesKey("conversation_filter")
+        val CATEGORY_FILTER = stringPreferencesKey("category_filter")
+
         // Spam Settings
         val SPAM_DETECTION_ENABLED = booleanPreferencesKey("spam_detection_enabled")
         val SPAM_THRESHOLD = intPreferencesKey("spam_threshold")
@@ -863,5 +1036,15 @@ class SettingsDataStore @Inject constructor(
         val INITIAL_SYNC_COMPLETE = booleanPreferencesKey("initial_sync_complete")
         val SYNCED_CHAT_GUIDS = stringPreferencesKey("synced_chat_guids")
         val INITIAL_SYNC_MESSAGES_PER_CHAT = intPreferencesKey("initial_sync_messages_per_chat")
+
+        // State Restoration
+        val LAST_OPEN_CHAT_GUID = stringPreferencesKey("last_open_chat_guid")
+        val LAST_OPEN_CHAT_MERGED_GUIDS = stringPreferencesKey("last_open_chat_merged_guids")
+        val LAST_SCROLL_POSITION = intPreferencesKey("last_scroll_position")
+        val LAST_SCROLL_OFFSET = intPreferencesKey("last_scroll_offset")
+        val APP_LAUNCH_TIMESTAMPS = stringPreferencesKey("app_launch_timestamps")
+
+        // Developer Mode
+        val DEVELOPER_MODE_ENABLED = booleanPreferencesKey("developer_mode_enabled")
     }
 }

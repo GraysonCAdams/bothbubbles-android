@@ -50,6 +50,8 @@ data class SmsMessage(
     val isPending: Boolean get() = type == Telephony.Sms.MESSAGE_TYPE_OUTBOX ||
             type == Telephony.Sms.MESSAGE_TYPE_QUEUED ||
             status == Telephony.Sms.STATUS_PENDING
+
+    val isDraft: Boolean get() = type == Telephony.Sms.MESSAGE_TYPE_DRAFT
 }
 
 /**
@@ -60,7 +62,7 @@ data class MmsMessage(
     val threadId: Long,
     val date: Long,
     val dateSent: Long,
-    val messageBox: Int, // 1=inbox, 2=sent
+    val messageBox: Int, // 1=inbox, 2=sent, 3=drafts, 4=outbox
     val isRead: Boolean,
     val subject: String?,
     val textParts: List<String>,
@@ -69,6 +71,8 @@ data class MmsMessage(
 ) {
     val isFromMe: Boolean get() = messageBox == Telephony.Mms.MESSAGE_BOX_SENT ||
             messageBox == Telephony.Mms.MESSAGE_BOX_OUTBOX
+
+    val isDraft: Boolean get() = messageBox == Telephony.Mms.MESSAGE_BOX_DRAFTS
 }
 
 data class MmsAttachment(
@@ -448,6 +452,7 @@ class SmsContentProvider @Inject constructor(
             smsId = id,
             smsThreadId = threadId,
             smsStatus = when {
+                isDraft -> "draft"
                 isFailed -> "failed"
                 isPending -> "pending"
                 else -> "complete"
@@ -470,7 +475,8 @@ class SmsContentProvider @Inject constructor(
             hasAttachments = imageParts.isNotEmpty(),
             messageSource = MessageSource.LOCAL_MMS.name,
             smsId = id,
-            smsThreadId = threadId
+            smsThreadId = threadId,
+            smsStatus = if (isDraft) "draft" else "complete"
         )
     }
 

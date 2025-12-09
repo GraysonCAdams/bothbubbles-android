@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
+import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -20,6 +21,7 @@ import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
+import com.bothbubbles.data.local.db.entity.SeenMessageEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 
@@ -55,9 +57,10 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         QuickReplyTemplateEntity::class,
         ScheduledMessageEntity::class,
         UnifiedChatGroupEntity::class,
-        UnifiedChatMember::class
+        UnifiedChatMember::class,
+        SeenMessageEntity::class
     ],
-    version = 16,
+    version = 19,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -70,6 +73,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun quickReplyTemplateDao(): QuickReplyTemplateDao
     abstract fun scheduledMessageDao(): ScheduledMessageDao
     abstract fun unifiedChatGroupDao(): UnifiedChatGroupDao
+    abstract fun seenMessageDao(): SeenMessageDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"
@@ -405,6 +409,53 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 16 to 17: Add sender_address column to messages table.
+         * This stores the actual phone number/email of the sender for group chat messages,
+         * enabling proper sender identification when handle IDs use internal identifiers.
+         */
+        val MIGRATION_16_17 = object : Migration(16, 17) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE messages ADD COLUMN sender_address TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Migration from version 17 to 18: Fix message_source for SMS messages.
+         * Messages in SMS chats (chat_guid starting with 'sms;-;') were incorrectly
+         * labeled as IMESSAGE. This updates them to SERVER_SMS.
+         */
+        val MIGRATION_17_18 = object : Migration(17, 18) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Fix messages in SMS chats that were incorrectly labeled as IMESSAGE
+                db.execSQL("""
+                    UPDATE messages
+                    SET message_source = 'SERVER_SMS'
+                    WHERE chat_guid LIKE 'sms;-;%'
+                    AND message_source = 'IMESSAGE'
+                """.trimIndent())
+            }
+        }
+
+        /**
+         * Migration from version 18 to 19: Add seen_messages table for persistent
+         * message deduplication. This prevents duplicate notifications across app restarts
+         * when the same message arrives via both FCM and Socket.IO.
+         */
+        val MIGRATION_18_19 = object : Migration(18, 19) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS seen_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        message_guid TEXT NOT NULL,
+                        seen_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_seen_messages_message_guid ON seen_messages(message_guid)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_seen_messages_seen_at ON seen_messages(seen_at)")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -425,7 +476,10 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_12_13,
             MIGRATION_13_14,
             MIGRATION_14_15,
-            MIGRATION_15_16
+            MIGRATION_15_16,
+            MIGRATION_16_17,
+            MIGRATION_17_18,
+            MIGRATION_18_19
         )
     }
 }

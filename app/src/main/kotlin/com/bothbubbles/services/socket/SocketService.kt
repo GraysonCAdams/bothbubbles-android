@@ -3,6 +3,7 @@ package com.bothbubbles.services.socket
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.sound.SoundManager
 import com.squareup.moshi.Moshi
 import io.socket.client.IO
@@ -21,11 +22,15 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import okhttp3.OkHttpClient
 import org.json.JSONObject
 import dagger.Lazy
 import java.net.URI
+import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
+import javax.net.ssl.SSLContext
+import javax.net.ssl.X509TrustManager
 
 /**
  * Socket.IO connection states
@@ -50,19 +55,37 @@ sealed class SocketEvent {
     data class NewMessage(val message: MessageDto, val chatGuid: String) : SocketEvent()
     data class MessageUpdated(val message: MessageDto, val chatGuid: String) : SocketEvent()
     data class MessageDeleted(val messageGuid: String, val chatGuid: String) : SocketEvent()
+    /** Server-side message send failure (faster than waiting for REST response) */
+    data class MessageSendError(val tempGuid: String, val errorMessage: String) : SocketEvent()
     data class TypingIndicator(val chatGuid: String, val isTyping: Boolean) : SocketEvent()
     data class ChatRead(val chatGuid: String) : SocketEvent()
     data class ParticipantAdded(val chatGuid: String, val handleAddress: String) : SocketEvent()
     data class ParticipantRemoved(val chatGuid: String, val handleAddress: String) : SocketEvent()
+    /** User voluntarily left group (distinct from being removed) */
+    data class ParticipantLeft(val chatGuid: String, val handleAddress: String) : SocketEvent()
     data class GroupNameChanged(val chatGuid: String, val newName: String) : SocketEvent()
     data class GroupIconChanged(val chatGuid: String) : SocketEvent()
+    /** Group icon was removed (distinct from changed) */
+    data class GroupIconRemoved(val chatGuid: String) : SocketEvent()
     data class ServerUpdate(val version: String) : SocketEvent()
+    /** iCloud account status change (logged in/out) */
+    data class ICloudAccountStatus(val alias: String?, val active: Boolean) : SocketEvent()
+    /** Standard FaceTime incoming call (non-Private API mode) */
+    data class IncomingFaceTime(val caller: String, val timestamp: Long) : SocketEvent()
+    /** Advanced FaceTime call status (Private API mode) */
     data class FaceTimeCall(
         val callUuid: String,
         val callerName: String?,
         val callerAddress: String?,
         val status: FaceTimeCallStatus
     ) : SocketEvent()
+
+    // Server-side scheduled message events
+    data class ScheduledMessageCreated(val messageId: Long, val chatGuid: String, val text: String?, val scheduledAt: Long) : SocketEvent()
+    data class ScheduledMessageSent(val messageId: Long, val chatGuid: String, val sentMessageGuid: String?) : SocketEvent()
+    data class ScheduledMessageError(val messageId: Long, val chatGuid: String, val errorMessage: String) : SocketEvent()
+    data class ScheduledMessageDeleted(val messageId: Long, val chatGuid: String) : SocketEvent()
+
     data class Error(val message: String) : SocketEvent()
 }
 
@@ -81,7 +104,9 @@ enum class FaceTimeCallStatus {
 class SocketService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val moshi: Moshi,
-    private val soundManager: Lazy<SoundManager>
+    private val soundManager: Lazy<SoundManager>,
+    private val okHttpClient: OkHttpClient,
+    private val developerEventLog: Lazy<DeveloperEventLog>
 ) {
     companion object {
         private const val TAG = "SocketService"
@@ -90,14 +115,25 @@ class SocketService @Inject constructor(
         private const val EVENT_NEW_MESSAGE = "new-message"
         private const val EVENT_MESSAGE_UPDATED = "updated-message"
         private const val EVENT_MESSAGE_DELETED = "message-deleted"
+        private const val EVENT_MESSAGE_SEND_ERROR = "message-send-error"
         private const val EVENT_TYPING_INDICATOR = "typing-indicator"
         private const val EVENT_CHAT_READ = "chat-read-status-changed"
         private const val EVENT_PARTICIPANT_ADDED = "participant-added"
         private const val EVENT_PARTICIPANT_REMOVED = "participant-removed"
+        private const val EVENT_PARTICIPANT_LEFT = "participant-left"
         private const val EVENT_GROUP_NAME_CHANGED = "group-name-change"
         private const val EVENT_GROUP_ICON_CHANGED = "group-icon-changed"
+        private const val EVENT_GROUP_ICON_REMOVED = "group-icon-removed"
         private const val EVENT_SERVER_UPDATE = "server-update"
+        private const val EVENT_INCOMING_FACETIME = "incoming-facetime"
         private const val EVENT_FACETIME_CALL = "ft-call-status-changed"
+        private const val EVENT_ICLOUD_ACCOUNT = "icloud-account"
+
+        // Server-side scheduled message events
+        private const val EVENT_SCHEDULED_MESSAGE_CREATED = "scheduled-message-created"
+        private const val EVENT_SCHEDULED_MESSAGE_SENT = "scheduled-message-sent"
+        private const val EVENT_SCHEDULED_MESSAGE_ERROR = "scheduled-message-error"
+        private const val EVENT_SCHEDULED_MESSAGE_DELETED = "scheduled-message-deleted"
 
         // Retry configuration
         private const val INITIAL_RETRY_DELAY_MS = 1000L
@@ -134,12 +170,23 @@ class SocketService @Inject constructor(
         return serverAddress.isNotBlank() && password.isNotBlank()
     }
 
+    // Track if we're currently connecting to prevent duplicate attempts
+    private var isConnecting = false
+
     /**
      * Connect to the BlueBubbles server
      */
     fun connect() {
+        Log.i(TAG, "connect() called - attempting to connect to server")
+
         if (socket?.connected() == true) {
             Log.d(TAG, "Already connected")
+            return
+        }
+
+        // Prevent duplicate connection attempts
+        if (isConnecting) {
+            Log.d(TAG, "Connection already in progress, skipping duplicate attempt")
             return
         }
 
@@ -148,6 +195,7 @@ class SocketService @Inject constructor(
 
         scope.launch {
             try {
+                isConnecting = true
                 _connectionState.value = ConnectionState.CONNECTING
 
                 val serverAddress = settingsDataStore.serverAddress.first()
@@ -159,6 +207,14 @@ class SocketService @Inject constructor(
                     return@launch
                 }
 
+                // Log sanitized server address (hide credentials/full URL for security)
+                val uri = URI.create(serverAddress)
+                Log.i(TAG, "Connecting to server: ${uri.scheme}://${uri.host}:${uri.port}")
+                Log.d(TAG, "Password length: ${password.length}, first 4 chars: ${password.take(4)}...")
+
+                // URL-encode the password for use in query string
+                val encodedPassword = URLEncoder.encode(password, "UTF-8")
+
                 val options = IO.Options().apply {
                     forceNew = true
                     reconnection = true
@@ -166,32 +222,64 @@ class SocketService @Inject constructor(
                     reconnectionDelay = 1000
                     reconnectionDelayMax = 5000
                     timeout = 20000
-                    query = "guid=$password"
+                    // Pass authentication via query string (like official BlueBubbles app)
+                    query = "guid=$encodedPassword"
                     transports = arrayOf("websocket", "polling")
+                    // Use our OkHttpClient which trusts self-signed certificates
+                    // Note: AuthInterceptor may add guid again - we need to fix that
+                    callFactory = okHttpClient
+                    webSocketFactory = okHttpClient
                 }
+
+                Log.d(TAG, "Creating socket with options: transports=${options.transports?.joinToString()}, timeout=${options.timeout}")
 
                 socket = IO.socket(URI.create(serverAddress), options).apply {
                     on(Socket.EVENT_CONNECT, onConnect)
                     on(Socket.EVENT_DISCONNECT, onDisconnect)
                     on(Socket.EVENT_CONNECT_ERROR, onConnectError)
 
+                    // Debug: Log ALL incoming events to see what the server sends
+                    onAnyIncoming { args: Array<Any?> ->
+                        val eventName = args.getOrNull(0)?.toString() ?: "unknown"
+                        Log.i(TAG, ">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
+                        args.drop(1).forEachIndexed { index: Int, arg: Any? ->
+                            val preview = arg?.toString()?.take(200) ?: "null"
+                            Log.d(TAG, "    arg[$index]: $preview")
+                        }
+                    }
+
                     // BlueBubbles events
                     on(EVENT_NEW_MESSAGE, onNewMessage)
                     on(EVENT_MESSAGE_UPDATED, onMessageUpdated)
                     on(EVENT_MESSAGE_DELETED, onMessageDeleted)
+                    on(EVENT_MESSAGE_SEND_ERROR, onMessageSendError)
                     on(EVENT_TYPING_INDICATOR, onTypingIndicator)
                     on(EVENT_CHAT_READ, onChatRead)
                     on(EVENT_PARTICIPANT_ADDED, onParticipantAdded)
                     on(EVENT_PARTICIPANT_REMOVED, onParticipantRemoved)
+                    on(EVENT_PARTICIPANT_LEFT, onParticipantLeft)
                     on(EVENT_GROUP_NAME_CHANGED, onGroupNameChanged)
                     on(EVENT_GROUP_ICON_CHANGED, onGroupIconChanged)
+                    on(EVENT_GROUP_ICON_REMOVED, onGroupIconRemoved)
                     on(EVENT_SERVER_UPDATE, onServerUpdate)
+                    on(EVENT_INCOMING_FACETIME, onIncomingFaceTime)
                     on(EVENT_FACETIME_CALL, onFaceTimeCall)
+                    on(EVENT_ICLOUD_ACCOUNT, onICloudAccountStatus)
 
+                    // Server-side scheduled message events
+                    on(EVENT_SCHEDULED_MESSAGE_CREATED, onScheduledMessageCreated)
+                    on(EVENT_SCHEDULED_MESSAGE_SENT, onScheduledMessageSent)
+                    on(EVENT_SCHEDULED_MESSAGE_ERROR, onScheduledMessageError)
+                    on(EVENT_SCHEDULED_MESSAGE_DELETED, onScheduledMessageDeleted)
+
+                    Log.i(TAG, "Socket created, calling connect()...")
                     connect()
+                    Log.d(TAG, "Socket.connect() called, waiting for connection events...")
                 }
+                // Note: isConnecting will be reset by onConnect or onConnectError handlers
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to connect", e)
+                isConnecting = false
                 _connectionState.value = ConnectionState.ERROR
                 _events.tryEmit(SocketEvent.Error(e.message ?: "Connection failed"))
                 scheduleRetry()
@@ -309,13 +397,17 @@ class SocketService @Inject constructor(
 
     private val onConnect = Emitter.Listener {
         Log.d(TAG, "Connected to server")
+        isConnecting = false
         resetRetryState()
         _connectionState.value = ConnectionState.CONNECTED
+        developerEventLog.get().logSocketEvent("CONNECTED", "Real-time connection established")
     }
 
     private val onDisconnect = Emitter.Listener { args ->
         Log.d(TAG, "Disconnected from server: ${args.firstOrNull()}")
+        isConnecting = false
         _connectionState.value = ConnectionState.DISCONNECTED
+        developerEventLog.get().logSocketEvent("DISCONNECTED", args.firstOrNull()?.toString())
         // Schedule retry on unexpected disconnect
         scheduleRetry()
     }
@@ -323,27 +415,39 @@ class SocketService @Inject constructor(
     private val onConnectError = Emitter.Listener { args ->
         val error = args.firstOrNull()
         Log.e(TAG, "Connection error: $error")
+        isConnecting = false
         _connectionState.value = ConnectionState.ERROR
         _events.tryEmit(SocketEvent.Error(error?.toString() ?: "Connection error"))
+        developerEventLog.get().logSocketEvent("ERROR", error?.toString())
         // Schedule retry on connection error
         scheduleRetry()
     }
 
     private val onNewMessage = Emitter.Listener { args ->
         try {
-            val data = args.firstOrNull() as? JSONObject ?: return@Listener
-            val messageJson = data.optJSONObject("message") ?: return@Listener
-            val chatGuid = data.optString("chatGuid", "")
+            val data = args.firstOrNull() as? JSONObject ?: run {
+                Log.w(TAG, "new-message: first arg is not JSONObject: ${args.firstOrNull()?.javaClass?.name}")
+                return@Listener
+            }
 
-            val message = messageAdapter.fromJson(messageJson.toString())
-            if (message != null) {
-                Log.d(TAG, "New message received: ${message.guid}")
-                _events.tryEmit(SocketEvent.NewMessage(message, chatGuid))
+            // Server sends message directly, not wrapped in {"message": {...}}
+            // The message itself contains a "chats" array with the chat info
+            val message = messageAdapter.fromJson(data.toString())
+            if (message == null) {
+                Log.w(TAG, "new-message: Failed to parse message from: ${data.toString().take(200)}")
+                return@Listener
+            }
 
-                // Play receive sound for messages from others (not from me)
-                if (message.isFromMe != true) {
-                    soundManager.get().playReceiveSound()
-                }
+            // Get chatGuid from the message's chats array
+            val chatGuid = message.chats?.firstOrNull()?.guid ?: ""
+
+            Log.d(TAG, "New message received: ${message.guid} for chat: $chatGuid")
+            _events.tryEmit(SocketEvent.NewMessage(message, chatGuid))
+            developerEventLog.get().logSocketEvent("new-message", "guid: ${message.guid?.take(20)}...")
+
+            // Play receive sound for messages from others (not from me)
+            if (message.isFromMe != true) {
+                soundManager.get().playReceiveSound()
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing new message", e)
@@ -353,11 +457,11 @@ class SocketService @Inject constructor(
     private val onMessageUpdated = Emitter.Listener { args ->
         try {
             val data = args.firstOrNull() as? JSONObject ?: return@Listener
-            val messageJson = data.optJSONObject("message") ?: return@Listener
-            val chatGuid = data.optString("chatGuid", "")
 
-            val message = messageAdapter.fromJson(messageJson.toString())
+            // Server sends message directly, not wrapped
+            val message = messageAdapter.fromJson(data.toString())
             if (message != null) {
+                val chatGuid = message.chats?.firstOrNull()?.guid ?: ""
                 Log.d(TAG, "Message updated: ${message.guid}")
                 _events.tryEmit(SocketEvent.MessageUpdated(message, chatGuid))
             }
@@ -378,6 +482,21 @@ class SocketService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing message deletion", e)
+        }
+    }
+
+    private val onMessageSendError = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val tempGuid = data.optString("tempGuid", data.optString("guid", ""))
+            val errorMessage = data.optString("error", data.optString("message", "Send failed"))
+
+            if (tempGuid.isNotBlank()) {
+                Log.e(TAG, "Message send error: $tempGuid - $errorMessage")
+                _events.tryEmit(SocketEvent.MessageSendError(tempGuid, errorMessage))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing message send error", e)
         }
     }
 
@@ -436,6 +555,21 @@ class SocketService @Inject constructor(
         }
     }
 
+    private val onParticipantLeft = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val chatGuid = data.optString("chatGuid", "")
+            val handleAddress = data.optString("handle", "")
+
+            if (chatGuid.isNotBlank() && handleAddress.isNotBlank()) {
+                Log.d(TAG, "Participant left: $handleAddress from $chatGuid")
+                _events.tryEmit(SocketEvent.ParticipantLeft(chatGuid, handleAddress))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing participant left", e)
+        }
+    }
+
     private val onGroupNameChanged = Emitter.Listener { args ->
         try {
             val data = args.firstOrNull() as? JSONObject ?: return@Listener
@@ -463,6 +597,20 @@ class SocketService @Inject constructor(
         }
     }
 
+    private val onGroupIconRemoved = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val chatGuid = data.optString("chatGuid", "")
+
+            if (chatGuid.isNotBlank()) {
+                Log.d(TAG, "Group icon removed: $chatGuid")
+                _events.tryEmit(SocketEvent.GroupIconRemoved(chatGuid))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing group icon removed", e)
+        }
+    }
+
     private val onServerUpdate = Emitter.Listener { args ->
         try {
             val data = args.firstOrNull() as? JSONObject ?: return@Listener
@@ -473,6 +621,21 @@ class SocketService @Inject constructor(
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing server update", e)
+        }
+    }
+
+    private val onIncomingFaceTime = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val caller = data.optString("caller", data.optString("handle", ""))
+            val timestamp = data.optLong("timestamp", System.currentTimeMillis())
+
+            if (caller.isNotBlank()) {
+                Log.d(TAG, "Incoming FaceTime from: $caller")
+                _events.tryEmit(SocketEvent.IncomingFaceTime(caller, timestamp))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing incoming FaceTime", e)
         }
     }
 
@@ -499,5 +662,123 @@ class SocketService @Inject constructor(
         } catch (e: Exception) {
             Log.e(TAG, "Error parsing FaceTime call event", e)
         }
+    }
+
+    private val onICloudAccountStatus = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val alias = data.optString("alias", null)
+            val active = data.optBoolean("active", true)
+
+            Log.i(TAG, "iCloud account status: alias=$alias, active=$active")
+            _events.tryEmit(SocketEvent.ICloudAccountStatus(alias, active))
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing iCloud account status", e)
+        }
+    }
+
+    // ===== Server-side Scheduled Message Events =====
+
+    private val onScheduledMessageCreated = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val messageId = data.optLong("id", -1)
+            val chatGuid = data.optString("chatGuid", "")
+            val text = data.optString("text", null)
+            val scheduledAt = data.optLong("scheduledFor", 0)
+
+            if (messageId >= 0 && chatGuid.isNotBlank()) {
+                Log.d(TAG, "Scheduled message created: $messageId for chat $chatGuid at $scheduledAt")
+                _events.tryEmit(SocketEvent.ScheduledMessageCreated(messageId, chatGuid, text, scheduledAt))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing scheduled message created", e)
+        }
+    }
+
+    private val onScheduledMessageSent = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val messageId = data.optLong("id", -1)
+            val chatGuid = data.optString("chatGuid", "")
+            val sentMessageGuid = data.optString("messageGuid", null)
+
+            if (messageId >= 0) {
+                Log.d(TAG, "Scheduled message sent: $messageId -> $sentMessageGuid")
+                _events.tryEmit(SocketEvent.ScheduledMessageSent(messageId, chatGuid, sentMessageGuid))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing scheduled message sent", e)
+        }
+    }
+
+    private val onScheduledMessageError = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val messageId = data.optLong("id", -1)
+            val chatGuid = data.optString("chatGuid", "")
+            val errorMessage = data.optString("error", "Unknown error")
+
+            if (messageId >= 0) {
+                Log.e(TAG, "Scheduled message error: $messageId - $errorMessage")
+                _events.tryEmit(SocketEvent.ScheduledMessageError(messageId, chatGuid, errorMessage))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing scheduled message error", e)
+        }
+    }
+
+    private val onScheduledMessageDeleted = Emitter.Listener { args ->
+        try {
+            val data = args.firstOrNull() as? JSONObject ?: return@Listener
+            val messageId = data.optLong("id", -1)
+            val chatGuid = data.optString("chatGuid", "")
+
+            if (messageId >= 0) {
+                Log.d(TAG, "Scheduled message deleted: $messageId")
+                _events.tryEmit(SocketEvent.ScheduledMessageDeleted(messageId, chatGuid))
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error parsing scheduled message deleted", e)
+        }
+    }
+
+    // ===== Outbound Events =====
+
+    /**
+     * Notify server that user opened a conversation.
+     * This tells the server which chat is currently active, allowing it to
+     * optimize notifications (e.g., skip push for active chat).
+     */
+    fun sendOpenChat(chatGuid: String) {
+        if (!isConnected()) {
+            Log.d(TAG, "Cannot send open-chat: not connected")
+            return
+        }
+
+        val payload = JSONObject().apply {
+            put("chatGuid", chatGuid)
+        }
+
+        socket?.emit("open-chat", payload)
+        Log.d(TAG, "Sent open-chat for: $chatGuid")
+    }
+
+    /**
+     * Notify server that user closed the conversation.
+     * Call this when navigating away from the chat screen.
+     */
+    fun sendCloseChat(chatGuid: String) {
+        if (!isConnected()) {
+            Log.d(TAG, "Cannot send close-chat: not connected")
+            return
+        }
+
+        val payload = JSONObject().apply {
+            put("chatGuid", chatGuid)
+        }
+
+        socket?.emit("close-chat", payload)
+        Log.d(TAG, "Sent close-chat for: $chatGuid")
     }
 }

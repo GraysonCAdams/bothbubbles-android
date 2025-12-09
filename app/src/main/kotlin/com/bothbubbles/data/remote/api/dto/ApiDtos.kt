@@ -133,14 +133,77 @@ data class ContactDto(
 )
 
 /**
- * FCM Client DTO
+ * FCM Client DTO - matches the raw google-services.json structure returned by the server
  */
 @JsonClass(generateAdapter = true)
 data class FcmClientDto(
-    @Json(name = "projectNumber") val projectNumber: String? = null,
-    @Json(name = "appId") val appId: String? = null,
-    @Json(name = "apiKey") val apiKey: String? = null,
-    @Json(name = "storageBucket") val storageBucket: String? = null
+    @Json(name = "project_info") val projectInfo: FcmProjectInfo? = null,
+    @Json(name = "client") val clients: List<FcmClientEntry>? = null
+) {
+    /**
+     * Get the Firebase config for a specific package name.
+     * Returns null if the package is not found in the clients list.
+     */
+    fun getConfigForPackage(packageName: String): FcmAppConfig? {
+        val projectNumber = projectInfo?.projectNumber ?: return null
+        val projectId = projectInfo.projectId ?: return null
+        val storageBucket = projectInfo.storageBucket ?: ""
+
+        val client = clients?.find {
+            it.clientInfo?.androidClientInfo?.packageName == packageName
+        } ?: return null
+
+        val appId = client.clientInfo?.mobileSdkAppId ?: return null
+        val apiKey = client.apiKey?.firstOrNull()?.currentKey ?: return null
+
+        return FcmAppConfig(
+            projectNumber = projectNumber,
+            projectId = projectId,
+            appId = appId,
+            apiKey = apiKey,
+            storageBucket = storageBucket
+        )
+    }
+}
+
+@JsonClass(generateAdapter = true)
+data class FcmProjectInfo(
+    @Json(name = "project_number") val projectNumber: String? = null,
+    @Json(name = "project_id") val projectId: String? = null,
+    @Json(name = "storage_bucket") val storageBucket: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FcmClientEntry(
+    @Json(name = "client_info") val clientInfo: FcmClientInfo? = null,
+    @Json(name = "api_key") val apiKey: List<FcmApiKey>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FcmClientInfo(
+    @Json(name = "mobilesdk_app_id") val mobileSdkAppId: String? = null,
+    @Json(name = "android_client_info") val androidClientInfo: FcmAndroidClientInfo? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FcmAndroidClientInfo(
+    @Json(name = "package_name") val packageName: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class FcmApiKey(
+    @Json(name = "current_key") val currentKey: String? = null
+)
+
+/**
+ * Parsed FCM config for a specific app
+ */
+data class FcmAppConfig(
+    val projectNumber: String,
+    val projectId: String,
+    val appId: String,
+    val apiKey: String,
+    val storageBucket: String
 )
 
 /**

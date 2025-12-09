@@ -34,7 +34,7 @@ class FirebaseConfigManager @Inject constructor(
 ) {
     companion object {
         private const val TAG = "FirebaseConfigManager"
-        private const val FIREBASE_APP_NAME = "bothbubbles"
+        private const val PACKAGE_NAME = "com.bothbubbles.messaging"
     }
 
     private val mutex = Mutex()
@@ -62,7 +62,7 @@ class FirebaseConfigManager @Inject constructor(
      */
     fun isInitialized(): Boolean {
         return try {
-            FirebaseApp.getInstance(FIREBASE_APP_NAME)
+            FirebaseApp.getInstance()
             true
         } catch (e: IllegalStateException) {
             false
@@ -74,7 +74,7 @@ class FirebaseConfigManager @Inject constructor(
      */
     fun getFirebaseApp(): FirebaseApp? {
         return try {
-            FirebaseApp.getInstance(FIREBASE_APP_NAME)
+            FirebaseApp.getInstance()
         } catch (e: IllegalStateException) {
             null
         }
@@ -125,35 +125,40 @@ class FirebaseConfigManager @Inject constructor(
                 return@withLock Result.failure(Exception(error))
             }
 
-            val fcmClient = response.body()?.data
-            if (fcmClient == null) {
+            val fcmClientResponse = response.body()?.data
+            if (fcmClientResponse == null) {
                 val error = "FCM config response was empty"
                 Log.e(TAG, error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
 
-            // Validate required fields
-            if (fcmClient.projectNumber.isNullOrBlank() ||
-                fcmClient.appId.isNullOrBlank() ||
-                fcmClient.apiKey.isNullOrBlank()
-            ) {
-                val error = "FCM config is incomplete (missing required fields)"
+            // Find the config for our package name
+            val appConfig = fcmClientResponse.getConfigForPackage(PACKAGE_NAME)
+            if (appConfig == null) {
+                val availablePackages = fcmClientResponse.clients?.mapNotNull {
+                    it.clientInfo?.androidClientInfo?.packageName
+                }?.joinToString() ?: "none"
+                val error = "FCM config missing for package $PACKAGE_NAME. Available: $availablePackages"
                 Log.e(TAG, error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
 
+            Log.d(TAG, "Found FCM config for $PACKAGE_NAME: appId=${appConfig.appId.take(20)}...")
+
             val config = FirebaseConfig(
-                projectNumber = fcmClient.projectNumber,
-                appId = fcmClient.appId,
-                apiKey = fcmClient.apiKey,
-                storageBucket = fcmClient.storageBucket ?: ""
+                projectNumber = appConfig.projectNumber,
+                projectId = appConfig.projectId,
+                appId = appConfig.appId,
+                apiKey = appConfig.apiKey,
+                storageBucket = appConfig.storageBucket
             )
 
             // Save config for offline use
             settingsDataStore.setFirebaseConfig(
                 projectNumber = config.projectNumber,
+                projectId = config.projectId,
                 appId = config.appId,
                 apiKey = config.apiKey,
                 storageBucket = config.storageBucket
@@ -210,7 +215,7 @@ class FirebaseConfigManager @Inject constructor(
      */
     suspend fun reset() = mutex.withLock {
         try {
-            FirebaseApp.getInstance(FIREBASE_APP_NAME).delete()
+            FirebaseApp.getInstance().delete()
         } catch (e: IllegalStateException) {
             // App not initialized, ignore
         }
@@ -221,16 +226,18 @@ class FirebaseConfigManager @Inject constructor(
 
     private suspend fun getCachedConfig(): FirebaseConfig? {
         val projectNumber = settingsDataStore.firebaseProjectNumber.first()
+        val projectId = settingsDataStore.firebaseProjectId.first()
         val appId = settingsDataStore.firebaseAppId.first()
         val apiKey = settingsDataStore.firebaseApiKey.first()
         val storageBucket = settingsDataStore.firebaseStorageBucket.first()
 
-        if (projectNumber.isBlank() || appId.isBlank() || apiKey.isBlank()) {
+        if (projectNumber.isBlank() || projectId.isBlank() || appId.isBlank() || apiKey.isBlank()) {
             return null
         }
 
         return FirebaseConfig(
             projectNumber = projectNumber,
+            projectId = projectId,
             appId = appId,
             apiKey = apiKey,
             storageBucket = storageBucket
@@ -240,12 +247,14 @@ class FirebaseConfigManager @Inject constructor(
     private fun initializeFirebaseApp(config: FirebaseConfig) {
         val options = FirebaseOptions.Builder()
             .setGcmSenderId(config.projectNumber)
+            .setProjectId(config.projectId)
             .setApplicationId(config.appId)
             .setApiKey(config.apiKey)
             .setStorageBucket(config.storageBucket)
             .build()
 
-        FirebaseApp.initializeApp(context, options, FIREBASE_APP_NAME)
+        // Initialize as default app so FirebaseMessaging.getInstance() works
+        FirebaseApp.initializeApp(context, options)
     }
 }
 
@@ -254,6 +263,7 @@ class FirebaseConfigManager @Inject constructor(
  */
 data class FirebaseConfig(
     val projectNumber: String,
+    val projectId: String,
     val appId: String,
     val apiKey: String,
     val storageBucket: String

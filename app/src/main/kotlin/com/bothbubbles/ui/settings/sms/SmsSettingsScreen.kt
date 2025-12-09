@@ -109,6 +109,57 @@ fun SmsSettingsScreen(
                 }
             }
 
+            // Re-sync SMS
+            item {
+                AnimatedVisibility(visible = uiState.smsEnabled && uiState.capabilityStatus?.isDefaultSmsApp == true) {
+                    Card(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Sync,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.width(16.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Re-sync SMS", style = MaterialTheme.typography.titleSmall)
+                                Text(
+                                    "Import SMS sent by other apps (Android Auto, etc.)",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                uiState.resyncResult?.let { result ->
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        result,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            if (uiState.isResyncing) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                IconButton(onClick = viewModel::resyncSms) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = "Re-sync",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Backup & Restore
             item {
                 Card(

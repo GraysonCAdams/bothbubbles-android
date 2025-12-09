@@ -7,10 +7,10 @@ import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 
 /**
  * Firebase Cloud Messaging service for BlueBubbles.
@@ -25,9 +25,9 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
 
     companion object {
         private const val TAG = "BothBubblesFCM"
+        // Maximum time allowed for FCM message processing before timeout
+        private const val FCM_PROCESSING_TIMEOUT_MS = 10_000L
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Lazy initialization of dependencies via EntryPoint
     private val entryPoint: FirebaseServiceEntryPoint by lazy {
@@ -61,6 +61,12 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
 
     /**
      * Called when a message is received from FCM.
+     *
+     * IMPORTANT: Uses runBlocking to ensure message processing completes before
+     * this method returns. Without this, if the app process is killed immediately
+     * after onMessageReceived returns, the notification may not be shown.
+     *
+     * The timeout ensures we don't block indefinitely if something goes wrong.
      */
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
@@ -69,12 +75,20 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
         val type = message.data["type"]
         Log.d(TAG, "FCM message received: id=$messageId, type=$type")
 
-        // Process message in coroutine
-        scope.launch {
-            try {
-                fcmMessageHandler.handleMessage(message)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error handling FCM message", e)
+        // Use runBlocking to ensure processing completes before method returns.
+        // This prevents message/notification loss if the app is killed immediately.
+        runBlocking {
+            val result = withTimeoutOrNull(FCM_PROCESSING_TIMEOUT_MS) {
+                withContext(Dispatchers.IO) {
+                    try {
+                        fcmMessageHandler.handleMessage(message)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error handling FCM message", e)
+                    }
+                }
+            }
+            if (result == null) {
+                Log.w(TAG, "FCM message processing timed out after ${FCM_PROCESSING_TIMEOUT_MS}ms")
             }
         }
     }

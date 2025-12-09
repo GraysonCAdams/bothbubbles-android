@@ -37,13 +37,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import com.bothbubbles.ui.effects.bubble.GentleEffect
+import com.bothbubbles.ui.effects.bubble.InvisibleInkEffect
+import com.bothbubbles.ui.effects.bubble.LoudEffect
+import com.bothbubbles.ui.effects.bubble.SlamEffect
+import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -178,7 +187,7 @@ fun EffectPickerSheet(
 }
 
 /**
- * Preview of the message with the selected effect styling.
+ * Preview of the message with the selected effect animation.
  */
 @Composable
 private fun MessagePreview(
@@ -186,37 +195,88 @@ private fun MessagePreview(
     effect: MessageEffect?,
     modifier: Modifier = Modifier
 ) {
+    // Key changes when effect changes to re-trigger animation
+    var animationKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(effect) {
+        if (effect != null) {
+            animationKey++
+        }
+    }
+
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(100.dp)
+            .height(140.dp)
             .clip(RoundedCornerShape(12.dp))
+            .clipToBounds()
             .background(MaterialTheme.colorScheme.surfaceVariant),
         contentAlignment = Alignment.Center
     ) {
-        // Simple message bubble preview
-        Surface(
-            shape = RoundedCornerShape(18.dp),
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(16.dp)
-        ) {
-            Text(
-                text = text.ifEmpty { "Your message" },
-                color = MaterialTheme.colorScheme.onPrimary,
-                style = MaterialTheme.typography.bodyMedium,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
-                maxLines = 2
-            )
+        // Message bubble with effect wrapper
+        key(animationKey) {
+            val bubbleContent: @Composable () -> Unit = {
+                Surface(
+                    shape = RoundedCornerShape(18.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = text.ifEmpty { "Your message" },
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        maxLines = 2
+                    )
+                }
+            }
+
+            when (effect) {
+                is MessageEffect.Bubble.Slam -> SlamEffect(
+                    isNewMessage = true,
+                    isFromMe = true,
+                    content = bubbleContent
+                )
+                is MessageEffect.Bubble.Loud -> LoudEffect(
+                    isNewMessage = true,
+                    content = bubbleContent
+                )
+                is MessageEffect.Bubble.Gentle -> GentleEffect(
+                    isNewMessage = true,
+                    content = bubbleContent
+                )
+                is MessageEffect.Bubble.InvisibleInk -> InvisibleInkEffect(
+                    content = bubbleContent
+                )
+                is MessageEffect.Screen -> bubbleContent()
+                null -> bubbleContent()
+            }
         }
 
-        // Effect indicator overlay
+        // Screen effect overlay
+        if (effect is MessageEffect.Screen) {
+            key(animationKey) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .clipToBounds()
+                ) {
+                    ScreenEffectOverlay(
+                        effect = effect,
+                        messageText = text.ifEmpty { "Your message" },
+                        messageBounds = null
+                    )
+                }
+            }
+        }
+
+        // Effect name indicator
         if (effect != null) {
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
                     .background(
-                        MaterialTheme.colorScheme.primaryContainer,
+                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.9f),
                         CircleShape
                     )
                     .padding(6.dp)

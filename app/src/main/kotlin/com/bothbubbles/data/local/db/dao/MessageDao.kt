@@ -98,6 +98,7 @@ interface MessageDao {
     @Query("""
         SELECT * FROM messages
         WHERE chat_guid = :chatGuid AND date_deleted IS NULL
+        AND (sms_status IS NULL OR sms_status != 'draft')
         ORDER BY date_created DESC
         LIMIT 1
     """)
@@ -163,6 +164,9 @@ interface MessageDao {
     @Query("UPDATE messages SET error = :error WHERE guid = :guid")
     suspend fun updateErrorStatus(guid: String, error: Int)
 
+    @Query("UPDATE messages SET error = :error, sms_error_message = :errorMessage WHERE guid = :guid")
+    suspend fun updateMessageError(guid: String, error: Int, errorMessage: String?)
+
     @Query("UPDATE messages SET text = :text, date_edited = :dateEdited WHERE guid = :guid")
     suspend fun updateMessageText(guid: String, text: String, dateEdited: Long)
 
@@ -174,6 +178,19 @@ interface MessageDao {
 
     @Query("UPDATE messages SET date_played = :datePlayed WHERE guid = :guid")
     suspend fun updateDatePlayed(guid: String, datePlayed: Long)
+
+    @Query("UPDATE messages SET sms_status = :smsStatus WHERE guid = :guid")
+    suspend fun updateSmsStatus(guid: String, smsStatus: String)
+
+    /**
+     * Get all local MMS messages that don't have sms_status set (for draft detection migration)
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE message_source = 'LOCAL_MMS'
+        AND sms_status IS NULL
+    """)
+    suspend fun getLocalMmsWithoutStatus(): List<MessageEntity>
 
     // Replace temp GUID with server GUID
     @Query("""

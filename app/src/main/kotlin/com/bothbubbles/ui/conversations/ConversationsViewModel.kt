@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -55,6 +56,7 @@ private const val PAGE_SIZE = 25
 class ConversationsViewModel @Inject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
+    private val attachmentDao: AttachmentDao,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
@@ -105,10 +107,28 @@ class ConversationsViewModel @Inject constructor(
         observeMessageSearch()
         observeAppTitleSetting()
         observeCategorizationEnabled()
+        observeConversationFilter()
+        observeCategoryFilter()
+        observeFilteredUnreadCount()
         loadUserProfile()
         checkPrivateApiPrompt()
         checkInitialSmsImport()
         checkAndResumeSync()
+        markExistingMmsDrafts()
+        // Real-time socket event observers for immediate UI updates
+        observeNewMessagesFromSocket()
+        observeMessageUpdatesFromSocket()
+        observeChatReadFromSocket()
+    }
+
+    /**
+     * One-time migration to mark existing MMS drafts that were imported before
+     * draft detection was added.
+     */
+    private fun markExistingMmsDrafts() {
+        viewModelScope.launch {
+            smsRepository.markExistingMmsDrafts()
+        }
     }
 
     private fun observeAppTitleSetting() {
@@ -124,6 +144,52 @@ class ConversationsViewModel @Inject constructor(
             settingsDataStore.categorizationEnabled.collect { enabled ->
                 _uiState.update { it.copy(categorizationEnabled = enabled) }
             }
+        }
+    }
+
+    private fun observeConversationFilter() {
+        viewModelScope.launch {
+            settingsDataStore.conversationFilter.collect { filter ->
+                _uiState.update { it.copy(conversationFilter = filter) }
+            }
+        }
+    }
+
+    private fun observeCategoryFilter() {
+        viewModelScope.launch {
+            settingsDataStore.categoryFilter.collect { category ->
+                _uiState.update { it.copy(categoryFilter = category) }
+            }
+        }
+    }
+
+    fun setConversationFilter(filter: String) {
+        viewModelScope.launch {
+            settingsDataStore.setConversationFilter(filter)
+            _uiState.update { it.copy(conversationFilter = filter, categoryFilter = null) }
+            // Badge update is handled automatically by observeFilteredUnreadCount
+        }
+    }
+
+    fun setCategoryFilter(category: String?) {
+        viewModelScope.launch {
+            settingsDataStore.setCategoryFilter(category)
+            _uiState.update { it.copy(categoryFilter = category, conversationFilter = "all") }
+            // Badge update is handled automatically by observeFilteredUnreadCount
+        }
+    }
+
+    /**
+     * Observe changes to the filtered unread count and update the app badge.
+     * This watches for changes in conversations, conversationFilter, and categoryFilter.
+     */
+    private fun observeFilteredUnreadCount() {
+        viewModelScope.launch {
+            _uiState.map { it.filteredUnreadCount }
+                .distinctUntilChanged()
+                .collect { filteredUnreadCount ->
+                    notificationService.updateAppBadge(filteredUnreadCount)
+                }
         }
     }
 
@@ -334,7 +400,7 @@ class ConversationsViewModel @Inject constructor(
                 _typingChats,
                 _searchQuery
             ) { _, _, _, _, _ -> Unit }
-            .debounce(300) // Increased debounce to reduce jank
+            .debounce(100) // Reduced debounce for faster UI updates (socket observers handle immediate updates)
             .collect {
                 // Skip refresh while loading more to avoid items popping in during scroll
                 if (!_uiState.value.isLoadingMore) {
@@ -568,14 +634,33 @@ class ConversationsViewModel @Inject constructor(
         // Check for drafts
         val chatWithDraft = chats.find { !it.textFieldText.isNullOrBlank() }
 
-        val messageText = latestMessage?.text ?: primaryChat.lastMessageText ?: ""
+        val rawMessageText = latestMessage?.text ?: primaryChat.lastMessageText ?: ""
         val isFromMe = latestMessage?.isFromMe ?: false
 
-        // Determine message type
+        // Determine message type from attachment MIME type
+        val firstAttachment = if (latestMessage?.hasAttachments == true) {
+            attachmentDao.getAttachmentsForMessage(latestMessage.guid).firstOrNull()
+        } else null
+
         val messageType = when {
-            latestMessage?.hasAttachments == true -> MessageType.ATTACHMENT
-            messageText.contains("http://") || messageText.contains("https://") -> MessageType.LINK
+            firstAttachment != null -> when {
+                firstAttachment.isImage -> MessageType.IMAGE
+                firstAttachment.isVideo -> MessageType.VIDEO
+                firstAttachment.isAudio -> MessageType.AUDIO
+                else -> MessageType.ATTACHMENT
+            }
+            rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
             else -> MessageType.TEXT
+        }
+
+        // Generate preview text - show "Image", "Video" etc. when message has no text
+        val messageText = when {
+            rawMessageText.isNotBlank() -> rawMessageText
+            messageType == MessageType.IMAGE -> "Image"
+            messageType == MessageType.VIDEO -> "Video"
+            messageType == MessageType.AUDIO -> "Audio"
+            messageType == MessageType.ATTACHMENT -> "Attachment"
+            else -> rawMessageText
         }
 
         // Determine message status
@@ -591,7 +676,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get link preview data for LINK type
         val (linkTitle, linkDomain) = if (messageType == MessageType.LINK) {
-            val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
+            val detectedUrl = UrlParsingUtils.getFirstUrl(rawMessageText)
             if (detectedUrl != null) {
                 val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
                 val title = preview?.title?.takeIf { it.isNotBlank() }
@@ -747,6 +832,83 @@ class ConversationsViewModel @Inject constructor(
                     }
                 }
         }
+    }
+
+    /**
+     * Observe new messages from socket for immediate conversation list updates.
+     * This supplements Room Flow observation to ensure the list updates instantly
+     * when new messages arrive, rather than waiting for database invalidation.
+     */
+    private fun observeNewMessagesFromSocket() {
+        viewModelScope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.NewMessage>()
+                .collect { event ->
+                    android.util.Log.d("ConversationsViewModel", "Socket: New message for ${event.chatGuid}")
+                    // Immediately refresh to show new message in conversation list
+                    refreshAllLoadedPages()
+                }
+        }
+    }
+
+    /**
+     * Observe message updates from socket for immediate UI updates.
+     * Handles read receipts, delivery status, edits, and reactions.
+     */
+    private fun observeMessageUpdatesFromSocket() {
+        viewModelScope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.MessageUpdated>()
+                .collect { event ->
+                    android.util.Log.d("ConversationsViewModel", "Socket: Message updated for ${event.chatGuid}")
+                    // Refresh to show updated status (read receipts, delivery, edits)
+                    refreshAllLoadedPages()
+                }
+        }
+    }
+
+    /**
+     * Observe chat read status changes from socket for immediate unread badge updates.
+     * When a chat is marked as read (e.g., from another device), update the UI instantly.
+     */
+    private fun observeChatReadFromSocket() {
+        viewModelScope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.ChatRead>()
+                .collect { event ->
+                    android.util.Log.d("ConversationsViewModel", "Socket: Chat read ${event.chatGuid}")
+                    // Optimistically update UI immediately
+                    _uiState.update { state ->
+                        val updated = state.conversations.map { conv ->
+                            // Match by primary GUID or any merged GUID
+                            if (conv.guid == event.chatGuid ||
+                                conv.mergedChatGuids.contains(event.chatGuid) ||
+                                normalizeGuid(conv.guid) == normalizeGuid(event.chatGuid)) {
+                                conv.copy(unreadCount = 0)
+                            } else conv
+                        }
+                        state.copy(conversations = updated)
+                    }
+                }
+        }
+    }
+
+    /**
+     * Normalize a chat GUID for comparison by stripping formatting from phone numbers.
+     * Handles cases where server sends "+1234567890" but local has "+1-234-567-890".
+     */
+    private fun normalizeGuid(guid: String): String {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return guid.lowercase()
+        val prefix = parts[0].lowercase()
+        val address = if (parts[1].contains("@")) {
+            // Email address - just lowercase
+            parts[1].lowercase()
+        } else {
+            // Phone number - strip non-digits except leading +
+            parts[1].replace(Regex("[^0-9+]"), "")
+        }
+        return "$prefix;-;$address"
     }
 
     private fun observeSyncState() {
@@ -1396,7 +1558,7 @@ class ConversationsViewModel @Inject constructor(
 
     private suspend fun ChatEntity.toUiModel(typingChats: Set<String>): ConversationUiModel {
         val lastMessage = messageDao.getLatestMessageForChat(guid)
-        val messageText = lastMessage?.text ?: lastMessageText ?: ""
+        val rawMessageText = lastMessage?.text ?: lastMessageText ?: ""
         val isFromMe = lastMessage?.isFromMe ?: false
 
         // Get participants for this chat
@@ -1407,21 +1569,30 @@ class ConversationsViewModel @Inject constructor(
         val address = primaryParticipant?.address ?: chatIdentifier ?: ""
         val avatarPath = primaryParticipant?.cachedAvatarPath
 
-        // Determine message type from attachments or content
+        // Determine message type from attachment MIME type
+        val firstAttachment = if (lastMessage?.hasAttachments == true) {
+            attachmentDao.getAttachmentsForMessage(lastMessage.guid).firstOrNull()
+        } else null
+
         val messageType = when {
-            lastMessage?.hasAttachments == true -> {
-                // Check attachment mime type if available
-                val mimeType = lastMessage.associatedMessageType ?: ""
-                when {
-                    mimeType.startsWith("image/") -> MessageType.IMAGE
-                    mimeType.startsWith("video/") -> MessageType.VIDEO
-                    mimeType.startsWith("audio/") -> MessageType.AUDIO
-                    mimeType.isNotEmpty() -> MessageType.ATTACHMENT
-                    else -> MessageType.TEXT
-                }
+            firstAttachment != null -> when {
+                firstAttachment.isImage -> MessageType.IMAGE
+                firstAttachment.isVideo -> MessageType.VIDEO
+                firstAttachment.isAudio -> MessageType.AUDIO
+                else -> MessageType.ATTACHMENT
             }
-            messageText.contains("http://") || messageText.contains("https://") -> MessageType.LINK
+            rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
             else -> MessageType.TEXT
+        }
+
+        // Generate preview text - show "Image", "Video" etc. when message has no text
+        val messageText = when {
+            rawMessageText.isNotBlank() -> rawMessageText
+            messageType == MessageType.IMAGE -> "Image"
+            messageType == MessageType.VIDEO -> "Video"
+            messageType == MessageType.AUDIO -> "Audio"
+            messageType == MessageType.ATTACHMENT -> "Attachment"
+            else -> rawMessageText
         }
 
         // Determine message status for outgoing messages
@@ -1456,7 +1627,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Fetch link preview data for LINK type messages
         val (linkTitle, linkDomain) = if (messageType == MessageType.LINK) {
-            val detectedUrl = UrlParsingUtils.getFirstUrl(messageText)
+            val detectedUrl = UrlParsingUtils.getFirstUrl(rawMessageText)
             if (detectedUrl != null) {
                 val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
                 val title = preview?.title?.takeIf { it.isNotBlank() }
@@ -1474,6 +1645,18 @@ class ConversationsViewModel @Inject constructor(
             PhoneNumberFormatter.getContactKey(address)
         } else {
             ""
+        }
+
+        // For group chats, get sender's first name if not from me
+        val senderName = if (isGroup && !isFromMe && lastMessage?.senderAddress != null) {
+            // Find participant by sender address
+            val senderParticipant = participants.find { it.address == lastMessage.senderAddress }
+            val fullName = senderParticipant?.cachedDisplayName
+                ?: senderParticipant?.formattedAddress
+                ?: lastMessage.senderAddress
+            extractFirstName(fullName)
+        } else {
+            null
         }
 
         return ConversationUiModel(
@@ -1506,6 +1689,7 @@ class ConversationsViewModel @Inject constructor(
             isSnoozed = isSnoozed,
             snoozeUntil = snoozeUntil,
             lastMessageSource = lastMessage?.messageSource,
+            lastMessageSenderName = senderName,
             mergedChatGuids = listOf(guid), // Initially just this chat
             isMerged = false,
             contactKey = contactKey
@@ -1538,6 +1722,25 @@ class ConversationsViewModel @Inject constructor(
             isSameYear -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
             else -> SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(timestamp))
         }
+    }
+
+    /**
+     * Extract the first name from a full name, excluding emojis and non-letter characters.
+     * If the name starts with emojis, finds the first word that contains letters.
+     */
+    private fun extractFirstName(fullName: String): String {
+        // Split by whitespace and find the first word that has letters
+        val words = fullName.trim().split(Regex("\\s+"))
+        for (word in words) {
+            // Filter to only letters/digits
+            val cleaned = word.filter { it.isLetterOrDigit() }
+            // Check if it has at least one letter (not just digits/emojis)
+            if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
+                return cleaned
+            }
+        }
+        // Fallback to the first word cleaned of non-alphanumeric characters
+        return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
     }
 
     /**
@@ -1667,8 +1870,38 @@ data class ConversationsUiState(
     val smsImportProgress: Float = 0f,
     val smsImportError: String? = null,
     // Categorization state
-    val categorizationEnabled: Boolean = false
-)
+    val categorizationEnabled: Boolean = false,
+    // Conversation filter state (persisted)
+    val conversationFilter: String = "all",
+    val categoryFilter: String? = null
+) {
+    /**
+     * Calculate the unread count based on the current filter.
+     * This is used for the notification badge and header display.
+     */
+    val filteredUnreadCount: Int
+        get() {
+            val filtered = conversations.filter { conv ->
+                // Apply status filter first
+                val matchesStatus = when (conversationFilter.lowercase()) {
+                    "all" -> !conv.isSpam
+                    "unread" -> !conv.isSpam && conv.unreadCount > 0
+                    "spam" -> conv.isSpam
+                    "unknown_senders" -> !conv.isSpam && !conv.hasContact
+                    "known_senders" -> !conv.isSpam && conv.hasContact
+                    else -> !conv.isSpam
+                }
+
+                // Apply category filter if set
+                val matchesCategory = categoryFilter?.let { category ->
+                    conv.category?.equals(category, ignoreCase = true) == true
+                } ?: true
+
+                matchesStatus && matchesCategory
+            }
+            return filtered.sumOf { it.unreadCount }
+        }
+}
 
 /**
  * Represents a message that matched a search query.
@@ -1750,6 +1983,7 @@ data class ConversationUiModel(
     val isSnoozed: Boolean = false, // Whether notifications are snoozed
     val snoozeUntil: Long? = null, // When snooze expires (-1 = indefinite)
     val lastMessageSource: String? = null, // Message source: IMESSAGE, SERVER_SMS, LOCAL_SMS, LOCAL_MMS
+    val lastMessageSenderName: String? = null, // Sender's first name for group chats (null if isFromMe or 1:1)
     // Merged conversation support (for combining iMessage and SMS threads to same contact)
     val mergedChatGuids: List<String> = listOf(), // All chat GUIDs in this merged conversation
     val isMerged: Boolean = false, // True if this represents multiple merged chats

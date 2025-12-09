@@ -50,11 +50,22 @@ data class ShareIntentData(
     val sharedUris: List<Uri> = emptyList()
 )
 
+/**
+ * Data class to hold state restoration data for resuming previous session
+ */
+data class StateRestorationData(
+    val chatGuid: String,
+    val mergedGuids: String? = null,
+    val scrollPosition: Int = 0,
+    val scrollOffset: Int = 0
+)
+
 @Composable
 fun BothBubblesNavHost(
     navController: NavHostController = rememberNavController(),
     isSetupComplete: Boolean = true,
-    shareIntentData: ShareIntentData? = null
+    shareIntentData: ShareIntentData? = null,
+    stateRestorationData: StateRestorationData? = null
 ) {
     // Determine start destination based on setup status and share intent
     val startDestination: Screen = when {
@@ -64,6 +75,27 @@ fun BothBubblesNavHost(
             sharedUris = shareIntentData.sharedUris.map { it.toString() }
         )
         else -> Screen.Conversations
+    }
+
+    // Handle state restoration: navigate to saved chat after initial composition
+    LaunchedEffect(stateRestorationData) {
+        if (stateRestorationData != null && isSetupComplete && shareIntentData == null) {
+            // Navigate to the restored chat
+            navController.navigate(Screen.Chat(stateRestorationData.chatGuid, stateRestorationData.mergedGuids)) {
+                // Keep Conversations in the back stack so back button works
+                launchSingleTop = true
+            }
+            // Set scroll position on the chat entry's saved state handle
+            try {
+                val chatEntry = navController.getBackStackEntry(
+                    Screen.Chat(stateRestorationData.chatGuid, stateRestorationData.mergedGuids)
+                )
+                chatEntry.savedStateHandle["restore_scroll_position"] = stateRestorationData.scrollPosition
+                chatEntry.savedStateHandle["restore_scroll_offset"] = stateRestorationData.scrollOffset
+            } catch (_: Exception) {
+                // Entry might not be found immediately
+            }
+        }
     }
 
     fun popBackStackReturningToSettings(returnToSettings: Boolean) {
@@ -180,6 +212,14 @@ fun BothBubblesNavHost(
                 .getStateFlow("activate_search", false)
                 .collectAsState()
 
+            // Handle scroll position restoration
+            val restoreScrollPosition = backStackEntry.savedStateHandle
+                .getStateFlow("restore_scroll_position", 0)
+                .collectAsState()
+            val restoreScrollOffset = backStackEntry.savedStateHandle
+                .getStateFlow("restore_scroll_offset", 0)
+                .collectAsState()
+
             ChatScreen(
                 chatGuid = route.chatGuid,
                 onBackClick = { navController.popBackStack() },
@@ -205,6 +245,12 @@ fun BothBubblesNavHost(
                 activateSearch = activateSearch.value,
                 onSearchActivated = {
                     backStackEntry.savedStateHandle["activate_search"] = false
+                },
+                initialScrollPosition = restoreScrollPosition.value,
+                initialScrollOffset = restoreScrollOffset.value,
+                onScrollPositionRestored = {
+                    backStackEntry.savedStateHandle.remove<Int>("restore_scroll_position")
+                    backStackEntry.savedStateHandle.remove<Int>("restore_scroll_offset")
                 }
             )
         }
@@ -296,7 +342,6 @@ fun BothBubblesNavHost(
                 onExportClick = { navController.navigate(Screen.ExportMessages(returnToSettings = true)) },
                 onSmsSettingsClick = { navController.navigate(Screen.SmsSettings(returnToSettings = true)) },
                 onNotificationsClick = { navController.navigate(Screen.NotificationSettings(returnToSettings = true)) },
-                onNotificationProviderClick = { navController.navigate(Screen.NotificationProvider(returnToSettings = true)) },
                 onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings(returnToSettings = true)) },
                 onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
                 onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
@@ -373,16 +418,6 @@ fun BothBubblesNavHost(
         composable<Screen.NotificationSettings> { backStackEntry ->
             val route: Screen.NotificationSettings = backStackEntry.toRoute()
             com.bothbubbles.ui.settings.notifications.NotificationSettingsScreen(
-                onNavigateBack = {
-                    popBackStackReturningToSettings(route.returnToSettings)
-                }
-            )
-        }
-
-        // Notification Provider (FCM vs Foreground Service)
-        composable<Screen.NotificationProvider> { backStackEntry ->
-            val route: Screen.NotificationProvider = backStackEntry.toRoute()
-            com.bothbubbles.ui.settings.notifications.NotificationProviderScreen(
                 onNavigateBack = {
                     popBackStackReturningToSettings(route.returnToSettings)
                 }
@@ -574,6 +609,13 @@ fun BothBubblesNavHost(
                 onNavigateBack = {
                     popBackStackReturningToSettings(route.returnToSettings)
                 }
+            )
+        }
+
+        // Developer Event Log
+        composable<Screen.DeveloperEventLog> {
+            com.bothbubbles.ui.settings.developer.DeveloperEventLogScreen(
+                onNavigateBack = { navController.popBackStack() }
             )
         }
 

@@ -11,12 +11,11 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 
 /**
- * Loud bubble effect - message scales up large then settles with vibration.
+ * Loud bubble effect - message scales up large then settles with rotation shake.
  *
- * From legacy bubble_effects.dart:
  * - Duration: 900ms total
- * - Scale: 1.0 → 3.0 (300ms) → 1.0 (500ms)
- * - Shake: Horizontal oscillation during scale-down
+ * - Scale: 1.0 → 2.5 (300ms) → 1.0 (500ms)
+ * - Shake: Rotation oscillation like someone yelling
  * - Creates vibration/shaking effect
  */
 @Composable
@@ -27,14 +26,14 @@ fun LoudEffect(
     content: @Composable () -> Unit
 ) {
     val scale = remember { Animatable(if (isNewMessage) 1f else 1f) }
-    val shakeOffset = remember { Animatable(0f) }
+    val rotation = remember { Animatable(0f) }
 
     LaunchedEffect(isNewMessage) {
         if (isNewMessage) {
             // Scale up big then back to normal
             launch {
                 scale.animateTo(
-                    targetValue = 3f,
+                    targetValue = 2.5f,
                     animationSpec = tween(durationMillis = 300)
                 )
                 scale.animateTo(
@@ -43,23 +42,25 @@ fun LoudEffect(
                 )
             }
 
-            // Shake effect during the animation
+            // Rotation shake effect during the animation
             launch {
                 // Wait a bit for the scale to reach peak
-                kotlinx.coroutines.delay(200)
+                kotlinx.coroutines.delay(150)
 
-                // Shake 4 times
-                repeat(4) {
-                    shakeOffset.animateTo(
-                        targetValue = 8f,
-                        animationSpec = tween(durationMillis = 50)
+                // Shake with rotation - 6 quick oscillations
+                repeat(6) { i ->
+                    // Decreasing intensity as we go
+                    val intensity = 12f - (i * 1.5f)
+                    rotation.animateTo(
+                        targetValue = intensity,
+                        animationSpec = tween(durationMillis = 40)
                     )
-                    shakeOffset.animateTo(
-                        targetValue = -8f,
-                        animationSpec = tween(durationMillis = 50)
+                    rotation.animateTo(
+                        targetValue = -intensity,
+                        animationSpec = tween(durationMillis = 40)
                     )
                 }
-                shakeOffset.animateTo(
+                rotation.animateTo(
                     targetValue = 0f,
                     animationSpec = tween(durationMillis = 50)
                 )
@@ -75,7 +76,7 @@ fun LoudEffect(
         modifier = modifier.graphicsLayer {
             scaleX = scale.value
             scaleY = scale.value
-            translationX = shakeOffset.value
+            rotationZ = rotation.value
         }
     ) {
         content()

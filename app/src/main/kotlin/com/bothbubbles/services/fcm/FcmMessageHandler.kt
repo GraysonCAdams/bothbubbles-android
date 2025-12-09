@@ -2,10 +2,17 @@ package com.bothbubbles.services.fcm
 
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.ui.effects.MessageEffect
+import com.bothbubbles.util.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.google.firebase.messaging.RemoteMessage
+import dagger.Lazy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -27,7 +34,12 @@ import javax.inject.Singleton
 class FcmMessageHandler @Inject constructor(
     private val socketService: SocketService,
     private val notificationService: NotificationService,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    private val handleDao: HandleDao,
+    private val androidContactsService: AndroidContactsService,
+    private val messageDeduplicator: MessageDeduplicator,
+    private val activeConversationManager: ActiveConversationManager,
+    private val developerEventLog: Lazy<DeveloperEventLog>
 ) {
     companion object {
         private const val TAG = "FcmMessageHandler"
@@ -53,9 +65,11 @@ class FcmMessageHandler @Inject constructor(
     suspend fun handleMessage(message: RemoteMessage) {
         val type = message.data["type"]
         Log.d(TAG, "Received FCM message type: $type")
+        developerEventLog.get().logFcmEvent(type ?: "unknown", "FCM push received")
 
         if (type.isNullOrBlank()) {
             Log.w(TAG, "FCM message has no type, ignoring")
+            developerEventLog.get().logFcmEvent("IGNORED", "No type field")
             return
         }
 
@@ -68,9 +82,11 @@ class FcmMessageHandler @Inject constructor(
             TYPE_TYPING_INDICATOR -> {
                 // Typing indicators are handled via socket only
                 Log.d(TAG, "Ignoring typing indicator from FCM")
+                developerEventLog.get().logFcmEvent(type, "Ignored (socket-only)")
             }
             else -> {
                 Log.d(TAG, "Unhandled FCM message type: $type")
+                developerEventLog.get().logFcmEvent(type, "Unhandled type")
                 // Trigger socket reconnect for unhandled events that might need full data
                 triggerSocketReconnect()
             }
@@ -88,7 +104,7 @@ class FcmMessageHandler @Inject constructor(
         val chatGuid = data["chatGuid"]
         val messageGuid = data["guid"] ?: data["messageGuid"]
         val messageText = data["text"] ?: data["message"] ?: ""
-        val senderName = data["senderName"] ?: data["handle"]
+        val senderAddress = data["handle"]
         val isFromMe = data["isFromMe"]?.toBoolean() ?: false
 
         if (chatGuid.isNullOrBlank() || messageGuid.isNullOrBlank()) {
@@ -103,8 +119,29 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
+        // Check for duplicate notification (message may arrive via both FCM and socket)
+        if (!messageDeduplicator.shouldNotifyForMessage(messageGuid)) {
+            Log.d(TAG, "Message $messageGuid already notified, skipping FCM duplicate notification")
+            triggerSocketReconnect()
+            return
+        }
+
+        // Check if user is currently viewing this conversation
+        if (activeConversationManager.isConversationActive(chatGuid)) {
+            Log.d(TAG, "Chat $chatGuid is currently active, skipping FCM notification")
+            triggerSocketReconnect()
+            return
+        }
+
         // Get chat info from local database
         val chat = chatDao.getChatByGuid(chatGuid)
+
+        // Check if notifications are disabled for this chat
+        if (chat?.notificationsEnabled == false) {
+            Log.d(TAG, "Notifications disabled for chat $chatGuid, skipping FCM notification")
+            triggerSocketReconnect()
+            return
+        }
 
         // Check if chat is snoozed
         if (chat?.isSnoozed == true) {
@@ -113,20 +150,76 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
+        // Resolve sender name - try contact lookup first
+        val senderName = resolveSenderName(senderAddress, data["senderName"])
+
         val chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: senderName ?: ""
+
+        // Check for invisible ink effect
+        val expressiveSendStyleId = data["expressiveSendStyleId"]
+        val isInvisibleInk = MessageEffect.fromStyleId(expressiveSendStyleId) == MessageEffect.Bubble.InvisibleInk
+        val hasAttachments = data["hasAttachments"]?.toBoolean() ?: false
+        val notificationText = if (isInvisibleInk) {
+            if (hasAttachments) "Image sent with Invisible Ink" else "Message sent with Invisible Ink"
+        } else {
+            messageText
+        }
+
+        // For group chats, extract first name for cleaner notification display
+        val isGroup = chat?.isGroup ?: false
+        val displaySenderName = if (isGroup && senderName != null) {
+            extractFirstName(senderName)
+        } else {
+            senderName
+        }
 
         // Show notification
         notificationService.showMessageNotification(
             chatGuid = chatGuid,
             chatTitle = chatTitle,
-            messageText = messageText,
+            messageText = notificationText,
             messageGuid = messageGuid,
-            senderName = senderName,
-            senderAddress = data["handle"]
+            senderName = displaySenderName,
+            senderAddress = senderAddress,
+            isGroup = isGroup
         )
 
         // Trigger socket reconnect to sync full data
         triggerSocketReconnect()
+    }
+
+    /**
+     * Resolve sender name from address.
+     * Priority: device contact > cached contact name > server-provided name > formatted address
+     */
+    private suspend fun resolveSenderName(address: String?, serverProvidedName: String?): String? {
+        if (address.isNullOrBlank()) return serverProvidedName
+
+        // Try live contact lookup first
+        val contactName = androidContactsService.getContactDisplayName(address)
+        if (contactName != null) {
+            // Cache the contact name for future lookups
+            val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
+            localHandle?.let { handle ->
+                val photoUri = androidContactsService.getContactPhotoUri(address)
+                handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
+            }
+            return contactName
+        }
+
+        // Check for cached contact name in local handle
+        val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
+        if (localHandle?.cachedDisplayName != null) {
+            return localHandle.cachedDisplayName
+        }
+
+        // Fall back to inferred name
+        if (localHandle?.inferredName != null) {
+            return localHandle.displayName // includes "Maybe:" prefix
+        }
+
+        // Fall back to server-provided name or formatted address
+        return serverProvidedName ?: PhoneNumberFormatter.format(address)
     }
 
     private fun handleUpdatedMessage(data: Map<String, String>) {
@@ -190,5 +283,19 @@ class FcmMessageHandler @Inject constructor(
                 socketService.connect()
             }
         }
+    }
+
+    /**
+     * Extract the first name from a full name, excluding emojis and non-letter characters.
+     */
+    private fun extractFirstName(fullName: String): String {
+        val words = fullName.trim().split(Regex("\\s+"))
+        for (word in words) {
+            val cleaned = word.filter { it.isLetterOrDigit() }
+            if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
+                return cleaned
+            }
+        }
+        return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
     }
 }

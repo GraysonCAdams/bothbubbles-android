@@ -20,6 +20,12 @@ class AuthInterceptor @Inject constructor(
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url
 
+        // Skip Socket.IO requests - they handle auth via their own query parameter
+        // to avoid duplicate guid parameters
+        if (originalUrl.encodedPath.contains("socket.io")) {
+            return chain.proceed(originalRequest)
+        }
+
         // Get server address from settings (this is the actual user-configured URL)
         val serverAddress = runBlocking {
             settingsDataStore.serverAddress.first()

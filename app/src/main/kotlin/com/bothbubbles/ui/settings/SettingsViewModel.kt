@@ -35,6 +35,7 @@ class SettingsViewModel @Inject constructor(
         observeAppTitleSetting()
         observePrivateApiSettings()
         observeSoundSettings()
+        observeDeveloperMode()
     }
 
     private fun observeAppTitleSetting() {
@@ -92,6 +93,14 @@ class SettingsViewModel @Inject constructor(
     fun setMessageSoundsEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setMessageSoundsEnabled(enabled)
+        }
+    }
+
+    private fun observeDeveloperMode() {
+        viewModelScope.launch {
+            settingsDataStore.developerModeEnabled.collect { enabled ->
+                _uiState.update { it.copy(developerModeEnabled = enabled) }
+            }
         }
     }
 
@@ -219,5 +228,7 @@ data class SettingsUiState(
     // Sound settings
     val messageSoundsEnabled: Boolean = true,
     // Server configuration state
-    val isServerConfigured: Boolean = false
+    val isServerConfigured: Boolean = false,
+    // Developer mode
+    val developerModeEnabled: Boolean = false
 )

@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.*
@@ -55,14 +56,16 @@ object SmsModule {
         smsContentProvider: SmsContentProvider,
         chatDao: ChatDao,
         messageDao: MessageDao,
-        notificationService: NotificationService
+        notificationService: NotificationService,
+        activeConversationManager: ActiveConversationManager
     ): SmsContentObserver {
         return SmsContentObserver(
             context,
             smsContentProvider,
             chatDao,
             messageDao,
-            notificationService
+            notificationService,
+            activeConversationManager
         )
     }
 

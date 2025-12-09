@@ -58,6 +58,44 @@ class SmsRepository @Inject constructor(
     }
 
     /**
+     * Mark existing MMS drafts in the database.
+     * This is a one-time migration to properly mark drafts that were imported before
+     * draft detection was added.
+     */
+    suspend fun markExistingMmsDrafts() = withContext(Dispatchers.IO) {
+        try {
+            val mmsWithoutStatus = messageDao.getLocalMmsWithoutStatus()
+            Log.d(TAG, "Checking ${mmsWithoutStatus.size} MMS messages for draft status")
+
+            for (message in mmsWithoutStatus) {
+                // Extract MMS ID from guid (format: "mms-{id}")
+                val mmsId = message.guid.removePrefix("mms-").toLongOrNull() ?: continue
+
+                // Query system MMS provider to check messageBox
+                context.contentResolver.query(
+                    Uri.parse("content://mms/$mmsId"),
+                    arrayOf(Telephony.Mms.MESSAGE_BOX),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val messageBox = cursor.getInt(0)
+                        val isDraft = messageBox == Telephony.Mms.MESSAGE_BOX_DRAFTS
+                        val status = if (isDraft) "draft" else "complete"
+                        messageDao.updateSmsStatus(message.guid, status)
+                        if (isDraft) {
+                            Log.d(TAG, "Marked MMS ${message.guid} as draft")
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error marking MMS drafts", e)
+        }
+    }
+
+    /**
      * Check if device has SMS capability
      */
     fun hasSmsCapability(): Boolean {
@@ -578,6 +616,7 @@ class SmsRepository @Inject constructor(
             smsId = id,
             smsThreadId = threadId,
             smsStatus = when {
+                isDraft -> "draft"
                 isFailed -> "failed"
                 isPending -> "pending"
                 else -> "complete"
@@ -597,7 +636,8 @@ class SmsRepository @Inject constructor(
             hasAttachments = imageParts.isNotEmpty(),
             messageSource = MessageSource.LOCAL_MMS.name,
             smsId = id,
-            smsThreadId = threadId
+            smsThreadId = threadId,
+            smsStatus = if (isDraft) "draft" else "complete"
         )
     }
 

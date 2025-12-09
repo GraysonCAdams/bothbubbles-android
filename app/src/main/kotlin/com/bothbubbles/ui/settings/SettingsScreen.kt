@@ -33,7 +33,6 @@ fun SettingsScreen(
     onExportClick: () -> Unit = {},
     onSmsSettingsClick: () -> Unit = {},
     onNotificationsClick: () -> Unit = {},
-    onNotificationProviderClick: () -> Unit = {},
     onSwipeSettingsClick: () -> Unit = {},
     onEffectsSettingsClick: () -> Unit = {},
     onTemplatesClick: () -> Unit = {},
@@ -74,7 +73,6 @@ fun SettingsScreen(
             onExportClick = onExportClick,
             onSmsSettingsClick = onSmsSettingsClick,
             onNotificationsClick = onNotificationsClick,
-            onNotificationProviderClick = onNotificationProviderClick,
             onSwipeSettingsClick = onSwipeSettingsClick,
             onEffectsSettingsClick = onEffectsSettingsClick,
             onTemplatesClick = onTemplatesClick,
@@ -105,7 +103,6 @@ fun SettingsContent(
     onExportClick: () -> Unit = {},
     onSmsSettingsClick: () -> Unit,
     onNotificationsClick: () -> Unit,
-    onNotificationProviderClick: () -> Unit,
     onSwipeSettingsClick: () -> Unit,
     onEffectsSettingsClick: () -> Unit,
     onTemplatesClick: () -> Unit,
@@ -192,16 +189,6 @@ fun SettingsContent(
                     title = stringResource(R.string.settings_notifications),
                     subtitle = "Sound, vibration, and display",
                     onClick = onNotificationsClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Notification Provider (FCM vs Foreground Service)
-                SettingsMenuItem(
-                    icon = Icons.Default.CloudSync,
-                    title = "Notification provider",
-                    subtitle = "FCM push or foreground service",
-                    onClick = onNotificationProviderClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

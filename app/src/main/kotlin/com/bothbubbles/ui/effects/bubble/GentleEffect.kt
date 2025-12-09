@@ -13,13 +13,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import kotlinx.coroutines.launch
 
 /**
- * Gentle bubble effect - message fades in slowly from tiny.
+ * Gentle bubble effect - message fades in very slowly from tiny.
  *
- * From legacy bubble_effects.dart:
- * - Duration: 1800ms total
- * - Scale: 0.2 → 1.2 (500ms) → 1.0 (800ms)
- * - Alpha: 0 → 1 (500ms)
- * - Subtle, soft appearance
+ * - Duration: ~2500ms total
+ * - Scale: 0.3 → 1.08 (1000ms) → 1.0 (1200ms)
+ * - Alpha: 0 → 1 (1000ms)
+ * - Subtle, soft, dreamy appearance
  */
 @Composable
 fun GentleEffect(
@@ -28,34 +27,34 @@ fun GentleEffect(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit
 ) {
-    val scale = remember { Animatable(if (isNewMessage) 0.2f else 1f) }
+    val scale = remember { Animatable(if (isNewMessage) 0.3f else 1f) }
     val alpha = remember { Animatable(if (isNewMessage) 0f else 1f) }
 
     LaunchedEffect(isNewMessage) {
         if (isNewMessage) {
-            // Animate alpha and scale in parallel
+            // Animate alpha and scale in parallel - slow and gentle
             launch {
                 alpha.animateTo(
                     targetValue = 1f,
                     animationSpec = tween(
-                        durationMillis = 500,
+                        durationMillis = 1000,
                         easing = LinearOutSlowInEasing
                     )
                 )
             }
 
-            // Scale up with slight overshoot, then settle
+            // Scale up with very slight overshoot, then settle slowly
             scale.animateTo(
-                targetValue = 1.2f,
+                targetValue = 1.08f,
                 animationSpec = tween(
-                    durationMillis = 500,
+                    durationMillis = 1000,
                     easing = LinearOutSlowInEasing
                 )
             )
             scale.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(
-                    durationMillis = 800,
+                    durationMillis = 1200,
                     easing = FastOutSlowInEasing
                 )
             )

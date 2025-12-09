@@ -8,14 +8,31 @@ import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.navigation.compose.rememberNavController
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.services.developer.ConnectionModeManager
+import com.bothbubbles.ui.components.DeveloperConnectionOverlay
 import com.bothbubbles.ui.navigation.BothBubblesNavHost
+import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.ui.navigation.ShareIntentData
+import com.bothbubbles.ui.navigation.StateRestorationData
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -23,6 +40,9 @@ class MainActivity : ComponentActivity() {
 
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
+
+    @Inject
+    lateinit var connectionModeManager: ConnectionModeManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be before super.onCreate()
@@ -33,14 +53,68 @@ class MainActivity : ComponentActivity() {
         // Parse share intent data
         val shareIntentData = parseShareIntent(intent)
 
+        // Check crash protection and get state restoration data synchronously
+        // This needs to happen before setting content to determine start destination
+        val stateRestorationData = runBlocking {
+            val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
+            android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}")
+            if (shouldSkipRestore || shareIntentData != null) {
+                // Skip restoration if crash protection triggered or handling share intent
+                android.util.Log.d("StateRestore", "Skipping restoration")
+                null
+            } else {
+                // Try to restore previous state
+                val lastChatGuid = settingsDataStore.lastOpenChatGuid.first()
+                android.util.Log.d("StateRestore", "lastChatGuid=$lastChatGuid")
+                if (lastChatGuid != null) {
+                    val data = StateRestorationData(
+                        chatGuid = lastChatGuid,
+                        mergedGuids = settingsDataStore.lastOpenChatMergedGuids.first(),
+                        scrollPosition = settingsDataStore.lastScrollPosition.first(),
+                        scrollOffset = settingsDataStore.lastScrollOffset.first()
+                    )
+                    android.util.Log.d("StateRestore", "Restoring: $data")
+                    data
+                } else {
+                    android.util.Log.d("StateRestore", "No chat to restore")
+                    null
+                }
+            }
+        }
+
         setContent {
             val isSetupComplete by settingsDataStore.isSetupComplete.collectAsState(initial = true)
+            val developerModeEnabled by settingsDataStore.developerModeEnabled.collectAsState(initial = false)
+            val connectionMode by connectionModeManager.currentMode.collectAsState()
+            val navController = rememberNavController()
+
+            // Clear crash protection after app has been stable for 30 seconds
+            LaunchedEffect(Unit) {
+                delay(30_000L)
+                settingsDataStore.clearLaunchTimestamps()
+            }
 
             BothBubblesTheme {
-                BothBubblesNavHost(
-                    isSetupComplete = isSetupComplete,
-                    shareIntentData = shareIntentData
-                )
+                Box(modifier = Modifier.fillMaxSize()) {
+                    BothBubblesNavHost(
+                        navController = navController,
+                        isSetupComplete = isSetupComplete,
+                        shareIntentData = shareIntentData,
+                        stateRestorationData = stateRestorationData
+                    )
+
+                    // Developer mode connection overlay
+                    DeveloperConnectionOverlay(
+                        isVisible = developerModeEnabled && isSetupComplete,
+                        connectionMode = connectionMode,
+                        onTap = {
+                            navController.navigate(Screen.DeveloperEventLog)
+                        },
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .statusBarsPadding()
+                    )
+                }
             }
         }
     }

@@ -55,19 +55,30 @@ class NotificationProviderViewModel @Inject constructor(
 
     private fun observeFcmState() {
         viewModelScope.launch {
-            combine(
-                firebaseConfigManager.state,
-                fcmTokenManager.tokenState
-            ) { configState, tokenState ->
-                Pair(configState, tokenState)
-            }.collect { (configState, tokenState) ->
-                _uiState.update {
-                    it.copy(
-                        firebaseConfigState = configState,
-                        fcmTokenState = tokenState,
-                        isGooglePlayServicesAvailable = firebaseConfigManager.isGooglePlayServicesAvailable()
-                    )
+            try {
+                combine(
+                    firebaseConfigManager.state,
+                    fcmTokenManager.tokenState
+                ) { configState, tokenState ->
+                    Pair(configState, tokenState)
+                }.collect { (configState, tokenState) ->
+                    val isGooglePlayAvailable = try {
+                        firebaseConfigManager.isGooglePlayServicesAvailable()
+                    } catch (e: Exception) {
+                        android.util.Log.e("NotificationProviderVM", "Error checking Google Play Services", e)
+                        false
+                    }
+
+                    _uiState.update {
+                        it.copy(
+                            firebaseConfigState = configState,
+                            fcmTokenState = tokenState,
+                            isGooglePlayServicesAvailable = isGooglePlayAvailable
+                        )
+                    }
                 }
+            } catch (e: Exception) {
+                android.util.Log.e("NotificationProviderVM", "Error observing FCM state", e)
             }
         }
     }

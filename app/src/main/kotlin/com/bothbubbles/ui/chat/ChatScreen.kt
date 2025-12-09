@@ -24,6 +24,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.animation.AnimatedContent
@@ -55,8 +56,6 @@ import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.filled.GraphicEq
-import androidx.compose.material.icons.outlined.EmojiEmotions
-import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
@@ -70,7 +69,9 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -88,7 +89,6 @@ import com.bothbubbles.R
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.components.AttachmentPickerPanel
-import com.bothbubbles.ui.components.EmojiPickerPanel
 import com.bothbubbles.ui.components.Avatar
 import com.bothbubbles.ui.components.GroupAvatar
 import com.bothbubbles.ui.components.DateSeparator
@@ -101,6 +101,7 @@ import com.bothbubbles.ui.components.ScheduleMessageDialog
 import com.bothbubbles.ui.components.SmartReplyChips
 import com.bothbubbles.ui.components.SpamSafetyBanner
 import com.bothbubbles.ui.components.TapbackMenu
+import com.bothbubbles.ui.components.TypingIndicator
 import com.bothbubbles.ui.components.VCardOptionsDialog
 import com.bothbubbles.ui.components.MessageListSkeleton
 import com.bothbubbles.ui.components.MessageBubbleSkeleton
@@ -132,13 +133,33 @@ fun ChatScreen(
     onSharedContentHandled: () -> Unit = {},
     activateSearch: Boolean = false,
     onSearchActivated: () -> Unit = {},
+    initialScrollPosition: Int = 0,
+    initialScrollOffset: Int = 0,
+    onScrollPositionRestored: () -> Unit = {},
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = initialScrollPosition,
+        initialFirstVisibleItemScrollOffset = initialScrollOffset
+    )
+
+    // Track if scroll position has been restored
+    var scrollRestored by remember { mutableStateOf(initialScrollPosition == 0 && initialScrollOffset == 0) }
+
+    // Restore scroll position after messages load (if we have state to restore)
+    LaunchedEffect(uiState.messages.isNotEmpty(), initialScrollPosition, initialScrollOffset) {
+        if (!scrollRestored && uiState.messages.isNotEmpty() && (initialScrollPosition > 0 || initialScrollOffset > 0)) {
+            // Scroll to restored position after messages have loaded
+            listState.scrollToItem(initialScrollPosition, initialScrollOffset)
+            scrollRestored = true
+            onScrollPositionRestored()
+        }
+    }
     val context = LocalContext.current
+    val hapticFeedback = LocalHapticFeedback.current
 
     // Menu and dialog state
     var showOverflowMenu by remember { mutableStateOf(false) }
@@ -149,7 +170,6 @@ fun ChatScreen(
     // Attachment picker state
     var showAttachmentPicker by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
-    var showEmojiPicker by remember { mutableStateOf(false) }
 
     // vCard options dialog state
     var showVCardOptionsDialog by remember { mutableStateOf(false) }
@@ -170,6 +190,9 @@ fun ChatScreen(
 
     // Track processed screen effects this session to avoid re-triggering
     val processedEffectMessages = remember { mutableSetOf<String>() }
+
+    // Track revealed invisible ink messages (resets when leaving chat)
+    var revealedInvisibleInkMessages by remember { mutableStateOf(setOf<String>()) }
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
@@ -276,6 +299,15 @@ fun ChatScreen(
         }
     }
 
+    // Track scroll position changes for state restoration
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }.collect { (index, offset) ->
+            viewModel.updateScrollPosition(index, offset)
+        }
+    }
+
     // Cleanup recording and playback on dispose
     DisposableEffect(Unit) {
         onDispose {
@@ -356,7 +388,11 @@ fun ChatScreen(
         topBar = {
             TopAppBar(
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(onClick = {
+                        // Clear saved state when user explicitly navigates back
+                        viewModel.onNavigateBack()
+                        onBackClick()
+                    }) {
                         Icon(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
@@ -489,15 +525,6 @@ fun ChatScreen(
                     onCameraClick = onCameraClick
                 )
 
-                // Emoji picker panel (slides up above input)
-                EmojiPickerPanel(
-                    visible = showEmojiPicker,
-                    onDismiss = { showEmojiPicker = false },
-                    onEmojiSelected = { emoji ->
-                        viewModel.updateDraft(draftText + emoji)
-                    }
-                )
-
                 // Determine input mode for unified handling
                 val inputMode = when {
                     isRecording -> InputMode.RECORDING
@@ -520,6 +547,25 @@ fun ChatScreen(
                     )
                 }
 
+                // Reply preview - shows when replying to a message
+                val replyingToGuid = uiState.replyingToGuid
+                val replyingToMessage = remember(replyingToGuid, uiState.messages) {
+                    replyingToGuid?.let { guid -> uiState.messages.find { it.guid == guid } }
+                }
+
+                AnimatedVisibility(
+                    visible = replyingToMessage != null,
+                    enter = expandVertically() + fadeIn(),
+                    exit = shrinkVertically() + fadeOut()
+                ) {
+                    replyingToMessage?.let { message ->
+                        ReplyPreview(
+                            message = message,
+                            onDismiss = { viewModel.clearReply() }
+                        )
+                    }
+                }
+
                 // Unified input area with animated content transitions
                 UnifiedInputArea(
                     mode = inputMode,
@@ -530,22 +576,16 @@ fun ChatScreen(
                         viewModel.sendMessage()
                         pendingAttachments = emptyList()
                         showAttachmentPicker = false
-                        showEmojiPicker = false
                     },
                     onSendLongPress = {
                         if (!uiState.isLocalSmsChat) {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                             showEffectPicker = true
                         }
                     },
                     onAttachClick = {
                         showAttachmentPicker = !showAttachmentPicker
-                        if (showAttachmentPicker) showEmojiPicker = false
                     },
-                    onEmojiClick = {
-                        showEmojiPicker = !showEmojiPicker
-                        if (showEmojiPicker) showAttachmentPicker = false
-                    },
-                    onImageClick = { imagePickerLauncher.launch("image/*") },
                     onVoiceMemoClick = {
                         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     },
@@ -598,7 +638,6 @@ fun ChatScreen(
                         viewModel.clearAttachments()
                     },
                     isPickerExpanded = showAttachmentPicker,
-                    isEmojiPickerExpanded = showEmojiPicker,
                     // Recording mode props
                     recordingDuration = recordingDuration,
                     amplitudeHistory = amplitudeHistory,
@@ -848,6 +887,16 @@ fun ChatScreen(
                             }
                         }
 
+                        // Typing indicator - shows when someone is typing
+                        // Since reverseLayout=true, adding at start puts it at visual bottom
+                        if (uiState.isTyping) {
+                            item(key = "typing_indicator") {
+                                TypingIndicator(
+                                    modifier = Modifier.padding(top = 6.dp)
+                                )
+                            }
+                        }
+
                         itemsIndexed(
                             items = uiState.messages,
                             key = { _, message -> message.guid }
@@ -899,11 +948,13 @@ fun ChatScreen(
                             }
 
                             // Spacing based on group position:
+                            // - Placed stickers: negative padding to overlap previous message
                             // - SINGLE/FIRST: 6dp top (gap between groups)
                             // - MIDDLE/LAST: 2dp top (tight within group)
-                            val topPadding = when (groupPosition) {
-                                MessageGroupPosition.SINGLE, MessageGroupPosition.FIRST -> 6.dp
-                                MessageGroupPosition.MIDDLE, MessageGroupPosition.LAST -> 2.dp
+                            val topPadding = when {
+                                message.isPlacedSticker -> (-20).dp  // Overlap for "slapped on" effect
+                                groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
+                                else -> 2.dp
                             }
 
                             // Determine if sender name should be shown in group chats
@@ -949,12 +1000,33 @@ fun ChatScreen(
                                         autoPlayEffects && !reduceMotion &&
                                         (!message.effectPlayed || replayEffectsOnScroll)
 
+                                    // Check if message has media attachments (for invisible ink behavior)
+                                    val hasMedia = remember(message.attachments) {
+                                        message.attachments.any { it.isImage || it.isVideo }
+                                    }
+
+                                    // Track invisible ink reveal state locally (resets on chat exit)
+                                    val isInvisibleInkRevealed = message.guid in revealedInvisibleInkMessages
+                                    val isInvisibleInk = bubbleEffect == MessageEffect.Bubble.InvisibleInk
+
                                     BubbleEffectWrapper(
                                         effect = bubbleEffect,
                                         isNewMessage = shouldAnimateBubble,
                                         isFromMe = message.isFromMe,
                                         onEffectComplete = { viewModel.onBubbleEffectCompleted(message.guid) },
-                                        onReveal = { viewModel.onBubbleEffectCompleted(message.guid) }
+                                        isInvisibleInkRevealed = isInvisibleInkRevealed,
+                                        onInvisibleInkRevealChanged = { revealed ->
+                                            // Update local revealed state
+                                            revealedInvisibleInkMessages = if (revealed) {
+                                                revealedInvisibleInkMessages + message.guid
+                                            } else {
+                                                revealedInvisibleInkMessages - message.guid
+                                            }
+                                        },
+                                        hasMedia = hasMedia,
+                                        onMediaClickBlocked = {
+                                            // Optional: show feedback when user tries to tap blocked media
+                                        }
                                     ) {
                                         MessageBubble(
                                             message = message,
@@ -970,7 +1042,8 @@ fun ChatScreen(
                                                     selectedMessageForTapback = message
                                                 }
                                             },
-                                            onMediaClick = onMediaClick,
+                                            // Block media click if invisible ink not revealed
+                                            onMediaClick = if (isInvisibleInk && hasMedia && !isInvisibleInkRevealed) { _ -> } else onMediaClick,
                                             groupPosition = groupPosition,
                                             searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
                                             isCurrentSearchMatch = isCurrentSearchMatch,
@@ -979,7 +1052,8 @@ fun ChatScreen(
                                                 { attachmentGuid -> viewModel.downloadAttachment(attachmentGuid) }
                                             } else null,
                                             downloadingAttachments = downloadingAttachments,
-                                            showDeliveryIndicator = showDeliveryIndicator
+                                            showDeliveryIndicator = showDeliveryIndicator,
+                                            onReply = { guid -> viewModel.setReplyTo(guid) }
                                         )
                                     }
 
@@ -1085,7 +1159,6 @@ fun ChatScreen(
                     viewModel.sendMessage(effect.appleId)
                     pendingAttachments = emptyList()
                     showAttachmentPicker = false
-                    showEmojiPicker = false
                 }
             },
             onDismiss = { showEffectPicker = false }
@@ -1254,8 +1327,6 @@ private fun UnifiedInputArea(
     onSendClick: () -> Unit,
     onSendLongPress: () -> Unit,
     onAttachClick: () -> Unit,
-    onEmojiClick: () -> Unit,
-    onImageClick: () -> Unit,
     onVoiceMemoClick: () -> Unit,
     onVoiceMemoPressStart: () -> Unit,
     onVoiceMemoPressEnd: () -> Unit,
@@ -1266,7 +1337,6 @@ private fun UnifiedInputArea(
     onRemoveAttachment: (Uri) -> Unit,
     onClearAllAttachments: () -> Unit,
     isPickerExpanded: Boolean,
-    isEmojiPickerExpanded: Boolean,
     // Recording mode props
     recordingDuration: Long,
     amplitudeHistory: List<Float>,
@@ -1355,72 +1425,37 @@ private fun UnifiedInputArea(
                     .padding(horizontal = 8.dp, vertical = 8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left side button - animated between add/cancel
-                AnimatedContent(
-                    targetState = mode,
-                    transitionSpec = {
-                        (fadeIn(animationSpec = tween(150)) +
-                            slideInHorizontally(animationSpec = tween(200)) { -it / 2 })
-                            .togetherWith(fadeOut(animationSpec = tween(150)) +
-                                slideOutHorizontally(animationSpec = tween(200)) { -it / 2 })
-                    },
-                    label = "left_button"
-                ) { currentMode ->
-                    when (currentMode) {
-                        InputMode.NORMAL -> {
-                            // Circular add attachment button
-                            Surface(
-                                onClick = onAttachClick,
-                                modifier = Modifier.size(40.dp),
-                                shape = CircleShape,
-                                color = if (isPickerExpanded) {
-                                    MaterialTheme.colorScheme.primaryContainer
-                                } else {
-                                    inputColors.inputFieldBackground
-                                }
+                // Left side cancel button - only visible in recording/preview modes
+                AnimatedVisibility(
+                    visible = mode != InputMode.NORMAL,
+                    enter = fadeIn(animationSpec = tween(150)) +
+                        slideInHorizontally(animationSpec = tween(200)) { -it / 2 },
+                    exit = fadeOut(animationSpec = tween(150)) +
+                        slideOutHorizontally(animationSpec = tween(200)) { -it / 2 }
+                ) {
+                    Row {
+                        // Cancel button for recording/preview modes
+                        Surface(
+                            onClick = if (mode == InputMode.RECORDING) onRecordingCancel else onPreviewCancel,
+                            modifier = Modifier.size(40.dp),
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = if (isPickerExpanded) Icons.Default.Close else Icons.Default.Add,
-                                        contentDescription = stringResource(R.string.attach_file),
-                                        tint = if (isPickerExpanded) {
-                                            MaterialTheme.colorScheme.onPrimaryContainer
-                                        } else {
-                                            inputColors.inputIcon
-                                        },
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = stringResource(R.string.action_cancel),
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(24.dp)
+                                )
                             }
                         }
-                        InputMode.RECORDING, InputMode.PREVIEW -> {
-                            // Cancel button for recording/preview modes
-                            Surface(
-                                onClick = if (currentMode == InputMode.RECORDING) onRecordingCancel else onPreviewCancel,
-                                modifier = Modifier.size(40.dp),
-                                shape = CircleShape,
-                                color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = stringResource(R.string.action_cancel),
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
-                            }
-                        }
+                        Spacer(modifier = Modifier.width(4.dp))
                     }
                 }
-
-                Spacer(modifier = Modifier.width(4.dp))
 
                 // Center content - animated between text field / recording / preview
                 AnimatedContent(
@@ -1450,6 +1485,38 @@ private fun UnifiedInputArea(
                                         .padding(horizontal = 4.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    // Add button with circle outline inside the text field
+                                    Surface(
+                                        onClick = onAttachClick,
+                                        modifier = Modifier.size(32.dp),
+                                        shape = CircleShape,
+                                        color = Color.Transparent,
+                                        border = BorderStroke(
+                                            width = 1.5.dp,
+                                            color = if (isPickerExpanded) {
+                                                MaterialTheme.colorScheme.primary
+                                            } else {
+                                                inputColors.inputIcon.copy(alpha = 0.6f)
+                                            }
+                                        )
+                                    ) {
+                                        Box(
+                                            modifier = Modifier.fillMaxSize(),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                imageVector = if (isPickerExpanded) Icons.Default.Close else Icons.Default.Add,
+                                                contentDescription = stringResource(R.string.attach_file),
+                                                tint = if (isPickerExpanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    inputColors.inputIcon
+                                                },
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                        }
+                                    }
+
                                     TextField(
                                         value = text,
                                         onValueChange = onTextChange,
@@ -1474,34 +1541,6 @@ private fun UnifiedInputArea(
                                         ),
                                         maxLines = 4
                                     )
-
-                                    IconButton(
-                                        onClick = onEmojiClick,
-                                        modifier = Modifier.size(40.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.EmojiEmotions,
-                                            contentDescription = stringResource(R.string.emoji),
-                                            tint = if (isEmojiPickerExpanded) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                inputColors.inputIcon
-                                            },
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
-
-                                    IconButton(
-                                        onClick = onImageClick,
-                                        modifier = Modifier.size(40.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.Image,
-                                            contentDescription = stringResource(R.string.attach_image),
-                                            tint = inputColors.inputIcon,
-                                            modifier = Modifier.size(24.dp)
-                                        )
-                                    }
                                 }
                             }
                         }
@@ -2738,6 +2777,68 @@ private fun FailedMessageMenu(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * Reply preview shown above the input when replying to a message.
+ */
+@Composable
+private fun ReplyPreview(
+    message: MessageUiModel,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val inputColors = BothBubblesTheme.bubbleColors
+
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = inputColors.inputBackground
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Accent bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(MaterialTheme.colorScheme.primary)
+            )
+
+            Spacer(modifier = Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Replying to ${message.senderName ?: if (message.isFromMe) "yourself" else "message"}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = message.text ?: "[Attachment]",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(32.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Cancel reply",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

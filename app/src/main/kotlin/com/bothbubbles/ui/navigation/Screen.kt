@@ -129,4 +129,7 @@ sealed interface Screen {
 
     @Serializable
     data class ExportMessages(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data object DeveloperEventLog : Screen
 }

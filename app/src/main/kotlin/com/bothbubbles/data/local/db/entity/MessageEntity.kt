@@ -37,6 +37,11 @@ data class MessageEntity(
     @ColumnInfo(name = "handle_id")
     val handleId: Long? = null,
 
+    // Sender's address (phone number or email) for incoming messages
+    // Used for group chats to identify who sent each message
+    @ColumnInfo(name = "sender_address")
+    val senderAddress: String? = null,
+
     @ColumnInfo(name = "text")
     val text: String? = null,
 

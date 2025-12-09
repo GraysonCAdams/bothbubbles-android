@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.SmsRepository
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ import javax.inject.Inject
  *
  * Handles:
  * - Starting foreground service if "keep app alive" mode is enabled
+ * - Starting SMS content observer for external SMS detection (Android Auto, etc.)
  * - FCM is handled automatically by Firebase SDK on boot
  */
 @AndroidEntryPoint
@@ -29,6 +31,9 @@ class BootReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
+
+    @Inject
+    lateinit var smsRepository: SmsRepository
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -71,6 +76,13 @@ class BootReceiver : BroadcastReceiver() {
                         // Token refresh will trigger re-registration if needed
                         Log.d(TAG, "FCM mode, Firebase will handle push notifications")
                     }
+                }
+
+                // Start SMS content observer if we're the default SMS app
+                // This detects external SMS sent via Android Auto, Google Assistant, etc.
+                if (smsRepository.isDefaultSmsApp()) {
+                    Log.i(TAG, "Starting SMS content observer on boot")
+                    smsRepository.startObserving()
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error handling boot", e)

@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.spam.SpamRepository
@@ -90,6 +91,9 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var androidContactsService: AndroidContactsService
+
+    @Inject
+    lateinit var activeConversationManager: ActiveConversationManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -205,17 +209,29 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
             // Show early notification
             val chat = chatDao.getChatByGuid(chatGuid)
-            val notificationText = notification.subject?.takeIf { it.isNotBlank() }
-                ?: "Incoming MMS"
 
-            notificationService.showMessageNotification(
-                chatGuid = chatGuid,
-                chatTitle = chat?.displayName ?: address,
-                messageText = notificationText,
-                messageGuid = "mms-pending-$mmsId",
-                senderName = null,
-                senderAddress = address
-            )
+            // Check if notifications are disabled for this chat
+            if (chat?.notificationsEnabled == false) {
+                Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping MMS notification")
+            } else if (chat?.isSnoozed == true) {
+                // Check if chat is snoozed
+                Log.i(TAG, "Chat $chatGuid is snoozed, skipping MMS notification")
+            } else if (activeConversationManager.isConversationActive(chatGuid)) {
+                // Check if user is currently viewing this conversation
+                Log.i(TAG, "Chat $chatGuid is currently active, skipping MMS notification")
+            } else {
+                val notificationText = notification.subject?.takeIf { it.isNotBlank() }
+                    ?: "Incoming MMS"
+
+                notificationService.showMessageNotification(
+                    chatGuid = chatGuid,
+                    chatTitle = chat?.displayName ?: address,
+                    messageText = notificationText,
+                    messageGuid = "mms-pending-$mmsId",
+                    senderName = null,
+                    senderAddress = address
+                )
+            }
 
             Log.i(TAG, "MMS from $address written to provider (ID: $mmsId), awaiting download")
         }

@@ -116,6 +116,56 @@ class SmsSettingsViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
+
+    /**
+     * Clear the resync result message
+     */
+    fun clearResyncResult() {
+        _uiState.update { it.copy(resyncResult = null) }
+    }
+
+    /**
+     * Manually re-sync SMS messages from the system SMS provider.
+     * This imports any SMS messages that may have been missed
+     * (e.g., from Android Auto, other SMS apps, etc.)
+     */
+    fun resyncSms() {
+        if (_uiState.value.isResyncing) return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isResyncing = true, resyncResult = null) }
+
+            try {
+                val result = smsRepository.importAllThreads(limit = 500)
+                result.onSuccess { imported ->
+                    _uiState.update {
+                        it.copy(
+                            isResyncing = false,
+                            resyncResult = if (imported > 0) {
+                                "Imported $imported SMS threads"
+                            } else {
+                                "No new messages found"
+                            }
+                        )
+                    }
+                }.onFailure { error ->
+                    _uiState.update {
+                        it.copy(
+                            isResyncing = false,
+                            error = "Re-sync failed: ${error.message}"
+                        )
+                    }
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        isResyncing = false,
+                        error = "Re-sync failed: ${e.message}"
+                    )
+                }
+            }
+        }
+    }
 }
 
 data class SmsSettingsUiState(
@@ -125,5 +175,7 @@ data class SmsSettingsUiState(
     val smsEnabled: Boolean = false,
     val preferSmsOverIMessage: Boolean = false,
     val selectedSimSlot: Int = -1,
-    val error: String? = null
+    val error: String? = null,
+    val isResyncing: Boolean = false,
+    val resyncResult: String? = null
 )

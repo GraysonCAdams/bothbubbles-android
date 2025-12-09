@@ -10,8 +10,16 @@ import android.provider.ContactsContract
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -22,9 +30,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.material.icons.automirrored.outlined.Reply
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.ClickableText
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -43,6 +56,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
@@ -71,11 +85,22 @@ enum class MessageGroupPosition {
 }
 
 /**
+ * Type of swipe gesture being performed on a message bubble.
+ */
+private enum class SwipeType {
+    /** Swipe toward center to trigger reply (iMessage only) */
+    REPLY,
+    /** Swipe toward empty space to reveal date/type info */
+    DATE_REVEAL
+}
+
+/**
  * UI model for a message bubble
  */
 data class MessageUiModel(
     val guid: String,
     val text: String?,
+    val subject: String? = null,
     val dateCreated: Long,
     val formattedTime: String,
     val isFromMe: Boolean,
@@ -90,8 +115,13 @@ data class MessageUiModel(
     val reactions: List<ReactionUiModel> = emptyList(),
     val myReactions: Set<Tapback> = emptySet(),
     val expressiveSendStyleId: String? = null,
-    val effectPlayed: Boolean = false
-)
+    val effectPlayed: Boolean = false,
+    val associatedMessageGuid: String? = null
+) {
+    /** True if this is a sticker that was placed on another message */
+    val isPlacedSticker: Boolean
+        get() = associatedMessageGuid != null && attachments.any { it.isSticker }
+}
 
 data class AttachmentUiModel(
     val guid: String,
@@ -136,6 +166,12 @@ data class AttachmentUiModel(
 
     val fileExtension: String?
         get() = transferName?.substringAfterLast('.', "")?.takeIf { it.isNotEmpty() }
+
+    /** True if this image format supports transparency (PNG, GIF, WebP, APNG) */
+    val mayHaveTransparency: Boolean
+        get() = isSticker || mimeType?.lowercase() in listOf(
+            "image/png", "image/gif", "image/webp", "image/apng"
+        )
 }
 
 @Composable
@@ -151,7 +187,9 @@ fun MessageBubble(
     onDownloadClick: ((String) -> Unit)? = null,
     downloadingAttachments: Map<String, Float> = emptyMap(),
     // Whether to show delivery indicator (iMessage-style: only on last message in sequence)
-    showDeliveryIndicator: Boolean = true
+    showDeliveryIndicator: Boolean = true,
+    // Callback for swipe-to-reply (iMessage only). Pass message GUID when triggered.
+    onReply: ((String) -> Unit)? = null
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -177,7 +215,8 @@ fun MessageBubble(
             isCurrentSearchMatch = isCurrentSearchMatch,
             onDownloadClick = onDownloadClick,
             downloadingAttachments = downloadingAttachments,
-            showDeliveryIndicator = showDeliveryIndicator
+            showDeliveryIndicator = showDeliveryIndicator,
+            onReply = onReply
         )
     } else {
         // Use optimized single-bubble rendering for simple text messages
@@ -192,7 +231,8 @@ fun MessageBubble(
             isCurrentSearchMatch = isCurrentSearchMatch,
             onDownloadClick = onDownloadClick,
             downloadingAttachments = downloadingAttachments,
-            showDeliveryIndicator = showDeliveryIndicator
+            showDeliveryIndicator = showDeliveryIndicator,
+            onReply = onReply
         )
     }
 }
@@ -213,7 +253,8 @@ private fun SegmentedMessageBubble(
     isCurrentSearchMatch: Boolean = false,
     onDownloadClick: ((String) -> Unit)? = null,
     downloadingAttachments: Map<String, Float> = emptyMap(),
-    showDeliveryIndicator: Boolean = true
+    showDeliveryIndicator: Boolean = true,
+    onReply: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -226,9 +267,47 @@ private fun SegmentedMessageBubble(
         MessageSegmentParser.parse(message, firstUrl)
     }
 
-    // Swipe-to-reveal timestamp state
-    val dragOffset = remember { Animatable(0f) }
+    // Reply swipe state (toward center - moves bubble)
+    val replyDragOffset = remember { Animatable(0f) }
+    val replyThresholdPx = with(density) { 60.dp.toPx() }
+    val replyMaxPx = replyThresholdPx * 1.2f
+
+    // Date reveal state (toward empty space - NO bubble movement)
+    val dateRevealProgress = remember { Animatable(0f) }
     val maxDragPx = with(density) { 80.dp.toPx() }
+
+    // Track which gesture is active and haptic state
+    var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
+    var hasTriggeredHaptic by remember { mutableStateOf(false) }
+
+    // Measurement state for adaptive clearance during date reveal
+    var containerWidthPx by remember { mutableIntStateOf(0) }
+    var bubbleWidthPx by remember { mutableIntStateOf(0) }
+
+    // Clearance calculation - only offset bubble when insufficient space
+    val minClearancePx = with(density) { 12.dp.toPx() }
+    val labelWidthPx = with(density) { 80.dp.toPx() }
+    val requiredSpacePx = labelWidthPx + minClearancePx
+
+    val adaptiveBubbleOffsetPx by remember(containerWidthPx, bubbleWidthPx) {
+        derivedStateOf {
+            if (containerWidthPx > 0 && bubbleWidthPx > 0) {
+                val availableClearancePx = (containerWidthPx - bubbleWidthPx).toFloat()
+                val clearanceDeficitPx = (requiredSpacePx - availableClearancePx).coerceAtLeast(0f)
+                if (clearanceDeficitPx > 0f) {
+                    val direction = if (message.isFromMe) 1f else -1f
+                    clearanceDeficitPx * dateRevealProgress.value * direction
+                } else {
+                    0f
+                }
+            } else {
+                0f
+            }
+        }
+    }
+
+    // Check if reply is available (iMessage only)
+    val canReply = isIMessage && onReply != null
 
     // Tap-to-show timestamp state
     var showTimestamp by remember { mutableStateOf(false) }
@@ -242,85 +321,136 @@ private fun SegmentedMessageBubble(
     }
 
     Box(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .onSizeChanged { size -> containerWidthPx = size.width },
         contentAlignment = Alignment.CenterStart
     ) {
-        // Sliding timestamp
-        val timestampAlpha = (dragOffset.value.absoluteValue / maxDragPx).coerceIn(0f, 1f)
-
-        if (message.isFromMe) {
-            Column(
-                horizontalAlignment = Alignment.End,
+        // Reply indicator - behind bubble at screen edge (only during reply swipe)
+        if (activeSwipe == SwipeType.REPLY && canReply) {
+            val progress = (replyDragOffset.value.absoluteValue / replyThresholdPx).coerceIn(0f, 1f)
+            val isFullyExposed = replyDragOffset.value.absoluteValue >= replyThresholdPx
+            ReplyIndicator(
+                progress = progress,
+                isFullyExposed = isFullyExposed,
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .offset(x = (80 - (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
-                    .alpha(timestampAlpha)
-                    .padding(end = 8.dp)
-            ) {
-                Text(
-                    text = message.formattedTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = messageTypeLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
-        } else {
-            Column(
-                horizontalAlignment = Alignment.Start,
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = (-80 + (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
-                    .alpha(timestampAlpha)
-                    .padding(start = 8.dp)
-            ) {
-                Text(
-                    text = message.formattedTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = messageTypeLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
+                    .align(if (message.isFromMe) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = 16.dp)
+            )
         }
 
-        // Main content row
+        // Date/type info - slides in from empty space side (only during date swipe)
+        if (activeSwipe == SwipeType.DATE_REVEAL || dateRevealProgress.value > 0f) {
+            DateTypeLabel(
+                time = message.formattedTime,
+                type = messageTypeLabel,
+                progress = dateRevealProgress.value,
+                isFromMe = message.isFromMe,
+                modifier = Modifier.align(
+                    if (message.isFromMe) Alignment.CenterStart else Alignment.CenterEnd
+                )
+            )
+        }
+
+        // Main content row - offset during REPLY swipe and DATE_REVEAL (when clearance needed)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset { IntOffset(dragOffset.value.roundToInt(), 0) }
-                .pointerInput(message.guid) {
+                .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
+                .pointerInput(message.guid, canReply) {
+                    val velocityTracker = VelocityTracker()
+
                     detectHorizontalDragGestures(
+                        onDragStart = {
+                            velocityTracker.resetTracking()
+                        },
                         onDragEnd = {
+                            val velocity = velocityTracker.calculateVelocity().x
                             coroutineScope.launch {
-                                dragOffset.animateTo(
-                                    0f,
-                                    animationSpec = spring(
-                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                        stiffness = Spring.StiffnessLow
-                                    )
-                                )
+                                when (activeSwipe) {
+                                    SwipeType.REPLY -> {
+                                        // Check if reply should trigger: past threshold OR momentum
+                                        val isReplyDirection = if (message.isFromMe) velocity < 0 else velocity > 0
+                                        val shouldTriggerReply =
+                                            replyDragOffset.value.absoluteValue >= replyThresholdPx ||
+                                            (velocity.absoluteValue > 1000f && isReplyDirection)
+
+                                        if (shouldTriggerReply && canReply) {
+                                            onReply?.invoke(message.guid)
+                                        }
+                                        replyDragOffset.animateTo(
+                                            0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
+                                        )
+                                    }
+                                    SwipeType.DATE_REVEAL -> {
+                                        dateRevealProgress.animateTo(
+                                            0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
+                                        )
+                                    }
+                                    null -> {}
+                                }
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
                             }
                         },
                         onDragCancel = {
                             coroutineScope.launch {
-                                dragOffset.animateTo(0f)
+                                replyDragOffset.animateTo(0f)
+                                dateRevealProgress.animateTo(0f)
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
                             }
                         },
-                        onHorizontalDrag = { _, dragAmount ->
+                        onHorizontalDrag = { change, dragAmount ->
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+
                             coroutineScope.launch {
-                                val newOffset = if (message.isFromMe) {
-                                    (dragOffset.value + dragAmount).coerceIn(-maxDragPx, 0f)
-                                } else {
-                                    (dragOffset.value + dragAmount).coerceIn(0f, maxDragPx)
+                                // Determine direction on first significant movement
+                                if (activeSwipe == null && dragAmount.absoluteValue > 5f) {
+                                    val isTowardCenter = if (message.isFromMe) dragAmount < 0 else dragAmount > 0
+                                    activeSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
                                 }
-                                dragOffset.snapTo(newOffset)
+
+                                when (activeSwipe) {
+                                    SwipeType.REPLY -> {
+                                        // Reply: move bubble, constrain to reply direction only
+                                        val newOffset = if (message.isFromMe) {
+                                            (replyDragOffset.value + dragAmount).coerceIn(-replyMaxPx, 0f)
+                                        } else {
+                                            (replyDragOffset.value + dragAmount).coerceIn(0f, replyMaxPx)
+                                        }
+                                        replyDragOffset.snapTo(newOffset)
+
+                                        // Haptic at threshold
+                                        if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            hasTriggeredHaptic = true
+                                        } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                            hasTriggeredHaptic = false
+                                        }
+                                    }
+                                    SwipeType.DATE_REVEAL -> {
+                                        // Date reveal: NO bubble movement, just progress 0-1
+                                        val progressDelta = dragAmount / maxDragPx
+                                        val newProgress = if (message.isFromMe) {
+                                            // Sent: swipe right (positive) for date
+                                            (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
+                                        } else {
+                                            // Received: swipe left (negative) for date
+                                            (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
+                                        }
+                                        dateRevealProgress.snapTo(newProgress)
+                                    }
+                                    null -> {}
+                                }
                             }
                         }
                     )
@@ -330,18 +460,10 @@ private fun SegmentedMessageBubble(
         ) {
             Column(
                 horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
-                modifier = Modifier.widthIn(max = 300.dp)
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
-                // Sender name for group chats
-                if (!message.isFromMe && message.senderName != null) {
-                    Text(
-                        text = message.senderName,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(start = 12.dp, bottom = 2.dp)
-                    )
-                }
-
                 // Render segments with reactions on first segment
                 Box {
                     Column(
@@ -358,6 +480,8 @@ private fun SegmentedMessageBubble(
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = segment.attachment.guid in downloadingAttachments,
                                         downloadProgress = downloadingAttachments[segment.attachment.guid] ?: 0f,
+                                        isPlacedSticker = message.isPlacedSticker,
+                                        messageGuid = message.guid,
                                         modifier = Modifier
                                             .pointerInput(message.guid) {
                                                 detectTapGestures(
@@ -372,14 +496,16 @@ private fun SegmentedMessageBubble(
                                 }
 
                                 is MessageSegment.TextSegment -> {
+                                    val isFirstTextSegment = index == segments.indexOfFirst { it is MessageSegment.TextSegment }
                                     TextBubbleSegment(
                                         message = message,
                                         text = segment.text,
                                         groupPosition = groupPosition,
                                         searchQuery = searchQuery,
-                                        isCurrentSearchMatch = isCurrentSearchMatch && index == segments.indexOfFirst { it is MessageSegment.TextSegment },
+                                        isCurrentSearchMatch = isCurrentSearchMatch && isFirstTextSegment,
                                         onLongPress = onLongPress,
-                                        onTimestampToggle = { showTimestamp = !showTimestamp }
+                                        onTimestampToggle = { showTimestamp = !showTimestamp },
+                                        showSubject = isFirstTextSegment
                                     )
                                 }
 
@@ -476,7 +602,8 @@ private fun TextBubbleSegment(
     searchQuery: String?,
     isCurrentSearchMatch: Boolean,
     onLongPress: () -> Unit,
-    onTimestampToggle: () -> Unit
+    onTimestampToggle: () -> Unit,
+    showSubject: Boolean = false
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -536,6 +663,18 @@ private fun TextBubbleSegment(
                 message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
                 message.isFromMe -> bubbleColors.smsSentText
                 else -> bubbleColors.receivedText
+            }
+
+            // Subject line (bold, before message text)
+            if (showSubject) {
+                message.subject?.let { subject ->
+                    val displaySubject = if (subject.isBlank()) "(no subject)" else subject
+                    Text(
+                        text = displaySubject,
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                        color = textColor
+                    )
+                }
             }
 
             val hasClickableContent = detectedDates.isNotEmpty() ||
@@ -658,7 +797,8 @@ private fun SimpleBubbleContent(
     isCurrentSearchMatch: Boolean = false,
     onDownloadClick: ((String) -> Unit)? = null,
     downloadingAttachments: Map<String, Float> = emptyMap(),
-    showDeliveryIndicator: Boolean = true
+    showDeliveryIndicator: Boolean = true,
+    onReply: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -667,9 +807,47 @@ private fun SimpleBubbleContent(
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
 
-    // Swipe-to-reveal timestamp state
-    val dragOffset = remember { Animatable(0f) }
+    // Reply swipe state (toward center - moves bubble)
+    val replyDragOffset = remember { Animatable(0f) }
+    val replyThresholdPx = with(density) { 60.dp.toPx() }
+    val replyMaxPx = replyThresholdPx * 1.2f
+
+    // Date reveal state (toward empty space - NO bubble movement)
+    val dateRevealProgress = remember { Animatable(0f) }
     val maxDragPx = with(density) { 80.dp.toPx() }
+
+    // Track which gesture is active and haptic state
+    var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
+    var hasTriggeredHaptic by remember { mutableStateOf(false) }
+
+    // Measurement state for adaptive clearance during date reveal
+    var containerWidthPx by remember { mutableIntStateOf(0) }
+    var bubbleWidthPx by remember { mutableIntStateOf(0) }
+
+    // Clearance calculation - only offset bubble when insufficient space
+    val minClearancePx = with(density) { 12.dp.toPx() }
+    val labelWidthPx = with(density) { 80.dp.toPx() }
+    val requiredSpacePx = labelWidthPx + minClearancePx
+
+    val adaptiveBubbleOffsetPx by remember(containerWidthPx, bubbleWidthPx) {
+        derivedStateOf {
+            if (containerWidthPx > 0 && bubbleWidthPx > 0) {
+                val availableClearancePx = (containerWidthPx - bubbleWidthPx).toFloat()
+                val clearanceDeficitPx = (requiredSpacePx - availableClearancePx).coerceAtLeast(0f)
+                if (clearanceDeficitPx > 0f) {
+                    val direction = if (message.isFromMe) 1f else -1f
+                    clearanceDeficitPx * dateRevealProgress.value * direction
+                } else {
+                    0f
+                }
+            } else {
+                0f
+            }
+        }
+    }
+
+    // Check if reply is available (iMessage only)
+    val canReply = isIMessage && onReply != null
 
     // Tap-to-show timestamp state (default hidden)
     var showTimestamp by remember { mutableStateOf(false) }
@@ -705,141 +883,66 @@ private fun SimpleBubbleContent(
         else -> "iMessage"
     }
 
-    // Swipe-to-reveal timestamp container
+    // Swipe container
     Box(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .onSizeChanged { size -> containerWidthPx = size.width },
         contentAlignment = Alignment.CenterStart
     ) {
-        // Sliding timestamp from the edge (same side as bubble)
-        val timestampAlpha = (dragOffset.value.absoluteValue / maxDragPx).coerceIn(0f, 1f)
-
-        // Timestamp positioned at the edge - slides in from outside screen edge
-        if (message.isFromMe) {
-            // Right-side timestamp for sent messages (slides in from right)
-            Column(
-                horizontalAlignment = Alignment.End,
+        // Reply indicator - behind bubble at screen edge (only during reply swipe)
+        if (activeSwipe == SwipeType.REPLY && canReply) {
+            val progress = (replyDragOffset.value.absoluteValue / replyThresholdPx).coerceIn(0f, 1f)
+            val isFullyExposed = replyDragOffset.value.absoluteValue >= replyThresholdPx
+            ReplyIndicator(
+                progress = progress,
+                isFullyExposed = isFullyExposed,
                 modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .offset(x = (80 - (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
-                    .alpha(timestampAlpha)
-                    .padding(end = 8.dp)
-            ) {
-                Text(
-                    text = message.formattedTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = messageTypeLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
-        } else {
-            // Left-side timestamp for received messages (slides in from left)
-            Column(
-                horizontalAlignment = Alignment.Start,
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = (-80 + (dragOffset.value.absoluteValue / maxDragPx * 80)).dp)
-                    .alpha(timestampAlpha)
-                    .padding(start = 8.dp)
-            ) {
-                Text(
-                    text = message.formattedTime,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = messageTypeLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                )
-            }
+                    .align(if (message.isFromMe) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = 16.dp)
+            )
         }
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .offset { IntOffset(dragOffset.value.roundToInt(), 0) },
-        horizontalArrangement = if (message.isFromMe) {
-            Arrangement.End
-        } else {
-            Arrangement.Start
-        },
-        verticalAlignment = Alignment.Top
-    ) {
-        Column(
-            horizontalAlignment = if (message.isFromMe) {
-                Alignment.End
-            } else {
-                Alignment.Start
-            },
-            modifier = Modifier.widthIn(max = 300.dp)
-        ) {
-            // Sender name for group chats
-            if (!message.isFromMe && message.senderName != null) {
-                Text(
-                    text = message.senderName,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 12.dp, bottom = 2.dp)
+        // Date/type info - slides in from empty space side (only during date swipe)
+        if (activeSwipe == SwipeType.DATE_REVEAL || dateRevealProgress.value > 0f) {
+            DateTypeLabel(
+                time = message.formattedTime,
+                type = messageTypeLabel,
+                progress = dateRevealProgress.value,
+                isFromMe = message.isFromMe,
+                modifier = Modifier.align(
+                    if (message.isFromMe) Alignment.CenterStart else Alignment.CenterEnd
                 )
-            }
+            )
+        }
 
-            // Message bubble with floating reactions overlay
-            Box {
-                // Message bubble with long-press gesture
-                // Select shape based on group position for visual grouping
-                val bubbleShape = when (groupPosition) {
-                    MessageGroupPosition.SINGLE -> if (message.isFromMe) {
-                        MessageShapes.sentSingle
-                    } else {
-                        MessageShapes.receivedSingle
-                    }
-                    MessageGroupPosition.FIRST -> if (message.isFromMe) {
-                        MessageShapes.sentFirst
-                    } else {
-                        MessageShapes.receivedFirst
-                    }
-                    MessageGroupPosition.MIDDLE -> if (message.isFromMe) {
-                        MessageShapes.sentMiddle
-                    } else {
-                        MessageShapes.receivedMiddle
-                    }
-                    MessageGroupPosition.LAST -> if (message.isFromMe) {
-                        MessageShapes.sentLast
-                    } else {
-                        MessageShapes.receivedLast
-                    }
-                }
+        // Main content row - offset during REPLY swipe and DATE_REVEAL (when clearance needed)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
+                .pointerInput(message.guid, canReply) {
+                    val velocityTracker = VelocityTracker()
 
-                Surface(
-                    shape = bubbleShape,
-                    color = when {
-                        message.isFromMe && isIMessage -> bubbleColors.iMessageSent
-                        message.isFromMe -> bubbleColors.smsSent
-                        else -> bubbleColors.received
-                    },
-                    tonalElevation = 0.dp,
-                    modifier = Modifier
-                        .then(
-                            if (isCurrentSearchMatch) {
-                                Modifier.border(
-                                    width = 2.dp,
-                                    color = Color(0xFFFF9800), // Orange highlight for current match
-                                    shape = bubbleShape
-                                )
-                            } else {
-                                Modifier
-                            }
-                        )
-                        .pointerInput(message.guid) {
-                            detectHorizontalDragGestures(
-                                onDragEnd = {
-                                    // Animate back to original position
-                                    coroutineScope.launch {
-                                        dragOffset.animateTo(
+                    detectHorizontalDragGestures(
+                        onDragStart = {
+                            velocityTracker.resetTracking()
+                        },
+                        onDragEnd = {
+                            val velocity = velocityTracker.calculateVelocity().x
+                            coroutineScope.launch {
+                                when (activeSwipe) {
+                                    SwipeType.REPLY -> {
+                                        // Check if reply should trigger: past threshold OR momentum
+                                        val isReplyDirection = if (message.isFromMe) velocity < 0 else velocity > 0
+                                        val shouldTriggerReply =
+                                            replyDragOffset.value.absoluteValue >= replyThresholdPx ||
+                                            (velocity.absoluteValue > 1000f && isReplyDirection)
+
+                                        if (shouldTriggerReply && canReply) {
+                                            onReply?.invoke(message.guid)
+                                        }
+                                        replyDragOffset.animateTo(
                                             0f,
                                             animationSpec = spring(
                                                 dampingRatio = Spring.DampingRatioMediumBouncy,
@@ -847,38 +950,124 @@ private fun SimpleBubbleContent(
                                             )
                                         )
                                     }
-                                },
-                                onDragCancel = {
-                                    coroutineScope.launch {
-                                        dragOffset.animateTo(0f)
+                                    SwipeType.DATE_REVEAL -> {
+                                        dateRevealProgress.animateTo(
+                                            0f,
+                                            animationSpec = spring(
+                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                stiffness = Spring.StiffnessLow
+                                            )
+                                        )
                                     }
-                                },
-                                onHorizontalDrag = { _, dragAmount ->
-                                    coroutineScope.launch {
-                                        // For sent messages (right side): allow drag left (negative)
-                                        // For received messages (left side): allow drag right (positive)
+                                    null -> {}
+                                }
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
+                            }
+                        },
+                        onDragCancel = {
+                            coroutineScope.launch {
+                                replyDragOffset.animateTo(0f)
+                                dateRevealProgress.animateTo(0f)
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
+                            }
+                        },
+                        onHorizontalDrag = { change, dragAmount ->
+                            velocityTracker.addPosition(change.uptimeMillis, change.position)
+
+                            coroutineScope.launch {
+                                // Determine direction on first significant movement
+                                if (activeSwipe == null && dragAmount.absoluteValue > 5f) {
+                                    val isTowardCenter = if (message.isFromMe) dragAmount < 0 else dragAmount > 0
+                                    activeSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                }
+
+                                when (activeSwipe) {
+                                    SwipeType.REPLY -> {
+                                        // Reply: move bubble, constrain to reply direction only
                                         val newOffset = if (message.isFromMe) {
-                                            (dragOffset.value + dragAmount).coerceIn(-maxDragPx, 0f)
+                                            (replyDragOffset.value + dragAmount).coerceIn(-replyMaxPx, 0f)
                                         } else {
-                                            (dragOffset.value + dragAmount).coerceIn(0f, maxDragPx)
+                                            (replyDragOffset.value + dragAmount).coerceIn(0f, replyMaxPx)
                                         }
-                                        dragOffset.snapTo(newOffset)
+                                        replyDragOffset.snapTo(newOffset)
+
+                                        // Haptic at threshold
+                                        if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            hasTriggeredHaptic = true
+                                        } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                            hasTriggeredHaptic = false
+                                        }
                                     }
+                                    SwipeType.DATE_REVEAL -> {
+                                        // Date reveal: NO bubble movement, just progress 0-1
+                                        val progressDelta = dragAmount / maxDragPx
+                                        val newProgress = if (message.isFromMe) {
+                                            // Sent: swipe right (positive) for date
+                                            (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
+                                        } else {
+                                            // Received: swipe left (negative) for date
+                                            (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
+                                        }
+                                        dateRevealProgress.snapTo(newProgress)
+                                    }
+                                    null -> {}
+                                }
+                            }
+                        }
+                    )
+                },
+            horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
+            verticalAlignment = Alignment.Top
+        ) {
+            Column(
+                horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
+                modifier = Modifier
+                    .widthIn(max = 300.dp)
+                    .onSizeChanged { size -> bubbleWidthPx = size.width }
+            ) {
+                // Message bubble with floating reactions overlay
+                Box {
+                    // Select shape based on group position for visual grouping
+                    val bubbleShape = when (groupPosition) {
+                        MessageGroupPosition.SINGLE -> if (message.isFromMe) MessageShapes.sentSingle else MessageShapes.receivedSingle
+                        MessageGroupPosition.FIRST -> if (message.isFromMe) MessageShapes.sentFirst else MessageShapes.receivedFirst
+                        MessageGroupPosition.MIDDLE -> if (message.isFromMe) MessageShapes.sentMiddle else MessageShapes.receivedMiddle
+                        MessageGroupPosition.LAST -> if (message.isFromMe) MessageShapes.sentLast else MessageShapes.receivedLast
+                    }
+
+                    Surface(
+                        shape = bubbleShape,
+                        color = when {
+                            message.isFromMe && isIMessage -> bubbleColors.iMessageSent
+                            message.isFromMe -> bubbleColors.smsSent
+                            else -> bubbleColors.received
+                        },
+                        tonalElevation = 0.dp,
+                        modifier = Modifier
+                            .then(
+                                if (isCurrentSearchMatch) {
+                                    Modifier.border(
+                                        width = 2.dp,
+                                        color = Color(0xFFFF9800),
+                                        shape = bubbleShape
+                                    )
+                                } else {
+                                    Modifier
                                 }
                             )
-                        }
-                        .pointerInput(message.guid) {
-                            detectTapGestures(
-                                onTap = {
-                                    showTimestamp = !showTimestamp
-                                },
-                                onLongPress = {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    onLongPress()
-                                }
-                            )
-                        }
-                ) {
+                            .pointerInput(message.guid) {
+                                detectTapGestures(
+                                    onTap = { showTimestamp = !showTimestamp },
+                                    onLongPress = {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onLongPress()
+                                    }
+                                )
+                            }
+                    ) {
                     Column(
                         modifier = Modifier.padding(
                             horizontal = 16.dp,
@@ -904,6 +1093,21 @@ private fun SimpleBubbleContent(
                                     )
                                 }
                             }
+                        }
+
+                        // Subject line (bold, before message text)
+                        message.subject?.let { subject ->
+                            val textColor = when {
+                                message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
+                                message.isFromMe -> bubbleColors.smsSentText
+                                else -> bubbleColors.receivedText
+                            }
+                            val displaySubject = if (subject.isBlank()) "(no subject)" else subject
+                            Text(
+                                text = displaySubject,
+                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                color = textColor
+                            )
                         }
 
                         // Text content with clickable dates, phone numbers, codes, and search highlighting
@@ -1537,29 +1741,29 @@ private fun TypingDot(
     delay: Int,
     modifier: Modifier = Modifier
 ) {
-    var visible by remember { mutableStateOf(true) }
+    val infiniteTransition = rememberInfiniteTransition(label = "typingDot")
 
-    LaunchedEffect(Unit) {
-        kotlinx.coroutines.delay(delay.toLong())
-        while (true) {
-            visible = !visible
-            kotlinx.coroutines.delay(500)
-        }
-    }
-
-    val alpha by animateColorAsState(
-        targetValue = if (visible)
-            MaterialTheme.colorScheme.onSurfaceVariant
-        else
-            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-        animationSpec = spring(stiffness = Spring.StiffnessLow),
-        label = "dotAlpha"
+    val offsetY by infiniteTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 0f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 1200
+                0f at delay using LinearEasing
+                -6f at (delay + 200) using FastOutSlowInEasing
+                0f at (delay + 400) using FastOutSlowInEasing
+                0f at 1200 using LinearEasing
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "dotBounce"
     )
 
     Box(
         modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(alpha)
+            .offset(y = offsetY.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.onSurfaceVariant)
     )
 }
 
@@ -1633,6 +1837,89 @@ fun NewMessagesIndicator(
                 )
             }
         }
+    }
+}
+
+/**
+ * Reply indicator shown behind message bubble during reply swipe.
+ */
+@Composable
+private fun ReplyIndicator(
+    progress: Float,
+    isFullyExposed: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val scale by animateFloatAsState(
+        targetValue = if (isFullyExposed) 1.1f else 0.6f + (progress * 0.4f),
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy),
+        label = "replyScale"
+    )
+
+    val backgroundColor by animateColorAsState(
+        targetValue = if (isFullyExposed)
+            MaterialTheme.colorScheme.primary
+        else
+            MaterialTheme.colorScheme.surfaceContainerHighest,
+        label = "replyBg"
+    )
+
+    Box(
+        modifier = modifier
+            .size(40.dp)
+            .scale(scale)
+            .alpha(progress)
+            .clip(CircleShape)
+            .background(backgroundColor),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.AutoMirrored.Outlined.Reply,
+            contentDescription = "Reply",
+            tint = if (isFullyExposed)
+                MaterialTheme.colorScheme.onPrimary
+            else
+                MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(22.dp)
+        )
+    }
+}
+
+/**
+ * Date and message type label shown during date reveal swipe.
+ */
+@Composable
+private fun DateTypeLabel(
+    time: String,
+    type: String,
+    progress: Float,
+    isFromMe: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val offsetX = if (isFromMe) {
+        // Slides in from left for sent messages
+        (-80 + (progress * 80)).dp
+    } else {
+        // Slides in from right for received messages
+        (80 - (progress * 80)).dp
+    }
+
+    Column(
+        horizontalAlignment = if (isFromMe) Alignment.Start else Alignment.End,
+        modifier = modifier
+            .offset(x = offsetX)
+            .alpha(progress)
+            .padding(horizontal = 8.dp)
+    ) {
+        Text(
+            text = time,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = type,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
     }
 }
 

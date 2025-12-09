@@ -47,6 +47,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
@@ -73,7 +74,6 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
@@ -186,8 +186,15 @@ fun ConversationsScreen(
 
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
-    var conversationFilter by remember { mutableStateOf(ConversationFilter.ALL) }
-    var categoryFilter by remember { mutableStateOf<MessageCategory?>(null) }
+    // Filter state - derived from persisted settings
+    val conversationFilter = remember(uiState.conversationFilter) {
+        ConversationFilter.entries.find { it.name.lowercase() == uiState.conversationFilter.lowercase() } ?: ConversationFilter.ALL
+    }
+    val categoryFilter = remember(uiState.categoryFilter) {
+        uiState.categoryFilter?.let { savedCategory ->
+            MessageCategory.entries.find { it.name.equals(savedCategory, ignoreCase = true) }
+        }
+    }
     var showFilterDropdown by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -547,8 +554,7 @@ fun ConversationsScreen(
                                                     }
                                                 },
                                                 onClick = {
-                                                    conversationFilter = filter
-                                                    categoryFilter = null // Clear category when status selected
+                                                    viewModel.setConversationFilter(filter.name.lowercase())
                                                     showFilterDropdown = false
                                                 }
                                             )
@@ -601,8 +607,7 @@ fun ConversationsScreen(
                                                         }
                                                     },
                                                     onClick = {
-                                                        categoryFilter = category
-                                                        conversationFilter = ConversationFilter.ALL // Reset status filter
+                                                        viewModel.setCategoryFilter(category.name)
                                                         showFilterDropdown = false
                                                     }
                                                 )
@@ -740,15 +745,14 @@ fun ConversationsScreen(
                         EmptyCategoryState(
                             category = categoryFilter!!,
                             onClearFilter = {
-                                categoryFilter = null
-                                conversationFilter = ConversationFilter.ALL
+                                viewModel.setCategoryFilter(null)
                             },
                             modifier = Modifier.fillMaxSize()
                         )
                     } else {
                         EmptyFilterState(
                             filter = conversationFilter,
-                            onClearFilter = { conversationFilter = ConversationFilter.ALL },
+                            onClearFilter = { viewModel.setConversationFilter("all") },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -2232,55 +2236,23 @@ private fun GoogleStyleConversationTile(
 
                 Spacer(modifier = Modifier.height(2.dp))
 
-                // Message preview with status indicator
+                // Message preview
                 val textColor = when {
                     conversation.hasDraft -> MaterialTheme.colorScheme.error
                     conversation.unreadCount > 0 -> MaterialTheme.colorScheme.onSurface
                     else -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
                 }
-                val statusTint = when (conversation.lastMessageStatus) {
-                    MessageStatus.READ -> MaterialTheme.colorScheme.primary
-                    MessageStatus.FAILED -> MaterialTheme.colorScheme.error
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                }
-                val statusIcon = when (conversation.lastMessageStatus) {
-                    MessageStatus.SENDING -> Icons.Default.Send
-                    MessageStatus.SENT -> Icons.Default.Check
-                    MessageStatus.DELIVERED -> Icons.Default.DoneAll
-                    MessageStatus.READ -> Icons.Default.DoneAll
-                    MessageStatus.FAILED -> Icons.Default.ErrorOutline
-                    MessageStatus.NONE -> null
-                }
 
-                val iconSize = 14.dp
-                val iconSpacing = 4.dp
-                val firstLineIndent = if (statusIcon != null) (iconSize + iconSpacing).value.sp else 0.sp
-
-                Box {
-                    // Icon positioned at top-left, aligned with first line of text
-                    if (statusIcon != null) {
-                        Icon(
-                            imageVector = statusIcon,
-                            contentDescription = null,
-                            tint = statusTint,
-                            modifier = Modifier
-                                .size(iconSize)
-                                .offset(y = 1.dp) // Align with text baseline
-                        )
-                    }
-
-                    Text(
-                        text = formatMessagePreview(conversation),
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
-                            lineHeight = 18.sp,
-                            textIndent = TextIndent(firstLine = firstLineIndent, restLine = 0.sp)
-                        ),
-                        color = textColor,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                }
+                Text(
+                    text = formatMessagePreview(conversation),
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontWeight = if (conversation.unreadCount > 0) FontWeight.Bold else FontWeight.Normal,
+                        lineHeight = 18.sp
+                    ),
+                    color = textColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
@@ -2360,50 +2332,6 @@ private fun UnreadBadge(
     }
 }
 
-/**
- * Displays message status indicator (sent, delivered, read) for outgoing messages.
- * Uses standard messaging conventions:
- * - Single check for sent
- * - Double check for delivered
- * - Blue double check for read
- */
-@Composable
-private fun MessageStatusIndicator(
-    status: MessageStatus,
-    modifier: Modifier = Modifier
-) {
-    val icon = when (status) {
-        MessageStatus.SENDING -> Icons.Filled.Schedule
-        MessageStatus.SENT -> Icons.Filled.Done
-        MessageStatus.DELIVERED -> Icons.Filled.DoneAll
-        MessageStatus.READ -> Icons.Filled.DoneAll
-        MessageStatus.FAILED -> Icons.Filled.ErrorOutline
-        MessageStatus.NONE -> null
-    }
-
-    val tint = when (status) {
-        MessageStatus.READ -> MaterialTheme.colorScheme.primary
-        MessageStatus.FAILED -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
-
-    if (icon != null) {
-        Icon(
-            imageVector = icon,
-            contentDescription = when (status) {
-                MessageStatus.SENDING -> "Sending"
-                MessageStatus.SENT -> "Sent"
-                MessageStatus.DELIVERED -> "Delivered"
-                MessageStatus.READ -> "Read"
-                MessageStatus.FAILED -> "Failed"
-                MessageStatus.NONE -> null
-            },
-            tint = tint,
-            modifier = modifier.size(16.dp)
-        )
-    }
-}
-
 @Composable
 private fun PinnedConversationsRow(
     conversations: List<ConversationUiModel>,
@@ -2421,9 +2349,14 @@ private fun PinnedConversationsRow(
     val density = LocalDensity.current
     val itemWidthPx = with(density) { itemWidth.toPx() }
 
+    // Threshold for drag-to-unpin (drag downward past this to unpin)
+    val unpinThresholdPx = with(density) { 60.dp.toPx() }
+
     // Drag state
     var draggedItemIndex by remember { mutableIntStateOf(-1) }
+    var draggedItemGuid by remember { mutableStateOf<String?>(null) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
+    var dragOffsetY by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
     // Mutable list for reordering during drag
@@ -2453,12 +2386,23 @@ private fun PinnedConversationsRow(
 
             // Calculate visual offset for dragged item
             val offsetX = if (isBeingDragged) dragOffsetX else 0f
+            val offsetY = if (isBeingDragged) dragOffsetY.coerceAtLeast(0f) else 0f
 
-            // Scale up dragged item for visual feedback
+            // Calculate progress toward unpin threshold (0 to 1)
+            val unpinProgress = if (isBeingDragged) (dragOffsetY / unpinThresholdPx).coerceIn(0f, 1f) else 0f
+
+            // Scale up dragged item for visual feedback, reduce when approaching unpin
             val scale by animateFloatAsState(
-                targetValue = if (isBeingDragged) 1.08f else 1f,
+                targetValue = if (isBeingDragged) 1.08f - (unpinProgress * 0.15f) else 1f,
                 animationSpec = tween(150),
                 label = "dragScale"
+            )
+
+            // Fade out when approaching unpin threshold
+            val alpha by animateFloatAsState(
+                targetValue = if (isBeingDragged) 1f - (unpinProgress * 0.5f) else 1f,
+                animationSpec = tween(100),
+                label = "dragAlpha"
             )
 
             // Elevation for shadow effect during drag
@@ -2471,14 +2415,14 @@ private fun PinnedConversationsRow(
             Box(
                 modifier = Modifier
                     .zIndex(if (isBeingDragged) 1f else 0f)
-                    .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), 0) }
+                    .offset { androidx.compose.ui.unit.IntOffset(offsetX.toInt(), offsetY.toInt()) }
                     .scale(scale)
+                    .alpha(alpha)
                     .shadow(elevation, RoundedCornerShape(12.dp))
             ) {
                 PinnedConversationItem(
                     conversation = conversation,
                     onClick = { if (!isDragging) onConversationClick(conversation) },
-                    onUnpin = { onUnpin(conversation.guid) },
                     onAvatarClick = { onAvatarClick(conversation) },
                     isSelected = conversation.guid in selectedConversations,
                     isSelectionMode = isSelectionMode,
@@ -2486,15 +2430,18 @@ private fun PinnedConversationsRow(
                     onDragStart = {
                         if (!isSelectionMode) {
                             draggedItemIndex = index
+                            draggedItemGuid = guid
                             isDragging = true
                             dragOffsetX = 0f
+                            dragOffsetY = 0f
                         }
                     },
-                    onDrag = { dragAmount ->
+                    onDrag = { dragAmountX, dragAmountY ->
                         if (isDragging && draggedItemIndex >= 0) {
-                            dragOffsetX += dragAmount
+                            dragOffsetX += dragAmountX
+                            dragOffsetY += dragAmountY
 
-                            // Calculate if we should swap with neighbor
+                            // Calculate if we should swap with neighbor (horizontal reordering)
                             val draggedPosition = draggedItemIndex
                             val offsetInItems = (dragOffsetX / itemWidthPx).toInt()
                             val newPosition = (draggedPosition + offsetInItems).coerceIn(0, currentOrder.size - 1)
@@ -2514,22 +2461,31 @@ private fun PinnedConversationsRow(
                     },
                     onDragEnd = {
                         if (isDragging && draggedItemIndex >= 0) {
-                            // Only call onReorder if the order actually changed
-                            val originalOrder = conversations.map { it.guid }
-                            if (currentOrder != originalOrder) {
-                                onReorder(currentOrder)
+                            // Check if dragged past unpin threshold (downward)
+                            if (dragOffsetY >= unpinThresholdPx) {
+                                draggedItemGuid?.let { onUnpin(it) }
+                            } else {
+                                // Only call onReorder if the order actually changed
+                                val originalOrder = conversations.map { it.guid }
+                                if (currentOrder != originalOrder) {
+                                    onReorder(currentOrder)
+                                }
                             }
                         }
                         isDragging = false
                         draggedItemIndex = -1
+                        draggedItemGuid = null
                         dragOffsetX = 0f
+                        dragOffsetY = 0f
                     },
                     onDragCancel = {
                         // Reset to original order on cancel
                         currentOrder = conversations.map { it.guid }
                         isDragging = false
                         draggedItemIndex = -1
+                        draggedItemGuid = null
                         dragOffsetX = 0f
+                        dragOffsetY = 0f
                     }
                 )
             }
@@ -2542,22 +2498,16 @@ private fun PinnedConversationsRow(
 private fun PinnedConversationItem(
     conversation: ConversationUiModel,
     onClick: () -> Unit,
-    onUnpin: () -> Unit = {},
     onAvatarClick: () -> Unit = {},
     isSelected: Boolean = false,
     isSelectionMode: Boolean = false,
     isDragging: Boolean = false,
     onDragStart: () -> Unit = {},
-    onDrag: (Float) -> Unit = {},
+    onDrag: (Float, Float) -> Unit = { _, _ -> },
     onDragEnd: () -> Unit = {},
     onDragCancel: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var showContextMenu by remember { mutableStateOf(false) }
-    // Track accumulated drag distance to distinguish from long-press-to-unpin
-    var totalDragDistance by remember { mutableFloatStateOf(0f) }
-    val dragThreshold = with(LocalDensity.current) { 16.dp.toPx() }
-
     Box(modifier = modifier) {
         Column(
             modifier = Modifier
@@ -2566,27 +2516,13 @@ private fun PinnedConversationItem(
                 .pointerInput(isSelectionMode) {
                     if (!isSelectionMode) {
                         detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                totalDragDistance = 0f
-                                onDragStart()
-                            },
+                            onDragStart = { onDragStart() },
                             onDrag = { change, dragAmount ->
                                 change.consume()
-                                onDrag(dragAmount.x)
-                                totalDragDistance += kotlin.math.abs(dragAmount.x) + kotlin.math.abs(dragAmount.y)
+                                onDrag(dragAmount.x, dragAmount.y)
                             },
-                            onDragEnd = {
-                                if (totalDragDistance < dragThreshold) {
-                                    // User long-pressed without significant dragging - show context menu
-                                    showContextMenu = true
-                                }
-                                onDragEnd()
-                                totalDragDistance = 0f
-                            },
-                            onDragCancel = {
-                                onDragCancel()
-                                totalDragDistance = 0f
-                            }
+                            onDragEnd = { onDragEnd() },
+                            onDragCancel = { onDragCancel() }
                         )
                     }
                 }
@@ -2703,30 +2639,16 @@ private fun PinnedConversationItem(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Name (truncated) - format phone numbers nicely, constrain width for grid layout
+            // Name (truncated with ellipsis) - format phone numbers nicely, width is 120% of avatar
             val formattedName = formatDisplayName(conversation.displayName)
             Text(
-                text = formattedName.split(" ").firstOrNull() ?: formattedName,
+                text = formattedName,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.widthIn(max = 88.dp)
-            )
-        }
-
-        // Context menu dropdown
-        DropdownMenu(
-            expanded = showContextMenu,
-            onDismissRequest = { showContextMenu = false }
-        ) {
-            DropdownMenuItem(
-                text = { Text("Unpin") },
-                onClick = {
-                    showContextMenu = false
-                    onUnpin()
-                }
+                modifier = Modifier.widthIn(max = 86.dp) // 120% of 72.dp avatar
             )
         }
     }
@@ -2845,24 +2767,21 @@ private fun EmptyCategoryState(
 }
 
 private fun formatMessagePreview(conversation: ConversationUiModel): String {
+    val content = when (conversation.lastMessageType) {
+        MessageType.IMAGE -> "Image"
+        MessageType.VIDEO -> "Video"
+        MessageType.AUDIO -> "Audio"
+        MessageType.LINK -> formatLinkPreview(conversation)
+        MessageType.ATTACHMENT -> "Attachment"
+        else -> conversation.lastMessageText
+    }
+
     return when {
-        conversation.hasDraft -> conversation.draftText ?: ""
-        conversation.isFromMe -> {
-            val prefix = "You: "
-            val content = when (conversation.lastMessageType) {
-                MessageType.IMAGE -> "Image"
-                MessageType.VIDEO -> "Video"
-                MessageType.AUDIO -> "Audio"
-                MessageType.LINK -> formatLinkPreview(conversation)
-                MessageType.ATTACHMENT -> "Attachment"
-                else -> conversation.lastMessageText
-            }
-            prefix + content
-        }
-        else -> when (conversation.lastMessageType) {
-            MessageType.LINK -> formatLinkPreview(conversation)
-            else -> conversation.lastMessageText
-        }
+        conversation.isFromMe -> "You: $content"
+        // For group chats, show sender's first name
+        conversation.isGroup && conversation.lastMessageSenderName != null ->
+            "${conversation.lastMessageSenderName}: $content"
+        else -> content
     }
 }
 
@@ -3084,7 +3003,6 @@ private fun SettingsPanel(
                 onEffectsSettingsClick = { navigateFromDrawer("effects") },
                 onTemplatesClick = { navigateFromDrawer("templates") },
                 onAboutClick = { navigateFromDrawer("about") },
-                onNotificationProviderClick = { navigateFromDrawer("notification_provider") },
                 viewModel = viewModel
             )
         }

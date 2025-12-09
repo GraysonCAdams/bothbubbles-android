@@ -2,6 +2,7 @@ package com.bothbubbles.ui.settings.about
 
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -86,8 +87,42 @@ fun AboutScreen(
                     Text(
                         text = "Version ${uiState.appVersion}",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable {
+                            when (val result = viewModel.onVersionTapped()) {
+                                is DeveloperModeTapResult.TapsRemaining -> {
+                                    Toast.makeText(
+                                        context,
+                                        "${result.count} more tap${if (result.count > 1) "s" else ""} to enable developer mode",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                is DeveloperModeTapResult.JustEnabled -> {
+                                    Toast.makeText(
+                                        context,
+                                        "Developer mode enabled!",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                is DeveloperModeTapResult.AlreadyEnabled -> {
+                                    Toast.makeText(
+                                        context,
+                                        "Developer mode is already enabled",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                                else -> { /* No feedback */ }
+                            }
+                        }
                     )
+                    if (uiState.developerModeEnabled) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Developer Mode",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
                     if (uiState.serverVersion != null) {
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(

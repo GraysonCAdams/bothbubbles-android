@@ -2,6 +2,7 @@ package com.bothbubbles.ui.effects.bubble
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.TextStyle
 import com.bothbubbles.ui.effects.MessageEffect
 
 /**
@@ -12,7 +13,10 @@ import com.bothbubbles.ui.effects.MessageEffect
  * @param isNewMessage Whether this is a newly received message (triggers animation)
  * @param isFromMe Whether the message is from the current user (affects animation direction)
  * @param onEffectComplete Callback when the effect animation completes
- * @param onReveal Callback when invisible ink is revealed
+ * @param isInvisibleInkRevealed Whether invisible ink has been revealed
+ * @param onInvisibleInkRevealChanged Callback when invisible ink reveal state changes
+ * @param hasMedia Whether the message has media attachments (affects invisible ink behavior)
+ * @param onMediaClickBlocked Callback when media click is blocked (invisible ink not revealed)
  * @param content The message bubble content to wrap
  */
 @Composable
@@ -22,7 +26,10 @@ fun BubbleEffectWrapper(
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
     onEffectComplete: () -> Unit = {},
-    onReveal: () -> Unit = {},
+    isInvisibleInkRevealed: Boolean = false,
+    onInvisibleInkRevealChanged: (Boolean) -> Unit = {},
+    hasMedia: Boolean = false,
+    onMediaClickBlocked: (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
     when (effect) {
@@ -56,8 +63,11 @@ fun BubbleEffectWrapper(
 
         MessageEffect.Bubble.InvisibleInk -> {
             InvisibleInkEffect(
-                onReveal = onReveal,
+                isRevealed = isInvisibleInkRevealed,
+                onRevealStateChanged = onInvisibleInkRevealChanged,
                 modifier = modifier,
+                hasMedia = hasMedia,
+                onMediaClickBlocked = onMediaClickBlocked,
                 content = content
             )
         }

@@ -744,8 +744,10 @@ class MessageRepository @Inject constructor(
             }
         }
 
-        // Check if it's already a local SMS/MMS chat
-        if (chatGuid.startsWith("sms;-;") || chatGuid.startsWith("mms;-;")) {
+        // Check if it's already a local SMS/MMS/RCS chat
+        if (chatGuid.startsWith("sms;-;", ignoreCase = true) ||
+            chatGuid.startsWith("mms;-;", ignoreCase = true) ||
+            chatGuid.startsWith("RCS;-;", ignoreCase = true)) {
             // Use MMS if group or has attachments
             return if (chat?.isGroup == true || hasAttachments) {
                 MessageDeliveryMode.LOCAL_MMS
@@ -825,10 +827,12 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Check if a chat is a local SMS/MMS chat
+     * Check if a chat is a local SMS/MMS/RCS chat
      */
     fun isLocalSmsChat(chatGuid: String): Boolean {
-        return chatGuid.startsWith("sms;-;") || chatGuid.startsWith("mms;-;")
+        return chatGuid.startsWith("sms;-;", ignoreCase = true) ||
+            chatGuid.startsWith("mms;-;", ignoreCase = true) ||
+            chatGuid.startsWith("RCS;-;", ignoreCase = true)
     }
 
     /**
@@ -836,8 +840,9 @@ class MessageRepository @Inject constructor(
      */
     suspend fun getMessageSourceForChat(chatGuid: String): MessageSource {
         return when {
-            chatGuid.startsWith("sms;-;") -> MessageSource.LOCAL_SMS
-            chatGuid.startsWith("mms;-;") -> MessageSource.LOCAL_MMS
+            chatGuid.startsWith("sms;-;", ignoreCase = true) -> MessageSource.LOCAL_SMS
+            chatGuid.startsWith("mms;-;", ignoreCase = true) -> MessageSource.LOCAL_MMS
+            chatGuid.startsWith("RCS;-;", ignoreCase = true) -> MessageSource.LOCAL_SMS
             else -> MessageSource.IMESSAGE
         }
     }
@@ -847,6 +852,16 @@ class MessageRepository @Inject constructor(
      */
     suspend fun deleteMessageLocally(messageGuid: String) {
         messageDao.deleteMessage(messageGuid)
+    }
+
+    /**
+     * Mark a message as failed with an error message.
+     * Called when server sends a message-send-error event.
+     */
+    suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String) {
+        // Update the message error code and error message
+        messageDao.updateMessageError(messageGuid, 1, errorMessage)
+        Log.d(TAG, "Marked message $messageGuid as failed: $errorMessage")
     }
 
     /**
@@ -926,10 +941,22 @@ class MessageRepository @Inject constructor(
     }
 
     private fun MessageDto.toEntity(chatGuid: String): MessageEntity {
+        // Determine message source based on handle's service or chat GUID prefix
+        val source = when {
+            handle?.service?.equals("SMS", ignoreCase = true) == true -> MessageSource.SERVER_SMS.name
+            handle?.service?.equals("RCS", ignoreCase = true) == true -> MessageSource.SERVER_SMS.name
+            chatGuid.startsWith("sms;-;", ignoreCase = true) -> MessageSource.SERVER_SMS.name
+            chatGuid.startsWith("SMS;-;") -> MessageSource.SERVER_SMS.name
+            chatGuid.startsWith("RCS;-;", ignoreCase = true) -> MessageSource.SERVER_SMS.name
+            chatGuid.startsWith("mms;-;", ignoreCase = true) -> MessageSource.SERVER_SMS.name
+            else -> MessageSource.IMESSAGE.name
+        }
+
         return MessageEntity(
             guid = guid,
             chatGuid = chatGuid,
             handleId = handleId,
+            senderAddress = handle?.address,
             text = text,
             subject = subject,
             dateCreated = dateCreated ?: System.currentTimeMillis(),
@@ -954,7 +981,7 @@ class MessageRepository @Inject constructor(
             bigEmoji = bigEmoji,
             wasDeliveredQuietly = wasDeliveredQuietly,
             didNotifyRecipient = didNotifyRecipient,
-            messageSource = MessageSource.IMESSAGE.name
+            messageSource = source
         )
     }
 }

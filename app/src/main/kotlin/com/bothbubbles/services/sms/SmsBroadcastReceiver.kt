@@ -19,6 +19,7 @@ import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
@@ -75,6 +76,9 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var androidContactsService: AndroidContactsService
+
+    @Inject
+    lateinit var activeConversationManager: ActiveConversationManager
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -188,6 +192,24 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Ensure handle exists, link to chat, and try to infer sender name
             ensureHandleAndInferName(chatGuid, address, fullBody)
 
+            // Check if notifications are disabled for this chat
+            if (!chat.notificationsEnabled) {
+                Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping SMS notification")
+                return@forEach
+            }
+
+            // Check if chat is snoozed
+            if (chat.isSnoozed) {
+                Log.i(TAG, "Chat $chatGuid is snoozed, skipping SMS notification")
+                return@forEach
+            }
+
+            // Check if user is currently viewing this conversation
+            if (activeConversationManager.isConversationActive(chatGuid)) {
+                Log.i(TAG, "Chat $chatGuid is currently active, skipping SMS notification")
+                return@forEach
+            }
+
             // Check for spam - if spam, skip notification
             val spamResult = spamRepository.evaluateAndMarkSpam(chatGuid, address, fullBody)
             if (spamResult.isSpam) {
@@ -198,7 +220,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Categorize the message for filtering purposes
             categorizationRepository.evaluateAndCategorize(chatGuid, address, fullBody)
 
-            // Show notification (only for non-spam messages)
+            // Show notification (only for non-spam, non-snoozed, notifications-enabled chats)
             notificationService.showMessageNotification(
                 chatGuid = chatGuid,
                 chatTitle = chat.displayName ?: address,

@@ -32,6 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -354,10 +355,13 @@ private fun ImageAttachment(
         1f
     }
 
+    // For transparent images, don't clip corners or add background
+    val isTransparent = attachment.mayHaveTransparency
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -381,46 +385,65 @@ private fun ImageAttachment(
             isError = true
         }
 
-        // Loading indicator
+        // Loading indicator - minimal for transparent images
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
+            if (isTransparent) {
+                // No background for transparent images - just show spinner
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 250.dp)
+                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        // Error state
+        // Error state - minimal for transparent images
         if (isError) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.BrokenImage,
-                        contentDescription = "Failed to load",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(32.dp)
-                    )
-                    if (attachment.friendlySize.isNotEmpty()) {
-                        Text(
-                            text = attachment.friendlySize,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            if (isTransparent) {
+                // Compact error for transparent images
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = "Failed to load",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(32.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Outlined.BrokenImage,
+                            contentDescription = "Failed to load",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
                         )
+                        if (attachment.friendlySize.isNotEmpty()) {
+                            Text(
+                                text = attachment.friendlySize,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
@@ -430,6 +453,7 @@ private fun ImageAttachment(
 
 /**
  * GIF attachment that loops automatically and opens previewer on tap.
+ * GIFs can have transparency, so we don't clip corners or add background.
  */
 @Composable
 private fun GifAttachment(
@@ -449,10 +473,13 @@ private fun GifAttachment(
         1f
     }
 
+    // GIFs can have transparency - don't clip corners or add background
+    val isTransparent = attachment.mayHaveTransparency
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -476,26 +503,34 @@ private fun GifAttachment(
             isError = true
         }
 
-        // Loading indicator
+        // Loading indicator - minimal for transparent GIFs
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
+            if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = 250.dp)
+                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        // GIF badge
-        if (!isLoading && !isError) {
+        // GIF badge - only show for non-transparent GIFs to avoid clutter
+        if (!isLoading && !isError && !isTransparent) {
             Surface(
                 shape = RoundedCornerShape(4.dp),
                 color = Color.Black.copy(alpha = 0.6f),
@@ -512,28 +547,37 @@ private fun GifAttachment(
             }
         }
 
-        // Error state
+        // Error state - minimal for transparent GIFs
         if (isError) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.BrokenImage,
-                        contentDescription = "Failed to load",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(32.dp)
-                    )
-                    if (attachment.friendlySize.isNotEmpty()) {
-                        Text(
-                            text = attachment.friendlySize,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            if (isTransparent) {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = "Failed to load",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(32.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Outlined.BrokenImage,
+                            contentDescription = "Failed to load",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
                         )
+                        if (attachment.friendlySize.isNotEmpty()) {
+                            Text(
+                                text = attachment.friendlySize,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
@@ -1115,10 +1159,15 @@ fun BorderlessMediaContent(
     modifier: Modifier = Modifier,
     onDownloadClick: ((String) -> Unit)? = null,
     isDownloading: Boolean = false,
-    downloadProgress: Float = 0f
+    downloadProgress: Float = 0f,
+    isPlacedSticker: Boolean = false,
+    messageGuid: String = ""
 ) {
     // Show placeholder if manual download mode and attachment needs download
     val showPlaceholder = onDownloadClick != null && attachment.needsDownload
+
+    // Use smaller max width for placed stickers
+    val effectiveMaxWidth = if (isPlacedSticker) 140.dp else maxWidth
 
     when {
         showPlaceholder -> BorderlessAttachmentPlaceholder(
@@ -1126,25 +1175,29 @@ fun BorderlessMediaContent(
             onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
             isDownloading = isDownloading,
             downloadProgress = downloadProgress,
-            maxWidth = maxWidth,
+            maxWidth = effectiveMaxWidth,
             modifier = modifier
         )
         attachment.isGif -> BorderlessGifAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
-            maxWidth = maxWidth,
-            modifier = modifier
+            maxWidth = effectiveMaxWidth,
+            modifier = modifier,
+            isPlacedSticker = isPlacedSticker,
+            messageGuid = messageGuid
         )
         attachment.isImage -> BorderlessImageAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
-            maxWidth = maxWidth,
-            modifier = modifier
+            maxWidth = effectiveMaxWidth,
+            modifier = modifier,
+            isPlacedSticker = isPlacedSticker,
+            messageGuid = messageGuid
         )
         attachment.isVideo -> BorderlessInlineVideoAttachment(
             attachment = attachment,
             onFullscreenClick = { onMediaClick(attachment.guid) },
-            maxWidth = maxWidth,
+            maxWidth = effectiveMaxWidth,
             modifier = modifier
         )
     }
@@ -1262,14 +1315,17 @@ private fun BorderlessAttachmentPlaceholder(
 
 /**
  * Renders an image attachment without bubble container styling.
- * Only has subtle rounded corners, no background color.
+ * For transparent images, removes corners and background entirely.
+ * For placed stickers, applies a slight rotation for a "slapped on" effect.
  */
 @Composable
 private fun BorderlessImageAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPlacedSticker: Boolean = false,
+    messageGuid: String = ""
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
@@ -1283,11 +1339,29 @@ private fun BorderlessImageAttachment(
         1f
     }
 
+    // For transparent images, don't clip corners
+    val isTransparent = attachment.mayHaveTransparency
+
+    // Deterministic rotation based on guid hash for placed stickers (-15° to +15°)
+    val rotation = if (isPlacedSticker) {
+        ((messageGuid.hashCode() % 30) - 15).toFloat()
+    } else 0f
+
+    // Slight size variance for placed stickers (0.9x to 1.1x)
+    val sizeScale = if (isPlacedSticker) {
+        0.9f + ((messageGuid.hashCode() and 0xFF) / 255f) * 0.2f
+    } else 1f
+
     Box(
         modifier = modifier
-            .widthIn(max = maxWidth)
+            .widthIn(max = maxWidth * sizeScale)
             .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-            .clip(RoundedCornerShape(12.dp))
+            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .then(
+                if (isPlacedSticker) {
+                    Modifier.graphicsLayer { rotationZ = rotation }
+                } else Modifier
+            )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -1299,7 +1373,7 @@ private fun BorderlessImageAttachment(
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop,
+                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -1309,44 +1383,61 @@ private fun BorderlessImageAttachment(
             isError = true
         }
 
-        // Loading indicator (with subtle background)
+        // Loading indicator - minimal for transparent images
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                contentAlignment = Alignment.Center
-            ) {
+            if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        // Error state
+        // Error state - minimal for transparent images
         if (isError) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.BrokenImage,
-                        contentDescription = "Failed to load",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(32.dp)
-                    )
-                    if (attachment.friendlySize.isNotEmpty()) {
-                        Text(
-                            text = attachment.friendlySize,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            if (isTransparent) {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = "Failed to load",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(32.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Outlined.BrokenImage,
+                            contentDescription = "Failed to load",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
                         )
+                        if (attachment.friendlySize.isNotEmpty()) {
+                            Text(
+                                text = attachment.friendlySize,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }
@@ -1356,13 +1447,16 @@ private fun BorderlessImageAttachment(
 
 /**
  * Borderless GIF attachment that loops and opens previewer on tap.
+ * Supports transparency - no corners or background for transparent GIFs.
  */
 @Composable
 private fun BorderlessGifAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
     maxWidth: androidx.compose.ui.unit.Dp,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPlacedSticker: Boolean = false,
+    messageGuid: String = ""
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
@@ -1376,10 +1470,30 @@ private fun BorderlessGifAttachment(
         1f
     }
 
+    // GIFs can have transparency
+    val isTransparent = attachment.mayHaveTransparency
+
+    // Deterministic rotation based on guid hash for placed stickers (-15° to +15°)
+    val rotation = if (isPlacedSticker) {
+        ((messageGuid.hashCode() % 30) - 15).toFloat()
+    } else 0f
+
+    // Slight size variance for placed stickers (0.9x to 1.1x)
+    val sizeScale = if (isPlacedSticker) {
+        0.9f + ((messageGuid.hashCode() and 0xFF) / 255f) * 0.2f
+    } else 1f
+
+    val effectiveMaxWidth = maxWidth * sizeScale
+
     Box(
         modifier = modifier
-            .widthIn(max = maxWidth)
-            .clip(RoundedCornerShape(12.dp))
+            .widthIn(max = effectiveMaxWidth)
+            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .then(
+                if (isPlacedSticker) {
+                    Modifier.graphicsLayer { rotationZ = rotation }
+                } else Modifier
+            )
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -1391,9 +1505,8 @@ private fun BorderlessGifAttachment(
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
                 modifier = Modifier
-                    .widthIn(max = maxWidth)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                    .clip(RoundedCornerShape(12.dp)),
+                    .widthIn(max = effectiveMaxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
                 contentScale = ContentScale.Fit,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
@@ -1404,26 +1517,34 @@ private fun BorderlessGifAttachment(
             isError = true
         }
 
-        // Loading indicator
+        // Loading indicator - minimal for transparent GIFs
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .widthIn(max = maxWidth)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                contentAlignment = Alignment.Center
-            ) {
+            if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
                     strokeWidth = 2.dp,
                     color = MaterialTheme.colorScheme.primary
                 )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .widthIn(max = maxWidth)
+                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(32.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        // GIF badge
-        if (!isLoading && !isError) {
+        // GIF badge - only show for non-transparent GIFs
+        if (!isLoading && !isError && !isTransparent) {
             Surface(
                 shape = RoundedCornerShape(4.dp),
                 color = Color.Black.copy(alpha = 0.6f),
@@ -1440,28 +1561,37 @@ private fun BorderlessGifAttachment(
             }
         }
 
-        // Error state
+        // Error state - minimal for transparent GIFs
         if (isError) {
-            Box(
-                modifier = Modifier
-                    .size(100.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerLow),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Icon(
-                        Icons.Outlined.BrokenImage,
-                        contentDescription = "Failed to load",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(32.dp)
-                    )
-                    if (attachment.friendlySize.isNotEmpty()) {
-                        Text(
-                            text = attachment.friendlySize,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+            if (isTransparent) {
+                Icon(
+                    Icons.Outlined.BrokenImage,
+                    contentDescription = "Failed to load",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    modifier = Modifier.size(32.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .size(100.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerLow),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(
+                            Icons.Outlined.BrokenImage,
+                            contentDescription = "Failed to load",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.size(32.dp)
                         )
+                        if (attachment.friendlySize.isNotEmpty()) {
+                            Text(
+                                text = attachment.friendlySize,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                            )
+                        }
                     }
                 }
             }

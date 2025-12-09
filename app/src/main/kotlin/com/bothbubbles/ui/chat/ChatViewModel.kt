@@ -12,6 +12,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
@@ -27,11 +28,13 @@ import com.bothbubbles.data.repository.MessageDeliveryMode
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.smartreply.SmartReplyService
+import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
@@ -75,7 +78,9 @@ class ChatViewModel @Inject constructor(
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
     private val scheduledMessageDao: ScheduledMessageDao,
-    private val workManager: WorkManager
+    private val workManager: WorkManager,
+    private val handleDao: HandleDao,
+    private val activeConversationManager: ActiveConversationManager
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -126,10 +131,22 @@ class ChatViewModel @Inject constructor(
     private var typingDebounceJob: Job? = null
     private var isCurrentlyTyping = false
     private val typingDebounceMs = 3000L // 3 seconds after last keystroke to send stopped-typing
+    private var lastStartedTypingTime = 0L
+    private val typingCooldownMs = 500L // Min time between started-typing emissions
+
+    // Cached settings for typing indicators (avoids suspend calls on every keystroke)
+    @Volatile private var cachedPrivateApiEnabled = false
+    @Volatile private var cachedTypingIndicatorsEnabled = false
 
     // Draft persistence
     private var draftSaveJob: Job? = null
     private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
+
+    // Scroll position tracking for state restoration
+    private var lastScrollPosition: Int = 0
+    private var lastScrollOffset: Int = 0
+    private var scrollSaveJob: Job? = null
+    private val scrollSaveDebounceMs = 1000L // Debounce scroll saves
 
     // Effect settings flows
     val autoPlayEffects = settingsDataStore.autoPlayEffects
@@ -153,11 +170,19 @@ class ChatViewModel @Inject constructor(
     private var isPlayingScreenEffect = false
 
     init {
+        // Track this conversation as active to suppress notifications while viewing
+        activeConversationManager.setActiveConversation(chatGuid, mergedChatGuids.toSet())
+
+        // Notify server which chat is open (helps server optimize notification delivery)
+        socketService.sendOpenChat(chatGuid)
+
         loadChat()
         loadMessages()
         syncMessages()
         observeTypingIndicators()
+        observeTypingIndicatorSettings()
         observeNewMessages()
+        observeMessageUpdates()
         markAsRead()
         determineChatType()
         observeParticipantsForSaveContactBanner()
@@ -166,6 +191,37 @@ class ChatViewModel @Inject constructor(
         observeSmartReplies()
         observeAutoDownloadSetting()
         observeUploadProgress()
+        saveCurrentChatState()
+    }
+
+    /**
+     * Observe typing indicator settings and cache them for fast access.
+     * This avoids suspend calls on every keystroke in handleTypingIndicator.
+     */
+    private fun observeTypingIndicatorSettings() {
+        viewModelScope.launch {
+            settingsDataStore.enablePrivateApi.collect { enabled ->
+                cachedPrivateApiEnabled = enabled
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.sendTypingIndicators.collect { enabled ->
+                cachedTypingIndicatorsEnabled = enabled
+            }
+        }
+    }
+
+    /**
+     * Save current chat state immediately for state restoration.
+     * Called in init so state is persisted as soon as chat opens.
+     */
+    private fun saveCurrentChatState() {
+        android.util.Log.e("StateRestore", "saveCurrentChatState CALLED: chatGuid=$chatGuid")
+        viewModelScope.launch {
+            val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
+            android.util.Log.e("StateRestore", "saveCurrentChatState SAVING: chatGuid=$chatGuid")
+            settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
+        }
     }
 
     /**
@@ -563,11 +619,37 @@ class ChatViewModel @Inject constructor(
                 participantsFlow
             ) { messages, participants ->
                 // Build a map from handleId to displayName for quick lookup
-                val handleIdToName = participants.associate { it.id to it.displayName }
-                Pair(messages, handleIdToName)
+                val handleIdToName = participants.associate { it.id to it.displayName }.toMutableMap()
+
+                // Build a map by normalized address for looking up sender names from senderAddress
+                val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+
+                // For messages with handleId not in participants, look up the handle and match by address
+                val missingHandleIds = messages
+                    .filter { !it.isFromMe && it.handleId != null && it.handleId !in handleIdToName }
+                    .mapNotNull { it.handleId }
+                    .distinct()
+
+                // Fetch missing handles and resolve names
+                missingHandleIds.forEach { handleId ->
+                    val handle = handleDao.getHandleById(handleId)
+                    if (handle != null) {
+                        // Try to find a participant with matching address
+                        val normalizedAddress = normalizeAddress(handle.address)
+                        val matchingName = addressToName[normalizedAddress]
+                        if (matchingName != null) {
+                            handleIdToName[handleId] = matchingName
+                        } else {
+                            // No participant match - use handle's own displayName (address fallback)
+                            handleIdToName[handleId] = handle.displayName
+                        }
+                    }
+                }
+
+                Triple(messages, handleIdToName.toMap(), addressToName)
             }
                 .distinctUntilChanged()
-                .map { (messages, handleIdToName) ->
+                .map { (messages, handleIdToName, addressToName) ->
                     // Separate actual reactions (iMessage tapbacks)
                     val iMessageReactions = messages.filter { it.isReaction }
 
@@ -618,7 +700,7 @@ class ChatViewModel @Inject constructor(
                         val messageReactions = reactionsByMessage[message.guid].orEmpty()
                         val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
                         val attachments = allAttachments[message.guid].orEmpty()
-                        message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName)
+                        message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName, addressToName)
                     }
                 }
                 .collect { messageModels ->
@@ -751,23 +833,31 @@ class ChatViewModel @Inject constructor(
      * even if Room's Flow invalidation is delayed or there are chatGuid mismatches.
      *
      * When we receive a new message for this chat, we:
-     * 1. Ensure the message is saved with our local chatGuid (in case of format mismatch)
-     * 2. Force refresh the message list from Room
-     * 3. Play the receive sound and mark as read
+     * 1. Directly add the message to the UI state (like original Flutter client)
+     * 2. Mark as read since user is viewing the chat
      */
     private fun observeNewMessages() {
         viewModelScope.launch {
             socketService.events
                 .filterIsInstance<SocketEvent.NewMessage>()
                 .filter { event ->
-                    // Match if the event chatGuid is in our merged chat GUIDs
-                    event.chatGuid in mergedChatGuids ||
-                        event.chatGuid == chatGuid
+                    // Use normalized GUID comparison to handle format differences
+                    // Server may send "+1234567890" but local has "+1-234-567-890"
+                    val normalizedEventGuid = normalizeGuid(event.chatGuid)
+                    mergedChatGuids.any { normalizeGuid(it) == normalizedEventGuid } ||
+                        normalizeGuid(chatGuid) == normalizedEventGuid ||
+                        // Fallback: match by address/phone number only
+                        extractAddress(event.chatGuid)?.let { eventAddress ->
+                            mergedChatGuids.any { extractAddress(it) == eventAddress } ||
+                                extractAddress(chatGuid) == eventAddress
+                        } == true
                 }
                 .collect { event ->
-                    // Force refresh messages from Room in case the Flow didn't auto-update
-                    // This happens when Room's invalidation tracking doesn't trigger
-                    forceRefreshMessages()
+                    android.util.Log.d("ChatViewModel", "Socket: New message received for ${event.chatGuid}, guid=${event.message.guid}")
+
+                    // Directly add the new message to UI state (like original Flutter client)
+                    // This is more reliable than waiting for Room Flow invalidation
+                    directlyAddMessageToUi(event.message, event.chatGuid)
 
                     // Note: Sound is already played by SocketService.onNewMessage
                     // We don't play it again here to avoid double sounds
@@ -779,6 +869,178 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * Directly add a new message to the UI state without waiting for Room Flow.
+     * This mirrors the original Flutter client's pattern of manual list management.
+     */
+    private suspend fun directlyAddMessageToUi(messageDto: MessageDto, eventChatGuid: String) {
+        // Check if message already exists in UI state (avoid duplicates)
+        val currentMessages = _uiState.value.messages
+        if (currentMessages.any { it.guid == messageDto.guid }) {
+            android.util.Log.d("ChatViewModel", "Message ${messageDto.guid} already in UI, skipping")
+            return
+        }
+
+        // Convert DTO to Entity
+        val messageEntity = messageDto.toMessageEntity(eventChatGuid)
+
+        // Get participant info for sender name resolution
+        val participants = chatRepository.observeParticipantsForChats(mergedChatGuids).first()
+        val handleIdToName = participants.associate { it.id to it.displayName }
+        val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+
+        // Load attachments for this message
+        val attachments = if (messageEntity.hasAttachments) {
+            attachmentDao.getAttachmentsForMessage(messageEntity.guid)
+        } else {
+            emptyList()
+        }
+
+        // Convert to UI model
+        val messageModel = messageEntity.toUiModel(
+            reactions = emptyList(), // New messages typically don't have reactions yet
+            smsReactions = emptyList(),
+            attachments = attachments,
+            handleIdToName = handleIdToName,
+            addressToName = addressToName
+        )
+
+        // Add to UI state at the correct position (beginning for DESC sort)
+        _uiState.update { state ->
+            val updatedMessages = listOf(messageModel) + state.messages
+            android.util.Log.d("ChatViewModel", "Added message to UI, total: ${updatedMessages.size}")
+            state.copy(messages = updatedMessages)
+        }
+    }
+
+    /**
+     * Convert a MessageDto to MessageEntity for UI processing.
+     */
+    private fun MessageDto.toMessageEntity(chatGuid: String): MessageEntity {
+        return MessageEntity(
+            guid = guid,
+            chatGuid = chatGuid,
+            handleId = handleId,
+            senderAddress = handle?.address,
+            text = text,
+            subject = subject,
+            dateCreated = dateCreated ?: System.currentTimeMillis(),
+            dateRead = dateRead,
+            dateDelivered = dateDelivered,
+            dateEdited = dateEdited,
+            datePlayed = datePlayed,
+            isFromMe = isFromMe,
+            error = error,
+            itemType = itemType,
+            groupTitle = groupTitle,
+            groupActionType = groupActionType,
+            balloonBundleId = balloonBundleId,
+            associatedMessageGuid = associatedMessageGuid,
+            associatedMessagePart = associatedMessagePart,
+            associatedMessageType = associatedMessageType,
+            expressiveSendStyleId = expressiveSendStyleId,
+            threadOriginatorGuid = threadOriginatorGuid,
+            threadOriginatorPart = threadOriginatorPart,
+            hasAttachments = attachments?.isNotEmpty() == true,
+            hasReactions = hasReactions,
+            bigEmoji = bigEmoji,
+            wasDeliveredQuietly = wasDeliveredQuietly,
+            didNotifyRecipient = didNotifyRecipient,
+            messageSource = if (handle?.service?.equals("SMS", ignoreCase = true) == true) "SERVER_SMS" else "IMESSAGE"
+        )
+    }
+
+    /**
+     * Observe message updates from socket for immediate UI updates.
+     * Handles read receipts, delivery status, edits, reactions, etc.
+     */
+    private fun observeMessageUpdates() {
+        viewModelScope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.MessageUpdated>()
+                .filter { event ->
+                    val normalizedEventGuid = normalizeGuid(event.chatGuid)
+                    mergedChatGuids.any { normalizeGuid(it) == normalizedEventGuid } ||
+                        normalizeGuid(chatGuid) == normalizedEventGuid ||
+                        extractAddress(event.chatGuid)?.let { eventAddress ->
+                            mergedChatGuids.any { extractAddress(it) == eventAddress } ||
+                                extractAddress(chatGuid) == eventAddress
+                        } == true
+                }
+                .collect { event ->
+                    android.util.Log.d("ChatViewModel", "Socket: Message updated for ${event.chatGuid}, guid=${event.message.guid}")
+                    // Directly update the message in UI state
+                    directlyUpdateMessageInUi(event.message, event.chatGuid)
+                }
+        }
+    }
+
+    /**
+     * Directly update an existing message in the UI state.
+     * Used for read receipts, delivery status, edits, etc.
+     */
+    private suspend fun directlyUpdateMessageInUi(messageDto: MessageDto, eventChatGuid: String) {
+        val currentMessages = _uiState.value.messages
+        val existingIndex = currentMessages.indexOfFirst { it.guid == messageDto.guid }
+
+        if (existingIndex == -1) {
+            android.util.Log.d("ChatViewModel", "Message ${messageDto.guid} not in UI, adding it")
+            // Message not in UI yet, add it
+            directlyAddMessageToUi(messageDto, eventChatGuid)
+            return
+        }
+
+        // Update the existing message
+        val existingMessage = currentMessages[existingIndex]
+
+        // Create updated message with new status info (using UI model fields)
+        val updatedMessage = existingMessage.copy(
+            isDelivered = messageDto.dateDelivered != null || existingMessage.isDelivered,
+            isRead = messageDto.dateRead != null || existingMessage.isRead,
+            text = messageDto.text ?: existingMessage.text,
+            hasError = messageDto.error != 0
+        )
+
+        _uiState.update { state ->
+            val updatedMessages = state.messages.toMutableList()
+            updatedMessages[existingIndex] = updatedMessage
+            android.util.Log.d("ChatViewModel", "Updated message at index $existingIndex")
+            state.copy(messages = updatedMessages)
+        }
+    }
+
+    /**
+     * Normalize a chat GUID for comparison by stripping formatting from phone numbers.
+     * Handles cases where server sends "+1234567890" but local has "+1-234-567-890".
+     */
+    private fun normalizeGuid(guid: String): String {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return guid.lowercase()
+        val prefix = parts[0].lowercase()
+        val address = if (parts[1].contains("@")) {
+            // Email address - just lowercase
+            parts[1].lowercase()
+        } else {
+            // Phone number - strip non-digits except leading +
+            parts[1].replace(Regex("[^0-9+]"), "")
+        }
+        return "$prefix;-;$address"
+    }
+
+    /**
+     * Extract just the address/phone portion from a chat GUID for fallback matching.
+     * Returns null if the GUID format is invalid.
+     */
+    private fun extractAddress(guid: String): String? {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return null
+        return if (parts[1].contains("@")) {
+            parts[1].lowercase()
+        } else {
+            parts[1].replace(Regex("[^0-9+]"), "")
+        }
+    }
+
+    /**
      * Force a one-time refresh of messages from Room.
      * This is used when we know new messages have arrived but Room's Flow hasn't emitted.
      */
@@ -786,6 +1048,7 @@ class ChatViewModel @Inject constructor(
         val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
         val participants = participantsFlow.first()
         val handleIdToName = participants.associate { it.id to it.displayName }
+        val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
 
         val messagesFlow = if (isMergedChat) {
             messageRepository.observeMessagesForChats(mergedChatGuids, limit = 50, offset = 0)
@@ -827,7 +1090,7 @@ class ChatViewModel @Inject constructor(
             val messageReactions = reactionsByMessage[message.guid].orEmpty()
             val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
             val attachments = allAttachments[message.guid].orEmpty()
-            message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName)
+            message.toUiModel(messageReactions, messageSmsReactions, attachments, handleIdToName, addressToName)
         }
 
         _uiState.update { state ->
@@ -862,44 +1125,47 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Handle typing indicator logic with debouncing.
-     * Sends started-typing when user starts typing and stopped-typing after 3 seconds of inactivity.
+     * Handle typing indicator logic with debouncing and rate limiting.
+     *
+     * Optimizations:
+     * 1. Uses cached settings (no suspend calls on every keystroke)
+     * 2. Only sends started-typing once until stopped-typing is sent
+     * 3. Rate limits started-typing to avoid rapid on/off transitions
+     * 4. Debounces stopped-typing (3 seconds after last keystroke)
      */
     private fun handleTypingIndicator(text: String) {
         // Only send typing indicators for iMessage chats (not local SMS)
         if (_uiState.value.isLocalSmsChat) return
 
-        viewModelScope.launch {
-            // Check if Private API and typing indicators are enabled
-            val privateApiEnabled = settingsDataStore.enablePrivateApi.first()
-            val typingEnabled = settingsDataStore.sendTypingIndicators.first()
+        // Use cached settings (no suspend required)
+        if (!cachedPrivateApiEnabled || !cachedTypingIndicatorsEnabled) return
 
-            if (!privateApiEnabled || !typingEnabled) return@launch
+        // Cancel any pending stopped-typing
+        typingDebounceJob?.cancel()
 
-            // Cancel any pending stopped-typing
-            typingDebounceJob?.cancel()
+        if (text.isNotEmpty()) {
+            // User is typing - send started-typing if not already sent
+            // Also apply cooldown to avoid rapid started/stopped/started transitions
+            val now = System.currentTimeMillis()
+            if (!isCurrentlyTyping && (now - lastStartedTypingTime > typingCooldownMs)) {
+                isCurrentlyTyping = true
+                lastStartedTypingTime = now
+                socketService.sendStartedTyping(chatGuid)
+            }
 
-            if (text.isNotEmpty()) {
-                // User is typing - send started-typing if not already sent
-                if (!isCurrentlyTyping) {
-                    isCurrentlyTyping = true
-                    socketService.sendStartedTyping(chatGuid)
-                }
-
-                // Set up debounce to send stopped-typing after inactivity
-                typingDebounceJob = viewModelScope.launch {
-                    delay(typingDebounceMs)
-                    if (isCurrentlyTyping) {
-                        isCurrentlyTyping = false
-                        socketService.sendStoppedTyping(chatGuid)
-                    }
-                }
-            } else {
-                // Text cleared - immediately send stopped-typing
+            // Set up debounce to send stopped-typing after inactivity
+            typingDebounceJob = viewModelScope.launch {
+                delay(typingDebounceMs)
                 if (isCurrentlyTyping) {
                     isCurrentlyTyping = false
                     socketService.sendStoppedTyping(chatGuid)
                 }
+            }
+        } else {
+            // Text cleared - immediately send stopped-typing
+            if (isCurrentlyTyping) {
+                isCurrentlyTyping = false
+                socketService.sendStoppedTyping(chatGuid)
             }
         }
     }
@@ -908,6 +1174,12 @@ class ChatViewModel @Inject constructor(
      * Called when leaving the chat to ensure we send stopped-typing and save draft
      */
     fun onChatLeave() {
+        // Clear active conversation tracking to resume notifications
+        activeConversationManager.clearActiveConversation()
+
+        // Notify server we're leaving this chat
+        socketService.sendCloseChat(chatGuid)
+
         typingDebounceJob?.cancel()
         if (isCurrentlyTyping) {
             isCurrentlyTyping = false
@@ -915,8 +1187,41 @@ class ChatViewModel @Inject constructor(
         }
         // Save draft immediately when leaving (cancel debounce and save now)
         draftSaveJob?.cancel()
+        scrollSaveJob?.cancel()
         viewModelScope.launch {
             chatRepository.updateDraftText(chatGuid, _draftText.value)
+            // Save scroll position for state restoration
+            val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
+            android.util.Log.d("StateRestore", "onChatLeave: saving chatGuid=$chatGuid, scroll=($lastScrollPosition, $lastScrollOffset)")
+            settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
+            settingsDataStore.setLastScrollPosition(lastScrollPosition, lastScrollOffset)
+        }
+    }
+
+    /**
+     * Update scroll position for state restoration.
+     * Called from ChatScreen when scroll position changes.
+     */
+    fun updateScrollPosition(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int) {
+        lastScrollPosition = firstVisibleItemIndex
+        lastScrollOffset = firstVisibleItemScrollOffset
+
+        // Debounced save to DataStore
+        scrollSaveJob?.cancel()
+        scrollSaveJob = viewModelScope.launch {
+            delay(scrollSaveDebounceMs)
+            settingsDataStore.setLastScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        }
+    }
+
+    /**
+     * Mark that the user has navigated away from chat (back to conversation list).
+     * This clears the saved chat state so the app opens to conversation list next time.
+     */
+    fun onNavigateBack() {
+        android.util.Log.d("StateRestore", "onNavigateBack: clearing saved chat state")
+        viewModelScope.launch {
+            settingsDataStore.clearLastOpenChat()
         }
     }
 
@@ -965,6 +1270,7 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(effectId: String? = null) {
         val text = _draftText.value.trim()
         val attachments = _pendingAttachments.value
+        val replyToGuid = _uiState.value.replyingToGuid
 
         if (text.isBlank() && attachments.isEmpty()) return
 
@@ -977,7 +1283,7 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             _draftText.value = ""
-            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty()) }
+            _uiState.update { it.copy(isSending = true, isSendingWithAttachments = attachments.isNotEmpty(), replyingToGuid = null) }
             _pendingAttachments.value = emptyList()
             // Clear draft from database when message is sent
             draftSaveJob?.cancel()
@@ -987,6 +1293,7 @@ class ChatViewModel @Inject constructor(
             messageRepository.sendUnified(
                 chatGuid = chatGuid,
                 text = text,
+                replyToGuid = replyToGuid,
                 attachments = attachments,
                 effectId = effectId
             ).fold(
@@ -1047,6 +1354,20 @@ class ChatViewModel @Inject constructor(
                 }
             )
         }
+    }
+
+    /**
+     * Set the message to reply to (for swipe-to-reply)
+     */
+    fun setReplyTo(messageGuid: String) {
+        _uiState.update { it.copy(replyingToGuid = messageGuid) }
+    }
+
+    /**
+     * Clear the reply state
+     */
+    fun clearReply() {
+        _uiState.update { it.copy(replyingToGuid = null) }
     }
 
     /**
@@ -1373,7 +1694,8 @@ class ChatViewModel @Inject constructor(
         reactions: List<MessageEntity> = emptyList(),
         smsReactions: List<SyntheticReaction> = emptyList(),
         attachments: List<AttachmentEntity> = emptyList(),
-        handleIdToName: Map<Long, String> = emptyMap()
+        handleIdToName: Map<Long, String> = emptyMap(),
+        addressToName: Map<String, String> = emptyMap()
     ): MessageUiModel {
         // Build a set of removed reactions: (isFromMe, tapbackType)
         // These are reactions that have been explicitly removed (3xxx codes)
@@ -1442,6 +1764,7 @@ class ChatViewModel @Inject constructor(
         return MessageUiModel(
             guid = guid,
             text = text,
+            subject = subject,
             dateCreated = dateCreated,
             formattedTime = formatTime(dateCreated),
             isFromMe = isFromMe,
@@ -1451,12 +1774,14 @@ class ChatViewModel @Inject constructor(
             hasError = error != 0,
             isReaction = associatedMessageType?.contains("reaction") == true,
             attachments = attachmentUiModels,
-            senderName = handleId?.let { handleIdToName[it] },
+            // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
+            senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
             messageSource = messageSource,
             reactions = allReactions,
             myReactions = myReactions,
             expressiveSendStyleId = expressiveSendStyleId,
-            effectPlayed = datePlayed != null
+            effectPlayed = datePlayed != null,
+            associatedMessageGuid = associatedMessageGuid
         )
     }
 
@@ -1536,6 +1861,40 @@ class ChatViewModel @Inject constructor(
 
     private fun formatTime(timestamp: Long): String {
         return SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date(timestamp))
+    }
+
+    /**
+     * Normalize an address for comparison/lookup.
+     * Strips non-essential characters from phone numbers, lowercases emails.
+     */
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            address.lowercase()
+        } else {
+            address.replace(Regex("[^0-9+]"), "")
+        }
+    }
+
+    /**
+     * Resolve sender name from available data sources.
+     * Priority: senderAddress lookup > handleId lookup > formatted address
+     */
+    private fun resolveSenderName(
+        senderAddress: String?,
+        handleId: Long?,
+        addressToName: Map<String, String>,
+        handleIdToName: Map<Long, String>
+    ): String? {
+        // 1. Try looking up by senderAddress (most accurate for group chats)
+        senderAddress?.let { address ->
+            val normalized = normalizeAddress(address)
+            addressToName[normalized]?.let { return it }
+            // No contact match - return formatted phone number
+            return PhoneNumberFormatter.format(address)
+        }
+
+        // 2. Fall back to handleId lookup
+        return handleId?.let { handleIdToName[it] }
     }
 
     /**
@@ -1724,5 +2083,7 @@ data class ChatUiState(
     val forwardSuccess: Boolean = false,
     // Snooze
     val isSnoozed: Boolean = false,
-    val snoozeUntil: Long? = null
+    val snoozeUntil: Long? = null,
+    // Reply state
+    val replyingToGuid: String? = null
 )

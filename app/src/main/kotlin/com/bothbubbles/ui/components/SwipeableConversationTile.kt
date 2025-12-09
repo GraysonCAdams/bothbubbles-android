@@ -82,7 +82,7 @@ data class SwipeConfig(
     val enabled: Boolean = true,
     val leftAction: SwipeActionType = SwipeActionType.ARCHIVE,
     val rightAction: SwipeActionType = SwipeActionType.PIN,
-    val sensitivity: Float = 0.25f
+    val sensitivity: Float = 0.4f
 )
 
 /**

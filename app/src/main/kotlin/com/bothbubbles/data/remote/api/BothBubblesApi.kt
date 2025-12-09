@@ -165,7 +165,7 @@ interface BothBubblesApi {
     @POST("api/v1/fcm/device")
     suspend fun registerFcmDevice(
         @Body request: RegisterDeviceRequest
-    ): Response<ApiResponse<Unit>>
+    ): Response<ApiResponse<Any?>>
 
     @GET("api/v1/fcm/client")
     suspend fun getFcmClient(): Response<ApiResponse<FcmClientDto>>

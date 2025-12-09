@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -34,7 +35,8 @@ class SmsContentObserver @Inject constructor(
     private val smsContentProvider: SmsContentProvider,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
-    private val notificationService: NotificationService
+    private val notificationService: NotificationService,
+    private val activeConversationManager: ActiveConversationManager
 ) {
     companion object {
         private const val TAG = "SmsContentObserver"
@@ -181,14 +183,26 @@ class SmsContentObserver @Inject constructor(
                     // Show notification for incoming messages
                     if (!isFromMe) {
                         val chat = chatDao.getChatByGuid(chatGuid)
-                        notificationService.showMessageNotification(
-                            chatGuid = chatGuid,
-                            chatTitle = chat?.displayName ?: address,
-                            messageText = body ?: "",
-                            messageGuid = existingGuid,
-                            senderName = null,
-                            senderAddress = normalizedAddress
-                        )
+
+                        // Check if notifications are disabled for this chat
+                        if (chat?.notificationsEnabled == false) {
+                            Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping SMS notification")
+                        } else if (chat?.isSnoozed == true) {
+                            // Check if chat is snoozed
+                            Log.i(TAG, "Chat $chatGuid is snoozed, skipping SMS notification")
+                        } else if (activeConversationManager.isConversationActive(chatGuid)) {
+                            // Check if user is currently viewing this conversation
+                            Log.i(TAG, "Chat $chatGuid is currently active, skipping SMS notification")
+                        } else {
+                            notificationService.showMessageNotification(
+                                chatGuid = chatGuid,
+                                chatTitle = chat?.displayName ?: address,
+                                messageText = body ?: "",
+                                messageGuid = existingGuid,
+                                senderName = null,
+                                senderAddress = normalizedAddress
+                            )
+                        }
                     }
 
                     Log.d(TAG, "Imported SMS $id from content observer")
@@ -299,14 +313,26 @@ class SmsContentObserver @Inject constructor(
                     // Show notification for incoming messages
                     if (!isFromMe) {
                         val chat = chatDao.getChatByGuid(chatGuid)
-                        notificationService.showMessageNotification(
-                            chatGuid = chatGuid,
-                            chatTitle = chat?.displayName ?: primaryAddress,
-                            messageText = textContent ?: "[MMS]",
-                            messageGuid = existingGuid,
-                            senderName = if (isGroup) primaryAddress else null,
-                            senderAddress = primaryAddress
-                        )
+
+                        // Check if notifications are disabled for this chat
+                        if (chat?.notificationsEnabled == false) {
+                            Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping MMS notification")
+                        } else if (chat?.isSnoozed == true) {
+                            // Check if chat is snoozed
+                            Log.i(TAG, "Chat $chatGuid is snoozed, skipping MMS notification")
+                        } else if (activeConversationManager.isConversationActive(chatGuid)) {
+                            // Check if user is currently viewing this conversation
+                            Log.i(TAG, "Chat $chatGuid is currently active, skipping MMS notification")
+                        } else {
+                            notificationService.showMessageNotification(
+                                chatGuid = chatGuid,
+                                chatTitle = chat?.displayName ?: primaryAddress,
+                                messageText = textContent ?: "[MMS]",
+                                messageGuid = existingGuid,
+                                senderName = if (isGroup) primaryAddress else null,
+                                senderAddress = primaryAddress
+                            )
+                        }
                     }
 
                     Log.d(TAG, "Imported MMS $id from content observer")
