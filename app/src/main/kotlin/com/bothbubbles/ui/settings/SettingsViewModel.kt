@@ -6,6 +6,8 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.sound.SoundManager
+import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -21,7 +23,8 @@ class SettingsViewModel @Inject constructor(
     private val socketService: SocketService,
     private val syncService: SyncService,
     private val chatRepository: ChatRepository,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val soundManager: SoundManager
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -84,8 +87,13 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeSoundSettings() {
         viewModelScope.launch {
-            settingsDataStore.messageSoundsEnabled.collect { enabled ->
-                _uiState.update { it.copy(messageSoundsEnabled = enabled) }
+            combine(
+                settingsDataStore.messageSoundsEnabled,
+                settingsDataStore.soundTheme
+            ) { enabled, theme ->
+                enabled to theme
+            }.collect { (enabled, theme) ->
+                _uiState.update { it.copy(messageSoundsEnabled = enabled, soundTheme = theme) }
             }
         }
     }
@@ -93,6 +101,14 @@ class SettingsViewModel @Inject constructor(
     fun setMessageSoundsEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setMessageSoundsEnabled(enabled)
+        }
+    }
+
+    fun setSoundTheme(theme: SoundTheme) {
+        viewModelScope.launch {
+            settingsDataStore.setSoundTheme(theme)
+            // Preview the sounds when theme is selected
+            soundManager.previewSounds(theme)
         }
     }
 
@@ -227,6 +243,7 @@ data class SettingsUiState(
     val sendTypingIndicators: Boolean = true,
     // Sound settings
     val messageSoundsEnabled: Boolean = true,
+    val soundTheme: SoundTheme = SoundTheme.DEFAULT,
     // Server configuration state
     val isServerConfigured: Boolean = false,
     // Developer mode

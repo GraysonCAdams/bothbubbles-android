@@ -65,6 +65,48 @@ data class UnifiedChatGroupEntity(
     val latestMessageText: String? = null,
 
     /**
+     * GUID of the latest message for matching attachments/reactions.
+     */
+    @ColumnInfo(name = "latest_message_guid")
+    val latestMessageGuid: String? = null,
+
+    /**
+     * Whether the latest message was sent by the user.
+     */
+    @ColumnInfo(name = "latest_message_is_from_me")
+    val latestMessageIsFromMe: Boolean = false,
+
+    /**
+     * Whether the latest message has attachments.
+     */
+    @ColumnInfo(name = "latest_message_has_attachments")
+    val latestMessageHasAttachments: Boolean = false,
+
+    /**
+     * Source of the latest message (IMESSAGE, SERVER_SMS, LOCAL_SMS, LOCAL_MMS).
+     */
+    @ColumnInfo(name = "latest_message_source")
+    val latestMessageSource: String? = null,
+
+    /**
+     * Delivery timestamp of the latest message (for status display).
+     */
+    @ColumnInfo(name = "latest_message_date_delivered")
+    val latestMessageDateDelivered: Long? = null,
+
+    /**
+     * Read timestamp of the latest message (for status display).
+     */
+    @ColumnInfo(name = "latest_message_date_read")
+    val latestMessageDateRead: Long? = null,
+
+    /**
+     * Error code of the latest message (0 = no error).
+     */
+    @ColumnInfo(name = "latest_message_error")
+    val latestMessageError: Int = 0,
+
+    /**
      * Total unread count across all linked chats.
      */
     @ColumnInfo(name = "unread_count")

@@ -25,9 +25,11 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.ui.components.DeveloperConnectionOverlay
 import com.bothbubbles.ui.navigation.BothBubblesNavHost
+import com.bothbubbles.ui.navigation.NotificationDeepLinkData
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.ui.navigation.ShareIntentData
 import com.bothbubbles.ui.navigation.StateRestorationData
+import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
@@ -53,13 +55,16 @@ class MainActivity : ComponentActivity() {
         // Parse share intent data
         val shareIntentData = parseShareIntent(intent)
 
+        // Parse notification deep link data (when user taps a notification)
+        val notificationDeepLinkData = parseNotificationDeepLink(intent)
+
         // Check crash protection and get state restoration data synchronously
         // This needs to happen before setting content to determine start destination
         val stateRestorationData = runBlocking {
             val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
-            android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}")
-            if (shouldSkipRestore || shareIntentData != null) {
-                // Skip restoration if crash protection triggered or handling share intent
+            android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
+            if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null) {
+                // Skip restoration if crash protection triggered, handling share intent, or notification deep link
                 android.util.Log.d("StateRestore", "Skipping restoration")
                 null
             } else {
@@ -100,7 +105,8 @@ class MainActivity : ComponentActivity() {
                         navController = navController,
                         isSetupComplete = isSetupComplete,
                         shareIntentData = shareIntentData,
-                        stateRestorationData = stateRestorationData
+                        stateRestorationData = stateRestorationData,
+                        notificationDeepLinkData = notificationDeepLinkData
                     )
 
                     // Developer mode connection overlay
@@ -143,6 +149,9 @@ class MainActivity : ComponentActivity() {
                     return null
                 }
 
+                // Check if this is a direct share from a sharing shortcut
+                val directShareChatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID)
+
                 when {
                     mimeType.startsWith("text/") -> {
                         val sharedText = intent.getStringExtra(Intent.EXTRA_TEXT)
@@ -153,18 +162,34 @@ class MainActivity : ComponentActivity() {
                             sharedSubject != null -> sharedSubject
                             else -> sharedText
                         }
-                        if (text != null) ShareIntentData(sharedText = text) else null
+                        if (text != null || directShareChatGuid != null) {
+                            ShareIntentData(
+                                sharedText = text,
+                                directShareChatGuid = directShareChatGuid
+                            )
+                        } else null
                     }
                     else -> {
                         // Handle media (image, video, audio, files)
                         val uri = getParcelableExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
-                        if (uri != null) ShareIntentData(sharedUris = listOf(uri)) else null
+                        if (uri != null || directShareChatGuid != null) {
+                            ShareIntentData(
+                                sharedUris = listOfNotNull(uri),
+                                directShareChatGuid = directShareChatGuid
+                            )
+                        } else null
                     }
                 }
             }
             Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = getParcelableArrayListExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
-                if (!uris.isNullOrEmpty()) ShareIntentData(sharedUris = uris) else null
+                val directShareChatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID)
+                if (!uris.isNullOrEmpty() || directShareChatGuid != null) {
+                    ShareIntentData(
+                        sharedUris = uris ?: emptyList(),
+                        directShareChatGuid = directShareChatGuid
+                    )
+                } else null
             }
             else -> null
         }
@@ -192,5 +217,21 @@ class MainActivity : ComponentActivity() {
         } else {
             intent.getParcelableArrayListExtra(key)
         }
+    }
+
+    /**
+     * Parse notification deep link data from intent.
+     * Returns NotificationDeepLinkData if the intent contains EXTRA_CHAT_GUID from a notification tap.
+     */
+    private fun parseNotificationDeepLink(intent: Intent?): NotificationDeepLinkData? {
+        if (intent == null) return null
+
+        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return null
+        val messageGuid = intent.getStringExtra(NotificationService.EXTRA_MESSAGE_GUID)
+
+        return NotificationDeepLinkData(
+            chatGuid = chatGuid,
+            messageGuid = messageGuid
+        )
     }
 }

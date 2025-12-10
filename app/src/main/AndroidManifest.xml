@@ -82,6 +82,12 @@
             android:exported="true"
             android:theme="@style/Theme.BothBubbles"
             android:windowSoftInputMode="adjustResize">
+
+            <!-- Sharing shortcuts for direct share targets -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

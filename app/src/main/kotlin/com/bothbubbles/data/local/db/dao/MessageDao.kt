@@ -126,6 +126,25 @@ interface MessageDao {
     """)
     suspend fun getLatestMessageForChat(chatGuid: String): MessageEntity?
 
+    /**
+     * Batch fetch the latest message for multiple chats in a single query.
+     * Uses a correlated subquery to get the most recent message per chat.
+     * Much more efficient than calling getLatestMessageForChat N times.
+     */
+    @Query("""
+        SELECT m.* FROM messages m
+        INNER JOIN (
+            SELECT chat_guid, MAX(date_created) as max_date
+            FROM messages
+            WHERE chat_guid IN (:chatGuids)
+            AND date_deleted IS NULL
+            AND (sms_status IS NULL OR sms_status != 'draft')
+            GROUP BY chat_guid
+        ) latest ON m.chat_guid = latest.chat_guid AND m.date_created = latest.max_date
+        WHERE m.date_deleted IS NULL
+    """)
+    suspend fun getLatestMessagesForChats(chatGuids: List<String>): List<MessageEntity>
+
     @Query("SELECT COUNT(*) FROM messages WHERE chat_guid = :chatGuid AND date_deleted IS NULL")
     suspend fun getMessageCountForChat(chatGuid: String): Int
 
@@ -214,13 +233,31 @@ interface MessageDao {
     """)
     suspend fun getLocalMmsWithoutStatus(): List<MessageEntity>
 
-    // Replace temp GUID with server GUID
+    // Replace temp GUID with server GUID (internal use only - use replaceGuidSafe instead)
     @Query("""
         UPDATE messages
         SET guid = :newGuid, error = 0
         WHERE guid = :tempGuid
     """)
-    suspend fun replaceGuid(tempGuid: String, newGuid: String)
+    suspend fun replaceGuidDirect(tempGuid: String, newGuid: String)
+
+    /**
+     * Safely replace a temp GUID with the server GUID.
+     * Handles the race condition where the server message arrives via socket
+     * before the HTTP response, which would cause a UNIQUE constraint violation.
+     */
+    @Transaction
+    suspend fun replaceGuid(tempGuid: String, newGuid: String) {
+        // Check if a message with the new GUID already exists (race condition - socket arrived first)
+        val existingMessage = getMessageByGuid(newGuid)
+        if (existingMessage != null) {
+            // Socket event already inserted the real message, just delete the temp
+            deleteMessage(tempGuid)
+        } else {
+            // Normal case - update the temp message with the real GUID
+            replaceGuidDirect(tempGuid, newGuid)
+        }
+    }
 
     // ===== Deletes =====
 

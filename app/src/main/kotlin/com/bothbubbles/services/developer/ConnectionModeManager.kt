@@ -166,10 +166,6 @@ class ConnectionModeManager @Inject constructor(
                 state = "ACTIVE",
                 details = "App backgrounded, using FCM for notifications"
             )
-
-            // Show developer notification when FCM kicks in
-            Log.d(TAG, "onStop: Showing FCM status notification")
-            showFcmStatusNotification(success = true)
         }
     }
 

@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.db.dao.AttachmentDao
@@ -12,6 +13,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
@@ -36,6 +38,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -54,6 +57,7 @@ private const val PAGE_SIZE = 25
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class ConversationsViewModel @Inject constructor(
+    private val savedStateHandle: SavedStateHandle,
     private val application: Application,
     private val chatRepository: ChatRepository,
     private val attachmentDao: AttachmentDao,
@@ -83,6 +87,33 @@ class ConversationsViewModel @Inject constructor(
     private val _typingChats = MutableStateFlow<Set<String>>(emptySet())
     private val _smsStateRefreshTrigger = MutableStateFlow(0)
 
+    // SavedStateHandle-backed scroll position restoration (survives process death)
+    private companion object {
+        const val KEY_SCROLL_INDEX = "scroll_index"
+        const val KEY_SCROLL_OFFSET = "scroll_offset"
+        const val KEY_SEARCH_ACTIVE = "search_active"
+    }
+
+    /** Saved scroll position index - survives process death */
+    val savedScrollIndex: StateFlow<Int> = savedStateHandle.getStateFlow(KEY_SCROLL_INDEX, 0)
+
+    /** Saved scroll position offset - survives process death */
+    val savedScrollOffset: StateFlow<Int> = savedStateHandle.getStateFlow(KEY_SCROLL_OFFSET, 0)
+
+    /** Whether search was active - survives process death */
+    val savedSearchActive: StateFlow<Boolean> = savedStateHandle.getStateFlow(KEY_SEARCH_ACTIVE, false)
+
+    /** Save scroll position for restoration after process death */
+    fun saveScrollPosition(index: Int, offset: Int) {
+        savedStateHandle[KEY_SCROLL_INDEX] = index
+        savedStateHandle[KEY_SCROLL_OFFSET] = offset
+    }
+
+    /** Save search active state */
+    fun saveSearchActive(active: Boolean) {
+        savedStateHandle[KEY_SEARCH_ACTIVE] = active
+    }
+
     // Track if we've ever successfully connected (for banner logic)
     private var wasEverConnected = false
 
@@ -96,7 +127,14 @@ class ConversationsViewModel @Inject constructor(
             _startupGracePeriodPassed.value = true
         }
 
-        loadInitialConversations()
+        // Load filter FIRST before loading conversations to avoid race condition
+        // where conversations display with default filter before persisted filter loads
+        viewModelScope.launch {
+            val initialFilter = settingsDataStore.conversationFilter.first()
+            parseAndApplyFilter(initialFilter)
+            loadInitialConversations()
+        }
+
         observeDataChanges()
         observeConnectionState()
         observeConnectionBannerState()
@@ -107,8 +145,7 @@ class ConversationsViewModel @Inject constructor(
         observeMessageSearch()
         observeAppTitleSetting()
         observeCategorizationEnabled()
-        observeConversationFilter()
-        observeCategoryFilter()
+        observeFilters()
         observeFilteredUnreadCount()
         loadUserProfile()
         checkPrivateApiPrompt()
@@ -147,35 +184,44 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
-    private fun observeConversationFilter() {
+    /**
+     * Observe the unified filter value and parse it to update UI state.
+     * Both status filters and category filters are stored in a single preference.
+     */
+    private fun observeFilters() {
         viewModelScope.launch {
-            settingsDataStore.conversationFilter.collect { filter ->
-                _uiState.update { it.copy(conversationFilter = filter) }
+            settingsDataStore.conversationFilter.collect { storedFilter ->
+                parseAndApplyFilter(storedFilter)
             }
         }
     }
 
-    private fun observeCategoryFilter() {
-        viewModelScope.launch {
-            settingsDataStore.categoryFilter.collect { category ->
-                _uiState.update { it.copy(categoryFilter = category) }
-            }
+    /**
+     * Parse the stored filter value and update UI state accordingly.
+     * Status filters: "all", "unread", "spam", "unknown_senders", "known_senders"
+     * Category filters: "category:TRANSACTIONS", "category:DELIVERIES", etc.
+     */
+    private fun parseAndApplyFilter(storedFilter: String) {
+        if (storedFilter.startsWith("category:")) {
+            val category = storedFilter.removePrefix("category:")
+            _uiState.update { it.copy(conversationFilter = "all", categoryFilter = category) }
+        } else {
+            _uiState.update { it.copy(conversationFilter = storedFilter, categoryFilter = null) }
         }
     }
 
     fun setConversationFilter(filter: String) {
         viewModelScope.launch {
             settingsDataStore.setConversationFilter(filter)
-            _uiState.update { it.copy(conversationFilter = filter, categoryFilter = null) }
-            // Badge update is handled automatically by observeFilteredUnreadCount
+            // UI state is updated by observeFilters()
         }
     }
 
     fun setCategoryFilter(category: String?) {
         viewModelScope.launch {
-            settingsDataStore.setCategoryFilter(category)
-            _uiState.update { it.copy(categoryFilter = category, conversationFilter = "all") }
-            // Badge update is handled automatically by observeFilteredUnreadCount
+            val filterValue = category?.let { "category:$it" } ?: "all"
+            settingsDataStore.setConversationFilter(filterValue)
+            // UI state is updated by observeFilters()
         }
     }
 
@@ -340,6 +386,7 @@ class ConversationsViewModel @Inject constructor(
      */
     private fun loadInitialConversations() {
         viewModelScope.launch {
+            val loadId = PerformanceProfiler.start("ConversationList.loadInitial")
             _uiState.update { it.copy(isLoading = true) }
 
             // Clean up invalid display names before loading (runs once, fast, idempotent)
@@ -347,20 +394,28 @@ class ConversationsViewModel @Inject constructor(
 
             try {
                 // Load first page of unified groups (1:1 merged iMessage+SMS)
+                val queryId1 = PerformanceProfiler.start("DB.getUnifiedGroups")
                 val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, 0)
+                PerformanceProfiler.end(queryId1, "${unifiedGroups.size} groups")
 
                 // Load first page of group chats
+                val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
                 val groupChats = chatDao.getGroupChatsPaginated(PAGE_SIZE, 0)
+                PerformanceProfiler.end(queryId2, "${groupChats.size} chats")
 
                 // Load first page of non-group chats (for orphans not in unified groups)
+                val queryId3 = PerformanceProfiler.start("DB.getNonGroupChats")
                 val nonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, 0)
+                PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
+                val buildId = PerformanceProfiler.start("ConversationList.build")
                 val conversations = buildConversationList(
                     unifiedGroups = unifiedGroups,
                     groupChats = groupChats,
                     nonGroupChats = nonGroupChats,
                     typingChats = _typingChats.value
                 )
+                PerformanceProfiler.end(buildId, "${conversations.size} items")
 
                 // Check if more data exists beyond first page
                 val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
@@ -379,9 +434,11 @@ class ConversationsViewModel @Inject constructor(
                         currentPage = 0
                     )
                 }
+                PerformanceProfiler.end(loadId, "${conversations.size} conversations")
             } catch (e: Exception) {
                 android.util.Log.e("ConversationsViewModel", "Failed to load conversations", e)
                 _uiState.update { it.copy(isLoading = false, error = e.message) }
+                PerformanceProfiler.end(loadId, "ERROR: ${e.message}")
             }
         }
     }
@@ -415,6 +472,7 @@ class ConversationsViewModel @Inject constructor(
      * Called when sync updates data or when new messages arrive.
      */
     private suspend fun refreshAllLoadedPages() {
+        val refreshId = PerformanceProfiler.start("ConversationList.refresh")
         val currentPage = _uiState.value.currentPage
         val totalLoaded = (currentPage + 1) * PAGE_SIZE
 
@@ -462,8 +520,10 @@ class ConversationsViewModel @Inject constructor(
                     canLoadMore = hasMore
                 )
             }
+            PerformanceProfiler.end(refreshId, "${filtered.size} items")
         } catch (e: Exception) {
             android.util.Log.e("ConversationsViewModel", "Failed to refresh conversations", e)
+            PerformanceProfiler.end(refreshId, "ERROR")
         }
     }
 
@@ -525,6 +585,11 @@ class ConversationsViewModel @Inject constructor(
     /**
      * Build conversation list from paginated entities.
      * Converts unified groups, group chats, and orphan 1:1 chats to UI models.
+     *
+     * OPTIMIZATION: Uses batched queries to avoid N+1 problem:
+     * 1. Collect all chat GUIDs upfront
+     * 2. Batch fetch all latest messages in one query
+     * 3. Pass pre-fetched data to UI model builders
      */
     private suspend fun buildConversationList(
         unifiedGroups: List<UnifiedChatGroupEntity>,
@@ -535,13 +600,57 @@ class ConversationsViewModel @Inject constructor(
         val conversations = mutableListOf<ConversationUiModel>()
         val handledChatGuids = mutableSetOf<String>()
 
-        // Process unified chat groups (single-contact iMessage+SMS merged)
-        for (group in unifiedGroups) {
-            val chatGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
-            handledChatGuids.addAll(chatGuids)
-            handledChatGuids.add(group.primaryChatGuid)
+        // OPTIMIZATION: Batch fetch all chat GUIDs in a single query
+        val batchPrepId = PerformanceProfiler.start("BatchPrep.collectGuids")
+        val groupIds = unifiedGroups.map { it.id }
+        val allMembers = if (groupIds.isNotEmpty()) {
+            unifiedChatGroupDao.getChatGuidsForGroups(groupIds)
+        } else {
+            emptyList()
+        }
 
-            val uiModel = unifiedGroupToUiModel(group, chatGuids, typingChats)
+        // Build maps from batch results
+        val groupIdToGuids = allMembers.groupBy { it.groupId }.mapValues { entry ->
+            entry.value.map { it.chatGuid }
+        }
+        val allGroupChatGuids = allMembers.map { it.chatGuid }
+
+        // Track handled GUIDs
+        handledChatGuids.addAll(allGroupChatGuids)
+        unifiedGroups.forEach { handledChatGuids.add(it.primaryChatGuid) }
+        PerformanceProfiler.end(batchPrepId, "${allGroupChatGuids.size} guids")
+
+        // OPTIMIZATION: Batch fetch all chats in a single query
+        val batchChatsId = PerformanceProfiler.start("DB.batchGetChats")
+        val allChatsMap = if (allGroupChatGuids.isNotEmpty()) {
+            chatDao.getChatsByGuids(allGroupChatGuids).associateBy { it.guid }
+        } else {
+            emptyMap()
+        }
+        PerformanceProfiler.end(batchChatsId, "${allChatsMap.size} chats")
+
+        // OPTIMIZATION: Batch fetch all latest messages in a single query
+        val batchMsgId = PerformanceProfiler.start("DB.batchGetLatestMessages")
+        val latestMessagesMap = if (allGroupChatGuids.isNotEmpty()) {
+            messageDao.getLatestMessagesForChats(allGroupChatGuids)
+                .associateBy { it.chatGuid }
+        } else {
+            emptyMap()
+        }
+        PerformanceProfiler.end(batchMsgId, "${latestMessagesMap.size} messages")
+
+        // Process unified chat groups with pre-fetched data
+        // NOTE: Participants are fetched per-group to avoid cross-contamination of contact names
+        for (group in unifiedGroups) {
+            val chatGuids = groupIdToGuids[group.id] ?: continue
+
+            val uiModel = unifiedGroupToUiModelOptimized(
+                group = group,
+                chatGuids = chatGuids,
+                typingChats = typingChats,
+                latestMessagesMap = latestMessagesMap,
+                chatsMap = allChatsMap
+            )
             if (uiModel != null) {
                 conversations.add(uiModel)
             }
@@ -581,13 +690,24 @@ class ConversationsViewModel @Inject constructor(
         chatGuids: List<String>,
         typingChats: Set<String>
     ): ConversationUiModel? {
-        if (chatGuids.isEmpty()) return null
+        val uiModelId = PerformanceProfiler.start("UnifiedGroup.toUiModel", group.identifier)
+        if (chatGuids.isEmpty()) {
+            PerformanceProfiler.end(uiModelId, "empty guids")
+            return null
+        }
 
         // Get all chats in this group
+        val chatsId = PerformanceProfiler.start("DB.getChatsByGuid", "${chatGuids.size} guids")
         val chats = chatGuids.mapNotNull { chatDao.getChatByGuid(it) }
-        if (chats.isEmpty()) return null
+        PerformanceProfiler.end(chatsId, "${chats.size} chats")
+        if (chats.isEmpty()) {
+            PerformanceProfiler.end(uiModelId, "no chats")
+            return null
+        }
 
         // Find the most recent message across all chats
+        // NOTE: This is an N+1 query pattern - consider batching
+        val msgId = PerformanceProfiler.start("DB.getLatestMessages", "${chatGuids.size} queries")
         var latestMessage: MessageEntity? = null
         var latestTimestamp = 0L
         for (chatGuid in chatGuids) {
@@ -597,13 +717,16 @@ class ConversationsViewModel @Inject constructor(
                 latestTimestamp = msg.dateCreated
             }
         }
+        PerformanceProfiler.end(msgId, "found: ${latestMessage != null}")
 
         // Use the primary chat for display info
         val primaryChat = chats.find { it.guid == group.primaryChatGuid } ?: chats.first()
 
         // Get participants from ALL chats in the unified group (not just primary)
         // This ensures we find contact info even if it's only linked to one of the chats
+        val participantsId = PerformanceProfiler.start("DB.getParticipants")
         val allParticipants = chatRepository.getParticipantsForChats(chatGuids)
+        PerformanceProfiler.end(participantsId, "${allParticipants.size} participants")
 
         // Prefer participant with cached contact info, otherwise use first available
         val primaryParticipant = chatRepository.getBestParticipant(allParticipants)
@@ -637,31 +760,76 @@ class ConversationsViewModel @Inject constructor(
         val rawMessageText = latestMessage?.text ?: primaryChat.lastMessageText ?: ""
         val isFromMe = latestMessage?.isFromMe ?: false
 
-        // Determine message type from attachment MIME type
-        val firstAttachment = if (latestMessage?.hasAttachments == true) {
-            attachmentDao.getAttachmentsForMessage(latestMessage.guid).firstOrNull()
-        } else null
+        // Get attachments for the latest message
+        val attachments = if (latestMessage?.hasAttachments == true) {
+            attachmentDao.getAttachmentsForMessage(latestMessage.guid)
+        } else emptyList()
+        val firstAttachment = attachments.firstOrNull()
+        val attachmentCount = attachments.size
 
+        // Check for invisible ink effect
+        val isInvisibleInk = latestMessage?.expressiveSendStyleId?.contains("invisibleink", ignoreCase = true) == true
+
+        // Determine message type with enhanced detection
         val messageType = when {
+            latestMessage?.dateDeleted != null -> MessageType.DELETED
+            latestMessage?.isReaction == true -> MessageType.REACTION
+            latestMessage?.isGroupEvent == true -> MessageType.GROUP_EVENT
             firstAttachment != null -> when {
+                firstAttachment.isSticker -> MessageType.STICKER
+                firstAttachment.mimeType == "text/vcard" || firstAttachment.mimeType == "text/x-vcard" -> MessageType.CONTACT
+                firstAttachment.isImage && firstAttachment.hasLivePhoto -> MessageType.LIVE_PHOTO
                 firstAttachment.isImage -> MessageType.IMAGE
                 firstAttachment.isVideo -> MessageType.VIDEO
+                firstAttachment.isAudio && isVoiceMessage(firstAttachment) -> MessageType.VOICE_MESSAGE
                 firstAttachment.isAudio -> MessageType.AUDIO
+                isDocumentType(firstAttachment.mimeType) -> MessageType.DOCUMENT
                 else -> MessageType.ATTACHMENT
             }
+            !latestMessage?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
+            rawMessageText.containsLocation() -> MessageType.LOCATION
             rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
             else -> MessageType.TEXT
         }
 
-        // Generate preview text - show "Image", "Video" etc. when message has no text
+        // Generate preview text
         val messageText = when {
             rawMessageText.isNotBlank() -> rawMessageText
-            messageType == MessageType.IMAGE -> "Image"
+            messageType == MessageType.IMAGE -> "Photo"
+            messageType == MessageType.LIVE_PHOTO -> "Live Photo"
             messageType == MessageType.VIDEO -> "Video"
             messageType == MessageType.AUDIO -> "Audio"
+            messageType == MessageType.VOICE_MESSAGE -> "Voice message"
+            messageType == MessageType.STICKER -> "Sticker"
+            messageType == MessageType.CONTACT -> "Contact"
+            messageType == MessageType.DOCUMENT -> "Document"
+            messageType == MessageType.LOCATION -> "Location"
+            messageType == MessageType.APP_MESSAGE -> "App message"
             messageType == MessageType.ATTACHMENT -> "Attachment"
             else -> rawMessageText
         }
+
+        // Get document type name if applicable
+        val documentType = if (messageType == MessageType.DOCUMENT && firstAttachment != null) {
+            getDocumentTypeName(firstAttachment.mimeType, firstAttachment.fileExtension)
+        } else null
+
+        // Get reaction preview data
+        val reactionPreviewData = if (messageType == MessageType.REACTION && latestMessage != null) {
+            val originalGuid = latestMessage.associatedMessageGuid
+            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val tapbackInfo = parseTapbackType(latestMessage.associatedMessageType)
+            ReactionPreviewData(
+                tapbackVerb = tapbackInfo.verb,
+                originalText = originalMessage?.text?.take(30),
+                hasAttachment = originalMessage?.hasAttachments == true
+            )
+        } else null
+
+        // Get group event text
+        val groupEventText = if (messageType == MessageType.GROUP_EVENT && latestMessage != null) {
+            formatGroupEvent(latestMessage, group.primaryChatGuid)
+        } else null
 
         // Determine message status
         val messageStatus = when {
@@ -720,7 +888,225 @@ class ConversationsViewModel @Inject constructor(
             lastMessageSource = latestMessage?.messageSource,
             mergedChatGuids = chatGuids,
             isMerged = chatGuids.size > 1,
-            contactKey = PhoneNumberFormatter.getContactKey(address)
+            contactKey = PhoneNumberFormatter.getContactKey(address),
+            // Enhanced preview fields
+            isInvisibleInk = isInvisibleInk,
+            reactionPreviewData = reactionPreviewData,
+            groupEventText = groupEventText,
+            documentType = documentType,
+            attachmentCount = if (attachmentCount > 0) attachmentCount else 1
+        ).also {
+            PerformanceProfiler.end(uiModelId, "complete")
+        }
+    }
+
+    /**
+     * OPTIMIZED version of unifiedGroupToUiModel that uses pre-fetched data.
+     * Eliminates N+1 queries by receiving all data from batch queries.
+     * NOTE: Participants are fetched per-group to ensure correct contact mapping.
+     */
+    private suspend fun unifiedGroupToUiModelOptimized(
+        group: UnifiedChatGroupEntity,
+        chatGuids: List<String>,
+        typingChats: Set<String>,
+        latestMessagesMap: Map<String, MessageEntity>,
+        chatsMap: Map<String, ChatEntity>
+    ): ConversationUiModel? {
+        val uiModelId = PerformanceProfiler.start("UnifiedGroup.toUiModelOpt", group.identifier)
+        if (chatGuids.isEmpty()) {
+            PerformanceProfiler.end(uiModelId, "empty guids")
+            return null
+        }
+
+        // OPTIMIZATION: Use pre-fetched chats from batch query
+        val chats = chatGuids.mapNotNull { chatsMap[it] }
+        if (chats.isEmpty()) {
+            PerformanceProfiler.end(uiModelId, "no chats")
+            return null
+        }
+
+        // OPTIMIZATION: Use pre-fetched messages instead of N queries
+        var latestMessage: MessageEntity? = null
+        var latestTimestamp = 0L
+        for (chatGuid in chatGuids) {
+            val msg = latestMessagesMap[chatGuid]
+            if (msg != null && msg.dateCreated > latestTimestamp) {
+                latestMessage = msg
+                latestTimestamp = msg.dateCreated
+            }
+        }
+
+        // Use the primary chat for display info
+        val primaryChat = chats.find { it.guid == group.primaryChatGuid } ?: chats.first()
+
+        // Get participants for this specific group's chats (not batched to avoid cross-contamination)
+        val groupParticipants = chatRepository.getParticipantsForChats(chatGuids)
+        val primaryParticipant = chatRepository.getBestParticipant(groupParticipants)
+        val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: group.identifier
+
+        // Determine display name
+        val displayName = primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
+            ?: group.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
+            ?: primaryChat.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
+            ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
+            ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+            ?: address.let { PhoneNumberFormatter.format(it) }
+
+        // Sum unread counts
+        val totalUnread = chats.sumOf { it.unreadCount }
+
+        // Check for any typing indicators
+        val anyTyping = chatGuids.any { it in typingChats }
+
+        // Check for any pinned
+        val anyPinned = chats.any { it.isPinned } || group.isPinned
+
+        // Check if all muted
+        val allMuted = chats.all { it.muteType != null } || group.muteType != null
+
+        // Check for drafts
+        val chatWithDraft = chats.find { !it.textFieldText.isNullOrBlank() }
+
+        val rawMessageText = latestMessage?.text ?: primaryChat.lastMessageText ?: ""
+        val isFromMe = latestMessage?.isFromMe ?: false
+
+        // Get attachments for the latest message
+        val attachments = if (latestMessage?.hasAttachments == true) {
+            attachmentDao.getAttachmentsForMessage(latestMessage.guid)
+        } else emptyList()
+        val firstAttachment = attachments.firstOrNull()
+        val attachmentCount = attachments.size
+
+        // Check for invisible ink effect
+        val isInvisibleInk = latestMessage?.expressiveSendStyleId?.contains("invisibleink", ignoreCase = true) == true
+
+        // Determine message type with enhanced detection
+        val messageType = when {
+            latestMessage?.dateDeleted != null -> MessageType.DELETED
+            latestMessage?.isReaction == true -> MessageType.REACTION
+            latestMessage?.isGroupEvent == true -> MessageType.GROUP_EVENT
+            firstAttachment != null -> when {
+                firstAttachment.isSticker -> MessageType.STICKER
+                firstAttachment.mimeType == "text/vcard" || firstAttachment.mimeType == "text/x-vcard" -> MessageType.CONTACT
+                firstAttachment.isImage && firstAttachment.hasLivePhoto -> MessageType.LIVE_PHOTO
+                firstAttachment.isImage -> MessageType.IMAGE
+                firstAttachment.isVideo -> MessageType.VIDEO
+                firstAttachment.isAudio && isVoiceMessage(firstAttachment) -> MessageType.VOICE_MESSAGE
+                firstAttachment.isAudio -> MessageType.AUDIO
+                isDocumentType(firstAttachment.mimeType) -> MessageType.DOCUMENT
+                else -> MessageType.ATTACHMENT
+            }
+            !latestMessage?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
+            rawMessageText.containsLocation() -> MessageType.LOCATION
+            rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
+            else -> MessageType.TEXT
+        }
+
+        // Generate preview text
+        val messageText = when {
+            rawMessageText.isNotBlank() -> rawMessageText
+            messageType == MessageType.IMAGE -> "Photo"
+            messageType == MessageType.LIVE_PHOTO -> "Live Photo"
+            messageType == MessageType.VIDEO -> "Video"
+            messageType == MessageType.AUDIO -> "Audio"
+            messageType == MessageType.VOICE_MESSAGE -> "Voice message"
+            messageType == MessageType.STICKER -> "Sticker"
+            messageType == MessageType.CONTACT -> "Contact"
+            messageType == MessageType.DOCUMENT -> "Document"
+            messageType == MessageType.LOCATION -> "Location"
+            messageType == MessageType.APP_MESSAGE -> "App message"
+            messageType == MessageType.ATTACHMENT -> "Attachment"
+            else -> rawMessageText
+        }
+
+        // Get document type name if applicable
+        val documentType = if (messageType == MessageType.DOCUMENT && firstAttachment != null) {
+            getDocumentTypeName(firstAttachment.mimeType, firstAttachment.fileExtension)
+        } else null
+
+        // Get reaction preview data
+        val reactionPreviewData = if (messageType == MessageType.REACTION && latestMessage != null) {
+            val originalGuid = latestMessage.associatedMessageGuid
+            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val tapbackInfo = parseTapbackType(latestMessage.associatedMessageType)
+            ReactionPreviewData(
+                tapbackVerb = tapbackInfo.verb,
+                originalText = originalMessage?.text?.take(30),
+                hasAttachment = originalMessage?.hasAttachments == true
+            )
+        } else null
+
+        // Get group event text
+        val groupEventText = if (messageType == MessageType.GROUP_EVENT && latestMessage != null) {
+            formatGroupEvent(latestMessage, group.primaryChatGuid)
+        } else null
+
+        // Determine message status
+        val messageStatus = when {
+            !isFromMe -> MessageStatus.NONE
+            latestMessage == null -> MessageStatus.NONE
+            latestMessage.guid.startsWith("temp-") -> MessageStatus.SENDING
+            latestMessage.dateRead != null -> MessageStatus.READ
+            latestMessage.dateDelivered != null -> MessageStatus.DELIVERED
+            latestMessage.error == 0 -> MessageStatus.SENT
+            else -> MessageStatus.NONE
+        }
+
+        // Get link preview data for LINK type
+        val (linkTitle, linkDomain) = if (messageType == MessageType.LINK) {
+            val detectedUrl = UrlParsingUtils.getFirstUrl(rawMessageText)
+            if (detectedUrl != null) {
+                val preview = linkPreviewRepository.getLinkPreview(detectedUrl.url)
+                val title = preview?.title?.takeIf { it.isNotBlank() }
+                val domain = preview?.domain ?: detectedUrl.domain
+                title to domain
+            } else {
+                null to null
+            }
+        } else {
+            null to null
+        }
+
+        PerformanceProfiler.end(uiModelId, "complete")
+
+        return ConversationUiModel(
+            guid = group.primaryChatGuid,
+            displayName = displayName,
+            avatarPath = primaryParticipant?.cachedAvatarPath,
+            lastMessageText = messageText,
+            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L),
+            lastMessageTimestamp = latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L,
+            unreadCount = totalUnread.takeIf { it > 0 } ?: group.unreadCount,
+            isPinned = anyPinned,
+            pinIndex = group.pinIndex ?: chats.mapNotNull { it.pinIndex }.minOrNull() ?: Int.MAX_VALUE,
+            isMuted = allMuted,
+            isGroup = false,
+            isTyping = anyTyping,
+            isFromMe = isFromMe,
+            hasDraft = chatWithDraft != null,
+            draftText = chatWithDraft?.textFieldText,
+            lastMessageType = messageType,
+            lastMessageStatus = messageStatus,
+            participantNames = groupParticipants.map { it.displayName },
+            address = address,
+            hasInferredName = primaryParticipant?.hasInferredName == true,
+            inferredName = primaryParticipant?.inferredName,
+            lastMessageLinkTitle = linkTitle,
+            lastMessageLinkDomain = linkDomain,
+            isSpam = chats.any { it.isSpam },
+            category = primaryChat.category,
+            isSnoozed = group.snoozeUntil != null,
+            snoozeUntil = group.snoozeUntil,
+            lastMessageSource = latestMessage?.messageSource,
+            mergedChatGuids = chatGuids,
+            isMerged = chatGuids.size > 1,
+            contactKey = PhoneNumberFormatter.getContactKey(address),
+            // Enhanced preview fields
+            isInvisibleInk = isInvisibleInk,
+            reactionPreviewData = reactionPreviewData,
+            groupEventText = groupEventText,
+            documentType = documentType,
+            attachmentCount = if (attachmentCount > 0) attachmentCount else 1
         )
     }
 
@@ -1302,8 +1688,13 @@ class ConversationsViewModel @Inject constructor(
                 _scrollToIndexEvent.tryEmit(scrollIndex)
             }
 
-            // Persist to database in background
+            // Persist to database in background - update both chats and unified_chat_groups
             chatRepository.setPinned(chatGuid, newPinState, if (newPinState) newPinIndex else null)
+            // Also update the unified chat group for this chat
+            val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+            if (group != null) {
+                unifiedChatGroupDao.updatePinStatus(group.id, newPinState, if (newPinState) newPinIndex else null)
+            }
         }
     }
 
@@ -1340,9 +1731,14 @@ class ConversationsViewModel @Inject constructor(
                 state.copy(conversations = updatedConversations)
             }
 
-            // Persist to database
+            // Persist to database - update both chats table and unified_chat_groups table
             reorderedGuids.forEachIndexed { index, guid ->
                 chatRepository.setPinned(guid, true, index)
+                // Also update the unified chat group for this chat
+                val group = unifiedChatGroupDao.getGroupForChat(guid)
+                if (group != null) {
+                    unifiedChatGroupDao.updatePinStatus(group.id, true, index)
+                }
             }
         }
     }
@@ -1561,31 +1957,90 @@ class ConversationsViewModel @Inject constructor(
         val address = primaryParticipant?.address ?: chatIdentifier ?: ""
         val avatarPath = primaryParticipant?.cachedAvatarPath
 
-        // Determine message type from attachment MIME type
-        val firstAttachment = if (lastMessage?.hasAttachments == true) {
-            attachmentDao.getAttachmentsForMessage(lastMessage.guid).firstOrNull()
-        } else null
+        // Get attachments for the last message
+        val attachments = if (lastMessage?.hasAttachments == true) {
+            attachmentDao.getAttachmentsForMessage(lastMessage.guid)
+        } else emptyList()
+        val firstAttachment = attachments.firstOrNull()
+        val attachmentCount = attachments.size
 
+        // Check for invisible ink effect
+        val isInvisibleInk = lastMessage?.expressiveSendStyleId?.contains("invisibleink", ignoreCase = true) == true
+
+        // Determine message type with enhanced detection
         val messageType = when {
+            // Check deleted first
+            lastMessage?.dateDeleted != null -> MessageType.DELETED
+
+            // Check for reactions/tapbacks
+            lastMessage?.isReaction == true -> MessageType.REACTION
+
+            // Check for group events
+            lastMessage?.isGroupEvent == true -> MessageType.GROUP_EVENT
+
+            // Attachment-based types
             firstAttachment != null -> when {
+                firstAttachment.isSticker -> MessageType.STICKER
+                firstAttachment.mimeType == "text/vcard" || firstAttachment.mimeType == "text/x-vcard" -> MessageType.CONTACT
+                firstAttachment.isImage && firstAttachment.hasLivePhoto -> MessageType.LIVE_PHOTO
                 firstAttachment.isImage -> MessageType.IMAGE
                 firstAttachment.isVideo -> MessageType.VIDEO
+                firstAttachment.isAudio && isVoiceMessage(firstAttachment) -> MessageType.VOICE_MESSAGE
                 firstAttachment.isAudio -> MessageType.AUDIO
+                isDocumentType(firstAttachment.mimeType) -> MessageType.DOCUMENT
                 else -> MessageType.ATTACHMENT
             }
+
+            // Check for app messages (balloonBundleId)
+            !lastMessage?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
+
+            // Check for location in text
+            rawMessageText.containsLocation() -> MessageType.LOCATION
+
+            // Check for links
             rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
+
             else -> MessageType.TEXT
         }
 
-        // Generate preview text - show "Image", "Video" etc. when message has no text
+        // Generate preview text - show type placeholder when message has no text
         val messageText = when {
             rawMessageText.isNotBlank() -> rawMessageText
-            messageType == MessageType.IMAGE -> "Image"
+            messageType == MessageType.IMAGE -> "Photo"
+            messageType == MessageType.LIVE_PHOTO -> "Live Photo"
             messageType == MessageType.VIDEO -> "Video"
             messageType == MessageType.AUDIO -> "Audio"
+            messageType == MessageType.VOICE_MESSAGE -> "Voice message"
+            messageType == MessageType.STICKER -> "Sticker"
+            messageType == MessageType.CONTACT -> "Contact"
+            messageType == MessageType.DOCUMENT -> "Document"
+            messageType == MessageType.LOCATION -> "Location"
+            messageType == MessageType.APP_MESSAGE -> "App message"
             messageType == MessageType.ATTACHMENT -> "Attachment"
             else -> rawMessageText
         }
+
+        // Get document type name if applicable
+        val documentType = if (messageType == MessageType.DOCUMENT && firstAttachment != null) {
+            getDocumentTypeName(firstAttachment.mimeType, firstAttachment.fileExtension)
+        } else null
+
+        // Get reaction preview data if this is a reaction
+        val reactionPreviewData = if (messageType == MessageType.REACTION && lastMessage != null) {
+            val originalGuid = lastMessage.associatedMessageGuid
+            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val tapbackInfo = parseTapbackType(lastMessage.associatedMessageType)
+            ReactionPreviewData(
+                tapbackVerb = tapbackInfo.verb,
+                originalText = originalMessage?.text?.take(30),
+                hasAttachment = originalMessage?.hasAttachments == true
+            )
+        } else null
+
+        // Get group event text if this is a group event
+        val groupEventText = if (messageType == MessageType.GROUP_EVENT && lastMessage != null) {
+            formatGroupEvent(lastMessage, guid)
+        } else null
 
         // Determine message status for outgoing messages
         val messageStatus = when {
@@ -1684,7 +2139,13 @@ class ConversationsViewModel @Inject constructor(
             lastMessageSenderName = senderName,
             mergedChatGuids = listOf(guid), // Initially just this chat
             isMerged = false,
-            contactKey = contactKey
+            contactKey = contactKey,
+            // Enhanced preview fields
+            isInvisibleInk = isInvisibleInk,
+            reactionPreviewData = reactionPreviewData,
+            groupEventText = groupEventText,
+            documentType = documentType,
+            attachmentCount = if (attachmentCount > 0) attachmentCount else 1
         )
     }
 
@@ -1734,6 +2195,97 @@ class ConversationsViewModel @Inject constructor(
         // Fallback to the first word cleaned of non-alphanumeric characters
         return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
     }
+
+    /**
+     * Check if audio attachment is a voice message (by UTI or filename pattern)
+     */
+    private fun isVoiceMessage(attachment: AttachmentEntity): Boolean {
+        val uti = attachment.uti?.lowercase() ?: ""
+        val name = attachment.transferName?.lowercase() ?: ""
+        return uti.contains("voice") ||
+               name.startsWith("audio message") ||
+               name.endsWith(".caf") // Voice memos are often .caf format
+    }
+
+    /**
+     * Check if mime type represents a document file
+     */
+    private fun isDocumentType(mimeType: String?): Boolean {
+        val type = mimeType?.lowercase() ?: return false
+        return type.startsWith("application/pdf") ||
+               type.contains("document") ||
+               type.contains("spreadsheet") ||
+               type.contains("presentation") ||
+               type.startsWith("application/msword") ||
+               type.startsWith("application/vnd.ms-") ||
+               type.startsWith("application/vnd.openxmlformats")
+    }
+
+    /**
+     * Get friendly document type name from mime type and extension
+     */
+    private fun getDocumentTypeName(mimeType: String?, extension: String?): String {
+        return when {
+            mimeType?.contains("pdf") == true -> "PDF"
+            mimeType?.contains("word") == true || extension == "doc" || extension == "docx" -> "Document"
+            mimeType?.contains("excel") == true || mimeType?.contains("spreadsheet") == true -> "Spreadsheet"
+            mimeType?.contains("powerpoint") == true || mimeType?.contains("presentation") == true -> "Presentation"
+            else -> "File"
+        }
+    }
+
+    /**
+     * Check if text contains location coordinates or map links
+     */
+    private fun String.containsLocation(): Boolean {
+        return contains("maps.apple.com") ||
+               contains("maps.google.com") ||
+               contains("goo.gl/maps") ||
+               matches(Regex(".*-?\\d+\\.\\d+,\\s*-?\\d+\\.\\d+.*"))
+    }
+
+    /**
+     * Parse tapback/reaction type to human-readable verb
+     */
+    private fun parseTapbackType(associatedMessageType: String?): TapbackInfo {
+        val type = associatedMessageType?.lowercase() ?: ""
+        return when {
+            type.contains("love") -> TapbackInfo("Loved", "❤️")
+            type.contains("like") -> TapbackInfo("Liked", "👍")
+            type.contains("dislike") -> TapbackInfo("Disliked", "👎")
+            type.contains("laugh") -> TapbackInfo("Laughed at", "😂")
+            type.contains("emphasize") || type.contains("!!") -> TapbackInfo("Emphasized", "‼️")
+            type.contains("question") || type.contains("?") -> TapbackInfo("Questioned", "❓")
+            else -> TapbackInfo("Reacted to", "")
+        }
+    }
+
+    /**
+     * Format group event message based on itemType and groupActionType
+     */
+    private suspend fun formatGroupEvent(message: MessageEntity, chatGuid: String): String {
+        return when (message.itemType) {
+            1 -> { // Participant change
+                val participantName = message.handleId?.let { handleId ->
+                    handleDao.getHandleById(handleId)?.displayName
+                } ?: "Someone"
+                val firstName = extractFirstName(participantName)
+                when (message.groupActionType) {
+                    0 -> "$firstName joined the group"
+                    1 -> "$firstName left the group"
+                    else -> "Group membership changed"
+                }
+            }
+            2 -> message.groupTitle?.let { "Name changed to \"$it\"" } ?: "Group name changed"
+            3 -> "Group photo changed"
+            else -> "Group updated"
+        }
+    }
+
+    /**
+     * Data class for tapback information
+     */
+    private data class TapbackInfo(val verb: String, val emoji: String)
 
     /**
      * Merge 1:1 conversations with the same contact into a single entry.
@@ -1979,7 +2531,13 @@ data class ConversationUiModel(
     // Merged conversation support (for combining iMessage and SMS threads to same contact)
     val mergedChatGuids: List<String> = listOf(), // All chat GUIDs in this merged conversation
     val isMerged: Boolean = false, // True if this represents multiple merged chats
-    val contactKey: String = "" // Normalized phone/email for matching
+    val contactKey: String = "", // Normalized phone/email for matching
+    // Enhanced preview fields
+    val isInvisibleInk: Boolean = false, // Whether message uses invisible ink effect
+    val reactionPreviewData: ReactionPreviewData? = null, // Data for reaction preview formatting
+    val groupEventText: String? = null, // Formatted group event text (e.g., "John left the group")
+    val documentType: String? = null, // Document type name (e.g., "PDF", "Document")
+    val attachmentCount: Int = 1 // Number of attachments for "2 Photos" style preview
 ) {
     /**
      * Returns true if this conversation has a saved contact.
@@ -2003,9 +2561,28 @@ enum class MessageType {
     IMAGE,
     VIDEO,
     AUDIO,
+    VOICE_MESSAGE,
     LINK,
-    ATTACHMENT
+    ATTACHMENT,
+    STICKER,
+    CONTACT,
+    DOCUMENT,
+    LOCATION,
+    REACTION,
+    GROUP_EVENT,
+    DELETED,
+    LIVE_PHOTO,
+    APP_MESSAGE
 }
+
+/**
+ * Data for reaction preview text generation
+ */
+data class ReactionPreviewData(
+    val tapbackVerb: String,      // "Liked", "Loved", "Laughed at", etc.
+    val originalText: String?,    // Truncated original message text
+    val hasAttachment: Boolean    // If original message had an attachment
+)
 
 /**
  * Status of the last sent message for display in conversation list

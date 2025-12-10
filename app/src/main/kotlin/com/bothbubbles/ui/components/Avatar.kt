@@ -33,7 +33,7 @@ import android.net.Uri
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
-import kotlin.math.abs
+import com.bothbubbles.util.AvatarGenerator
 
 /**
  * Message source type for determining which indicator to show
@@ -55,9 +55,9 @@ fun Avatar(
     avatarPath: String? = null,
     size: Dp = 40.dp
 ) {
-    val initials = remember(name) { getInitials(name) }
-    val backgroundColor = remember(name) { getAvatarColor(name) }
-    val showPersonIcon = remember(name) { isPhoneNumber(name) }
+    val initials = remember(name) { AvatarGenerator.getInitials(name) }
+    val backgroundColor = remember(name) { Color(AvatarGenerator.getAvatarColorInt(name)) }
+    val showPersonIcon = remember(name) { AvatarGenerator.isPhoneNumber(name) }
 
     Box(
         modifier = modifier
@@ -105,43 +105,8 @@ fun Avatar(
     }
 }
 
-private fun getInitials(name: String): String {
-    // Strip emojis and other non-letter/non-digit characters at the start of each word
-    val cleanedName = name.trim()
-        .split(" ")
-        .map { word -> word.filter { it.isLetterOrDigit() } }
-        .filter { it.isNotBlank() }
-        .joinToString(" ")
-
-    val parts = cleanedName.split(" ").filter { it.isNotBlank() }
-    return when {
-        parts.size >= 2 -> "${parts.first().first()}${parts.last().first()}"
-        parts.size == 1 && parts.first().length >= 2 -> parts.first().take(2)
-        parts.size == 1 -> parts.first().take(1)
-        else -> "?"
-    }.uppercase()
-}
-
-// Google Messages-style avatar colors - muted pastels that work in light and dark mode
-private val avatarColors = listOf(
-    Color(0xFF5C6BC0), // Soft Indigo
-    Color(0xFF26A69A), // Muted Teal
-    Color(0xFFAB47BC), // Soft Purple
-    Color(0xFFEC407A), // Dusty Rose
-    Color(0xFF42A5F5), // Soft Blue
-)
-
-private fun getAvatarColor(name: String): Color {
-    // Hash the name/number to get a consistent color for each contact
-    val hash = abs(name.hashCode())
-    return avatarColors[hash % avatarColors.size]
-}
-
-private fun isPhoneNumber(name: String): Boolean {
-    // Check if name looks like a phone number
-    val digitsOnly = name.replace(Regex("[^0-9]"), "")
-    return digitsOnly.length >= 7 && name.matches(Regex("^[+\\d\\s()\\-]+$"))
-}
+// Avatar colors and utility functions are now in AvatarGenerator.kt
+// to share logic between UI and notifications
 
 // Extension for sp unit in Dp context
 private val Float.sp: androidx.compose.ui.unit.TextUnit
@@ -354,6 +319,7 @@ private val smsGreen = Color(0xFF34C759)
  * @param messageSourceType The type of the last message (IMESSAGE, SMS, or NONE)
  * @param backgroundColor Background color for the indicator outline (should match the list background)
  * @param size The size of the avatar
+ * @param indicatorSizeOverride Optional explicit size for the indicator badge. If null, defaults to size * 0.36f
  * @param avatarContent The avatar composable to wrap (Avatar or GroupAvatar)
  */
 @Composable
@@ -362,9 +328,10 @@ fun AvatarWithMessageType(
     modifier: Modifier = Modifier,
     backgroundColor: Color = MaterialTheme.colorScheme.surface,
     size: Dp = 56.dp,
+    indicatorSizeOverride: Dp? = null,
     avatarContent: @Composable () -> Unit
 ) {
-    val indicatorSize = size * 0.36f
+    val indicatorSize = indicatorSizeOverride ?: (size * 0.36f)
     val badgeOverflow = 4.dp // How much the badge extends beyond the avatar
 
     // Outer box sized to accommodate badge overflow

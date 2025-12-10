@@ -23,6 +23,7 @@ import com.bothbubbles.data.remote.api.dto.UnsendMessageRequest
 import com.bothbubbles.services.sms.MmsSendService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sms.SmsSendService
+import com.bothbubbles.services.media.VideoCompressor
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.services.messaging.FallbackReason
@@ -37,6 +38,7 @@ import kotlinx.coroutines.flow.first
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.MultipartBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -65,7 +67,8 @@ class MessageRepository @Inject constructor(
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val nameInferenceService: NameInferenceService
+    private val nameInferenceService: NameInferenceService,
+    private val videoCompressor: VideoCompressor
 ) {
     companion object {
         private const val TAG = "MessageRepository"
@@ -551,11 +554,11 @@ class MessageRepository @Inject constructor(
 
         return when (actualMode) {
             MessageDeliveryMode.LOCAL_SMS -> {
-                ensureCarrierReadyOrThrow()
+                ensureCarrierReady()?.let { return Result.failure(it) }
                 sendLocalSms(chatGuid, text, subscriptionId)
             }
             MessageDeliveryMode.LOCAL_MMS -> {
-                ensureCarrierReadyOrThrow(requireMms = true)
+                ensureCarrierReady(requireMms = true)?.let { return Result.failure(it) }
                 sendLocalMms(chatGuid, text, attachments, subject, subscriptionId)
             }
             else -> {
@@ -659,7 +662,8 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Upload a single attachment to BlueBubbles server with progress tracking
+     * Upload a single attachment to BlueBubbles server with progress tracking.
+     * Videos are compressed before upload if compression is enabled.
      */
     private suspend fun uploadAttachment(
         chatGuid: String,
@@ -671,14 +675,59 @@ class MessageRepository @Inject constructor(
         val contentResolver = context.contentResolver
 
         // Get file name from URI
-        val fileName = getFileName(uri) ?: "attachment"
+        var fileName = getFileName(uri) ?: "attachment"
 
         // Get MIME type
-        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        var mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
 
-        // Read file bytes
-        val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-            ?: throw Exception("Cannot read attachment")
+        // Check if this is a video that should be compressed
+        val isVideo = mimeType.startsWith("video/")
+        val shouldCompress = isVideo && settingsDataStore.compressVideosBeforeUpload.first()
+
+        val bytes: ByteArray
+        var compressedPath: String? = null
+
+        if (shouldCompress) {
+            // Get compression quality from settings
+            val qualityStr = settingsDataStore.videoCompressionQuality.first()
+            val quality = when (qualityStr) {
+                "original" -> VideoCompressor.Companion.Quality.ORIGINAL
+                "high" -> VideoCompressor.Companion.Quality.HIGH
+                "medium" -> VideoCompressor.Companion.Quality.MEDIUM
+                "low" -> VideoCompressor.Companion.Quality.LOW
+                else -> VideoCompressor.Companion.Quality.MEDIUM
+            }
+
+            Log.d(TAG, "Compressing video with quality: $qualityStr")
+
+            compressedPath = videoCompressor.compress(uri, quality) { progress ->
+                // Report compression progress (0-50% of total upload progress)
+                _uploadProgress.value = UploadProgress(
+                    fileName = fileName,
+                    bytesUploaded = (progress * 50).toLong(),
+                    totalBytes = 100,
+                    attachmentIndex = attachmentIndex,
+                    totalAttachments = totalAttachments
+                )
+            }
+
+            if (compressedPath != null) {
+                val compressedFile = File(compressedPath)
+                bytes = compressedFile.readBytes()
+                mimeType = "video/mp4"
+                fileName = fileName.substringBeforeLast('.') + ".mp4"
+                Log.d(TAG, "Video compressed: ${compressedFile.length() / 1024} KB")
+            } else {
+                // Compression failed, use original
+                Log.w(TAG, "Video compression failed, using original")
+                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw Exception("Cannot read attachment")
+            }
+        } else {
+            // Read file bytes directly
+            bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                ?: throw Exception("Cannot read attachment")
+        }
 
         Log.d(TAG, "Uploading attachment: $fileName ($mimeType, ${bytes.size} bytes)")
 
@@ -703,6 +752,15 @@ class MessageRepository @Inject constructor(
             method = "private-api".toRequestBody("text/plain".toMediaTypeOrNull()),
             attachment = filePart
         )
+
+        // Clean up compressed file if we created one
+        compressedPath?.let { path ->
+            try {
+                File(path).delete()
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to delete compressed file: $path", e)
+            }
+        }
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
@@ -852,20 +910,31 @@ class MessageRepository @Inject constructor(
         return cleaned.startsWith("+") || (cleaned.length >= 10 && cleaned.all { it.isDigit() })
     }
 
-    private fun ensureCarrierReadyOrThrow(requireMms: Boolean = false) {
+    /**
+     * Check if carrier messaging is ready. Returns an exception if not ready, null if ready.
+     */
+    private fun ensureCarrierReady(requireMms: Boolean = false): IllegalStateException? {
         val status = smsPermissionHelper.getSmsCapabilityStatus()
         if (!status.deviceSupportsSms) {
-            throw IllegalStateException("This device cannot send SMS/MMS messages")
+            return IllegalStateException("This device cannot send SMS/MMS messages")
         }
         if (!status.isDefaultSmsApp) {
-            throw IllegalStateException("Set BlueBubbles as the default SMS app to send carrier messages")
+            return IllegalStateException("Set BlueBubbles as the default SMS app to send carrier messages")
         }
         if (!status.canSendSms) {
-            throw IllegalStateException("Grant SMS permissions to BlueBubbles to send carrier messages")
+            return IllegalStateException("Grant SMS permissions to BlueBubbles to send carrier messages")
         }
         if (requireMms && !status.deviceSupportsMms) {
-            throw IllegalStateException("This device cannot send MMS messages")
+            return IllegalStateException("This device cannot send MMS messages")
         }
+        return null
+    }
+
+    /**
+     * Throws if carrier messaging is not ready. Use inside runCatching blocks.
+     */
+    private fun ensureCarrierReadyOrThrow(requireMms: Boolean = false) {
+        ensureCarrierReady(requireMms)?.let { throw it }
     }
 
     /**

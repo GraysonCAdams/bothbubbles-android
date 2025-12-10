@@ -76,6 +76,17 @@ interface UnifiedChatGroupDao {
     """)
     suspend fun getChatGuidsForGroup(groupId: Long): List<String>
 
+    /**
+     * Batch fetch all chat GUIDs for multiple groups in a single query.
+     * Returns a list of UnifiedChatMember objects with group_id and chat_guid.
+     * Much more efficient than calling getChatGuidsForGroup N times.
+     */
+    @Query("""
+        SELECT * FROM unified_chat_members
+        WHERE group_id IN (:groupIds)
+    """)
+    suspend fun getChatGuidsForGroups(groupIds: List<Long>): List<UnifiedChatMember>
+
     @Query("""
         SELECT chat_guid FROM unified_chat_members
         WHERE group_id = :groupId
@@ -155,6 +166,36 @@ interface UnifiedChatGroupDao {
         WHERE id = :groupId
     """)
     suspend fun updateLatestMessage(groupId: Long, date: Long, text: String?)
+
+    /**
+     * Update all cached message fields for a unified group.
+     * Called when a new message arrives or message status changes.
+     */
+    @Query("""
+        UPDATE unified_chat_groups
+        SET latest_message_date = :date,
+            latest_message_text = :text,
+            latest_message_guid = :guid,
+            latest_message_is_from_me = :isFromMe,
+            latest_message_has_attachments = :hasAttachments,
+            latest_message_source = :source,
+            latest_message_date_delivered = :dateDelivered,
+            latest_message_date_read = :dateRead,
+            latest_message_error = :error
+        WHERE id = :groupId
+    """)
+    suspend fun updateLatestMessageFull(
+        groupId: Long,
+        date: Long,
+        text: String?,
+        guid: String?,
+        isFromMe: Boolean,
+        hasAttachments: Boolean,
+        source: String?,
+        dateDelivered: Long?,
+        dateRead: Long?,
+        error: Int
+    )
 
     @Query("UPDATE unified_chat_groups SET unread_count = :count WHERE id = :groupId")
     suspend fun updateUnreadCount(groupId: Long, count: Int)

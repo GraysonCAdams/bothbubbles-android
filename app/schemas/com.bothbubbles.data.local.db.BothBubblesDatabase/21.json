@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 21,
-    "identityHash": "d6614aa7501cc461d7572770a60d3007",
+    "identityHash": "ec0ce43a3a17ac4fe0123a1f22935eed",
     "entities": [
       {
         "tableName": "chats",
@@ -1354,7 +1354,7 @@
       },
       {
         "tableName": "unified_chat_groups",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `identifier` TEXT NOT NULL, `primary_chat_guid` TEXT NOT NULL, `display_name` TEXT, `latest_message_date` INTEGER, `latest_message_text` TEXT, `unread_count` INTEGER NOT NULL, `is_pinned` INTEGER NOT NULL, `pin_index` INTEGER, `is_archived` INTEGER NOT NULL, `is_starred` INTEGER NOT NULL, `mute_type` TEXT, `snooze_until` INTEGER, `created_at` INTEGER NOT NULL)",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `identifier` TEXT NOT NULL, `primary_chat_guid` TEXT NOT NULL, `display_name` TEXT, `latest_message_date` INTEGER, `latest_message_text` TEXT, `latest_message_guid` TEXT, `latest_message_is_from_me` INTEGER NOT NULL, `latest_message_has_attachments` INTEGER NOT NULL, `latest_message_source` TEXT, `latest_message_date_delivered` INTEGER, `latest_message_date_read` INTEGER, `latest_message_error` INTEGER NOT NULL, `unread_count` INTEGER NOT NULL, `is_pinned` INTEGER NOT NULL, `pin_index` INTEGER, `is_archived` INTEGER NOT NULL, `is_starred` INTEGER NOT NULL, `mute_type` TEXT, `snooze_until` INTEGER, `created_at` INTEGER NOT NULL)",
         "fields": [
           {
             "fieldPath": "id",
@@ -1391,6 +1391,48 @@
             "columnName": "latest_message_text",
             "affinity": "TEXT",
             "notNull": false
+          },
+          {
+            "fieldPath": "latestMessageGuid",
+            "columnName": "latest_message_guid",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestMessageIsFromMe",
+            "columnName": "latest_message_is_from_me",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latestMessageHasAttachments",
+            "columnName": "latest_message_has_attachments",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "latestMessageSource",
+            "columnName": "latest_message_source",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestMessageDateDelivered",
+            "columnName": "latest_message_date_delivered",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestMessageDateRead",
+            "columnName": "latest_message_date_read",
+            "affinity": "INTEGER",
+            "notNull": false
+          },
+          {
+            "fieldPath": "latestMessageError",
+            "columnName": "latest_message_error",
+            "affinity": "INTEGER",
+            "notNull": true
           },
           {
             "fieldPath": "unreadCount",
@@ -1582,7 +1624,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd6614aa7501cc461d7572770a60d3007')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'ec0ce43a3a17ac4fe0123a1f22935eed')"
     ]
   }
 }

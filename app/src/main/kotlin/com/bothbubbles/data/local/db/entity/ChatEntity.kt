@@ -164,6 +164,13 @@ data class ChatEntity(
         get() = guid.startsWith("sms;") || guid.startsWith("mms;")
 
     /**
+     * Whether this is any SMS chat (local or server text forwarding).
+     * Use this for UI styling decisions (green bubbles, SMS placeholder, etc.)
+     */
+    val isSmsChat: Boolean
+        get() = isLocalSms || isTextForwarding
+
+    /**
      * Whether this is an iMessage chat
      */
     val isIMessage: Boolean

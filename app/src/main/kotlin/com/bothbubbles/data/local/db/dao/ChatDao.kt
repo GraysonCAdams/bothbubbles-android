@@ -77,6 +77,13 @@ interface ChatDao {
     @Query("SELECT * FROM chats WHERE guid = :guid")
     suspend fun getChatByGuid(guid: String): ChatEntity?
 
+    /**
+     * Batch fetch multiple chats by their GUIDs in a single query.
+     * Much more efficient than calling getChatByGuid N times.
+     */
+    @Query("SELECT * FROM chats WHERE guid IN (:guids)")
+    suspend fun getChatsByGuids(guids: List<String>): List<ChatEntity>
+
     @Query("SELECT * FROM chats WHERE guid = :guid")
     fun observeChatByGuid(guid: String): Flow<ChatEntity?>
 
@@ -183,6 +190,17 @@ interface ChatDao {
         WHERE chr.chat_guid = :chatGuid
     """)
     suspend fun getParticipantsForChat(chatGuid: String): List<HandleEntity>
+
+    /**
+     * Batch fetch participants for multiple chats in a single query.
+     * Returns all participants from all specified chats (may have duplicates from different chats).
+     */
+    @Query("""
+        SELECT DISTINCT h.* FROM handles h
+        INNER JOIN chat_handle_cross_ref chr ON h.id = chr.handle_id
+        WHERE chr.chat_guid IN (:chatGuids)
+    """)
+    suspend fun getParticipantsForChats(chatGuids: List<String>): List<HandleEntity>
 
     @Query("""
         SELECT h.* FROM handles h

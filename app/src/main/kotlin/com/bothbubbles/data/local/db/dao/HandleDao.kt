@@ -23,6 +23,13 @@ interface HandleDao {
     @Query("SELECT * FROM handles WHERE id = :id")
     suspend fun getHandleById(id: Long): HandleEntity?
 
+    /**
+     * PERF: Batch fetch handles by multiple IDs in a single query.
+     * Much more efficient than calling getHandleById() in a loop.
+     */
+    @Query("SELECT * FROM handles WHERE id IN (:ids)")
+    suspend fun getHandlesByIds(ids: List<Long>): List<HandleEntity>
+
     @Query("SELECT * FROM handles WHERE address = :address AND service = :service")
     suspend fun getHandleByAddressAndService(address: String, service: String): HandleEntity?
 

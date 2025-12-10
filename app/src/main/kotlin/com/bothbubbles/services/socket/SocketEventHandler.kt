@@ -275,9 +275,26 @@ class SocketEventHandler @Inject constructor(
                 senderName
             }
 
+            // For 1:1 chats, use sender's contact name as title; for groups, use group name
+            val chatTitle = if (chat?.isGroup == true) {
+                chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+            } else {
+                senderName
+                    ?: chat?.displayName
+                    ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                    ?: ""
+            }
+
+            // For group chats, fetch participant names for the group avatar collage
+            val participantNames = if (chat?.isGroup == true) {
+                chatDao.getParticipantsForChat(event.chatGuid).map { it.rawDisplayName }
+            } else {
+                emptyList()
+            }
+
             notificationService.showMessageNotification(
                 chatGuid = event.chatGuid,
-                chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
+                chatTitle = chatTitle,
                 messageText = notificationText,
                 messageGuid = savedMessage.guid,
                 senderName = displaySenderName,
@@ -285,7 +302,8 @@ class SocketEventHandler @Inject constructor(
                 isGroup = chat?.isGroup ?: false,
                 avatarUri = senderAvatarUri,
                 linkPreviewTitle = linkTitle,
-                linkPreviewDomain = linkDomain
+                linkPreviewDomain = linkDomain,
+                participantNames = participantNames
             )
         }
     }

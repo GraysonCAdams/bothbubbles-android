@@ -47,7 +47,8 @@ private val EXIT_DURATION = MotionTokens.Duration.MEDIUM_2
  */
 data class ShareIntentData(
     val sharedText: String? = null,
-    val sharedUris: List<Uri> = emptyList()
+    val sharedUris: List<Uri> = emptyList(),
+    val directShareChatGuid: String? = null  // Pre-selected chat from sharing shortcut
 )
 
 /**
@@ -60,16 +61,28 @@ data class StateRestorationData(
     val scrollOffset: Int = 0
 )
 
+/**
+ * Data class to hold notification deep link data for navigating to a specific message
+ */
+data class NotificationDeepLinkData(
+    val chatGuid: String,
+    val messageGuid: String?
+)
+
 @Composable
 fun BothBubblesNavHost(
     navController: NavHostController = rememberNavController(),
     isSetupComplete: Boolean = true,
     shareIntentData: ShareIntentData? = null,
-    stateRestorationData: StateRestorationData? = null
+    stateRestorationData: StateRestorationData? = null,
+    notificationDeepLinkData: NotificationDeepLinkData? = null
 ) {
     // Determine start destination based on setup status and share intent
     val startDestination: Screen = when {
         !isSetupComplete -> Screen.Setup()
+        // Direct share from shortcut - go straight to chat
+        shareIntentData?.directShareChatGuid != null -> Screen.Chat(shareIntentData.directShareChatGuid)
+        // Regular share - show picker to select conversation
         shareIntentData != null -> Screen.SharePicker(
             sharedText = shareIntentData.sharedText,
             sharedUris = shareIntentData.sharedUris.map { it.toString() }
@@ -77,9 +90,25 @@ fun BothBubblesNavHost(
         else -> Screen.Conversations
     }
 
+    // Handle notification deep link: navigate to chat with target message (takes priority over state restoration)
+    LaunchedEffect(notificationDeepLinkData) {
+        if (notificationDeepLinkData != null && isSetupComplete && shareIntentData == null) {
+            // Navigate to the chat with target message for deep-link scrolling
+            navController.navigate(
+                Screen.Chat(
+                    chatGuid = notificationDeepLinkData.chatGuid,
+                    targetMessageGuid = notificationDeepLinkData.messageGuid
+                )
+            ) {
+                launchSingleTop = true
+            }
+        }
+    }
+
     // Handle state restoration: navigate to saved chat after initial composition
+    // Skip if notification deep link is present (it takes priority)
     LaunchedEffect(stateRestorationData) {
-        if (stateRestorationData != null && isSetupComplete && shareIntentData == null) {
+        if (stateRestorationData != null && isSetupComplete && shareIntentData == null && notificationDeepLinkData == null) {
             // Navigate to the restored chat
             navController.navigate(Screen.Chat(stateRestorationData.chatGuid, stateRestorationData.mergedGuids)) {
                 // Keep Conversations in the back stack so back button works
@@ -92,6 +121,26 @@ fun BothBubblesNavHost(
                 )
                 chatEntry.savedStateHandle["restore_scroll_position"] = stateRestorationData.scrollPosition
                 chatEntry.savedStateHandle["restore_scroll_offset"] = stateRestorationData.scrollOffset
+            } catch (_: Exception) {
+                // Entry might not be found immediately
+            }
+        }
+    }
+
+    // Handle direct share from sharing shortcut: pass shared content to chat screen
+    LaunchedEffect(shareIntentData) {
+        if (shareIntentData?.directShareChatGuid != null && isSetupComplete) {
+            // Pass shared content to the chat screen via savedStateHandle
+            try {
+                val chatEntry = navController.getBackStackEntry(
+                    Screen.Chat(shareIntentData.directShareChatGuid)
+                )
+                chatEntry.savedStateHandle.apply {
+                    shareIntentData.sharedText?.let { set("shared_text", it) }
+                    if (shareIntentData.sharedUris.isNotEmpty()) {
+                        set("shared_uris", ArrayList(shareIntentData.sharedUris.map { it.toString() }))
+                    }
+                }
             } catch (_: Exception) {
                 // Entry might not be found immediately
             }
@@ -251,7 +300,8 @@ fun BothBubblesNavHost(
                 onScrollPositionRestored = {
                     backStackEntry.savedStateHandle.remove<Int>("restore_scroll_position")
                     backStackEntry.savedStateHandle.remove<Int>("restore_scroll_offset")
-                }
+                },
+                targetMessageGuid = route.targetMessageGuid
             )
         }
 

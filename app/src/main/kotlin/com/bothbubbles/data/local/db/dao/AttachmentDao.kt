@@ -128,6 +128,9 @@ interface AttachmentDao {
     @Query("UPDATE attachments SET blurhash = :blurhash WHERE guid = :guid")
     suspend fun updateBlurhash(guid: String, blurhash: String?)
 
+    @Query("UPDATE attachments SET thumbnail_path = :thumbnailPath WHERE guid = :guid")
+    suspend fun updateThumbnailPath(guid: String, thumbnailPath: String?)
+
     @Query("UPDATE attachments SET height = :height, width = :width WHERE guid = :guid")
     suspend fun updateDimensions(guid: String, height: Int, width: Int)
 
@@ -145,4 +148,7 @@ interface AttachmentDao {
     // Clear local files (for storage management)
     @Query("UPDATE attachments SET local_path = NULL")
     suspend fun clearAllLocalPaths()
+
+    @Query("UPDATE attachments SET thumbnail_path = NULL")
+    suspend fun clearAllThumbnailPaths()
 }

@@ -9,6 +9,8 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
+import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
@@ -19,6 +21,8 @@ import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
+import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.SeenMessageEntity
@@ -58,9 +62,11 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         ScheduledMessageEntity::class,
         UnifiedChatGroupEntity::class,
         UnifiedChatMember::class,
-        SeenMessageEntity::class
+        SeenMessageEntity::class,
+        PendingMessageEntity::class,
+        PendingAttachmentEntity::class
     ],
-    version = 21,
+    version = 24,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -74,6 +80,8 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun scheduledMessageDao(): ScheduledMessageDao
     abstract fun unifiedChatGroupDao(): UnifiedChatGroupDao
     abstract fun seenMessageDao(): SeenMessageDao
+    abstract fun pendingMessageDao(): PendingMessageDao
+    abstract fun pendingAttachmentDao(): PendingAttachmentDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"
@@ -483,6 +491,81 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 21 to 22: Add cached message preview fields to unified_chat_groups.
+         * These denormalized fields eliminate N+1 queries when displaying the conversation list.
+         */
+        val MIGRATION_21_22 = object : Migration(21, 22) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_guid TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_is_from_me INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_has_attachments INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_source TEXT DEFAULT NULL")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_date_delivered INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_date_read INTEGER DEFAULT NULL")
+                db.execSQL("ALTER TABLE unified_chat_groups ADD COLUMN latest_message_error INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        val MIGRATION_22_23 = object : Migration(22, 23) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add thumbnail_path column for cached attachment thumbnails
+                db.execSQL("ALTER TABLE attachments ADD COLUMN thumbnail_path TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Migration from version 23 to 24: Add pending_messages and pending_attachments tables
+         * for offline-first message sending with WorkManager.
+         */
+        val MIGRATION_23_24 = object : Migration(23, 24) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Create pending_messages table for offline message queue
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS pending_messages (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        local_id TEXT NOT NULL,
+                        chat_guid TEXT NOT NULL,
+                        text TEXT,
+                        subject TEXT,
+                        reply_to_guid TEXT,
+                        effect_id TEXT,
+                        delivery_mode TEXT NOT NULL DEFAULT 'AUTO',
+                        sync_status TEXT NOT NULL DEFAULT 'PENDING',
+                        server_guid TEXT,
+                        error_message TEXT,
+                        retry_count INTEGER NOT NULL DEFAULT 0,
+                        work_request_id TEXT,
+                        created_at INTEGER NOT NULL,
+                        last_attempt_at INTEGER
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pending_messages_local_id ON pending_messages(local_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_messages_chat_guid ON pending_messages(chat_guid)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_messages_sync_status ON pending_messages(sync_status)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_messages_created_at ON pending_messages(created_at)")
+
+                // Create pending_attachments table for attachment persistence
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS pending_attachments (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        local_id TEXT NOT NULL,
+                        pending_message_id INTEGER NOT NULL,
+                        original_uri TEXT NOT NULL,
+                        persisted_path TEXT NOT NULL,
+                        file_name TEXT NOT NULL,
+                        mime_type TEXT NOT NULL,
+                        file_size INTEGER NOT NULL,
+                        upload_progress REAL NOT NULL DEFAULT 0,
+                        order_index INTEGER NOT NULL DEFAULT 0,
+                        FOREIGN KEY (pending_message_id) REFERENCES pending_messages(id) ON DELETE CASCADE
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pending_attachments_local_id ON pending_attachments(local_id)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_attachments_pending_message_id ON pending_attachments(pending_message_id)")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -508,7 +591,10 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_17_18,
             MIGRATION_18_19,
             MIGRATION_19_20,
-            MIGRATION_20_21
+            MIGRATION_20_21,
+            MIGRATION_21_22,
+            MIGRATION_22_23,
+            MIGRATION_23_24
         )
     }
 }

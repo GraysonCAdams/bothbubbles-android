@@ -261,7 +261,8 @@ data class AttachmentUiModel(
     val transferName: String? = null,
     val totalBytes: Long? = null,
     val isSticker: Boolean = false,
-    val blurhash: String? = null
+    val blurhash: String? = null,
+    val thumbnailPath: String? = null
 ) {
     /** True if the attachment needs to be downloaded (no local file available) */
     val needsDownload: Boolean

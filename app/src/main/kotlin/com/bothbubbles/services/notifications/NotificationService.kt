@@ -30,6 +30,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.AvatarGenerator
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -154,12 +155,14 @@ class NotificationService @Inject constructor(
      * @param chatGuid Unique identifier for the chat
      * @param chatTitle Display name of the conversation
      * @param isGroup Whether this is a group conversation
+     * @param participantNames List of participant names for group collage (optional)
      * @return The shortcut ID
      */
     private fun createConversationShortcut(
         chatGuid: String,
         chatTitle: String,
-        isGroup: Boolean
+        isGroup: Boolean,
+        participantNames: List<String> = emptyList()
     ): String {
         val shortcutId = "chat_$chatGuid"
 
@@ -169,10 +172,19 @@ class NotificationService @Inject constructor(
             putExtra(EXTRA_CHAT_GUID, chatGuid)
         }
 
+        // Generate avatar icon - use group collage for groups, single avatar otherwise
+        // Uses transparent background so no white circle appears behind the collage
+        val avatarIcon: IconCompat = if (isGroup && participantNames.size > 1) {
+            AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+        } else {
+            AvatarGenerator.generateIconCompat(chatTitle, 128)
+        }
+
         // Create person for the conversation
         val person = Person.Builder()
             .setName(chatTitle)
             .setKey(chatGuid)
+            .setIcon(avatarIcon)
             .build()
 
         // Build the shortcut with LocusId for bubble support
@@ -180,9 +192,10 @@ class NotificationService @Inject constructor(
         val shortcut = ShortcutInfoCompat.Builder(context, shortcutId)
             .setShortLabel(chatTitle)
             .setLongLabel(chatTitle)
-            .setIcon(IconCompat.createWithResource(context, R.mipmap.ic_launcher))
+            .setIcon(avatarIcon)
             .setIntent(intent)
             .setLongLived(true)
+            .setIsConversation()
             .setLocusId(locusId)
             .setPerson(person)
             .setCategories(setOf("com.bothbubbles.category.SHARE_TARGET"))
@@ -219,11 +232,15 @@ class NotificationService @Inject constructor(
      *
      * @param chatGuid Unique identifier for the chat
      * @param chatTitle Display name of the conversation
+     * @param isGroup Whether this is a group conversation
+     * @param participantNames List of participant names for group collage (optional)
      * @return BubbleMetadata for the notification, or null if bubbles aren't supported
      */
     private fun createBubbleMetadata(
         chatGuid: String,
-        chatTitle: String
+        chatTitle: String,
+        isGroup: Boolean = false,
+        participantNames: List<String> = emptyList()
     ): NotificationCompat.BubbleMetadata? {
         // Bubbles require Android Q (API 29) or higher
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -240,10 +257,18 @@ class NotificationService @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
+        // Generate avatar icon - use group collage for groups, single avatar otherwise
+        // Uses transparent background so no white circle appears behind the collage
+        val bubbleIcon: IconCompat = if (isGroup && participantNames.size > 1) {
+            AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+        } else {
+            AvatarGenerator.generateIconCompat(chatTitle, 128)
+        }
+
         // Build bubble metadata
         val metadata = NotificationCompat.BubbleMetadata.Builder(
             bubblePendingIntent,
-            IconCompat.createWithResource(context, R.mipmap.ic_launcher)
+            bubbleIcon
         )
             .setDesiredHeight(600)
             .setAutoExpandBubble(false)
@@ -258,6 +283,7 @@ class NotificationService @Inject constructor(
      * Show a notification for a new message
      *
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
+     * @param participantNames List of participant names for group chats (used for group avatar collage)
      */
     fun showMessageNotification(
         chatGuid: String,
@@ -269,16 +295,18 @@ class NotificationService @Inject constructor(
         isGroup: Boolean = false,
         avatarUri: String? = null,
         linkPreviewTitle: String? = null,
-        linkPreviewDomain: String? = null
+        linkPreviewDomain: String? = null,
+        participantNames: List<String> = emptyList()
     ) {
         if (!hasNotificationPermission()) return
 
         val notificationId = chatGuid.hashCode()
 
-        // Create intent to open the chat
+        // Create intent to open the chat (with message GUID for deep-link scrolling)
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(EXTRA_CHAT_GUID, chatGuid)
+            putExtra(EXTRA_MESSAGE_GUID, messageGuid)
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
@@ -351,15 +379,26 @@ class NotificationService @Inject constructor(
             .setName(senderName ?: chatTitle)
             .setKey(senderAddress ?: chatGuid)
 
-        // Add avatar to sender Person if available
-        if (avatarUri != null) {
+        // Add avatar to sender Person - use contact photo or generate one
+        val avatarIcon: IconCompat? = if (avatarUri != null) {
             try {
-                val uri = android.net.Uri.parse(avatarUri)
-                senderBuilder.setIcon(IconCompat.createWithContentUri(uri))
+                IconCompat.createWithContentUri(android.net.Uri.parse(avatarUri))
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to load avatar for notification: $avatarUri", e)
+                null
+            }
+        } else {
+            // Generate avatar bitmap matching UI style (same colors/initials as Avatar.kt)
+            try {
+                val displayName = senderName ?: chatTitle
+                AvatarGenerator.generateIconCompat(displayName, 128)
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to generate avatar bitmap", e)
+                null
             }
         }
+
+        avatarIcon?.let { senderBuilder.setIcon(it) }
 
         val sender = senderBuilder.build()
 
@@ -374,13 +413,14 @@ class NotificationService @Inject constructor(
             .addMessage(displayText, System.currentTimeMillis(), sender)
 
         // Create conversation shortcut for bubble support
-        val shortcutId = createConversationShortcut(chatGuid, chatTitle, isGroup)
+        // Pass participant names for group collages with transparent backgrounds
+        val shortcutId = createConversationShortcut(chatGuid, chatTitle, isGroup, participantNames)
 
         // Create bubble metadata if bubbles are enabled for this conversation
         val shouldBubble = shouldShowBubble(chatGuid, senderAddress)
         Log.d(TAG, "Bubble check: shouldBubble=$shouldBubble, filterMode=$cachedBubbleFilterMode, chatGuid=$chatGuid")
         val bubbleMetadata = if (shouldBubble) {
-            createBubbleMetadata(chatGuid, chatTitle)
+            createBubbleMetadata(chatGuid, chatTitle, isGroup, participantNames)
         } else {
             null
         }

@@ -467,35 +467,38 @@ fun PinnedConversationTile(
                     avatarContent()
 
                     // Unread badge with pop-in animation
-                    AnimatedVisibility(
-                        visible = unreadCount > 0,
-                        enter = scaleIn(
-                            initialScale = 0.5f,
-                            animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
-                        ) + fadeIn(tween(100)),
-                        exit = scaleOut(targetScale = 0.5f, animationSpec = tween(100)) + fadeOut(tween(100)),
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .offset(x = 4.dp, y = (-4).dp)
-                    ) {
-                        Surface(
-                            color = MaterialTheme.colorScheme.primary,
-                            shape = CircleShape,
-                            modifier = Modifier.size(18.dp)
+                    // Note: Using Box to break ColumnScope and use top-level AnimatedVisibility
+                    if (unreadCount > 0) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = true,
+                            enter = scaleIn(
+                                initialScale = 0.5f,
+                                animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
+                            ) + fadeIn(tween(100)),
+                            exit = scaleOut(targetScale = 0.5f, animationSpec = tween(100)) + fadeOut(tween(100)),
+                            modifier = Modifier
+                                .align(Alignment.TopEnd)
+                                .offset(x = 4.dp, y = (-4).dp)
                         ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                AnimatedContent(
-                                    targetState = unreadCount,
-                                    transitionSpec = {
-                                        fadeIn(tween(100)) togetherWith fadeOut(tween(100))
-                                    },
-                                    label = "pinnedBadgeCount"
-                                ) { count ->
-                                    Text(
-                                        text = if (count > 9) "9+" else count.toString(),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onPrimary
-                                    )
+                            Surface(
+                                color = MaterialTheme.colorScheme.primary,
+                                shape = CircleShape,
+                                modifier = Modifier.size(18.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    AnimatedContent(
+                                        targetState = unreadCount,
+                                        transitionSpec = {
+                                            fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+                                        },
+                                        label = "pinnedBadgeCount"
+                                    ) { count ->
+                                        Text(
+                                            text = if (count > 9) "9+" else count.toString(),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimary
+                                        )
+                                    }
                                 }
                             }
                         }

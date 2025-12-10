@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.bothbubbles.data.ServerCapabilities
+import com.bothbubbles.services.sound.SoundTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -302,6 +303,15 @@ class SettingsDataStore @Inject constructor(
 
     val messageSoundsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.MESSAGE_SOUNDS_ENABLED] ?: true
+    }
+
+    val soundTheme: Flow<SoundTheme> = dataStore.data.map { prefs ->
+        val themeName = prefs[Keys.SOUND_THEME] ?: SoundTheme.DEFAULT.name
+        try {
+            SoundTheme.valueOf(themeName)
+        } catch (e: IllegalArgumentException) {
+            SoundTheme.DEFAULT
+        }
     }
 
     // ===== Setters =====
@@ -624,6 +634,12 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    suspend fun setSoundTheme(theme: SoundTheme) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SOUND_THEME] = theme.name
+        }
+    }
+
     // ===== Conversation Filter Settings =====
 
     /**
@@ -727,6 +743,48 @@ class SettingsDataStore @Inject constructor(
     suspend fun setAutoDownloadAttachments(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_DOWNLOAD_ATTACHMENTS] = enabled
+        }
+    }
+
+    // ===== Video Compression =====
+
+    /**
+     * Video compression quality for uploads.
+     * Values: "original", "high", "medium", "low"
+     */
+    val videoCompressionQuality: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.VIDEO_COMPRESSION_QUALITY] ?: "medium"
+    }
+
+    suspend fun setVideoCompressionQuality(quality: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.VIDEO_COMPRESSION_QUALITY] = quality
+        }
+    }
+
+    /**
+     * Whether to compress videos before upload.
+     */
+    val compressVideosBeforeUpload: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.COMPRESS_VIDEOS_BEFORE_UPLOAD] ?: true
+    }
+
+    suspend fun setCompressVideosBeforeUpload(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.COMPRESS_VIDEOS_BEFORE_UPLOAD] = enabled
+        }
+    }
+
+    /**
+     * Maximum concurrent downloads.
+     */
+    val maxConcurrentDownloads: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.MAX_CONCURRENT_DOWNLOADS] ?: 2
+    }
+
+    suspend fun setMaxConcurrentDownloads(count: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.MAX_CONCURRENT_DOWNLOADS] = count.coerceIn(1, 5)
         }
     }
 
@@ -1014,6 +1072,7 @@ class SettingsDataStore @Inject constructor(
 
         // Sound Settings
         val MESSAGE_SOUNDS_ENABLED = booleanPreferencesKey("message_sounds_enabled")
+        val SOUND_THEME = stringPreferencesKey("sound_theme")
 
         // Conversation Filter Settings
         val CONVERSATION_FILTER = stringPreferencesKey("conversation_filter")
@@ -1030,6 +1089,11 @@ class SettingsDataStore @Inject constructor(
 
         // Attachment Settings
         val AUTO_DOWNLOAD_ATTACHMENTS = booleanPreferencesKey("auto_download_attachments")
+
+        // Video Compression
+        val VIDEO_COMPRESSION_QUALITY = stringPreferencesKey("video_compression_quality")
+        val COMPRESS_VIDEOS_BEFORE_UPLOAD = booleanPreferencesKey("compress_videos_before_upload")
+        val MAX_CONCURRENT_DOWNLOADS = intPreferencesKey("max_concurrent_downloads")
 
         // Initial Sync Progress (Resumable)
         val INITIAL_SYNC_STARTED = booleanPreferencesKey("initial_sync_started")

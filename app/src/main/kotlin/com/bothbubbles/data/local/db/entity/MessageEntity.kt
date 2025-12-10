@@ -156,11 +156,23 @@ data class MessageEntity(
         get() = error == 0 && !guid.startsWith("temp-")
 
     /**
-     * Whether this message is a reaction/tapback
+     * Whether this message is a reaction/tapback.
+     * iMessage reactions can come in several formats:
+     * - Numeric codes: "2000"-"2005" (add), "3000"-"3005" (remove)
+     * - Text names: "love", "like", etc. or "-love", "-like" (remove)
+     * - With prefixes: "reaction/2000", "tapback/love", etc.
      */
     val isReaction: Boolean
-        get() = associatedMessageType?.contains("reaction") == true ||
-                associatedMessageType?.contains("tapback") == true
+        get() = associatedMessageGuid != null && associatedMessageType != null && (
+            associatedMessageType!!.contains("reaction") ||
+            associatedMessageType!!.contains("tapback") ||
+            associatedMessageType!!.contains("200") ||  // 2000-2005 (add reactions)
+            associatedMessageType!!.contains("300") ||  // 3000-3005 (remove reactions)
+            associatedMessageType in listOf(
+                "love", "like", "dislike", "laugh", "emphasize", "question",
+                "-love", "-like", "-dislike", "-laugh", "-emphasize", "-question"
+            )
+        )
 
     /**
      * Whether this message is a group event (participant added/removed, name change)

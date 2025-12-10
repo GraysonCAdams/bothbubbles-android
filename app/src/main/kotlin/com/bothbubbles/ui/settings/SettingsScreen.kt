@@ -2,6 +2,7 @@ package com.bothbubbles.ui.settings
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -15,6 +16,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.ProfileHeader
 import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.ui.settings.components.SettingsMenuItem
@@ -330,6 +332,31 @@ fun SettingsContent(
                         )
                     }
                 )
+
+                // Sound theme picker (only show when sounds are enabled)
+                if (uiState.messageSoundsEnabled) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    var showSoundPicker by remember { mutableStateOf(false) }
+
+                    SettingsMenuItem(
+                        icon = Icons.Default.MusicNote,
+                        title = "Sound theme",
+                        subtitle = uiState.soundTheme.displayName,
+                        onClick = { showSoundPicker = true }
+                    )
+
+                    if (showSoundPicker) {
+                        SoundThemePickerDialog(
+                            currentTheme = uiState.soundTheme,
+                            onThemeSelected = { theme ->
+                                viewModel.setSoundTheme(theme)
+                                showSoundPicker = false
+                            },
+                            onDismiss = { showSoundPicker = false }
+                        )
+                    }
+                }
             }
         }
 
@@ -390,4 +417,51 @@ fun SettingsContent(
             }
         }
     }
+}
+
+/**
+ * Dialog for selecting a sound theme.
+ * Plays both inbound and outbound sounds as a preview when a theme is selected.
+ */
+@Composable
+private fun SoundThemePickerDialog(
+    currentTheme: SoundTheme,
+    onThemeSelected: (SoundTheme) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sound theme") },
+        text = {
+            Column {
+                SoundTheme.entries.forEach { theme ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(
+                                selected = theme == currentTheme,
+                                onClick = { onThemeSelected(theme) }
+                            )
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                    ) {
+                        RadioButton(
+                            selected = theme == currentTheme,
+                            onClick = null
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = theme.displayName,
+                            style = MaterialTheme.typography.bodyLarge
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Done")
+            }
+        }
+    )
 }

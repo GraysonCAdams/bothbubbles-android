@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat
 
 import android.Manifest
+import android.content.Intent
 import android.media.MediaActionSound
 import android.media.MediaPlayer
 import android.media.MediaRecorder
@@ -74,6 +75,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -140,6 +142,7 @@ fun ChatScreen(
     initialScrollPosition: Int = 0,
     initialScrollOffset: Int = 0,
     onScrollPositionRestored: () -> Unit = {},
+    targetMessageGuid: String? = null,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -162,14 +165,72 @@ fun ChatScreen(
             onScrollPositionRestored()
         }
     }
+
+    // Track if we've handled the target message (from notification deep-link)
+    var targetMessageHandled by remember { mutableStateOf(false) }
+
+    // Handle notification deep-link: scroll to target message and highlight it
+    LaunchedEffect(targetMessageGuid, uiState.messages.isNotEmpty()) {
+        if (targetMessageGuid != null && !targetMessageHandled && uiState.messages.isNotEmpty()) {
+            val index = uiState.messages.indexOfFirst { it.guid == targetMessageGuid }
+            if (index >= 0) {
+                // Scroll with offset so message isn't at the very top edge
+                // In reversed layout, negative offset moves item down (away from visual top)
+                listState.animateScrollToItem(index, scrollOffset = -100)
+                // Trigger highlight animation after scroll
+                viewModel.highlightMessage(targetMessageGuid)
+                targetMessageHandled = true
+            }
+        }
+    }
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Hide keyboard when user scrolls more than a threshold
+    LaunchedEffect(listState) {
+        var previousScrollOffset = listState.firstVisibleItemScrollOffset
+        var previousFirstVisibleItem = listState.firstVisibleItemIndex
+        var accumulatedScroll = 0
+
+        snapshotFlow {
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.isScrollInProgress
+            )
+        }.collect { (currentIndex, currentOffset, isScrolling) ->
+            if (isScrolling) {
+                // Calculate scroll delta
+                val scrollDelta = if (currentIndex == previousFirstVisibleItem) {
+                    currentOffset - previousScrollOffset
+                } else {
+                    // Changed items, estimate large scroll
+                    (currentIndex - previousFirstVisibleItem) * 200
+                }
+                accumulatedScroll += kotlin.math.abs(scrollDelta)
+
+                // Hide keyboard after scrolling ~250dp worth
+                if (accumulatedScroll > 750) {
+                    keyboardController?.hide()
+                    accumulatedScroll = 0
+                }
+            } else {
+                // Reset when scroll stops
+                accumulatedScroll = 0
+            }
+
+            previousFirstVisibleItem = currentIndex
+            previousScrollOffset = currentOffset
+        }
+    }
 
     // Menu and dialog state
     var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }
     var showVideoCallDialog by remember { mutableStateOf(false) }
+    var showSmsBlockedDialog by remember { mutableStateOf(false) }
 
     // Attachment picker state
     var showAttachmentPicker by remember { mutableStateOf(false) }
@@ -221,6 +282,67 @@ fun ChatScreen(
     var selectedMessageForRetry by remember { mutableStateOf<MessageUiModel?>(null) }
     var canRetrySmsForMessage by remember { mutableStateOf(false) }
     val retryMenuScope = rememberCoroutineScope()
+    val scrollScope = rememberCoroutineScope()
+
+    // Track unseen incoming messages when scrolled away from bottom
+    var unseenMessageGuids by remember { mutableStateOf<List<String>>(emptyList()) }
+    var lastKnownMessageCount by remember { mutableIntStateOf(0) }
+
+    // Detect if user is at the bottom of the list (reversed layout: index 0 is bottom)
+    val isAtBottom by remember {
+        derivedStateOf {
+            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 100
+        }
+    }
+
+    // Track new incoming messages when not at bottom
+    LaunchedEffect(uiState.messages.size, isAtBottom) {
+        val messages = uiState.messages
+        if (messages.isEmpty()) {
+            lastKnownMessageCount = 0
+            return@LaunchedEffect
+        }
+
+        // If we're at bottom, clear unseen messages
+        if (isAtBottom) {
+            unseenMessageGuids = emptyList()
+            lastKnownMessageCount = messages.size
+            return@LaunchedEffect
+        }
+
+        // Check for new messages (they appear at the front in reversed layout)
+        if (messages.size > lastKnownMessageCount && lastKnownMessageCount > 0) {
+            val newCount = messages.size - lastKnownMessageCount
+            val newMessages = messages.take(newCount)
+            // Only track incoming messages (not from me)
+            val newIncoming = newMessages.filter { !it.isFromMe }.map { it.guid }
+            if (newIncoming.isNotEmpty()) {
+                unseenMessageGuids = newIncoming + unseenMessageGuids
+            }
+        }
+        lastKnownMessageCount = messages.size
+    }
+
+    // Clear unseen messages when user scrolls to bottom
+    LaunchedEffect(isAtBottom) {
+        if (isAtBottom) {
+            unseenMessageGuids = emptyList()
+        }
+    }
+
+    // Snackbar for error display
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Show snackbar when error occurs
+    LaunchedEffect(uiState.error) {
+        uiState.error?.let { error ->
+            snackbarHostState.showSnackbar(
+                message = error,
+                duration = SnackbarDuration.Long
+            )
+            viewModel.clearError()
+        }
+    }
 
     // Forward message dialog state
     var showForwardDialog by remember { mutableStateOf(false) }
@@ -319,12 +441,16 @@ fun ChatScreen(
         }
     }
 
-    // Track scroll position changes for state restoration
+    // Track scroll position changes for state restoration and preloading
     LaunchedEffect(listState) {
         snapshotFlow {
-            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
-        }.collect { (index, offset) ->
-            viewModel.updateScrollPosition(index, offset)
+            Triple(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                listState.layoutInfo.visibleItemsInfo.size
+            )
+        }.collect { (index, offset, visibleCount) ->
+            viewModel.updateScrollPosition(index, offset, visibleCount)
         }
     }
 
@@ -405,6 +531,7 @@ fun ChatScreen(
     ) {
     Scaffold(
         containerColor = Color.Transparent,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 navigationIcon = {
@@ -461,13 +588,6 @@ fun ChatScreen(
                                         tint = MaterialTheme.colorScheme.primary
                                     )
                                 }
-                            }
-                            if (uiState.isTyping) {
-                                Text(
-                                    text = stringResource(R.string.typing_indicator),
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
                             }
                         }
                     }
@@ -596,6 +716,10 @@ fun ChatScreen(
                         viewModel.sendMessage()
                         pendingAttachments = emptyList()
                         showAttachmentPicker = false
+                        // Scroll to bottom after sending
+                        scrollScope.launch {
+                            listState.animateScrollToItem(0)
+                        }
                     },
                     onSendLongPress = {
                         if (!uiState.isLocalSmsChat) {
@@ -647,6 +771,8 @@ fun ChatScreen(
                     },
                     isSending = uiState.isSending,
                     isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
+                    smsInputBlocked = uiState.smsInputBlocked,
+                    onSmsInputBlockedClick = { showSmsBlockedDialog = true },
                     hasAttachments = pendingAttachments.isNotEmpty(),
                     attachments = pendingAttachments,
                     onRemoveAttachment = { uri ->
@@ -691,6 +817,7 @@ fun ChatScreen(
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
                             pendingAttachments = emptyList()
+                            scrollScope.launch { listState.animateScrollToItem(0) }
                         }
                         recordingFile = null
                     },
@@ -740,6 +867,7 @@ fun ChatScreen(
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
                             pendingAttachments = emptyList()
+                            scrollScope.launch { listState.animateScrollToItem(0) }
                         }
                         recordingFile = null
                     },
@@ -790,6 +918,23 @@ fun ChatScreen(
                 // Small delay to let the message render and calculate its height
                 kotlinx.coroutines.delay(100)
                 listState.animateScrollToItem(0)
+            }
+        }
+
+        // Auto-scroll when typing indicator appears (if user is within 10% of bottom)
+        LaunchedEffect(uiState.isTyping) {
+            if (uiState.isTyping) {
+                val layoutInfo = listState.layoutInfo
+                val totalItems = layoutInfo.totalItemsCount
+                // With reverseLayout=true, index 0 = visual bottom
+                // 10% threshold: if within first 10% of items from bottom
+                val threshold = (totalItems * 0.1).toInt().coerceAtLeast(1)
+                val isNearBottom = listState.firstVisibleItemIndex <= threshold
+
+                if (isNearBottom) {
+                    kotlinx.coroutines.delay(100)
+                    listState.animateScrollToItem(0)
+                }
             }
         }
 
@@ -886,6 +1031,26 @@ fun ChatScreen(
                         label = "banner_padding"
                     )
 
+                    // PERF: Pre-compute expensive lookups once instead of O(n²) per-item
+                    // 1. Map each index to its next visible (non-reaction) message
+                    val nextVisibleMessageMap = remember(uiState.messages) {
+                        val map = mutableMapOf<Int, MessageUiModel?>()
+                        var lastVisibleMessage: MessageUiModel? = null
+                        // Iterate backwards to build the "next visible" lookup
+                        for (i in uiState.messages.indices.reversed()) {
+                            map[i] = lastVisibleMessage
+                            if (!uiState.messages[i].isReaction) {
+                                lastVisibleMessage = uiState.messages[i]
+                            }
+                        }
+                        map
+                    }
+
+                    // 2. Pre-compute the last outgoing message index (first non-reaction from-me message)
+                    val lastOutgoingIndex = remember(uiState.messages) {
+                        uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
+                    }
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
@@ -938,9 +1103,8 @@ fun ChatScreen(
                             // Since list is reversed, next index = earlier message
                             // Skip reaction messages (they're hidden) when finding next message
                             // Also don't show separators for reaction messages themselves
-                            val nextVisibleMessage = uiState.messages
-                                .drop(index + 1)
-                                .firstOrNull { !it.isReaction }
+                            // PERF: Use pre-computed map instead of O(n) drop().firstOrNull() per item
+                            val nextVisibleMessage = nextVisibleMessageMap[index]
                             // Show separator if:
                             // 1. There's a 15+ minute gap with the next message, OR
                             // 2. This is the oldest message in the list (no next message) - always show a separator
@@ -958,13 +1122,11 @@ fun ChatScreen(
 
                             // iPhone-style delivery indicator: only show on THE last outgoing message
                             // in the entire conversation (not just last in consecutive sequence)
-                            val showDeliveryIndicator = if (message.isFromMe) {
-                                // Find the index of the very last outgoing message (excluding reactions)
-                                val lastOutgoingIndex = uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
-                                index == lastOutgoingIndex
-                            } else {
-                                false
-                            }
+                            // Don't show indicator while message is still sending (no clock icon)
+                            // PERF: Use pre-computed lastOutgoingIndex instead of O(n) search per item
+                            val showDeliveryIndicator = message.isFromMe &&
+                                index == lastOutgoingIndex &&
+                                (message.isSent || message.hasError)
 
                             // Spacing based on group position:
                             // - SINGLE/FIRST: 6dp top (gap between groups)
@@ -1006,6 +1168,27 @@ fun ChatScreen(
                             )
                             val stickerFadeAlpha = if (isStickerTargetInteracting) 0f else 1f  // Hide completely during interaction
 
+                            // Check if this message should be highlighted (from notification deep-link)
+                            val isHighlighted = uiState.highlightedMessageGuid == message.guid
+
+                            // iOS-like highlight animation: amber/gold glow that pulses and fades
+                            val highlightAlpha = remember { Animatable(0f) }
+                            LaunchedEffect(isHighlighted) {
+                                if (isHighlighted) {
+                                    // Phase 1: Fade in
+                                    highlightAlpha.animateTo(0.3f, tween(200))
+                                    // Phase 2: Pulse 3 times
+                                    repeat(3) {
+                                        highlightAlpha.animateTo(0.15f, tween(200))
+                                        highlightAlpha.animateTo(0.3f, tween(200))
+                                    }
+                                    // Phase 3: Fade out
+                                    highlightAlpha.animateTo(0f, tween(400))
+                                    // Clear highlight state after animation completes
+                                    viewModel.clearHighlight()
+                                }
+                            }
+
                             Column(
                                 modifier = Modifier
                                     .zIndex(if (message.isPlacedSticker) 1f else 0f)  // Stickers render on top
@@ -1014,6 +1197,14 @@ fun ChatScreen(
                                     .padding(top = topPadding)
                                     .staggeredEntrance(index)
                                     .animateItem()
+                                    .then(
+                                        if (highlightAlpha.value > 0f) {
+                                            Modifier.background(
+                                                color = Color(0xFFFFD54F).copy(alpha = highlightAlpha.value),
+                                                shape = RoundedCornerShape(16.dp)
+                                            )
+                                        } else Modifier
+                                    )
                             ) {
                                 // Show centered time separator BEFORE the message
                                 // In reversed layout, this makes it appear above the message visually
@@ -1208,6 +1399,44 @@ fun ChatScreen(
         onMessageClick = { guid -> viewModel.scrollToMessage(guid) },
         onDismiss = { viewModel.dismissThreadOverlay() }
     )
+
+    // New messages indicator - floating above message list
+    AnimatedVisibility(
+        visible = unseenMessageGuids.isNotEmpty(),
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = 100.dp), // Position above keyboard/input area
+        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
+        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
+    ) {
+        val count = unseenMessageGuids.size
+        Surface(
+            onClick = {
+                // Scroll to the first unseen message and highlight it
+                val firstUnseenGuid = unseenMessageGuids.lastOrNull()
+                if (firstUnseenGuid != null) {
+                    val index = uiState.messages.indexOfFirst { it.guid == firstUnseenGuid }
+                    if (index >= 0) {
+                        scrollScope.launch {
+                            listState.animateScrollToItem(index, scrollOffset = -100)
+                            viewModel.highlightMessage(firstUnseenGuid)
+                        }
+                    }
+                }
+                unseenMessageGuids = emptyList()
+            },
+            shape = RoundedCornerShape(20.dp),
+            color = MaterialTheme.colorScheme.primary,
+            contentColor = MaterialTheme.colorScheme.onPrimary,
+            shadowElevation = 4.dp
+        ) {
+            Text(
+                text = if (count == 1) "1 new message" else "$count new messages",
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelLarge
+            )
+        }
+    }
     } // End of outer Box
 
     // Effect picker bottom sheet
@@ -1222,6 +1451,7 @@ fun ChatScreen(
                     viewModel.sendMessage(effect.appleId)
                     pendingAttachments = emptyList()
                     showAttachmentPicker = false
+                    scrollScope.launch { listState.animateScrollToItem(0) }
                 }
             },
             onDismiss = { showEffectPicker = false }
@@ -1269,6 +1499,37 @@ fun ChatScreen(
             },
             onDismiss = { showBlockDialog = false },
             alreadyReportedToCarrier = uiState.isReportedToCarrier
+        )
+    }
+
+    if (showSmsBlockedDialog) {
+        AlertDialog(
+            onDismissRequest = { showSmsBlockedDialog = false },
+            title = { Text("Cannot Send SMS") },
+            text = {
+                Text("BothBubbles must be set as the default SMS app to send SMS messages.\n\nGo to Settings → Apps → Default apps → SMS app and select BothBubbles.")
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showSmsBlockedDialog = false
+                    // Open default apps settings
+                    try {
+                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        // Fallback to general settings
+                        val intent = Intent(android.provider.Settings.ACTION_SETTINGS)
+                        context.startActivity(intent)
+                    }
+                }) {
+                    Text("Open Settings")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSmsBlockedDialog = false }) {
+                    Text("Cancel")
+                }
+            }
         )
     }
 
@@ -1395,6 +1656,8 @@ private fun UnifiedInputArea(
     onVoiceMemoPressEnd: () -> Unit,
     isSending: Boolean,
     isLocalSmsChat: Boolean,
+    smsInputBlocked: Boolean,
+    onSmsInputBlockedClick: () -> Unit,
     hasAttachments: Boolean,
     attachments: List<Uri>,
     onRemoveAttachment: (Uri) -> Unit,
@@ -1582,24 +1845,41 @@ private fun UnifiedInputArea(
 
                                     TextField(
                                         value = text,
-                                        onValueChange = onTextChange,
-                                        modifier = Modifier.weight(1f),
+                                        onValueChange = { if (!smsInputBlocked) onTextChange(it) },
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .then(
+                                                if (smsInputBlocked) {
+                                                    Modifier.clickable { onSmsInputBlockedClick() }
+                                                } else Modifier
+                                            ),
+                                        enabled = !smsInputBlocked,
+                                        readOnly = smsInputBlocked,
                                         placeholder = {
                                             Text(
-                                                text = stringResource(
-                                                    if (isLocalSmsChat) R.string.message_placeholder_text
-                                                    else R.string.message_placeholder_imessage
-                                                ),
-                                                color = inputColors.inputPlaceholder
+                                                text = if (smsInputBlocked) {
+                                                    "Not default SMS app"
+                                                } else {
+                                                    stringResource(
+                                                        if (isLocalSmsChat) R.string.message_placeholder_text
+                                                        else R.string.message_placeholder_imessage
+                                                    )
+                                                },
+                                                color = inputColors.inputPlaceholder.copy(
+                                                    alpha = if (smsInputBlocked) 0.5f else 1f
+                                                )
                                             )
                                         },
                                         colors = TextFieldDefaults.colors(
                                             focusedContainerColor = Color.Transparent,
                                             unfocusedContainerColor = Color.Transparent,
+                                            disabledContainerColor = Color.Transparent,
                                             focusedIndicatorColor = Color.Transparent,
                                             unfocusedIndicatorColor = Color.Transparent,
+                                            disabledIndicatorColor = Color.Transparent,
                                             focusedTextColor = inputColors.inputText,
                                             unfocusedTextColor = inputColors.inputText,
+                                            disabledTextColor = inputColors.inputText.copy(alpha = 0.5f),
                                             cursorColor = MaterialTheme.colorScheme.primary
                                         ),
                                         maxLines = 4
@@ -1658,7 +1938,8 @@ private fun UnifiedInputArea(
                             onClick = onVoiceMemoClick,
                             onPressStart = onVoiceMemoPressStart,
                             onPressEnd = onVoiceMemoPressEnd,
-                            isSmsMode = isLocalSmsChat
+                            isSmsMode = isLocalSmsChat,
+                            isDisabled = smsInputBlocked
                         )
                     }
                 }
@@ -2145,13 +2426,18 @@ private fun VoiceMemoButton(
     onPressStart: () -> Unit,
     onPressEnd: () -> Unit,
     isSmsMode: Boolean,
+    isDisabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
     // Animated color transition for snappy mode switching (Android 16 style)
     val bubbleColors = BothBubblesTheme.bubbleColors
     val containerColor by animateColorAsState(
-        targetValue = if (isSmsMode) Color(0xFF34C759) else bubbleColors.iMessageSent,
+        targetValue = when {
+            isDisabled -> Color.Gray.copy(alpha = 0.3f)
+            isSmsMode -> Color(0xFF34C759)
+            else -> bubbleColors.iMessageSent
+        },
         animationSpec = tween(150, easing = FastOutSlowInEasing),
         label = "voiceMemoButtonColor"
     )
@@ -2161,49 +2447,51 @@ private fun VoiceMemoButton(
             .size(48.dp)
             .clip(CircleShape)
             .background(containerColor)
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    // Wait for initial press
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
+            .then(
+                if (isDisabled) Modifier else Modifier.pointerInput(Unit) {
+                    awaitEachGesture {
+                        // Wait for initial press
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
 
-                    // Track timing and state
-                    val holdThresholdMs = 200L
-                    val pressStartTime = System.currentTimeMillis()
-                    var recordingStarted = false
+                        // Track timing and state
+                        val holdThresholdMs = 200L
+                        val pressStartTime = System.currentTimeMillis()
+                        var recordingStarted = false
 
-                    // Wait for finger lift while tracking hold duration
-                    do {
-                        val event = awaitPointerEvent()
-                        val elapsed = System.currentTimeMillis() - pressStartTime
+                        // Wait for finger lift while tracking hold duration
+                        do {
+                            val event = awaitPointerEvent()
+                            val elapsed = System.currentTimeMillis() - pressStartTime
 
-                        // Start recording once hold threshold is reached
-                        if (elapsed >= holdThresholdMs && !recordingStarted) {
-                            recordingStarted = true
-                            onPressStart()
+                            // Start recording once hold threshold is reached
+                            if (elapsed >= holdThresholdMs && !recordingStarted) {
+                                recordingStarted = true
+                                onPressStart()
+                            }
+
+                            // Consume all changes to prevent event leaking
+                            event.changes.forEach { it.consume() }
+                        } while (event.changes.any { it.pressed })
+
+                        // Finger lifted
+                        if (recordingStarted) {
+                            // Was recording - stop it
+                            onPressEnd()
+                        } else {
+                            // Quick tap - just request permission
+                            onClick()
                         }
-
-                        // Consume all changes to prevent event leaking
-                        event.changes.forEach { it.consume() }
-                    } while (event.changes.any { it.pressed })
-
-                    // Finger lifted
-                    if (recordingStarted) {
-                        // Was recording - stop it
-                        onPressEnd()
-                    } else {
-                        // Quick tap - just request permission
-                        onClick()
                     }
                 }
-            },
+            ),
         contentAlignment = Alignment.Center
     ) {
         Icon(
             Icons.Filled.GraphicEq,
             contentDescription = stringResource(R.string.voice_memo),
             modifier = Modifier.size(24.dp),
-            tint = Color.White
+            tint = if (isDisabled) Color.White.copy(alpha = 0.4f) else Color.White
         )
     }
 }

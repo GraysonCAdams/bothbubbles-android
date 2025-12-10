@@ -4,8 +4,15 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -74,6 +81,7 @@ import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -210,9 +218,41 @@ fun ConversationsScreen(
         }
     }
 
-    // Pull-to-search state
-    val listState = rememberLazyListState()
+    // Collect saved scroll position for restoration after process death
+    val savedScrollIndex by viewModel.savedScrollIndex.collectAsStateWithLifecycle()
+    val savedScrollOffset by viewModel.savedScrollOffset.collectAsStateWithLifecycle()
+    val savedSearchActive by viewModel.savedSearchActive.collectAsStateWithLifecycle()
+
+    // Initialize search state from saved state (process death restoration)
+    LaunchedEffect(savedSearchActive) {
+        if (savedSearchActive && !isSearchActive) {
+            isSearchActive = true
+        }
+    }
+
+    // Pull-to-search state - initialize with saved position for restoration
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = savedScrollIndex,
+        initialFirstVisibleItemScrollOffset = savedScrollOffset
+    )
     val coroutineScope = rememberCoroutineScope()
+
+    // Save scroll position when it changes (debounced via snapshotFlow)
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            listState.firstVisibleItemIndex to listState.firstVisibleItemScrollOffset
+        }
+            .distinctUntilChanged()
+            .collect { (index, offset) ->
+                viewModel.saveScrollPosition(index, offset)
+            }
+    }
+
+    // Save search active state when it changes
+    LaunchedEffect(isSearchActive) {
+        viewModel.saveSearchActive(isSearchActive)
+    }
+
     var pullOffset by remember { mutableFloatStateOf(0f) }
     // Track if the current gesture started at the top (prevents flings from triggering pull-to-search)
     var gestureStartedAtTop by remember { mutableStateOf(false) }
@@ -774,8 +814,16 @@ fun ConversationsScreen(
                 var draggedPinOffset by remember { mutableStateOf(Offset.Zero) }
                 var isPinDragging by remember { mutableStateOf(false) }
                 val unpinThresholdPx = with(density) { 60.dp.toPx() }
+                // Track container position for correct overlay positioning
+                var containerRootPosition by remember { mutableStateOf(Offset.Zero) }
 
-                Box(modifier = Modifier.fillMaxSize()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .onGloballyPositioned { coordinates ->
+                            containerRootPosition = coordinates.positionInRoot()
+                        }
+                ) {
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -984,12 +1032,16 @@ fun ConversationsScreen(
                     val scale = 1.08f - (unpinProgress * 0.15f)
                     val overlayAlpha = 1f - (unpinProgress * 0.5f)
 
+                    // Calculate position relative to this container (not root)
+                    val relativeX = draggedPinStartPosition.x - containerRootPosition.x
+                    val relativeY = draggedPinStartPosition.y - containerRootPosition.y
+
                     Box(
                         modifier = Modifier
                             .offset {
                                 androidx.compose.ui.unit.IntOffset(
-                                    (draggedPinStartPosition.x + draggedPinOffset.x).toInt(),
-                                    (draggedPinStartPosition.y + draggedPinOffset.y.coerceAtLeast(0f)).toInt()
+                                    (relativeX + draggedPinOffset.x).toInt(),
+                                    (relativeY + draggedPinOffset.y.coerceAtLeast(0f)).toInt()
                                 )
                             }
                             .zIndex(100f)
@@ -2261,13 +2313,13 @@ private fun GoogleStyleConversationTile(
                         }
                     }
 
-                    // Chat badge indicator for recent messages
+                    // Typing indicator badge (replaces iMessage/SMS badge position when typing)
                     if (conversation.isTyping) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface,
                             shape = CircleShape,
                             modifier = Modifier
-                                .align(Alignment.BottomStart)
+                                .align(Alignment.BottomEnd)
                                 .size(20.dp)
                                 .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                         ) {
@@ -2275,9 +2327,9 @@ private fun GoogleStyleConversationTile(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.primaryContainer)
+                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                             ) {
-                                TypingDots()
+                                AnimatedTypingDots()
                             }
                         }
                     }
@@ -2321,6 +2373,18 @@ private fun GoogleStyleConversationTile(
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
+                }
+
+                // "is typing..." indicator text under the name
+                if (conversation.isTyping) {
+                    Text(
+                        text = "is typing...",
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontStyle = FontStyle.Italic
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))
@@ -2411,17 +2475,36 @@ private fun GoogleStyleConversationTile(
 }
 
 @Composable
-private fun TypingDots() {
+private fun AnimatedTypingDots() {
+    val infiniteTransition = rememberInfiniteTransition(label = "typingDots")
+
     Row(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         modifier = Modifier.padding(2.dp)
     ) {
-        repeat(3) {
+        repeat(3) { index ->
+            val alpha by infiniteTransition.animateFloat(
+                initialValue = 0.3f,
+                targetValue = 0.3f,
+                animationSpec = infiniteRepeatable(
+                    animation = keyframes {
+                        durationMillis = 1200
+                        val delay = index * 150
+                        0.3f at delay using LinearEasing
+                        1f at (delay + 200) using FastOutSlowInEasing
+                        0.3f at (delay + 400) using FastOutSlowInEasing
+                        0.3f at 1200 using LinearEasing
+                    },
+                    repeatMode = RepeatMode.Restart
+                ),
+                label = "dotFade$index"
+            )
+
             Box(
                 modifier = Modifier
                     .size(4.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.onPrimaryContainer)
+                    .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = alpha))
             )
         }
     }
@@ -2728,7 +2811,7 @@ private fun PinnedConversationItem(
                 .padding(4.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-        // Avatar with unread badge or selection checkmark
+        // Avatar with selection checkmark
         // Outer Box sized for avatar + badge overflow (72dp + 4dp)
         Box(modifier = Modifier.size(76.dp)) {
             // Avatar content - no clip here, AvatarWithMessageType handles its own clipping
@@ -2757,10 +2840,12 @@ private fun PinnedConversationItem(
                         }
                     }
                 } else {
+                    // Use same indicator size as conversation list (20dp) for consistent badge sizing
                     AvatarWithMessageType(
                         messageSourceType = getMessageSourceType(conversation.lastMessageSource),
                         backgroundColor = MaterialTheme.colorScheme.surface,
-                        size = 72.dp
+                        size = 72.dp,
+                        indicatorSizeOverride = 20.dp
                     ) {
                         if (conversation.isGroup) {
                             GroupAvatar(
@@ -2773,41 +2858,6 @@ private fun PinnedConversationItem(
                                 name = conversation.displayName,
                                 avatarPath = conversation.avatarPath,
                                 size = 72.dp
-                            )
-                        }
-                    }
-                }
-            }
-
-            // Unread badge - outside clipped area so it can overflow
-            if (conversation.unreadCount > 0 && !isSelected) {
-                // Outer surface creates the "cut into avatar" border effect
-                Surface(
-                    color = MaterialTheme.colorScheme.surface,
-                    shape = CircleShape,
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .offset(x = 4.dp, y = (-4).dp)
-                ) {
-                    // Inner badge with padding to create border thickness
-                    Surface(
-                        color = MaterialTheme.colorScheme.inverseSurface,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .padding(3.dp)
-                            .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = if (conversation.unreadCount > 9) "9+" else conversation.unreadCount.toString(),
-                                style = MaterialTheme.typography.labelSmall.copy(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
-                                ),
-                                color = MaterialTheme.colorScheme.inverseOnSurface
                             )
                         }
                     }
@@ -2829,7 +2879,7 @@ private fun PinnedConversationItem(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier.fillMaxSize()
                     ) {
-                        TypingDots()
+                        AnimatedTypingDots()
                     }
                 }
             }
@@ -2837,17 +2887,37 @@ private fun PinnedConversationItem(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Name (truncated with ellipsis) - format phone numbers nicely, width is 120% of avatar
+            // Name row with unread badge to the left
             val formattedName = formatDisplayName(conversation.displayName)
-            Text(
-                text = formattedName,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.widthIn(max = 86.dp) // 120% of 72.dp avatar
-            )
+            val hasUnread = conversation.unreadCount > 0 && !isSelected
+
+            Row(
+                modifier = Modifier.widthIn(max = 92.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Unread badge to the left of the name
+                if (hasUnread) {
+                    Surface(
+                        color = MaterialTheme.colorScheme.inverseSurface,
+                        shape = CircleShape,
+                        modifier = Modifier
+                            .size(8.dp)
+                    ) {}
+                    Spacer(modifier = Modifier.width(4.dp))
+                }
+
+                Text(
+                    text = formattedName,
+                    style = MaterialTheme.typography.labelMedium.copy(
+                        fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal
+                    ),
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center
+                )
+            }
         }
     }
 }
@@ -2970,21 +3040,74 @@ private fun formatMessagePreview(conversation: ConversationUiModel): String {
         return "typing..."
     }
 
+    // Check invisible ink first - hide actual content
+    if (conversation.isInvisibleInk) {
+        val content = if (conversation.lastMessageType in listOf(MessageType.IMAGE, MessageType.VIDEO, MessageType.LIVE_PHOTO))
+            "Image sent with Invisible Ink"
+        else
+            "Message sent with Invisible Ink"
+        return formatWithSenderPrefix(conversation, content)
+    }
+
     val content = when (conversation.lastMessageType) {
-        MessageType.IMAGE -> "Image"
-        MessageType.VIDEO -> "Video"
+        MessageType.DELETED -> "Message deleted"
+        MessageType.REACTION -> formatReactionPreview(conversation.reactionPreviewData)
+        MessageType.GROUP_EVENT -> conversation.groupEventText ?: "Group updated"
+        MessageType.STICKER -> "Sticker"
+        MessageType.CONTACT -> "Contact"
+        MessageType.LIVE_PHOTO -> "Live Photo"
+        MessageType.VOICE_MESSAGE -> "Voice message"
+        MessageType.DOCUMENT -> conversation.documentType ?: "Document"
+        MessageType.LOCATION -> "Location"
+        MessageType.APP_MESSAGE -> "App message"
+        MessageType.IMAGE -> formatAttachmentCount(conversation.attachmentCount, "Photo")
+        MessageType.VIDEO -> formatAttachmentCount(conversation.attachmentCount, "Video")
         MessageType.AUDIO -> "Audio"
         MessageType.LINK -> formatLinkPreview(conversation)
         MessageType.ATTACHMENT -> "Attachment"
-        else -> conversation.lastMessageText
+        MessageType.TEXT -> conversation.lastMessageText
     }
 
+    return formatWithSenderPrefix(conversation, content)
+}
+
+/**
+ * Add sender prefix ("You:" or "Name:") to preview content
+ */
+private fun formatWithSenderPrefix(conversation: ConversationUiModel, content: String): String {
     return when {
         conversation.isFromMe -> "You: $content"
         // For group chats, show sender's first name
         conversation.isGroup && conversation.lastMessageSenderName != null ->
             "${conversation.lastMessageSenderName}: $content"
         else -> content
+    }
+}
+
+/**
+ * Format reaction preview text: "Liked 'original message...'"
+ */
+private fun formatReactionPreview(data: ReactionPreviewData?): String {
+    if (data == null) return "Reacted to a message"
+    val target = when {
+        data.originalText != null -> {
+            val truncated = data.originalText
+            val ellipsis = if (truncated.length >= 30) "..." else ""
+            "\"$truncated$ellipsis\""
+        }
+        data.hasAttachment -> "an attachment"
+        else -> "a message"
+    }
+    return "${data.tapbackVerb} $target"
+}
+
+/**
+ * Format attachment count: "Photo" for 1, "2 Photos" for multiple
+ */
+private fun formatAttachmentCount(count: Int, singular: String): String {
+    return when {
+        count <= 1 -> singular
+        else -> "$count ${singular}s"
     }
 }
 

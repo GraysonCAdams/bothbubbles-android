@@ -4,8 +4,10 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
+import com.bothbubbles.services.media.ThumbnailManager
+import com.bothbubbles.util.GifProcessor
+import com.radzivon.bartoshyk.avif.coder.HeifCoder
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -23,7 +25,8 @@ class AttachmentRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     private val attachmentDao: AttachmentDao,
     private val api: BothBubblesApi,
-    private val okHttpClient: OkHttpClient
+    private val okHttpClient: OkHttpClient,
+    private val thumbnailManager: ThumbnailManager
 ) {
     companion object {
         private const val TAG = "AttachmentRepository"
@@ -138,8 +141,48 @@ class AttachmentRepository @Inject constructor(
                 outputFile
             }
 
-            // Update database with file path
+            // Fix GIFs with zero-delay frames (causes them to play too fast)
+            if (attachment.mimeType?.startsWith("image/gif") == true && finalFile.exists()) {
+                try {
+                    val originalBytes = finalFile.readBytes()
+                    val fixedBytes = GifProcessor.fixSpeedyGif(originalBytes)
+                    if (fixedBytes !== originalBytes) {
+                        finalFile.writeBytes(fixedBytes)
+                        Log.d(TAG, "Applied GIF speed fix to ${attachment.guid}")
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to apply GIF speed fix", e)
+                }
+            }
+
+            // Generate thumbnail for images and videos (skip GIFs - they're already small)
+            var thumbnailPath: String? = null
+            if (finalFile.exists() && !attachment.isSticker) {
+                thumbnailPath = when {
+                    attachment.isImage && attachment.mimeType != "image/gif" -> {
+                        thumbnailManager.generateImageThumbnail(
+                            sourcePath = finalFile.absolutePath,
+                            attachmentGuid = attachmentGuid
+                        )
+                    }
+                    attachment.isVideo -> {
+                        thumbnailManager.generateVideoThumbnail(
+                            sourcePath = finalFile.absolutePath,
+                            attachmentGuid = attachmentGuid
+                        )
+                    }
+                    else -> null
+                }
+                if (thumbnailPath != null) {
+                    Log.d(TAG, "Generated thumbnail for $attachmentGuid at $thumbnailPath")
+                }
+            }
+
+            // Update database with file path and thumbnail
             attachmentDao.updateLocalPath(attachmentGuid, finalFile.absolutePath)
+            if (thumbnailPath != null) {
+                attachmentDao.updateThumbnailPath(attachmentGuid, thumbnailPath)
+            }
 
             finalFile
         }

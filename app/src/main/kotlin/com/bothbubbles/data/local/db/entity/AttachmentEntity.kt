@@ -73,6 +73,9 @@ data class AttachmentEntity(
     @ColumnInfo(name = "blurhash")
     val blurhash: String? = null,
 
+    @ColumnInfo(name = "thumbnail_path")
+    val thumbnailPath: String? = null,
+
     // Metadata stored as JSON
     @ColumnInfo(name = "metadata")
     val metadata: String? = null

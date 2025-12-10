@@ -20,7 +20,9 @@ sealed interface Screen {
     data class Chat(
         val chatGuid: String,
         // Comma-separated list of all merged chat GUIDs (for merged iMessage+SMS conversations)
-        val mergedGuids: String? = null
+        val mergedGuids: String? = null,
+        // Target message GUID to scroll to and highlight (from notification deep-link)
+        val targetMessageGuid: String? = null
     ) : Screen
 
     @Serializable

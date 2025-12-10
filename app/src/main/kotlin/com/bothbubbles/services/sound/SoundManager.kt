@@ -16,15 +16,26 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
+ * Available sound themes for message sounds.
+ */
+enum class SoundTheme(val displayName: String) {
+    DEFAULT("Default"),
+    HIGH("High"),
+    POP("Pop")
+}
+
+/**
  * Manages playback of send/receive message sounds.
  *
  * Features:
+ * - Multiple sound themes (Default, High, Pop)
  * - Respects DND (Do Not Disturb) and silent/vibrate modes
  * - Uses media volume stream for playback
  * - User can disable sounds via settings
@@ -52,9 +63,15 @@ class SoundManager @Inject constructor(
     }
 
     private var soundPool: SoundPool? = null
-    private var sendSoundId: Int = 0
-    private var receiveSoundId: Int = 0
     private var isLoaded = false
+
+    // Sound IDs for each theme
+    private var defaultSendId: Int = 0
+    private var defaultReceiveId: Int = 0
+    private var highSendId: Int = 0
+    private var highReceiveId: Int = 0
+    private var popSendId: Int = 0
+    private var popReceiveId: Int = 0
 
     init {
         initializeSoundPool()
@@ -79,9 +96,36 @@ class SoundManager @Inject constructor(
                 }
             }
 
-        // Load sounds
-        sendSoundId = soundPool?.load(context, R.raw.sound_send, 1) ?: 0
-        receiveSoundId = soundPool?.load(context, R.raw.sound_receive, 1) ?: 0
+        // Load all sound themes
+        soundPool?.let { pool ->
+            // Default theme
+            defaultSendId = pool.load(context, R.raw.sound_send, 1)
+            defaultReceiveId = pool.load(context, R.raw.sound_receive, 1)
+            // High theme
+            highSendId = pool.load(context, R.raw.sound_high_send, 1)
+            highReceiveId = pool.load(context, R.raw.sound_high_receive, 1)
+            // Pop theme
+            popSendId = pool.load(context, R.raw.sound_pop_send, 1)
+            popReceiveId = pool.load(context, R.raw.sound_pop_receive, 1)
+        }
+    }
+
+    /**
+     * Get the send sound ID for the given theme.
+     */
+    private fun getSendSoundId(theme: SoundTheme): Int = when (theme) {
+        SoundTheme.DEFAULT -> defaultSendId
+        SoundTheme.HIGH -> highSendId
+        SoundTheme.POP -> popSendId
+    }
+
+    /**
+     * Get the receive sound ID for the given theme.
+     */
+    private fun getReceiveSoundId(theme: SoundTheme): Int = when (theme) {
+        SoundTheme.DEFAULT -> defaultReceiveId
+        SoundTheme.HIGH -> highReceiveId
+        SoundTheme.POP -> popReceiveId
     }
 
     /**
@@ -97,7 +141,8 @@ class SoundManager @Inject constructor(
                 return@launch
             }
             if (settingsDataStore.messageSoundsEnabled.first()) {
-                playSound(sendSoundId)
+                val theme = settingsDataStore.soundTheme.first()
+                playSound(getSendSoundId(theme))
             }
         }
     }
@@ -122,8 +167,23 @@ class SoundManager @Inject constructor(
                 return@launch
             }
             if (settingsDataStore.messageSoundsEnabled.first()) {
-                playSound(receiveSoundId)
+                val theme = settingsDataStore.soundTheme.first()
+                playSound(getReceiveSoundId(theme))
             }
+        }
+    }
+
+    /**
+     * Preview both sounds for a theme (receive then send).
+     * Used when user selects a new sound theme in settings.
+     */
+    fun previewSounds(theme: SoundTheme) {
+        scope.launch {
+            // Play receive sound first
+            playSoundDirect(getReceiveSoundId(theme))
+            // Wait a moment, then play send sound
+            delay(600)
+            playSoundDirect(getSendSoundId(theme))
         }
     }
 
@@ -138,10 +198,23 @@ class SoundManager @Inject constructor(
             return
         }
 
+        playSoundDirect(soundId)
+    }
+
+    /**
+     * Play sound directly without checking DND/ringer mode.
+     * Used for preview functionality.
+     */
+    private fun playSoundDirect(soundId: Int) {
+        if (!isLoaded || soundId == 0) {
+            Log.d(TAG, "Sound not loaded yet")
+            return
+        }
+
         // Get current media volume as a ratio (0.0 to 1.0)
         val maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
         val currentVolume = audioManager.getStreamVolume(AudioManager.STREAM_MUSIC)
-        val volumeRatio = if (maxVolume > 0) currentVolume.toFloat() / maxVolume else 0f
+        val volumeRatio = if (maxVolume > 0) currentVolume.toFloat() / maxVolume else 0.5f
 
         soundPool?.play(
             soundId,

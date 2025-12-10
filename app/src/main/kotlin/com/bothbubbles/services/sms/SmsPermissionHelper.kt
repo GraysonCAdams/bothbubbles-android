@@ -105,6 +105,14 @@ class SmsPermissionHelper @Inject constructor(
      * Check if this app is the default SMS app
      */
     fun isDefaultSmsApp(): Boolean {
+        // On Android 10+, use RoleManager for more reliable check
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = context.getSystemService(Context.ROLE_SERVICE) as? RoleManager
+            if (roleManager?.isRoleHeld(RoleManager.ROLE_SMS) == true) {
+                return true
+            }
+        }
+        // Fallback to Telephony check (also works on older versions)
         val defaultPackage = Telephony.Sms.getDefaultSmsPackage(context)
         return defaultPackage == context.packageName
     }

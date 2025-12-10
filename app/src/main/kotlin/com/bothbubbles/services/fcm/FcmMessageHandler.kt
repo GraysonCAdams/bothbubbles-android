@@ -153,7 +153,16 @@ class FcmMessageHandler @Inject constructor(
         // Resolve sender name and avatar - try contact lookup first
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, data["senderName"])
 
-        val chatTitle = chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: senderName ?: ""
+        // For 1:1 chats, use sender's contact name as title; for groups, use group name
+        val isGroup = chat?.isGroup ?: false
+        val chatTitle = if (isGroup) {
+            chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+        } else {
+            senderName
+                ?: chat?.displayName
+                ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                ?: ""
+        }
 
         // Check for invisible ink effect
         val expressiveSendStyleId = data["expressiveSendStyleId"]
@@ -166,11 +175,17 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // For group chats, extract first name for cleaner notification display
-        val isGroup = chat?.isGroup ?: false
         val displaySenderName = if (isGroup && senderName != null) {
             extractFirstName(senderName)
         } else {
             senderName
+        }
+
+        // For group chats, fetch participant names for the group avatar collage
+        val participantNames = if (isGroup) {
+            chatDao.getParticipantsForChat(chatGuid).map { it.rawDisplayName }
+        } else {
+            emptyList()
         }
 
         // Show notification
@@ -182,7 +197,8 @@ class FcmMessageHandler @Inject constructor(
             senderName = displaySenderName,
             senderAddress = senderAddress,
             isGroup = isGroup,
-            avatarUri = senderAvatarUri
+            avatarUri = senderAvatarUri,
+            participantNames = participantNames
         )
 
         // Trigger socket reconnect to sync full data

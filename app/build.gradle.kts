@@ -114,6 +114,9 @@ dependencies {
     // HEIC/AVIF decoding with alpha support
     implementation(libs.avif.coder)
 
+    // Blurhash placeholder decoding
+    implementation(libs.blurhash)
+
     // CameraX
     implementation(libs.camerax.core)
     implementation(libs.camerax.camera2)

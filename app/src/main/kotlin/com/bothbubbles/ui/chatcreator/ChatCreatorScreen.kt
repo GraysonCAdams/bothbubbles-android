@@ -111,9 +111,13 @@ fun ChatCreatorScreen(
                 },
                 actions = {
                     // Show Continue button when recipients are selected
+                    android.util.Log.d("ChatCreator", "selectedRecipients: ${uiState.selectedRecipients.size}, isLoading: ${uiState.isLoading}")
                     if (uiState.selectedRecipients.isNotEmpty()) {
                         TextButton(
-                            onClick = { viewModel.onContinue() },
+                            onClick = {
+                                android.util.Log.d("ChatCreator", "Continue button clicked!")
+                                viewModel.onContinue()
+                            },
                             enabled = !uiState.isLoading
                         ) {
                             Text("Continue")

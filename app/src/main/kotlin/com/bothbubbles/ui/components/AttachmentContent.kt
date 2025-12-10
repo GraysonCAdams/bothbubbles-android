@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -43,6 +44,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.viewinterop.AndroidView
@@ -56,6 +58,8 @@ import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
+import coil.size.Precision
+import com.bothbubbles.util.rememberBlurhashBitmap
 
 /**
  * Renders an attachment within a message bubble.
@@ -156,6 +160,12 @@ private fun AttachmentPlaceholder(
 
     val isMedia = attachment.isImage || attachment.isVideo
 
+    // Decode blurhash for placeholder preview
+    val blurhashBitmap = rememberBlurhashBitmap(
+        blurhash = attachment.blurhash,
+        aspectRatio = aspectRatio
+    )
+
     if (isMedia) {
         // Image/Video placeholder with blurhash background
         Box(
@@ -166,14 +176,27 @@ private fun AttachmentPlaceholder(
                 .clickable(enabled = !isDownloading, onClick = onDownloadClick),
             contentAlignment = Alignment.Center
         ) {
-            // TODO: Decode and display blurhash when available
-            // For now, just show a placeholder background
+            // Blurhash preview background (or fallback to solid color)
             Box(
                 modifier = Modifier
                     .widthIn(max = 250.dp)
                     .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-            )
+            ) {
+                if (blurhashBitmap != null) {
+                    Image(
+                        bitmap = blurhashBitmap,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = ContentScale.Crop
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                    )
+                }
+            }
 
             // Download button or progress overlay with crossfade animation
             Surface(
@@ -220,24 +243,6 @@ private fun AttachmentPlaceholder(
                             )
                         }
                     }
-                }
-            }
-
-            // File size badge
-            if (attachment.friendlySize.isNotEmpty()) {
-                Surface(
-                    shape = RoundedCornerShape(4.dp),
-                    color = Color.Black.copy(alpha = 0.6f),
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                ) {
-                    Text(
-                        text = attachment.friendlySize,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                    )
                 }
             }
 
@@ -348,18 +353,6 @@ private fun AttachmentPlaceholder(
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                            if (attachment.friendlySize.isNotEmpty()) {
-                                Text(
-                                    text = "•",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Text(
-                                    text = attachment.friendlySize,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
                         }
                     }
                 }
@@ -387,7 +380,8 @@ private fun ImageAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    val imageUrl = attachment.localPath ?: attachment.webUrl
+    // Use thumbnail for faster loading in message list, fall back to full image
+    val imageUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -398,6 +392,11 @@ private fun ImageAttachment(
 
     // For transparent images, don't clip corners or add background
     val isTransparent = attachment.mayHaveTransparency
+
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
 
     Box(
         modifier = modifier
@@ -411,6 +410,8 @@ private fun ImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
                 modifier = Modifier
@@ -479,21 +480,12 @@ private fun ImageAttachment(
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Outlined.BrokenImage,
-                            contentDescription = "Failed to load",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(32.dp)
-                        )
-                        if (attachment.friendlySize.isNotEmpty()) {
-                            Text(
-                                text = attachment.friendlySize,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
         }
@@ -525,6 +517,11 @@ private fun GifAttachment(
     // GIFs can have transparency - don't clip corners or add background
     val isTransparent = attachment.mayHaveTransparency
 
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
@@ -537,6 +534,8 @@ private fun GifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
                 modifier = Modifier
@@ -617,21 +616,12 @@ private fun GifAttachment(
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Outlined.BrokenImage,
-                            contentDescription = "Failed to load",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(32.dp)
-                        )
-                        if (attachment.friendlySize.isNotEmpty()) {
-                            Text(
-                                text = attachment.friendlySize,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
         }
@@ -830,23 +820,6 @@ private fun InlineVideoAttachment(
             }
         }
 
-        // File size badge (bottom-right)
-        if (attachment.friendlySize.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = attachment.friendlySize,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
-        }
     }
 }
 
@@ -862,8 +835,20 @@ private fun VideoThumbnailAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    // For videos, use webUrl for thumbnail (server generates thumbnails)
-    val thumbnailUrl = attachment.localPath ?: attachment.webUrl
+    // For videos, prefer local thumbnail, then webUrl (server generates thumbnails)
+    val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+
+    // Calculate aspect ratio
+    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
+        attachment.width.toFloat() / attachment.height.toFloat()
+    } else {
+        16f / 9f // Default video aspect ratio
+    }
+
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
 
     Box(
         modifier = modifier
@@ -873,18 +858,13 @@ private fun VideoThumbnailAttachment(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        // Calculate aspect ratio
-        val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
-            attachment.width.toFloat() / attachment.height.toFloat()
-        } else {
-            16f / 9f // Default video aspect ratio
-        }
-
         if (thumbnailUrl != null) {
             AsyncImage(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",
                 modifier = Modifier
@@ -932,24 +912,6 @@ private fun VideoThumbnailAttachment(
                 }
             }
         }
-
-        // File size badge
-        if (attachment.friendlySize.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = attachment.friendlySize,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
-        }
     }
 }
 
@@ -993,21 +955,13 @@ private fun AudioAttachment(
             }
 
             // Audio info
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = attachment.transferName ?: "Audio",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
-                )
-                if (attachment.friendlySize.isNotEmpty()) {
-                    Text(
-                        text = attachment.friendlySize,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            }
+            Text(
+                text = attachment.transferName ?: "Audio",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                modifier = Modifier.weight(1f)
+            )
 
             // Audio icon
             Icon(
@@ -1149,18 +1103,6 @@ private fun FileAttachment(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                    if (attachment.friendlySize.isNotEmpty()) {
-                        Text(
-                            text = "•",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = attachment.friendlySize,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
                 }
             }
 
@@ -1284,6 +1226,12 @@ private fun BorderlessAttachmentPlaceholder(
         1f
     }
 
+    // Decode blurhash for placeholder preview
+    val blurhashBitmap = rememberBlurhashBitmap(
+        blurhash = attachment.blurhash,
+        aspectRatio = aspectRatio
+    )
+
     Box(
         modifier = modifier
             .widthIn(max = maxWidth)
@@ -1292,12 +1240,21 @@ private fun BorderlessAttachmentPlaceholder(
             .clickable(enabled = !isDownloading, onClick = onDownloadClick),
         contentAlignment = Alignment.Center
     ) {
-        // Placeholder background with aspect ratio
+        // Blurhash preview background (or fallback to solid color)
         Box(
             modifier = Modifier
                 .widthIn(max = maxWidth)
                 .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-        )
+        ) {
+            if (blurhashBitmap != null) {
+                Image(
+                    bitmap = blurhashBitmap,
+                    contentDescription = null,
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+            }
+        }
 
         // Download button or progress overlay
         Surface(
@@ -1333,24 +1290,6 @@ private fun BorderlessAttachmentPlaceholder(
                         modifier = Modifier.size(28.dp)
                     )
                 }
-            }
-        }
-
-        // File size badge
-        if (attachment.friendlySize.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = attachment.friendlySize,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
             }
         }
 
@@ -1404,10 +1343,11 @@ private fun BorderlessImageAttachment(
 
     // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
     // Force download first to trigger HEIC→PNG conversion
+    // For non-stickers, use thumbnail when available for faster loading
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.localPath ?: attachment.webUrl
+        attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
     }
 
     // Calculate aspect ratio for proper sizing
@@ -1430,9 +1370,15 @@ private fun BorderlessImageAttachment(
         0.9f + ((messageGuid.hashCode() and 0xFF) / 255f) * 0.2f
     } else 1f
 
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val effectiveMaxWidth = maxWidth * sizeScale
+    val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+
     Box(
         modifier = modifier
-            .widthIn(max = maxWidth * sizeScale)
+            .widthIn(max = effectiveMaxWidth)
             .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
             .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
             .then(
@@ -1448,6 +1394,8 @@ private fun BorderlessImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
                 modifier = Modifier.fillMaxSize(),
@@ -1502,21 +1450,12 @@ private fun BorderlessImageAttachment(
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Outlined.BrokenImage,
-                            contentDescription = "Failed to load",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(32.dp)
-                        )
-                        if (attachment.friendlySize.isNotEmpty()) {
-                            Text(
-                                text = attachment.friendlySize,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
         }
@@ -1541,10 +1480,11 @@ private fun BorderlessGifAttachment(
 
     // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
     // Force download first to trigger HEIC→PNG conversion
+    // For non-stickers, use thumbnail when available for faster loading
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.localPath ?: attachment.webUrl
+        attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
     }
 
     // Calculate aspect ratio for proper sizing
@@ -1569,6 +1509,11 @@ private fun BorderlessGifAttachment(
 
     val effectiveMaxWidth = maxWidth * sizeScale
 
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+
     Box(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
@@ -1586,6 +1531,8 @@ private fun BorderlessGifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
                 modifier = Modifier
@@ -1662,21 +1609,12 @@ private fun BorderlessGifAttachment(
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(
-                            Icons.Outlined.BrokenImage,
-                            contentDescription = "Failed to load",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            modifier = Modifier.size(32.dp)
-                        )
-                        if (attachment.friendlySize.isNotEmpty()) {
-                            Text(
-                                text = attachment.friendlySize,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
-                            )
-                        }
-                    }
+                    Icon(
+                        Icons.Outlined.BrokenImage,
+                        contentDescription = "Failed to load",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.size(32.dp)
+                    )
                 }
             }
         }
@@ -1876,24 +1814,6 @@ private fun BorderlessInlineVideoAttachment(
                 )
             }
         }
-
-        // File size badge (bottom-right)
-        if (attachment.friendlySize.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = attachment.friendlySize,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
-        }
     }
 }
 
@@ -1910,7 +1830,8 @@ private fun BorderlessVideoThumbnailAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    val thumbnailUrl = attachment.localPath ?: attachment.webUrl
+    // Prefer local thumbnail for faster loading
+    val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
 
     // Calculate aspect ratio
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -1918,6 +1839,11 @@ private fun BorderlessVideoThumbnailAttachment(
     } else {
         16f / 9f // Default video aspect ratio
     }
+
+    // Calculate target size in pixels for memory-efficient loading
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { maxWidth.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
 
     Box(
         modifier = modifier
@@ -1932,6 +1858,8 @@ private fun BorderlessVideoThumbnailAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",
                 modifier = Modifier
@@ -1985,24 +1913,6 @@ private fun BorderlessVideoThumbnailAttachment(
                         modifier = Modifier.size(32.dp)
                     )
                 }
-            }
-        }
-
-        // File size badge
-        if (attachment.friendlySize.isNotEmpty()) {
-            Surface(
-                shape = RoundedCornerShape(4.dp),
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(8.dp)
-            ) {
-                Text(
-                    text = attachment.friendlySize,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = Color.White,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                )
             }
         }
     }

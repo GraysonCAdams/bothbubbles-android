@@ -11,14 +11,19 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.ContactsContentObserver
+import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.socket.SocketConnectionManager
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +59,12 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     @Inject
     lateinit var contactsContentObserver: ContactsContentObserver
 
+    @Inject
+    lateinit var shortcutService: ShortcutService
+
+    @Inject
+    lateinit var pendingMessageRepository: PendingMessageRepository
+
     private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -71,32 +82,62 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                     add(GifDecoder.Factory())
                 }
             }
-            .crossfade(true)
+            // Memory cache: ~25% of available memory for image caching
+            .memoryCache {
+                MemoryCache.Builder(this)
+                    .maxSizePercent(0.25)
+                    .build()
+            }
+            // Disk cache: 250MB dedicated directory for attachment images
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(cacheDir.resolve("image_cache"))
+                    .maxSizeBytes(250L * 1024 * 1024) // 250MB
+                    .build()
+            }
+            .crossfade(150) // Faster crossfade for snappier feel
+            .respectCacheHeaders(false) // Don't respect server headers for local files
             .build()
     }
 
     override fun onCreate() {
+        val startupId = PerformanceProfiler.start("App.onCreate")
         super.onCreate()
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
 
         // Initialize app lifecycle tracker (must be before other managers that may depend on it)
+        val lifecycleId = PerformanceProfiler.start("App.lifecycleTracker")
         appLifecycleTracker.initialize()
+        PerformanceProfiler.end(lifecycleId)
 
         // Initialize developer mode from settings
         initializeDeveloperMode()
 
         // Initialize connection mode manager (handles Socket <-> FCM auto-switching)
+        val connectionModeId = PerformanceProfiler.start("App.connectionModeManager")
         connectionModeManager.initialize()
+        PerformanceProfiler.end(connectionModeId)
 
         // Keep socket connection manager for legacy/fallback (will be phased out)
+        val socketId = PerformanceProfiler.start("App.socketManager")
         socketConnectionManager.initialize()
+        PerformanceProfiler.end(socketId)
 
         // Initialize SMS content observer for external SMS detection (Android Auto, etc.)
         initializeSmsObserver()
 
         // Initialize contacts content observer for cache invalidation
         initializeContactsObserver()
+
+        // Initialize sharing shortcuts for share sheet integration
+        initializeShortcutService()
+
+        // Re-enqueue any pending messages from previous session
+        initializePendingMessageQueue()
+
+        PerformanceProfiler.end(startupId)
+        Log.d("PerfProfiler", "App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
     }
 
     /**
@@ -194,6 +235,49 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 Log.d(TAG, "Contacts content observer started")
             } catch (e: Exception) {
                 Log.w(TAG, "Error initializing contacts observer", e)
+            }
+        }
+    }
+
+    /**
+     * Start shortcut service if setup is complete.
+     * This publishes recent conversations as share targets in the Android share sheet.
+     */
+    private fun initializeShortcutService() {
+        applicationScope.launch {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Start observing conversations for share targets
+                shortcutService.startObserving()
+                Log.d(TAG, "Shortcut service started")
+            } catch (e: Exception) {
+                Log.w(TAG, "Error initializing shortcut service", e)
+            }
+        }
+    }
+
+    /**
+     * Re-enqueue pending messages from previous session.
+     * This ensures messages survive app kills and device reboots.
+     */
+    private fun initializePendingMessageQueue() {
+        applicationScope.launch {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Re-enqueue any pending messages and clean up sent ones
+                pendingMessageRepository.reEnqueuePendingMessages()
+                pendingMessageRepository.cleanupSentMessages()
+
+                val unsentCount = pendingMessageRepository.getUnsentCount()
+                if (unsentCount > 0) {
+                    Log.i(TAG, "Found $unsentCount unsent messages in queue")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Error initializing pending message queue", e)
             }
         }
     }
