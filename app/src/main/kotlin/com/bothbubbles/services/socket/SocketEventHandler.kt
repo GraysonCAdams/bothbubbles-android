@@ -28,6 +28,8 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -88,7 +90,23 @@ class SocketEventHandler @Inject constructor(
         private const val TAG = "SocketEventHandler"
         // Cached regex for whitespace splitting (avoids recompilation on each call)
         private val WHITESPACE_REGEX = Regex("\\s+")
+        // Contact lookup cache TTL (5 minutes)
+        private const val CONTACT_CACHE_TTL_MS = 5 * 60 * 1000L
     }
+
+    /**
+     * Cached contact lookup result to avoid repeated Android Contacts queries
+     * during message bursts (e.g., after reconnect).
+     */
+    private data class CachedContactInfo(
+        val displayName: String?,
+        val avatarUri: String?,
+        val timestamp: Long
+    )
+
+    // In-memory contact lookup cache with mutex for thread-safe access
+    private val contactCacheMutex = Mutex()
+    private val contactCache = mutableMapOf<String, CachedContactInfo>()
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var isListening = false
@@ -323,6 +341,41 @@ class SocketEventHandler @Inject constructor(
     }
 
     /**
+     * Look up contact info from Android Contacts with in-memory caching.
+     * Uses mutex-protected cache to coalesce duplicate lookups during message bursts.
+     * Returns Pair of (displayName, avatarUri).
+     */
+    private suspend fun lookupContactWithCache(address: String): Pair<String?, String?> {
+        val now = System.currentTimeMillis()
+
+        // Check in-memory cache first (mutex-protected)
+        contactCacheMutex.withLock {
+            contactCache[address]?.let { cached ->
+                if (now - cached.timestamp < CONTACT_CACHE_TTL_MS) {
+                    return cached.displayName to cached.avatarUri
+                }
+                // Expired - remove stale entry
+                contactCache.remove(address)
+            }
+        }
+
+        // Not in cache - do the Android Contacts lookup
+        val contactName = androidContactsService.getContactDisplayName(address)
+        val photoUri = if (contactName != null) {
+            androidContactsService.getContactPhotoUri(address)
+        } else {
+            null
+        }
+
+        // Store result in cache (even null results to avoid repeated failed lookups)
+        contactCacheMutex.withLock {
+            contactCache[address] = CachedContactInfo(contactName, photoUri, now)
+        }
+
+        return contactName to photoUri
+    }
+
+    /**
      * Resolve the sender's display name and avatar from the message.
      * Priority: device contact name > local cached contact name > inferred name > formatted address > raw address
      * Returns Pair of (name, avatarUri)
@@ -338,11 +391,10 @@ class SocketEventHandler @Inject constructor(
                 return localHandle.cachedDisplayName to localHandle.cachedAvatarPath
             }
 
-            // Cached name not available - do a live contact lookup
-            val contactName = androidContactsService.getContactDisplayName(address)
+            // Use in-memory cached lookup to avoid repeated Android Contacts queries during bursts
+            val (contactName, photoUri) = lookupContactWithCache(address)
             if (contactName != null) {
-                val photoUri = androidContactsService.getContactPhotoUri(address)
-                // Cache the contact info for future lookups
+                // Cache the contact info in database for future lookups
                 localHandle?.let { handle ->
                     handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
                 }
@@ -367,10 +419,9 @@ class SocketEventHandler @Inject constructor(
                     return handle.cachedDisplayName to handle.cachedAvatarPath
                 }
 
-                // Do a live contact lookup
-                val contactName = androidContactsService.getContactDisplayName(handle.address)
+                // Use in-memory cached lookup
+                val (contactName, photoUri) = lookupContactWithCache(handle.address)
                 if (contactName != null) {
-                    val photoUri = androidContactsService.getContactPhotoUri(handle.address)
                     handleDao.updateCachedContactInfo(handle.id, contactName, photoUri)
                     return contactName to photoUri
                 }

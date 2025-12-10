@@ -57,14 +57,17 @@ import com.bothbubbles.ui.components.ReplyPreviewData
 import com.bothbubbles.ui.components.SuggestionItem
 import com.bothbubbles.ui.components.Tapback
 import com.bothbubbles.ui.components.ThreadChain
+import com.bothbubbles.ui.components.analyzeEmojis
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.TimeUnit
@@ -125,7 +128,8 @@ class ChatViewModel @Inject constructor(
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
     // Dynamic message limit for pagination - increases as user scrolls up to load older messages
-    private val _messageLimit = MutableStateFlow(50)
+    // Start with 75 messages (~5-7 screens) to reduce early pagination triggers
+    private val _messageLimit = MutableStateFlow(75)
 
     // Trigger to refresh messages (incremented when attachments are downloaded)
     private val _attachmentRefreshTrigger = MutableStateFlow(0)
@@ -173,8 +177,17 @@ class ChatViewModel @Inject constructor(
     // Scroll position tracking for state restoration
     private var lastScrollPosition: Int = 0
     private var lastScrollOffset: Int = 0
-    private var scrollSaveJob: Job? = null
+    private var lastScrollSaveTime: Long = 0L
     private val scrollSaveDebounceMs = 1000L // Debounce scroll saves
+
+    // Throttle preloader to avoid calling on every scroll frame
+    private var lastPreloadIndex: Int = -1
+    private var lastPreloadTime: Long = 0L
+    private val preloadThrottleMs = 150L // Only preload every 150ms at most
+
+    // Cached attachment list for preloading - avoids flatMap on every scroll frame
+    private var cachedAttachments: List<AttachmentUiModel> = emptyList()
+    private var cachedAttachmentsMessageCount: Int = 0
 
     // Effect settings flows
     val autoPlayEffects = settingsDataStore.autoPlayEffects
@@ -927,20 +940,25 @@ class ChatViewModel @Inject constructor(
                             msg.text?.let { parseSmsReaction(it) } != null
                         }
 
-                    // PERF: Build maps for O(1) message lookup instead of O(n) linear search
-                    // Map exact text -> guid for exact matches
+                    // PERF: Build map for O(1) exact match lookup
+                    // Prefix matching uses regionMatches to avoid string allocations
                     val exactTextToGuid = mutableMapOf<String, String>()
-                    // Map text prefix -> guid for truncated quote matching (first 50 chars)
-                    val prefixToGuid = mutableMapOf<String, String>()
                     regularMessages.forEach { msg ->
                         msg.text?.let { text ->
                             exactTextToGuid[text] = msg.guid
-                            if (text.length >= 10) {
-                                // Store multiple prefix lengths for better matching
-                                prefixToGuid[text.take(50)] = msg.guid
-                                prefixToGuid[text.take(30)] = msg.guid
-                            }
                         }
+                    }
+
+                    // Helper to find message by prefix match without allocating substrings
+                    fun findMessageByPrefix(searchText: String, prefixLen: Int): String? {
+                        if (searchText.length < 10) return null
+                        val compareLen = minOf(prefixLen, searchText.length)
+                        return regularMessages.find { msg ->
+                            msg.text?.let { text ->
+                                text.length >= compareLen &&
+                                text.regionMatches(0, searchText, 0, compareLen)
+                            } ?: false
+                        }?.guid
                     }
 
                     // Convert SMS reaction messages to synthetic reaction entries
@@ -949,11 +967,11 @@ class ChatViewModel @Inject constructor(
                         val (tapback, quotedText, isRemoval) = parseSmsReaction(msg.text ?: "") ?: return@mapNotNull null
                         // Skip removal messages - they just get filtered from regular messages
                         if (isRemoval) return@mapNotNull null
-                        // PERF: O(1) HashMap lookup instead of O(n) linear search
+                        // Try exact match first (O(1)), then prefix match (O(n) but allocation-free)
                         val searchText = if (quotedText.endsWith("...")) quotedText.dropLast(3) else quotedText
                         val targetGuid = exactTextToGuid[quotedText]
-                            ?: prefixToGuid[searchText.take(50)]
-                            ?: prefixToGuid[searchText.take(30)]
+                            ?: findMessageByPrefix(searchText, 50)
+                            ?: findMessageByPrefix(searchText, 30)
                         if (targetGuid != null) {
                             // Create a synthetic reaction entry
                             SyntheticReaction(
@@ -1225,31 +1243,34 @@ class ChatViewModel @Inject constructor(
      * This mirrors the original Flutter client's pattern of manual list management.
      */
     private suspend fun directlyAddMessageToUi(messageDto: MessageDto, eventChatGuid: String) {
-        // Convert DTO to Entity
-        val messageEntity = messageDto.toMessageEntity(eventChatGuid)
+        // Do heavy work on background thread to avoid blocking main thread
+        val messageModel = withContext(Dispatchers.Default) {
+            // Convert DTO to Entity
+            val messageEntity = messageDto.toMessageEntity(eventChatGuid)
 
-        // Get participant info for sender name and avatar resolution
-        val participants = chatRepository.observeParticipantsForChats(mergedChatGuids).first()
-        val handleIdToName = participants.associate { it.id to it.displayName }
-        val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
-        val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+            // Get participant info for sender name and avatar resolution
+            val participants = chatRepository.observeParticipantsForChats(mergedChatGuids).first()
+            val handleIdToName = participants.associate { it.id to it.displayName }
+            val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
+            val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
-        // Load attachments for this message
-        val attachments = if (messageEntity.hasAttachments) {
-            attachmentDao.getAttachmentsForMessage(messageEntity.guid)
-        } else {
-            emptyList()
+            // Load attachments for this message
+            val attachments = if (messageEntity.hasAttachments) {
+                attachmentDao.getAttachmentsForMessage(messageEntity.guid)
+            } else {
+                emptyList()
+            }
+
+            // Convert to UI model
+            messageEntity.toUiModel(
+                reactions = emptyList(), // New messages typically don't have reactions yet
+                smsReactions = emptyList(),
+                attachments = attachments,
+                handleIdToName = handleIdToName,
+                addressToName = addressToName,
+                addressToAvatarPath = addressToAvatarPath
+            )
         }
-
-        // Convert to UI model
-        val messageModel = messageEntity.toUiModel(
-            reactions = emptyList(), // New messages typically don't have reactions yet
-            smsReactions = emptyList(),
-            attachments = attachments,
-            handleIdToName = handleIdToName,
-            addressToName = addressToName,
-            addressToAvatarPath = addressToAvatarPath
-        )
 
         // Add to UI state at the correct position (beginning for DESC sort)
         // Duplicate check MUST be inside update lambda to avoid race with Room Flow
@@ -1577,7 +1598,6 @@ class ChatViewModel @Inject constructor(
         }
         // Save draft immediately when leaving (cancel debounce and save now)
         draftSaveJob?.cancel()
-        scrollSaveJob?.cancel()
         viewModelScope.launch {
             chatRepository.updateDraftText(chatGuid, _draftText.value)
             // Save scroll position for state restoration
@@ -1591,29 +1611,67 @@ class ChatViewModel @Inject constructor(
     /**
      * Update scroll position for state restoration.
      * Called from ChatScreen when scroll position changes.
+     * IMPORTANT: This runs on every scroll frame - must be extremely lightweight!
      */
     fun updateScrollPosition(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int, visibleItemCount: Int = 10) {
         lastScrollPosition = firstVisibleItemIndex
         lastScrollOffset = firstVisibleItemScrollOffset
 
-        // Preload attachments for nearby messages
-        val messages = _uiState.value.messages
-        if (messages.isNotEmpty()) {
-            val attachments = messages.flatMap { it.attachments }
-            if (attachments.isNotEmpty()) {
-                val visibleEnd = (firstVisibleItemIndex + visibleItemCount).coerceAtMost(messages.size - 1)
-                attachmentPreloader.preloadNearby(
-                    attachments = attachments,
-                    visibleRange = firstVisibleItemIndex..visibleEnd
-                )
+        // Throttle preloader - only call if BOTH index changed AND enough time has passed
+        // Using AND (not OR) to minimize work during scroll
+        val now = System.currentTimeMillis()
+        val indexChanged = firstVisibleItemIndex != lastPreloadIndex
+        val timeElapsed = now - lastPreloadTime >= preloadThrottleMs
+
+        if (indexChanged && timeElapsed) {
+            lastPreloadIndex = firstVisibleItemIndex
+            lastPreloadTime = now
+
+            // Defer preload work to avoid any main thread blocking
+            val messages = _uiState.value.messages
+            if (messages.isNotEmpty()) {
+                // Update cached attachments only if message count changed
+                if (messages.size != cachedAttachmentsMessageCount) {
+                    cachedAttachments = messages.flatMap { it.attachments }
+                    cachedAttachmentsMessageCount = messages.size
+                }
+
+                if (cachedAttachments.isNotEmpty()) {
+                    val visibleEnd = (firstVisibleItemIndex + visibleItemCount).coerceAtMost(messages.size - 1)
+                    // Preload images for ~3 screens in each direction to prevent image pop-in
+                    attachmentPreloader.preloadNearby(
+                        attachments = cachedAttachments,
+                        visibleRange = firstVisibleItemIndex..visibleEnd,
+                        preloadCount = 15
+                    )
+
+                    // Boost download priority for attachments in extended visible range
+                    // This ensures attachments needing download from server get prioritized
+                    val extendedStart = (firstVisibleItemIndex - 15).coerceAtLeast(0)
+                    val extendedEnd = (visibleEnd + 15).coerceAtMost(messages.size - 1)
+                    for (i in extendedStart..extendedEnd) {
+                        messages.getOrNull(i)?.attachments?.forEach { attachment ->
+                            if (attachment.needsDownload) {
+                                attachmentDownloadQueue.enqueue(
+                                    attachmentGuid = attachment.guid,
+                                    chatGuid = chatGuid,
+                                    priority = AttachmentDownloadQueue.Priority.VISIBLE
+                                )
+                            }
+                        }
+                    }
+                }
             }
         }
 
-        // Debounced save to DataStore
-        scrollSaveJob?.cancel()
-        scrollSaveJob = viewModelScope.launch {
-            delay(scrollSaveDebounceMs)
-            settingsDataStore.setLastScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+        // Throttled save to DataStore - uses timestamp instead of Job cancel/recreate
+        // This avoids object allocation and scheduling overhead on every scroll frame
+        val saveTimeElapsed = now - lastScrollSaveTime >= scrollSaveDebounceMs
+        if (saveTimeElapsed) {
+            lastScrollSaveTime = now
+            viewModelScope.launch {
+                settingsDataStore.setLastScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+            }
         }
     }
 
@@ -1937,22 +1995,36 @@ class ChatViewModel @Inject constructor(
     }
 
     fun loadMoreMessages() {
-        if (_uiState.value.isLoadingMore || !_uiState.value.canLoadMore) return
+        Log.d("ChatScroll", "[VM] loadMoreMessages called: isLoadingMore=${_uiState.value.isLoadingMore}, canLoadMore=${_uiState.value.canLoadMore}")
+        if (_uiState.value.isLoadingMore || !_uiState.value.canLoadMore) {
+            Log.d("ChatScroll", "[VM] loadMoreMessages SKIPPED - already loading or no more to load")
+            return
+        }
 
-        val oldestMessage = _uiState.value.messages.lastOrNull() ?: return
+        val oldestMessage = _uiState.value.messages.lastOrNull()
+        if (oldestMessage == null) {
+            Log.d("ChatScroll", "[VM] loadMoreMessages SKIPPED - no messages in list")
+            return
+        }
+
+        Log.d("ChatScroll", "[VM] >>> STARTING loadMoreMessages: oldestDate=${oldestMessage.dateCreated}, currentMsgCount=${_uiState.value.messages.size}")
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
 
+            val startTime = System.currentTimeMillis()
             messageRepository.syncMessagesForChat(
                 chatGuid = chatGuid,
                 before = oldestMessage.dateCreated,
                 limit = 50
             ).fold(
                 onSuccess = { messages ->
+                    val elapsed = System.currentTimeMillis() - startTime
+                    Log.d("ChatScroll", "[VM] loadMoreMessages SUCCESS: fetched=${messages.size} messages in ${elapsed}ms")
                     // Increase the message limit to include newly fetched older messages
                     // This triggers flatMapLatest in loadMessages() to re-query with expanded limit
                     _messageLimit.value += messages.size
+                    Log.d("ChatScroll", "[VM] loadMoreMessages: new messageLimit=${_messageLimit.value}")
 
                     _uiState.update { state ->
                         state.copy(
@@ -1960,8 +2032,11 @@ class ChatViewModel @Inject constructor(
                             canLoadMore = messages.size == 50
                         )
                     }
+                    Log.d("ChatScroll", "[VM] loadMoreMessages COMPLETE: canLoadMore=${messages.size == 50}")
                 },
-                onFailure = {
+                onFailure = { error ->
+                    val elapsed = System.currentTimeMillis() - startTime
+                    Log.e("ChatScroll", "[VM] loadMoreMessages FAILED after ${elapsed}ms: ${error.message}")
                     _uiState.update { it.copy(isLoadingMore = false) }
                 }
             )
@@ -2249,7 +2324,9 @@ class ChatViewModel @Inject constructor(
             associatedMessageGuid = associatedMessageGuid,
             // Reply indicator fields
             threadOriginatorGuid = threadOriginatorGuid,
-            replyPreview = replyPreview
+            replyPreview = replyPreview,
+            // Pre-compute emoji analysis to avoid recalculating on every composition
+            emojiAnalysis = analyzeEmojis(text)
         )
     }
 

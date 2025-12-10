@@ -30,7 +30,8 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.input.pointer.util.VelocityTracker
@@ -51,7 +52,9 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -74,8 +77,9 @@ import androidx.compose.ui.unit.sp
 
 /**
  * Result of analyzing text for emoji-only content.
+ * Public so it can be pre-computed in ViewModel and cached in MessageUiModel.
  */
-private data class EmojiAnalysis(
+data class EmojiAnalysis(
     val isEmojiOnly: Boolean,
     val emojiCount: Int
 )
@@ -83,8 +87,9 @@ private data class EmojiAnalysis(
 /**
  * Analyzes text to determine if it contains only emojis and counts them.
  * Uses Unicode emoji ranges and variation selectors.
+ * Public so it can be called from ViewModel during message transformation.
  */
-private fun analyzeEmojis(text: String?): EmojiAnalysis {
+fun analyzeEmojis(text: String?): EmojiAnalysis {
     if (text.isNullOrBlank()) return EmojiAnalysis(false, 0)
 
     val trimmed = text.trim()
@@ -193,6 +198,15 @@ private enum class SwipeType {
 }
 
 /**
+ * Direction intent for gesture detection - determines if user is swiping or scrolling.
+ */
+private enum class GestureIntent {
+    UNDETERMINED,
+    HORIZONTAL_SWIPE,
+    VERTICAL_SCROLL
+}
+
+/**
  * Preview data for the message being replied to.
  * Shown as a quote box above reply messages.
  */
@@ -240,7 +254,9 @@ data class MessageUiModel(
     val associatedMessageGuid: String? = null,
     // Reply indicator fields
     val threadOriginatorGuid: String? = null,
-    val replyPreview: ReplyPreviewData? = null
+    val replyPreview: ReplyPreviewData? = null,
+    // Pre-computed emoji analysis to avoid recalculating on every composition
+    val emojiAnalysis: EmojiAnalysis? = null
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean
@@ -463,9 +479,9 @@ private fun SegmentedMessageBubble(
     var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
 
-    // Cumulative horizontal drag for dead zone detection (prevents accidental swipes while scrolling)
-    var cumulativeHorizontalDrag by remember { mutableFloatStateOf(0f) }
-    val deadZonePx = with(density) { 20.dp.toPx() }
+    // Direction detection thresholds
+    val detectionDistancePx = with(density) { 15.dp.toPx() }
+    val directionRatio = 2.0f  // Horizontal must be 2x vertical to trigger swipe (favors scrolling)
 
     // Measurement state for adaptive clearance during date reveal
     var containerWidthPx by remember { mutableIntStateOf(0) }
@@ -550,120 +566,136 @@ private fun SegmentedMessageBubble(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
-                .pointerInput(message.guid, canReply) {
-                    val velocityTracker = VelocityTracker()
+                .pointerInput(message.guid, canReply, gesturesEnabled) {
+                    if (!gesturesEnabled) return@pointerInput
 
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            velocityTracker.resetTracking()
-                            cumulativeHorizontalDrag = 0f
-                        },
-                        onDragEnd = {
-                            val velocity = velocityTracker.calculateVelocity().x
-                            coroutineScope.launch {
-                                when (activeSwipe) {
-                                    SwipeType.REPLY -> {
-                                        // Check if reply should trigger: past threshold OR momentum
-                                        val isReplyDirection = if (message.isFromMe) velocity < 0 else velocity > 0
-                                        val shouldTriggerReply =
-                                            replyDragOffset.value.absoluteValue >= replyThresholdPx ||
-                                            (velocity.absoluteValue > 1000f && isReplyDirection)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
 
-                                        if (shouldTriggerReply && canReply) {
-                                            onReply?.invoke(message.guid)
-                                        }
-                                        replyDragOffset.animateTo(
-                                            0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessLow
-                                            )
-                                        )
-                                    }
-                                    SwipeType.DATE_REVEAL -> {
-                                        dateRevealProgress.animateTo(
-                                            0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessLow
-                                            )
-                                        )
-                                    }
-                                    null -> {}
-                                }
-                                // Notify when reply swipe ends (to show overlaying stickers again)
-                                if (activeSwipe == SwipeType.REPLY) {
-                                    onSwipeStateChanged?.invoke(false)
-                                }
-                                activeSwipe = null
-                                hasTriggeredHaptic = false
-                            }
-                        },
-                        onDragCancel = {
-                            coroutineScope.launch {
-                                replyDragOffset.animateTo(0f)
-                                dateRevealProgress.animateTo(0f)
-                                // Notify when reply swipe ends (to show overlaying stickers again)
-                                if (activeSwipe == SwipeType.REPLY) {
-                                    onSwipeStateChanged?.invoke(false)
-                                }
-                                activeSwipe = null
-                                hasTriggeredHaptic = false
-                            }
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            cumulativeHorizontalDrag += dragAmount
+                        var cumulativeX = 0f
+                        var cumulativeY = 0f
+                        var gestureIntent = GestureIntent.UNDETERMINED
+                        var currentSwipe: SwipeType? = null
+                        hasTriggeredHaptic = false
 
-                            coroutineScope.launch {
-                                // Determine direction after cumulative drag exceeds dead zone (20dp)
-                                // This prevents accidental swipes while scrolling vertically
-                                // Placed stickers don't respond to any swipe gestures
-                                if (activeSwipe == null && cumulativeHorizontalDrag.absoluteValue > deadZonePx && gesturesEnabled) {
-                                    val isTowardCenter = if (message.isFromMe) cumulativeHorizontalDrag < 0 else cumulativeHorizontalDrag > 0
-                                    val newSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
-                                    activeSwipe = newSwipe
-                                    // Notify when reply swipe starts (to hide overlaying stickers)
-                                    if (newSwipe == SwipeType.REPLY) {
-                                        onSwipeStateChanged?.invoke(true)
-                                    }
-                                }
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
 
-                                when (activeSwipe) {
-                                    SwipeType.REPLY -> {
-                                        // Reply: move bubble, constrain to reply direction only
-                                        val newOffset = if (message.isFromMe) {
-                                            (replyDragOffset.value + dragAmount).coerceIn(-replyMaxPx, 0f)
-                                        } else {
-                                            (replyDragOffset.value + dragAmount).coerceIn(0f, replyMaxPx)
-                                        }
-                                        replyDragOffset.snapTo(newOffset)
-
-                                        // Haptic at threshold
-                                        if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
-                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            hasTriggeredHaptic = true
-                                        } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                if (!change.pressed) {
+                                    // Pointer released - handle action if horizontal swipe was active
+                                    if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE && currentSwipe != null) {
+                                        coroutineScope.launch {
+                                            when (currentSwipe) {
+                                                SwipeType.REPLY -> {
+                                                    val shouldTriggerReply = replyDragOffset.value.absoluteValue >= replyThresholdPx
+                                                    if (shouldTriggerReply && canReply) {
+                                                        onReply?.invoke(message.guid)
+                                                    }
+                                                    replyDragOffset.animateTo(
+                                                        0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessLow
+                                                        )
+                                                    )
+                                                    onSwipeStateChanged?.invoke(false)
+                                                }
+                                                SwipeType.DATE_REVEAL -> {
+                                                    dateRevealProgress.animateTo(
+                                                        0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessLow
+                                                        )
+                                                    )
+                                                }
+                                                null -> {}
+                                            }
+                                            activeSwipe = null
                                             hasTriggeredHaptic = false
                                         }
                                     }
-                                    SwipeType.DATE_REVEAL -> {
-                                        // Date reveal: NO bubble movement, just progress 0-1
-                                        val progressDelta = dragAmount / maxDragPx
-                                        val newProgress = if (message.isFromMe) {
-                                            // Sent: swipe right (positive) for date
-                                            (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
-                                        } else {
-                                            // Received: swipe left (negative) for date
-                                            (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
-                                        }
-                                        dateRevealProgress.snapTo(newProgress)
-                                    }
-                                    null -> {}
+                                    break
                                 }
+
+                                val dragDelta = change.positionChange()
+                                cumulativeX += dragDelta.x
+                                cumulativeY += dragDelta.y
+
+                                // Determine intent once we've moved enough
+                                if (gestureIntent == GestureIntent.UNDETERMINED) {
+                                    val totalDistance = kotlin.math.sqrt(cumulativeX * cumulativeX + cumulativeY * cumulativeY)
+                                    if (totalDistance >= detectionDistancePx) {
+                                        // Check if horizontal clearly dominates vertical (2x ratio favors scrolling)
+                                        gestureIntent = if (cumulativeX.absoluteValue > cumulativeY.absoluteValue * directionRatio) {
+                                            GestureIntent.HORIZONTAL_SWIPE
+                                        } else {
+                                            GestureIntent.VERTICAL_SCROLL
+                                        }
+
+                                        // If horizontal, determine swipe type
+                                        if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE) {
+                                            val isTowardCenter = if (message.isFromMe) cumulativeX < 0 else cumulativeX > 0
+                                            currentSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                            activeSwipe = currentSwipe
+                                            if (currentSwipe == SwipeType.REPLY) {
+                                                onSwipeStateChanged?.invoke(true)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Only handle swipe if we determined it's horizontal
+                                if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE) {
+                                    change.consume()
+                                    coroutineScope.launch {
+                                        when (currentSwipe) {
+                                            SwipeType.REPLY -> {
+                                                val newOffset = if (message.isFromMe) {
+                                                    (replyDragOffset.value + dragDelta.x).coerceIn(-replyMaxPx, 0f)
+                                                } else {
+                                                    (replyDragOffset.value + dragDelta.x).coerceIn(0f, replyMaxPx)
+                                                }
+                                                replyDragOffset.snapTo(newOffset)
+
+                                                // Haptic at threshold
+                                                if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
+                                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    hasTriggeredHaptic = true
+                                                } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                                    hasTriggeredHaptic = false
+                                                }
+                                            }
+                                            SwipeType.DATE_REVEAL -> {
+                                                val progressDelta = dragDelta.x / maxDragPx
+                                                val newProgress = if (message.isFromMe) {
+                                                    (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                } else {
+                                                    (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
+                                                }
+                                                dateRevealProgress.snapTo(newProgress)
+                                            }
+                                            null -> {}
+                                        }
+                                    }
+                                }
+                                // If VERTICAL_SCROLL, don't consume - let LazyColumn handle it
+                            }
+                        } catch (_: Exception) {
+                            // Gesture cancelled - reset
+                            coroutineScope.launch {
+                                replyDragOffset.animateTo(0f)
+                                dateRevealProgress.animateTo(0f)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
                             }
                         }
-                    )
+                    }
                 },
             horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Top
@@ -896,7 +928,8 @@ private fun TextBubbleSegment(
             }
 
             // Check for emoji-only messages with 3 or fewer emojis
-            val emojiAnalysis = remember(text) { analyzeEmojis(text) }
+            // Use pre-computed value if available and text matches, otherwise compute
+            val emojiAnalysis = message.emojiAnalysis ?: remember(text) { analyzeEmojis(text) }
             val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
             val textStyle = if (isLargeEmoji) {
                 MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
@@ -1051,9 +1084,9 @@ private fun SimpleBubbleContent(
     var activeSwipe by remember { mutableStateOf<SwipeType?>(null) }
     var hasTriggeredHaptic by remember { mutableStateOf(false) }
 
-    // Cumulative horizontal drag for dead zone detection (prevents accidental swipes while scrolling)
-    var cumulativeHorizontalDrag by remember { mutableFloatStateOf(0f) }
-    val deadZonePx = with(density) { 20.dp.toPx() }
+    // Direction detection thresholds
+    val detectionDistancePx = with(density) { 15.dp.toPx() }
+    val directionRatio = 2.0f  // Horizontal must be 2x vertical to trigger swipe (favors scrolling)
 
     // Measurement state for adaptive clearance during date reveal
     var containerWidthPx by remember { mutableIntStateOf(0) }
@@ -1162,120 +1195,136 @@ private fun SimpleBubbleContent(
             modifier = Modifier
                 .fillMaxWidth()
                 .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
-                .pointerInput(message.guid, canReply) {
-                    val velocityTracker = VelocityTracker()
+                .pointerInput(message.guid, canReply, gesturesEnabled) {
+                    if (!gesturesEnabled) return@pointerInput
 
-                    detectHorizontalDragGestures(
-                        onDragStart = {
-                            velocityTracker.resetTracking()
-                            cumulativeHorizontalDrag = 0f
-                        },
-                        onDragEnd = {
-                            val velocity = velocityTracker.calculateVelocity().x
-                            coroutineScope.launch {
-                                when (activeSwipe) {
-                                    SwipeType.REPLY -> {
-                                        // Check if reply should trigger: past threshold OR momentum
-                                        val isReplyDirection = if (message.isFromMe) velocity < 0 else velocity > 0
-                                        val shouldTriggerReply =
-                                            replyDragOffset.value.absoluteValue >= replyThresholdPx ||
-                                            (velocity.absoluteValue > 1000f && isReplyDirection)
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
 
-                                        if (shouldTriggerReply && canReply) {
-                                            onReply?.invoke(message.guid)
-                                        }
-                                        replyDragOffset.animateTo(
-                                            0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessLow
-                                            )
-                                        )
-                                    }
-                                    SwipeType.DATE_REVEAL -> {
-                                        dateRevealProgress.animateTo(
-                                            0f,
-                                            animationSpec = spring(
-                                                dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                stiffness = Spring.StiffnessLow
-                                            )
-                                        )
-                                    }
-                                    null -> {}
-                                }
-                                // Notify when reply swipe ends (to show overlaying stickers again)
-                                if (activeSwipe == SwipeType.REPLY) {
-                                    onSwipeStateChanged?.invoke(false)
-                                }
-                                activeSwipe = null
-                                hasTriggeredHaptic = false
-                            }
-                        },
-                        onDragCancel = {
-                            coroutineScope.launch {
-                                replyDragOffset.animateTo(0f)
-                                dateRevealProgress.animateTo(0f)
-                                // Notify when reply swipe ends (to show overlaying stickers again)
-                                if (activeSwipe == SwipeType.REPLY) {
-                                    onSwipeStateChanged?.invoke(false)
-                                }
-                                activeSwipe = null
-                                hasTriggeredHaptic = false
-                            }
-                        },
-                        onHorizontalDrag = { change, dragAmount ->
-                            velocityTracker.addPosition(change.uptimeMillis, change.position)
-                            cumulativeHorizontalDrag += dragAmount
+                        var cumulativeX = 0f
+                        var cumulativeY = 0f
+                        var gestureIntent = GestureIntent.UNDETERMINED
+                        var currentSwipe: SwipeType? = null
+                        hasTriggeredHaptic = false
 
-                            coroutineScope.launch {
-                                // Determine direction after cumulative drag exceeds dead zone (20dp)
-                                // This prevents accidental swipes while scrolling vertically
-                                // Placed stickers don't respond to any swipe gestures
-                                if (activeSwipe == null && cumulativeHorizontalDrag.absoluteValue > deadZonePx && gesturesEnabled) {
-                                    val isTowardCenter = if (message.isFromMe) cumulativeHorizontalDrag < 0 else cumulativeHorizontalDrag > 0
-                                    val newSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
-                                    activeSwipe = newSwipe
-                                    // Notify when reply swipe starts (to hide overlaying stickers)
-                                    if (newSwipe == SwipeType.REPLY) {
-                                        onSwipeStateChanged?.invoke(true)
-                                    }
-                                }
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
 
-                                when (activeSwipe) {
-                                    SwipeType.REPLY -> {
-                                        // Reply: move bubble, constrain to reply direction only
-                                        val newOffset = if (message.isFromMe) {
-                                            (replyDragOffset.value + dragAmount).coerceIn(-replyMaxPx, 0f)
-                                        } else {
-                                            (replyDragOffset.value + dragAmount).coerceIn(0f, replyMaxPx)
-                                        }
-                                        replyDragOffset.snapTo(newOffset)
-
-                                        // Haptic at threshold
-                                        if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
-                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                            hasTriggeredHaptic = true
-                                        } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                if (!change.pressed) {
+                                    // Pointer released - handle action if horizontal swipe was active
+                                    if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE && currentSwipe != null) {
+                                        coroutineScope.launch {
+                                            when (currentSwipe) {
+                                                SwipeType.REPLY -> {
+                                                    val shouldTriggerReply = replyDragOffset.value.absoluteValue >= replyThresholdPx
+                                                    if (shouldTriggerReply && canReply) {
+                                                        onReply?.invoke(message.guid)
+                                                    }
+                                                    replyDragOffset.animateTo(
+                                                        0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessLow
+                                                        )
+                                                    )
+                                                    onSwipeStateChanged?.invoke(false)
+                                                }
+                                                SwipeType.DATE_REVEAL -> {
+                                                    dateRevealProgress.animateTo(
+                                                        0f,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessLow
+                                                        )
+                                                    )
+                                                }
+                                                null -> {}
+                                            }
+                                            activeSwipe = null
                                             hasTriggeredHaptic = false
                                         }
                                     }
-                                    SwipeType.DATE_REVEAL -> {
-                                        // Date reveal: NO bubble movement, just progress 0-1
-                                        val progressDelta = dragAmount / maxDragPx
-                                        val newProgress = if (message.isFromMe) {
-                                            // Sent: swipe right (positive) for date
-                                            (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
-                                        } else {
-                                            // Received: swipe left (negative) for date
-                                            (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
-                                        }
-                                        dateRevealProgress.snapTo(newProgress)
-                                    }
-                                    null -> {}
+                                    break
                                 }
+
+                                val dragDelta = change.positionChange()
+                                cumulativeX += dragDelta.x
+                                cumulativeY += dragDelta.y
+
+                                // Determine intent once we've moved enough
+                                if (gestureIntent == GestureIntent.UNDETERMINED) {
+                                    val totalDistance = kotlin.math.sqrt(cumulativeX * cumulativeX + cumulativeY * cumulativeY)
+                                    if (totalDistance >= detectionDistancePx) {
+                                        // Check if horizontal clearly dominates vertical (2x ratio favors scrolling)
+                                        gestureIntent = if (cumulativeX.absoluteValue > cumulativeY.absoluteValue * directionRatio) {
+                                            GestureIntent.HORIZONTAL_SWIPE
+                                        } else {
+                                            GestureIntent.VERTICAL_SCROLL
+                                        }
+
+                                        // If horizontal, determine swipe type
+                                        if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE) {
+                                            val isTowardCenter = if (message.isFromMe) cumulativeX < 0 else cumulativeX > 0
+                                            currentSwipe = if (isTowardCenter && canReply) SwipeType.REPLY else SwipeType.DATE_REVEAL
+                                            activeSwipe = currentSwipe
+                                            if (currentSwipe == SwipeType.REPLY) {
+                                                onSwipeStateChanged?.invoke(true)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // Only handle swipe if we determined it's horizontal
+                                if (gestureIntent == GestureIntent.HORIZONTAL_SWIPE) {
+                                    change.consume()
+                                    coroutineScope.launch {
+                                        when (currentSwipe) {
+                                            SwipeType.REPLY -> {
+                                                val newOffset = if (message.isFromMe) {
+                                                    (replyDragOffset.value + dragDelta.x).coerceIn(-replyMaxPx, 0f)
+                                                } else {
+                                                    (replyDragOffset.value + dragDelta.x).coerceIn(0f, replyMaxPx)
+                                                }
+                                                replyDragOffset.snapTo(newOffset)
+
+                                                // Haptic at threshold
+                                                if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
+                                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    hasTriggeredHaptic = true
+                                                } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
+                                                    hasTriggeredHaptic = false
+                                                }
+                                            }
+                                            SwipeType.DATE_REVEAL -> {
+                                                val progressDelta = dragDelta.x / maxDragPx
+                                                val newProgress = if (message.isFromMe) {
+                                                    (dateRevealProgress.value + progressDelta).coerceIn(0f, 1f)
+                                                } else {
+                                                    (dateRevealProgress.value - progressDelta).coerceIn(0f, 1f)
+                                                }
+                                                dateRevealProgress.snapTo(newProgress)
+                                            }
+                                            null -> {}
+                                        }
+                                    }
+                                }
+                                // If VERTICAL_SCROLL, don't consume - let LazyColumn handle it
+                            }
+                        } catch (_: Exception) {
+                            // Gesture cancelled - reset
+                            coroutineScope.launch {
+                                replyDragOffset.animateTo(0f)
+                                dateRevealProgress.animateTo(0f)
+                                if (activeSwipe == SwipeType.REPLY) {
+                                    onSwipeStateChanged?.invoke(false)
+                                }
+                                activeSwipe = null
+                                hasTriggeredHaptic = false
                             }
                         }
-                    )
+                    }
                 },
             horizontalArrangement = if (message.isFromMe) Arrangement.End else Arrangement.Start,
             verticalAlignment = Alignment.Top
@@ -1384,7 +1433,12 @@ private fun SimpleBubbleContent(
                             }
 
                             // Check for emoji-only messages with 3 or fewer emojis
-                            val emojiAnalysis = remember(displayText) { analyzeEmojis(displayText) }
+                            // Use pre-computed value if text unchanged, otherwise compute
+                            val emojiAnalysis = if (displayText == message.text && message.emojiAnalysis != null) {
+                                message.emojiAnalysis!!
+                            } else {
+                                remember(displayText) { analyzeEmojis(displayText) }
+                            }
                             val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
                             val textStyle = if (isLargeEmoji) {
                                 MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)

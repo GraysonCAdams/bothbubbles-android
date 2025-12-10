@@ -7,6 +7,7 @@ import android.media.MediaPlayer
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +26,7 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.layout.LazyLayoutCacheWindow
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -148,7 +150,13 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
+    // Cache window keeps ~50 messages composed beyond viewport (matching fossify-reference)
+    // ahead = prefetch before visible, behind = retain after scrolling past
+    @OptIn(ExperimentalFoundationApi::class)
+    val cacheWindow = remember { LazyLayoutCacheWindow(ahead = 1000.dp, behind = 2000.dp) }
+    @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(
+        cacheWindow = cacheWindow,
         initialFirstVisibleItemIndex = initialScrollPosition,
         initialFirstVisibleItemScrollOffset = initialScrollOffset
     )
@@ -284,50 +292,62 @@ fun ChatScreen(
     val retryMenuScope = rememberCoroutineScope()
     val scrollScope = rememberCoroutineScope()
 
-    // Track unseen incoming messages when scrolled away from bottom
-    var unseenMessageGuids by remember { mutableStateOf<List<String>>(emptyList()) }
+    // Track if new messages arrived while scrolled away from bottom (simple boolean, no cascade)
+    var hasNewMessages by remember { mutableStateOf(false) }
     var lastKnownMessageCount by remember { mutableIntStateOf(0) }
 
-    // Detect if user is at the bottom of the list (reversed layout: index 0 is bottom)
-    val isAtBottom by remember {
-        derivedStateOf {
-            listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 100
+    // Debounced "at bottom" state to avoid triggering during active scrolling
+    // Using a separate state that only updates after scrolling settles
+    var isAtBottomDebounced by remember { mutableStateOf(true) }
+
+    // Monitor scroll state and update isAtBottom only when scroll settles
+    // Uses hysteresis to prevent rapid state toggling at threshold boundary
+    LaunchedEffect(listState) {
+        snapshotFlow {
+            // Hysteresis: different thresholds for entering vs leaving "at bottom" state
+            val atBottom = if (isAtBottomDebounced) {
+                // Once at bottom, stay "at bottom" until 150px away
+                listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 150
+            } else {
+                // To become "at bottom", must be within 50px
+                listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 50
+            }
+            val isScrolling = listState.isScrollInProgress
+            Pair(atBottom, isScrolling)
         }
+            .distinctUntilChanged()
+            .collect { (atBottom, isScrolling) ->
+                // Only update when NOT actively scrolling, or when scrolling TO the bottom
+                if (!isScrolling || (atBottom && !isAtBottomDebounced)) {
+                    if (isAtBottomDebounced != atBottom) {
+                        isAtBottomDebounced = atBottom
+                        // Reset flag when returning to bottom (no state cascade - just one change)
+                        if (atBottom) {
+                            hasNewMessages = false
+                        }
+                    }
+                }
+            }
     }
 
-    // Track new incoming messages when not at bottom
-    LaunchedEffect(uiState.messages.size, isAtBottom) {
+    // Track new incoming messages when not at bottom (simplified - just sets a flag)
+    LaunchedEffect(uiState.messages.size) {
         val messages = uiState.messages
         if (messages.isEmpty()) {
             lastKnownMessageCount = 0
             return@LaunchedEffect
         }
 
-        // If we're at bottom, clear unseen messages
-        if (isAtBottom) {
-            unseenMessageGuids = emptyList()
-            lastKnownMessageCount = messages.size
-            return@LaunchedEffect
-        }
-
-        // Check for new messages (they appear at the front in reversed layout)
-        if (messages.size > lastKnownMessageCount && lastKnownMessageCount > 0) {
+        // Check for new incoming messages while scrolled away from bottom
+        if (!isAtBottomDebounced && messages.size > lastKnownMessageCount && lastKnownMessageCount > 0) {
             val newCount = messages.size - lastKnownMessageCount
             val newMessages = messages.take(newCount)
             // Only track incoming messages (not from me)
-            val newIncoming = newMessages.filter { !it.isFromMe }.map { it.guid }
-            if (newIncoming.isNotEmpty()) {
-                unseenMessageGuids = newIncoming + unseenMessageGuids
+            if (newMessages.any { !it.isFromMe }) {
+                hasNewMessages = true
             }
         }
         lastKnownMessageCount = messages.size
-    }
-
-    // Clear unseen messages when user scrolls to bottom
-    LaunchedEffect(isAtBottom) {
-        if (isAtBottom) {
-            unseenMessageGuids = emptyList()
-        }
     }
 
     // Snackbar for error display
@@ -450,6 +470,7 @@ fun ChatScreen(
                 listState.layoutInfo.visibleItemsInfo.size
             )
         }.collect { (index, offset, visibleCount) ->
+            // Note: logging removed to reduce main thread work during scroll
             viewModel.updateScrollPosition(index, offset, visibleCount)
         }
     }
@@ -716,9 +737,9 @@ fun ChatScreen(
                         viewModel.sendMessage()
                         pendingAttachments = emptyList()
                         showAttachmentPicker = false
-                        // Scroll to bottom after sending
+                        // Scroll to bottom after sending - use instant scroll to avoid jank
                         scrollScope.launch {
-                            listState.animateScrollToItem(0)
+                            listState.scrollToItem(0)
                         }
                     },
                     onSendLongPress = {
@@ -817,7 +838,7 @@ fun ChatScreen(
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
                             pendingAttachments = emptyList()
-                            scrollScope.launch { listState.animateScrollToItem(0) }
+                            scrollScope.launch { listState.scrollToItem(0) }
                         }
                         recordingFile = null
                     },
@@ -867,7 +888,7 @@ fun ChatScreen(
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
                             pendingAttachments = emptyList()
-                            scrollScope.launch { listState.animateScrollToItem(0) }
+                            scrollScope.launch { listState.scrollToItem(0) }
                         }
                         recordingFile = null
                     },
@@ -899,8 +920,7 @@ fun ChatScreen(
                 val layoutInfo = listState.layoutInfo
                 val totalItems = layoutInfo.totalItemsCount
                 val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                // Trigger when within 5 items of the end
-                lastVisibleItem >= totalItems - 5 && totalItems > 0
+                lastVisibleItem >= totalItems - 25 && totalItems > 0
             }
                 .distinctUntilChanged()
                 .collect { shouldLoadMore ->
@@ -910,14 +930,35 @@ fun ChatScreen(
                 }
         }
 
+        // Track the previous newest message GUID to detect truly NEW messages (not initial load)
+        var previousNewestGuid by remember { mutableStateOf<String?>(null) }
+        var hasInitiallyLoaded by remember { mutableStateOf(false) }
+
         // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
         // This ensures tall content like link previews isn't clipped by the keyboard
         LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
+            val newestGuid = uiState.messages.firstOrNull()?.guid
             val isNearBottom = listState.firstVisibleItemIndex <= 2
-            if (uiState.messages.isNotEmpty() && isNearBottom) {
+
+            // Skip if no messages yet
+            if (newestGuid == null) return@LaunchedEffect
+
+            // Track initial load - don't auto-scroll on first message load
+            if (!hasInitiallyLoaded) {
+                hasInitiallyLoaded = true
+                previousNewestGuid = newestGuid
+                return@LaunchedEffect
+            }
+
+            // Only auto-scroll if a NEW message arrived (guid changed from previous)
+            val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestGuid
+            previousNewestGuid = newestGuid
+
+            if (isNewMessage && isNearBottom) {
                 // Small delay to let the message render and calculate its height
                 kotlinx.coroutines.delay(100)
-                listState.animateScrollToItem(0)
+                // Use instant scroll instead of animated to avoid jank during animation
+                listState.scrollToItem(0)
             }
         }
 
@@ -933,7 +974,7 @@ fun ChatScreen(
 
                 if (isNearBottom) {
                     kotlinx.coroutines.delay(100)
-                    listState.animateScrollToItem(0)
+                    listState.scrollToItem(0)
                 }
             }
         }
@@ -1401,29 +1442,19 @@ fun ChatScreen(
     )
 
     // New messages indicator - floating above message list
+    // Visibility controlled by scroll position (isAtBottomDebounced) to avoid state cascade
     AnimatedVisibility(
-        visible = unseenMessageGuids.isNotEmpty(),
+        visible = !isAtBottomDebounced && hasNewMessages,
         modifier = Modifier
             .align(Alignment.BottomCenter)
             .padding(bottom = 100.dp), // Position above keyboard/input area
         enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
         exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
     ) {
-        val count = unseenMessageGuids.size
         Surface(
             onClick = {
-                // Scroll to the first unseen message and highlight it
-                val firstUnseenGuid = unseenMessageGuids.lastOrNull()
-                if (firstUnseenGuid != null) {
-                    val index = uiState.messages.indexOfFirst { it.guid == firstUnseenGuid }
-                    if (index >= 0) {
-                        scrollScope.launch {
-                            listState.animateScrollToItem(index, scrollOffset = -100)
-                            viewModel.highlightMessage(firstUnseenGuid)
-                        }
-                    }
-                }
-                unseenMessageGuids = emptyList()
+                // Smooth scroll to bottom - indicator will hide when isAtBottomDebounced becomes true
+                scrollScope.launch { listState.animateScrollToItem(0) }
             },
             shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.primary,
@@ -1431,7 +1462,7 @@ fun ChatScreen(
             shadowElevation = 4.dp
         ) {
             Text(
-                text = if (count == 1) "1 new message" else "$count new messages",
+                text = "New messages ↓",
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 style = MaterialTheme.typography.labelLarge
             )
@@ -1451,7 +1482,7 @@ fun ChatScreen(
                     viewModel.sendMessage(effect.appleId)
                     pendingAttachments = emptyList()
                     showAttachmentPicker = false
-                    scrollScope.launch { listState.animateScrollToItem(0) }
+                    scrollScope.launch { listState.scrollToItem(0) }
                 }
             },
             onDismiss = { showEffectPicker = false }

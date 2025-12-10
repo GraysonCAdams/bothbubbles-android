@@ -232,24 +232,29 @@ class AttachmentDownloadQueue @Inject constructor(
 
     private fun processQueue() {
         scope.launch {
+            Log.d("ChatScroll", "[DownloadQueue] processQueue started, pendingSize=${pendingQueue.size}")
             while (pendingQueue.isNotEmpty()) {
                 val request = pendingQueue.poll() ?: break
 
                 // Skip if already downloaded or being downloaded
                 if (activeDownloads.containsKey(request.attachmentGuid)) {
+                    Log.d("ChatScroll", "[DownloadQueue] Skip ${request.attachmentGuid} - already downloading")
                     continue
                 }
 
                 // Check if already downloaded
                 val attachment = attachmentDao.getAttachmentByGuid(request.attachmentGuid)
                 if (attachment?.localPath != null) {
+                    Log.d("ChatScroll", "[DownloadQueue] Skip ${request.attachmentGuid} - already downloaded locally")
                     queuedGuids.remove(request.attachmentGuid)
                     updateQueueSize()
                     continue
                 }
 
                 // Acquire semaphore (blocks if at max concurrent)
+                Log.d("ChatScroll", "[DownloadQueue] Waiting for semaphore, activeDownloads=${activeDownloads.size}")
                 semaphore.withPermit {
+                    Log.d("ChatScroll", "[DownloadQueue] >>> START download: ${request.attachmentGuid}, priority=${request.priority}")
                     activeDownloads[request.attachmentGuid] = request
                     updateQueueSize()
 
@@ -259,9 +264,11 @@ class AttachmentDownloadQueue @Inject constructor(
                         activeDownloads.remove(request.attachmentGuid)
                         queuedGuids.remove(request.attachmentGuid)
                         updateQueueSize()
+                        Log.d("ChatScroll", "[DownloadQueue] <<< END download: ${request.attachmentGuid}")
                     }
                 }
             }
+            Log.d("ChatScroll", "[DownloadQueue] processQueue finished")
         }
     }
 

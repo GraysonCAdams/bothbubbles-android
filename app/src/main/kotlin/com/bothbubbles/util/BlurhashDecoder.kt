@@ -3,10 +3,12 @@ package com.bothbubbles.util
 import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import com.vanniktech.blurhash.BlurHash
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * Utility for decoding blurhash strings to bitmaps with LRU caching.
@@ -105,11 +107,19 @@ fun rememberBlurhashBitmap(
     blurhash: String?,
     aspectRatio: Float = 1f
 ): ImageBitmap? {
-    return remember(blurhash, aspectRatio) {
-        if (aspectRatio != 1f) {
-            BlurhashDecoder.decodeWithAspectRatio(blurhash, aspectRatio)
-        } else {
-            BlurhashDecoder.decode(blurhash)
+    // Use produceState for async decoding on first load
+    // The LRU cache in BlurhashDecoder handles subsequent loads efficiently
+    return produceState<ImageBitmap?>(initialValue = null, blurhash, aspectRatio) {
+        if (blurhash.isNullOrBlank()) {
+            value = null
+            return@produceState
         }
-    }?.asImageBitmap()
+        value = withContext(Dispatchers.Default) {
+            if (aspectRatio != 1f) {
+                BlurhashDecoder.decodeWithAspectRatio(blurhash, aspectRatio)
+            } else {
+                BlurhashDecoder.decode(blurhash)
+            }
+        }?.asImageBitmap()
+    }.value
 }

@@ -1,6 +1,7 @@
 package com.bothbubbles.services.media
 
 import android.content.Context
+import android.util.Log
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.size.Precision
@@ -46,12 +47,17 @@ class AttachmentPreloader @Inject constructor(
 
         if (preloadStart > preloadEnd) return
 
-        // Filter to images that need preloading
-        val toPreload = attachments.subList(preloadStart, preloadEnd + 1)
-            .filter { it.isImage || it.isGif }
-            .filter { !it.needsDownload }
-            .mapNotNull { it.localPath ?: it.webUrl }
-            .filter { it !in preloadedUrls }
+        // Filter to images that need preloading - minimize allocations
+        val toPreload = mutableListOf<String>()
+        for (i in preloadStart..preloadEnd) {
+            val att = attachments[i]
+            if ((att.isImage || att.isGif) && !att.needsDownload) {
+                val url = att.localPath ?: att.webUrl
+                if (url != null && url !in preloadedUrls) {
+                    toPreload.add(url)
+                }
+            }
+        }
 
         // Preload each image
         toPreload.forEach { url ->
