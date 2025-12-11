@@ -16,7 +16,9 @@ import androidx.room.PrimaryKey
         Index(value = ["associated_message_guid"]),
         Index(value = ["thread_originator_guid"]),
         Index(value = ["message_source"]),
-        Index(value = ["chat_guid", "date_deleted"])
+        Index(value = ["chat_guid", "date_deleted"]),
+        // Covering index for pagination queries - enables O(1) position-based lookups
+        Index(value = ["chat_guid", "date_created", "date_deleted"])
     ],
     foreignKeys = [
         ForeignKey(

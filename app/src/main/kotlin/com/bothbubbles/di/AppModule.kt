@@ -9,6 +9,7 @@ import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
@@ -16,6 +17,7 @@ import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
+import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import dagger.Module
 import dagger.Provides
@@ -119,6 +121,18 @@ object AppModule {
     @Singleton
     fun providePendingAttachmentDao(database: BothBubblesDatabase): PendingAttachmentDao {
         return database.pendingAttachmentDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideIMessageCacheDao(database: BothBubblesDatabase): IMessageCacheDao {
+        return database.iMessageCacheDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSyncRangeDao(database: BothBubblesDatabase): SyncRangeDao {
+        return database.syncRangeDao()
     }
 
     @Provides

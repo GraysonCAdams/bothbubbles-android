@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.theme.KumbhSansFamily
+import com.bothbubbles.ui.theme.MessageShapes
 
 /**
  * Empty state for no conversations
@@ -280,7 +281,8 @@ fun ConversationTileSkeleton(
 }
 
 /**
- * Skeleton for a message bubble
+ * Skeleton for a message bubble.
+ * Matches the actual message bubble styling (MessageShapes) for visual consistency.
  */
 @Composable
 fun MessageBubbleSkeleton(
@@ -288,22 +290,28 @@ fun MessageBubbleSkeleton(
     modifier: Modifier = Modifier
 ) {
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),  // Match actual bubble spacing
         horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start
     ) {
         if (!isFromMe) {
-            Spacer(modifier = Modifier.width(48.dp))
+            // Match avatar space (36dp avatar + 8dp padding)
+            Spacer(modifier = Modifier.width(44.dp))
         }
 
         SkeletonBox(
             modifier = Modifier
-                .widthIn(min = 100.dp, max = 200.dp)
-                .height(48.dp)
-                .clip(RoundedCornerShape(18.dp))
+                .widthIn(min = 80.dp, max = 240.dp)
+                .height(44.dp)
+                .clip(
+                    // Use actual MessageShapes for correct tail styling
+                    if (isFromMe) MessageShapes.sentSingle else MessageShapes.receivedSingle
+                )
         )
 
         if (isFromMe) {
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
         }
     }
 }

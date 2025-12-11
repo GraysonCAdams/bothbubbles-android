@@ -1,17 +1,25 @@
 package com.bothbubbles.util
 
+import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
+import android.net.Uri
+import android.util.Log
 import androidx.core.graphics.drawable.IconCompat
 import kotlin.math.abs
+import kotlin.math.min
 
 /**
  * Shared avatar generation utility used by both the Compose UI (Avatar.kt)
  * and notifications (NotificationService.kt) to ensure consistent avatar appearance.
  */
 object AvatarGenerator {
+    private const val TAG = "AvatarGenerator"
 
     // Google Messages-style avatar colors - muted pastels that work in light and dark mode
     private val avatarColors = listOf(
@@ -121,6 +129,69 @@ object AvatarGenerator {
     fun generateIconCompat(name: String, sizePx: Int): IconCompat {
         val bitmap = generateBitmap(name, sizePx)
         return IconCompat.createWithBitmap(bitmap)
+    }
+
+    /**
+     * Load a contact photo from a content:// URI and convert it to a circular bitmap.
+     * Used for notifications where content URIs can't be passed directly (the notification
+     * system doesn't have permission to read contact photos).
+     *
+     * @param context Application context for ContentResolver access
+     * @param photoUri The content:// URI for the contact photo
+     * @param sizePx Target size for the output bitmap
+     * @return A circular bitmap of the contact photo, or null if loading fails
+     */
+    fun loadContactPhotoBitmap(context: Context, photoUri: String, sizePx: Int): Bitmap? {
+        return try {
+            val uri = Uri.parse(photoUri)
+            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                // Decode bitmap
+                val sourceBitmap = BitmapFactory.decodeStream(inputStream)
+                if (sourceBitmap == null) {
+                    Log.w(TAG, "Failed to decode contact photo: $photoUri")
+                    return null
+                }
+
+                // Scale to target size
+                val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
+                if (scaledBitmap != sourceBitmap) {
+                    sourceBitmap.recycle()
+                }
+
+                // Make it circular to match generated avatars
+                val circularBitmap = createCircularBitmap(scaledBitmap)
+                if (circularBitmap != scaledBitmap) {
+                    scaledBitmap.recycle()
+                }
+
+                circularBitmap
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to load contact photo: $photoUri", e)
+            null
+        }
+    }
+
+    /**
+     * Create a circular bitmap from a square bitmap.
+     * Clips the source bitmap into a circle to match the app's avatar style.
+     */
+    private fun createCircularBitmap(source: Bitmap): Bitmap {
+        val size = min(source.width, source.height)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(output)
+
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val radius = size / 2f
+
+        // Draw the circular mask
+        canvas.drawCircle(radius, radius, radius, paint)
+
+        // Draw the source bitmap using SRC_IN to clip to the circle
+        paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
+        canvas.drawBitmap(source, 0f, 0f, paint)
+
+        return output
     }
 
     /**

@@ -108,6 +108,33 @@ interface MessageDao {
     """)
     suspend fun getMessagesBefore(chatGuid: String, beforeTimestamp: Long, limit: Int): List<MessageEntity>
 
+    /**
+     * Cursor-based pagination using timestamp instead of OFFSET.
+     * O(1) performance regardless of how far back in the conversation.
+     * Use this for loading older messages during scroll.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid AND date_deleted IS NULL
+        AND date_created < :beforeTimestamp
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    fun observeMessagesBefore(chatGuid: String, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>>
+
+    /**
+     * Cursor-based pagination for merged chats (iMessage + SMS).
+     * O(1) performance regardless of conversation size.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL
+        AND date_created < :beforeTimestamp
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    fun observeMessagesBeforeForChats(chatGuids: List<String>, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>>
+
     @Query("""
         SELECT * FROM messages
         WHERE date_deleted IS NULL
@@ -150,6 +177,47 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM messages WHERE date_deleted IS NULL")
     suspend fun getTotalMessageCount(): Int
+
+    // ===== BitSet Pagination Queries =====
+
+    /**
+     * Get total message count for multiple chats (for merged iMessage + SMS conversations).
+     * Used to initialize the BitSet size for sparse pagination.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL")
+    suspend fun getMessageCountForChats(chatGuids: List<String>): Int
+
+    /**
+     * Observe message count changes for multiple chats.
+     * Emits when messages are added/deleted, used to resize BitSet.
+     */
+    @Query("SELECT COUNT(*) FROM messages WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL")
+    fun observeMessageCountForChats(chatGuids: List<String>): Flow<Int>
+
+    /**
+     * Position-based pagination for BitSet sparse loading.
+     * Fetches messages at specific positions (used when BitSet detects gaps).
+     * Uses OFFSET which is O(n), but only called for sparse gaps, not continuous scroll.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL
+        ORDER BY date_created DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getMessagesByPosition(chatGuids: List<String>, limit: Int, offset: Int): List<MessageEntity>
+
+    /**
+     * Get the position (index) of a specific message within the sorted conversation.
+     * Returns count of messages newer than the target, which equals its position.
+     * Used for jump-to-message (search results, deep links).
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL
+        AND date_created > (SELECT date_created FROM messages WHERE guid = :targetGuid)
+    """)
+    suspend fun getMessagePosition(chatGuids: List<String>, targetGuid: String): Int
 
     /**
      * Get messages that contain URLs for a specific chat.

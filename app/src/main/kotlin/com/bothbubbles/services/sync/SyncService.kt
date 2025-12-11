@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
@@ -41,7 +42,14 @@ sealed class SyncState {
         val processedChats: Int = 0,
         val syncedMessages: Int = 0,
         val currentChatName: String? = null,
-        val isInitialSync: Boolean = false
+        val isInitialSync: Boolean = false,
+        // Separate progress tracking for iMessage and SMS
+        val iMessageProgress: Float = 0f,
+        val iMessageComplete: Boolean = false,
+        val smsProgress: Float = 0f,
+        val smsComplete: Boolean = false,
+        val smsCurrent: Int = 0,
+        val smsTotal: Int = 0
     ) : SyncState()
 
     data object Completed : SyncState()
@@ -63,7 +71,8 @@ class SyncService @Inject constructor(
     private val messageDao: MessageDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val settingsDataStore: SettingsDataStore,
-    private val categorizationRepository: CategorizationRepository
+    private val categorizationRepository: CategorizationRepository,
+    private val syncRangeTracker: SyncRangeTracker
 ) {
     companion object {
         private const val TAG = "SyncService"
@@ -138,34 +147,37 @@ class SyncService @Inject constructor(
         val smsTotalThreads = AtomicInteger(0)
         val smsComplete = AtomicInteger(0) // 0 = in progress, 1 = complete
 
-        // Helper to update combined progress when SMS is running concurrently
-        fun updateCombinedProgress(iMessageProgressPercent: Int, stage: String, chatName: String? = null) {
-            if (shouldImportSms) {
-                val smsPct = if (smsTotalThreads.get() > 0) {
-                    (smsCurrentThread.get() * 100) / smsTotalThreads.get()
-                } else if (smsComplete.get() == 1) 100 else 0
-                // Combined: average of iMessage and SMS progress
-                val combinedProgress = (iMessageProgressPercent + smsPct) / 2
-                _syncState.value = SyncState.Syncing(
-                    progress = combinedProgress / 100f,
-                    stage = "iMessage: $iMessageProgressPercent% | SMS: ${smsCurrentThread.get()}/${smsTotalThreads.get()}",
-                    totalChats = totalChatsFound.get(),
-                    processedChats = processedChats.get(),
-                    syncedMessages = syncedMessages.get(),
-                    currentChatName = chatName,
-                    isInitialSync = true
-                )
+        // Helper to update progress - tracks iMessage and SMS separately
+        fun updateProgress(iMessageProgressPercent: Int, stage: String, chatName: String? = null) {
+            val imProgress = iMessageProgressPercent / 100f
+            val imComplete = iMessageProgressPercent >= 100
+            val smsProgressPct = if (smsTotalThreads.get() > 0) {
+                smsCurrentThread.get().toFloat() / smsTotalThreads.get()
+            } else 0f
+            val smsIsDone = smsComplete.get() == 1
+
+            // Overall progress: if SMS is running, average both; otherwise just iMessage
+            val overallProgress = if (shouldImportSms && smsTotalThreads.get() > 0) {
+                (imProgress + smsProgressPct) / 2
             } else {
-                _syncState.value = SyncState.Syncing(
-                    progress = iMessageProgressPercent / 100f,
-                    stage = stage,
-                    totalChats = totalChatsFound.get(),
-                    processedChats = processedChats.get(),
-                    syncedMessages = syncedMessages.get(),
-                    currentChatName = chatName,
-                    isInitialSync = true
-                )
+                imProgress
             }
+
+            _syncState.value = SyncState.Syncing(
+                progress = overallProgress,
+                stage = stage,
+                totalChats = totalChatsFound.get(),
+                processedChats = processedChats.get(),
+                syncedMessages = syncedMessages.get(),
+                currentChatName = chatName,
+                isInitialSync = true,
+                iMessageProgress = imProgress,
+                iMessageComplete = imComplete,
+                smsProgress = smsProgressPct,
+                smsComplete = smsIsDone,
+                smsCurrent = smsCurrentThread.get(),
+                smsTotal = smsTotalThreads.get()
+            )
         }
 
         // Channel to queue chats for message syncing as they're fetched
@@ -203,7 +215,7 @@ class SyncService @Inject constructor(
                 var offset = 0
 
                 if (onProgress == null) {
-                    updateCombinedProgress(5, "Fetching conversations...")
+                    updateProgress(5, "Fetching conversations...")
                 } else {
                     onProgress(5, 0, 0, 0)
                 }
@@ -231,7 +243,7 @@ class SyncService @Inject constructor(
                     // Update progress - chat fetching is ~20% of total work
                     val fetchProgressPercent = minOf(20, 5 + (15 * offset / maxOf(totalChatsFound.get(), 100)))
                     if (onProgress == null) {
-                        updateCombinedProgress(fetchProgressPercent, "Fetching conversations...")
+                        updateProgress(fetchProgressPercent, "Fetching conversations...")
                     } else {
                         onProgress(fetchProgressPercent, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
                     }
@@ -251,7 +263,8 @@ class SyncService @Inject constructor(
                             try {
                                 val result = messageRepository.syncMessagesForChat(
                                     chatGuid = task.guid,
-                                    limit = messagesPerChat
+                                    limit = messagesPerChat,
+                                    syncSource = SyncSource.INITIAL
                                 )
                                 syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
                                 settingsDataStore.markChatSynced(task.guid)
@@ -270,7 +283,7 @@ class SyncService @Inject constructor(
                             } else 20
 
                             if (onProgress == null) {
-                                updateCombinedProgress(messageProgressPercent, "Syncing messages...", task.displayName)
+                                updateProgress(messageProgressPercent, "Syncing messages...", task.displayName)
                             } else {
                                 onProgress(messageProgressPercent, processed, total, syncedMessages.get())
                             }
@@ -380,7 +393,8 @@ class SyncService @Inject constructor(
                         try {
                             val result = messageRepository.syncMessagesForChat(
                                 chatGuid = chat.guid,
-                                limit = messagesPerChat
+                                limit = messagesPerChat,
+                                syncSource = SyncSource.INITIAL
                             )
                             syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
                             settingsDataStore.markChatSynced(chat.guid)
@@ -474,7 +488,8 @@ class SyncService @Inject constructor(
 
     /**
      * Perform incremental sync
-     * Downloads only new messages since last sync using a single API call
+     * Downloads only new messages since last sync using a single API call.
+     * Runs silently in the background without updating UI progress state.
      */
     suspend fun performIncrementalSync(): Result<Unit> = runCatching {
         val lastSync = settingsDataStore.lastSyncTime.first()
@@ -485,15 +500,12 @@ class SyncService @Inject constructor(
         }
 
         Log.i(TAG, "Starting incremental sync from $lastSync")
-        _syncState.value = SyncState.Syncing(0f, "Checking for new messages...")
 
         // Sync chats first to get any new conversations
         chatRepository.syncChats(
             limit = CHAT_PAGE_SIZE,
             offset = 0
         )
-
-        _syncState.value = SyncState.Syncing(0.3f, "Syncing new messages...")
 
         // Fetch all new messages globally in a single API call
         val newMessageCount = messageRepository.syncMessagesGlobally(
@@ -509,12 +521,11 @@ class SyncService @Inject constructor(
         settingsDataStore.setLastSyncTime(syncTime)
         _lastSyncTime.value = syncTime
 
-        _syncState.value = SyncState.Completed
         Log.i(TAG, "Incremental sync completed: $newMessageCount new messages")
         Unit
     }.onFailure { e ->
         Log.e(TAG, "Incremental sync failed", e)
-        _syncState.value = SyncState.Error(e.message ?: "Sync failed")
+        // Don't update syncState for background incremental sync failures
     }
 
     /**
@@ -559,6 +570,9 @@ class SyncService @Inject constructor(
         messageDao.deleteAllMessages()
         chatDao.deleteAllChats()
 
+        // Clear sync range tracking
+        syncRangeTracker.clearAllRanges()
+
         // Reset sync time and clear sync progress
         settingsDataStore.setLastSyncTime(0L)
         settingsDataStore.clearSyncProgress()
@@ -589,6 +603,9 @@ class SyncService @Inject constructor(
         handleDao.deleteAllHandles()
         unifiedChatGroupDao.deleteAllData()
 
+        // Clear sync range tracking
+        syncRangeTracker.clearAllRanges()
+
         // Reset sync markers and clear sync progress
         settingsDataStore.setLastSyncTime(0L)
         settingsDataStore.clearSyncProgress()
@@ -606,16 +623,28 @@ class SyncService @Inject constructor(
         val smsCurrentThread = AtomicInteger(0)
         val smsTotalThreads = AtomicInteger(0)
 
-        // Helper to update combined progress display
-        fun updateCombinedProgress() {
+        // Helper to update progress display - tracks iMessage and SMS separately
+        fun updateProgress() {
             val imPct = iMessageProgress.get()
             val smsPct = smsProgress.get()
+            val imComplete = imPct >= 100
+            val smsIsDone = smsPct >= 100
+            val smsTotal = smsTotalThreads.get()
+            val smsCurrent = smsCurrentThread.get()
+            val smsProgressFloat = if (smsTotal > 0) smsCurrent.toFloat() / smsTotal else 0f
+
             // Combined progress: 10% base + 85% for actual work (split between iMessage and SMS)
             val combinedProgress = 0.1f + (0.85f * (imPct + smsPct) / 200f)
             _syncState.value = SyncState.Syncing(
                 progress = combinedProgress,
-                stage = "iMessage: $imPct% | SMS: ${smsCurrentThread.get()}/${smsTotalThreads.get()}",
-                isInitialSync = true
+                stage = "Importing messages...",
+                isInitialSync = true,
+                iMessageProgress = imPct / 100f,
+                iMessageComplete = imComplete,
+                smsProgress = smsProgressFloat,
+                smsComplete = smsIsDone,
+                smsCurrent = smsCurrent,
+                smsTotal = smsTotal
             )
         }
 
@@ -627,11 +656,11 @@ class SyncService @Inject constructor(
                 performInitialSync(
                     onProgress = { progress, _, _, _ ->
                         iMessageProgress.set(progress)
-                        updateCombinedProgress()
+                        updateProgress()
                     }
                 ).getOrThrow()
                 iMessageProgress.set(100)
-                updateCombinedProgress()
+                updateProgress()
                 Log.i(TAG, "Concurrent iMessage sync completed")
             }
 
@@ -643,11 +672,11 @@ class SyncService @Inject constructor(
                         smsCurrentThread.set(current)
                         smsTotalThreads.set(total)
                         smsProgress.set((current * 100) / maxOf(total, 1))
-                        updateCombinedProgress()
+                        updateProgress()
                     }
                 )
                 smsProgress.set(100)
-                updateCombinedProgress()
+                updateProgress()
                 Log.i(TAG, "Concurrent SMS import completed")
             }
 

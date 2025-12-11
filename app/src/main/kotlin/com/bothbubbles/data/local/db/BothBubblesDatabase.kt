@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
@@ -14,11 +15,13 @@ import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
+import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
@@ -26,6 +29,7 @@ import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.SeenMessageEntity
+import com.bothbubbles.data.local.db.entity.SyncRangeEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 
@@ -64,9 +68,11 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         UnifiedChatMember::class,
         SeenMessageEntity::class,
         PendingMessageEntity::class,
-        PendingAttachmentEntity::class
+        PendingAttachmentEntity::class,
+        IMessageAvailabilityCacheEntity::class,
+        SyncRangeEntity::class
     ],
-    version = 24,
+    version = 27,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -82,6 +88,8 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun seenMessageDao(): SeenMessageDao
     abstract fun pendingMessageDao(): PendingMessageDao
     abstract fun pendingAttachmentDao(): PendingAttachmentDao
+    abstract fun iMessageCacheDao(): IMessageCacheDao
+    abstract fun syncRangeDao(): SyncRangeDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"
@@ -566,6 +574,70 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 24 to 25: Add imessage_availability_cache table
+         * for caching iMessage availability check results per contact.
+         */
+        val MIGRATION_24_25 = object : Migration(24, 25) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS imessage_availability_cache (
+                        normalized_address TEXT PRIMARY KEY NOT NULL,
+                        check_result TEXT NOT NULL,
+                        checked_at INTEGER NOT NULL,
+                        expires_at INTEGER NOT NULL,
+                        session_id TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_imessage_availability_cache_check_result ON imessage_availability_cache(check_result)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_imessage_availability_cache_expires_at ON imessage_availability_cache(expires_at)")
+            }
+        }
+
+        /**
+         * Migration from version 25 to 26: Add sync_ranges table for tracking
+         * which message timestamp ranges have been synced from the server.
+         * This enables efficient sparse pagination without redundant API calls.
+         */
+        val MIGRATION_25_26 = object : Migration(25, 26) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS sync_ranges (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        chat_guid TEXT NOT NULL,
+                        start_timestamp INTEGER NOT NULL,
+                        end_timestamp INTEGER NOT NULL,
+                        synced_at INTEGER NOT NULL,
+                        sync_source TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_ranges_chat_guid ON sync_ranges(chat_guid)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_sync_ranges_chat_guid_timestamps ON sync_ranges(chat_guid, start_timestamp, end_timestamp)")
+            }
+        }
+
+        /**
+         * Migration from version 26 to 27: Add transfer state columns to attachments table.
+         * Enables "snappy" attachment rendering where:
+         * - Outbound attachments display immediately from local file while uploading
+         * - Inbound attachments show blurhash placeholders while downloading
+         */
+        val MIGRATION_26_27 = object : Migration(26, 27) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add transfer_state column with default PENDING
+                db.execSQL("ALTER TABLE attachments ADD COLUMN transfer_state TEXT NOT NULL DEFAULT 'PENDING'")
+
+                // Add transfer_progress column
+                db.execSQL("ALTER TABLE attachments ADD COLUMN transfer_progress REAL NOT NULL DEFAULT 0")
+
+                // Mark existing attachments with local_path as DOWNLOADED (backwards compatibility)
+                db.execSQL("UPDATE attachments SET transfer_state = 'DOWNLOADED' WHERE local_path IS NOT NULL")
+
+                // Create index for efficient state queries (e.g., finding pending downloads)
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_attachments_transfer_state ON attachments(transfer_state)")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -594,7 +666,10 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_20_21,
             MIGRATION_21_22,
             MIGRATION_22_23,
-            MIGRATION_23_24
+            MIGRATION_23_24,
+            MIGRATION_24_25,
+            MIGRATION_25_26,
+            MIGRATION_26_27
         )
     }
 }

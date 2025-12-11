@@ -13,6 +13,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
@@ -35,13 +36,16 @@ import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentDownloadQueue
+import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.media.AttachmentPreloader
+import com.bothbubbles.services.media.ValidationError
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.smartreply.SmartReplyService
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.MessageDto
 import android.util.Log
+import com.bothbubbles.services.imessage.IMessageAvailabilityService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
@@ -59,6 +63,10 @@ import com.bothbubbles.ui.components.Tapback
 import com.bothbubbles.ui.components.ThreadChain
 import com.bothbubbles.ui.components.analyzeEmojis
 import com.bothbubbles.ui.effects.MessageEffect
+import com.bothbubbles.ui.chat.paging.MessagePagingController
+import com.bothbubbles.ui.chat.paging.PagingConfig
+import com.bothbubbles.ui.chat.paging.RoomMessageDataSource
+import com.bothbubbles.ui.chat.paging.SparseMessageList
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -100,12 +108,16 @@ class ChatViewModel @Inject constructor(
     private val api: BothBubblesApi,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val attachmentPreloader: AttachmentPreloader,
-    private val pendingMessageRepository: PendingMessageRepository
+    private val pendingMessageRepository: PendingMessageRepository,
+    private val messageDao: MessageDao,
+    private val iMessageAvailabilityService: IMessageAvailabilityService,
+    private val attachmentLimitsProvider: AttachmentLimitsProvider
 ) : ViewModel() {
 
     companion object {
         private const val TAG = "ChatViewModel"
         private const val AVAILABILITY_CHECK_COOLDOWN = 5 * 60 * 1000L // 5 minutes
+        private const val SERVER_STABILITY_PERIOD_MS = 30_000L // 30 seconds stable before allowing iMessage
     }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -127,9 +139,34 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState())
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    // Dynamic message limit for pagination - increases as user scrolls up to load older messages
-    // Start with 75 messages (~5-7 screens) to reduce early pagination triggers
-    private val _messageLimit = MutableStateFlow(75)
+    // PERF: Message cache for incremental updates - preserves object identity for unchanged messages
+    // This allows Compose to skip recomposition for items that haven't changed
+    private val messageCache = MessageCache()
+
+    // Signal-style BitSet pagination controller
+    private val pagingController: MessagePagingController by lazy {
+        val dataSource = RoomMessageDataSource(
+            chatGuids = mergedChatGuids,
+            messageDao = messageDao,
+            attachmentDao = attachmentDao,
+            handleDao = handleDao,
+            chatRepository = chatRepository,
+            messageRepository = messageRepository,
+            messageCache = messageCache,
+            syncTrigger = null // TODO: Implement sync trigger for server fetching
+        )
+        MessagePagingController(
+            dataSource = dataSource,
+            config = PagingConfig.Default,
+            scope = viewModelScope
+        )
+    }
+
+    // Sparse message list from paging controller - supports holes for unloaded positions
+    val sparseMessages: StateFlow<SparseMessageList> = pagingController.messages
+
+    // Total message count for scroll indicator
+    val totalMessageCount: StateFlow<Int> = pagingController.totalCount
 
     // Trigger to refresh messages (incremented when attachments are downloaded)
     private val _attachmentRefreshTrigger = MutableStateFlow(0)
@@ -173,6 +210,14 @@ class ChatViewModel @Inject constructor(
     // Draft persistence
     private var draftSaveJob: Job? = null
     private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
+
+    // iMessage availability checking state
+    private var serverConnectedSince: Long? = null // Timestamp when server became connected
+    private var iMessageAvailabilityCheckJob: Job? = null
+
+    // PERF: Search debounce - cancels previous search when new query arrives
+    private var searchJob: Job? = null
+    private val searchDebounceMs = 150L // Debounce search to avoid running on every keystroke
 
     // Scroll position tracking for state restoration
     private var lastScrollPosition: Int = 0
@@ -254,6 +299,13 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             delay(500) // Wait for loadChat() to populate participantPhone
             checkAndMaybeExitFallback()
+            // Check iMessage availability for the contact (for send mode switching)
+            checkIMessageAvailability()
+        }
+
+        // Initialize server stability tracking if already connected
+        if (socketService.connectionState.value == ConnectionState.CONNECTED) {
+            serverConnectedSince = System.currentTimeMillis()
         }
     }
 
@@ -572,9 +624,139 @@ class ChatViewModel @Inject constructor(
     private fun observeConnectionState() {
         viewModelScope.launch {
             socketService.connectionState.collect { state ->
-                _uiState.update { it.copy(isServerConnected = state == ConnectionState.CONNECTED) }
+                val isConnected = state == ConnectionState.CONNECTED
+                _uiState.update { it.copy(isServerConnected = isConnected) }
+
+                if (isConnected) {
+                    // Track when server became connected for stability check
+                    if (serverConnectedSince == null) {
+                        serverConnectedSince = System.currentTimeMillis()
+                        // Check if we can switch to iMessage after stability period
+                        scheduleIMessageModeCheck()
+                    }
+                } else {
+                    // Server disconnected - reset stability tracking and switch to SMS
+                    serverConnectedSince = null
+                    iMessageAvailabilityCheckJob?.cancel()
+                    _uiState.update { currentState ->
+                        currentState.copy(currentSendMode = ChatSendMode.SMS)
+                    }
+                }
             }
         }
+    }
+
+    /**
+     * Schedule a check to switch to iMessage mode after server stability period.
+     */
+    private fun scheduleIMessageModeCheck() {
+        iMessageAvailabilityCheckJob?.cancel()
+        iMessageAvailabilityCheckJob = viewModelScope.launch {
+            // Wait for server to be stable for required period
+            delay(SERVER_STABILITY_PERIOD_MS)
+
+            // Verify server is still connected
+            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
+                return@launch
+            }
+
+            // Check if contact supports iMessage
+            val contactAvailable = _uiState.value.contactIMessageAvailable
+            if (contactAvailable == true) {
+                _uiState.update { it.copy(currentSendMode = ChatSendMode.IMESSAGE) }
+                Log.d(TAG, "Switched to iMessage mode after ${SERVER_STABILITY_PERIOD_MS}ms stability")
+            }
+        }
+    }
+
+    /**
+     * Check iMessage availability for the current chat's contact(s).
+     * Called when chat opens - re-checks if cache is from previous session.
+     */
+    private fun checkIMessageAvailability() {
+        // Skip for local SMS chats and group chats
+        val currentState = _uiState.value
+        if (currentState.isLocalSmsChat || currentState.isGroup) {
+            Log.d(TAG, "Skipping iMessage check: localSms=${currentState.isLocalSmsChat}, group=${currentState.isGroup}")
+            return
+        }
+
+        val participantPhone = currentState.participantPhone ?: return
+        Log.d(TAG, "Starting iMessage availability check for: $participantPhone")
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isCheckingIMessageAvailability = true) }
+
+            try {
+                // Check if cache is from previous session (needs re-check on app restart)
+                val needsRecheck = iMessageAvailabilityService.isCacheFromPreviousSession(participantPhone)
+
+                val result = iMessageAvailabilityService.checkAvailability(
+                    address = participantPhone,
+                    forceRecheck = needsRecheck
+                )
+
+                result.fold(
+                    onSuccess = { available ->
+                        Log.d(TAG, "iMessage availability result for $participantPhone: $available")
+                        _uiState.update { state ->
+                            state.copy(
+                                contactIMessageAvailable = available,
+                                isCheckingIMessageAvailability = false,
+                                // Switch to iMessage immediately if server has been stable
+                                currentSendMode = if (available && isServerStable()) {
+                                    ChatSendMode.IMESSAGE
+                                } else {
+                                    state.currentSendMode
+                                }
+                            )
+                        }
+                        // If available but server not yet stable, the scheduled check will handle it
+                    },
+                    onFailure = { e ->
+                        Log.w(TAG, "iMessage availability check failed for $participantPhone", e)
+                        _uiState.update { state ->
+                            state.copy(
+                                contactIMessageAvailable = null,
+                                isCheckingIMessageAvailability = false
+                            )
+                        }
+                    }
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "Unexpected error checking iMessage availability", e)
+                _uiState.update { it.copy(isCheckingIMessageAvailability = false) }
+            }
+        }
+    }
+
+    /**
+     * Check if server has been stable for the required period.
+     */
+    private fun isServerStable(): Boolean {
+        val connectedSince = serverConnectedSince ?: return false
+        val stableFor = System.currentTimeMillis() - connectedSince
+        return stableFor >= SERVER_STABILITY_PERIOD_MS
+    }
+
+    /**
+     * Manually switch send mode (for UI toggle).
+     * Only allows switching to iMessage if contact supports it and server is stable.
+     */
+    fun setSendMode(mode: ChatSendMode) {
+        if (mode == ChatSendMode.IMESSAGE) {
+            // Validate before switching to iMessage
+            if (_uiState.value.contactIMessageAvailable != true) {
+                Log.w(TAG, "Cannot switch to iMessage: contact doesn't support it")
+                return
+            }
+            if (!isServerStable()) {
+                Log.w(TAG, "Cannot switch to iMessage: server not stable yet")
+                return
+            }
+        }
+        _uiState.update { it.copy(currentSendMode = mode) }
+        Log.d(TAG, "Send mode changed to: $mode")
     }
 
     private fun syncMessages() {
@@ -794,6 +976,17 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * Jump to a specific message, loading its position from the database if needed.
+     * This is paging-aware and works with sparse loading.
+     *
+     * @param guid The message GUID to jump to
+     * @return The position of the message, or null if not found
+     */
+    suspend fun jumpToMessage(guid: String): Int? {
+        return pagingController.jumpToMessage(guid)
+    }
+
+    /**
      * Highlight a message with an iOS-like blink animation.
      * Called after scrolling to a message from notification deep-link.
      */
@@ -874,291 +1067,46 @@ class ChatViewModel @Inject constructor(
     }
 
     private fun loadMessages() {
+        // Initialize Signal-style BitSet pagination controller
+        pagingController.initialize()
+
+        // Bridge sparse messages to uiState.messages for backwards compatibility with ChatScreen
+        // TODO: Phase 4 will update ChatScreen to use sparseMessages directly
         viewModelScope.launch {
-            // Observe participants from all chats in merged conversation
-            val participantsFlow = chatRepository.observeParticipantsForChats(mergedChatGuids)
-
-            // Use flatMapLatest to react to message limit changes for pagination
-            // When _messageLimit increases, automatically re-query with larger limit
-            // Also react to attachment refresh trigger (when downloads complete)
-            combine(_messageLimit, _attachmentRefreshTrigger) { limit, _ -> limit }
-            .flatMapLatest { limit ->
-                // For merged chats, observe messages from all chats
-                val messagesFlow = if (isMergedChat) {
-                    messageRepository.observeMessagesForChats(mergedChatGuids, limit = limit, offset = 0)
-                } else {
-                    messageRepository.observeMessagesForChat(chatGuid, limit = limit, offset = 0)
-                }
-
-                // Combine messages with participants to get sender names and avatar paths
-                combine(
-                    messagesFlow,
-                    participantsFlow
-                ) { messages, participants ->
-                // Build a map from handleId to displayName for quick lookup
-                val handleIdToName = participants.associate { it.id to it.displayName }.toMutableMap()
-
-                // Build a map by normalized address for looking up sender names from senderAddress
-                val addressToName = participants.associate { normalizeAddress(it.address) to it.displayName }
-
-                // Build a map by normalized address for looking up avatar paths
-                val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
-
-                // For messages with handleId not in participants, look up the handle and match by address
-                val missingHandleIds = messages
-                    .filter { !it.isFromMe && it.handleId != null && it.handleId !in handleIdToName }
-                    .mapNotNull { it.handleId }
-                    .distinct()
-
-                // PERF: Batch fetch missing handles in a single query instead of sequential calls
-                if (missingHandleIds.isNotEmpty()) {
-                    val handles = handleDao.getHandlesByIds(missingHandleIds)
-                    handles.forEach { handle ->
-                        // Try to find a participant with matching address
-                        val normalizedAddress = normalizeAddress(handle.address)
-                        val matchingName = addressToName[normalizedAddress]
-                        if (matchingName != null) {
-                            handleIdToName[handle.id] = matchingName
-                        } else {
-                            // No participant match - use handle's own displayName (address fallback)
-                            handleIdToName[handle.id] = handle.displayName
-                        }
-                    }
-                }
-
-                ParticipantMaps(messages, handleIdToName.toMap(), addressToName, addressToAvatarPath)
-            }
-                .distinctUntilChanged()
-                .map { (messages, handleIdToName, addressToName, addressToAvatarPath) ->
-                    // Separate actual reactions (iMessage tapbacks)
-                    val iMessageReactions = messages.filter { it.isReaction }
-
-                    // Detect SMS-style reaction messages (e.g., 'Loved "Hello"')
-                    val (smsReactionMessages, regularMessages) = messages
-                        .filter { !it.isReaction }
-                        .partition { msg ->
-                            msg.text?.let { parseSmsReaction(it) } != null
-                        }
-
-                    // PERF: Build map for O(1) exact match lookup
-                    // Prefix matching uses regionMatches to avoid string allocations
-                    val exactTextToGuid = mutableMapOf<String, String>()
-                    regularMessages.forEach { msg ->
-                        msg.text?.let { text ->
-                            exactTextToGuid[text] = msg.guid
-                        }
-                    }
-
-                    // Helper to find message by prefix match without allocating substrings
-                    fun findMessageByPrefix(searchText: String, prefixLen: Int): String? {
-                        if (searchText.length < 10) return null
-                        val compareLen = minOf(prefixLen, searchText.length)
-                        return regularMessages.find { msg ->
-                            msg.text?.let { text ->
-                                text.length >= compareLen &&
-                                text.regionMatches(0, searchText, 0, compareLen)
-                            } ?: false
-                        }?.guid
-                    }
-
-                    // Convert SMS reaction messages to synthetic reaction entries
-                    // Only include additions, not removals (removals are just filtered out)
-                    val smsReactions = smsReactionMessages.mapNotNull { msg ->
-                        val (tapback, quotedText, isRemoval) = parseSmsReaction(msg.text ?: "") ?: return@mapNotNull null
-                        // Skip removal messages - they just get filtered from regular messages
-                        if (isRemoval) return@mapNotNull null
-                        // Try exact match first (O(1)), then prefix match (O(n) but allocation-free)
-                        val searchText = if (quotedText.endsWith("...")) quotedText.dropLast(3) else quotedText
-                        val targetGuid = exactTextToGuid[quotedText]
-                            ?: findMessageByPrefix(searchText, 50)
-                            ?: findMessageByPrefix(searchText, 30)
-                        if (targetGuid != null) {
-                            // Create a synthetic reaction entry
-                            SyntheticReaction(
-                                targetMessageGuid = targetGuid,
-                                tapback = tapback,
-                                isFromMe = msg.isFromMe,
-                                senderName = null
-                            )
-                        } else null
-                    }
-
-                    // Group iMessage reactions by their associated message GUID
-                    val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
-
-                    // Group SMS reactions by target message GUID
-                    val smsReactionsByMessage = smsReactions.groupBy { it.targetMessageGuid }
-
-                    // Batch load all attachments in a single query
-                    val allAttachments = attachmentDao.getAttachmentsForMessages(
-                        regularMessages.map { it.guid }
-                    ).groupBy { it.messageGuid }
-
-                    // Collect all unique threadOriginatorGuids for reply preview loading
-                    val replyGuids = regularMessages
-                        .mapNotNull { it.threadOriginatorGuid }
-                        .distinct()
-
-                    // Build a map of guid -> message for quick lookup (from loaded messages)
-                    val loadedMessagesMap = regularMessages.associateBy { it.guid }
-
-                    // Batch fetch original messages that are not in the loaded set
-                    val missingGuids = replyGuids.filter { it !in loadedMessagesMap }
-                    val fetchedOriginals = if (missingGuids.isNotEmpty()) {
-                        messageRepository.getMessagesByGuids(missingGuids).associateBy { it.guid }
-                    } else {
-                        emptyMap()
-                    }
-
-                    // Combine loaded and fetched messages for reply preview lookup
-                    val allMessagesMap = loadedMessagesMap + fetchedOriginals
-
-                    // Build reply preview data map
-                    val replyPreviewMap = replyGuids.mapNotNull { originGuid ->
-                        val originalMessage = allMessagesMap[originGuid]
-                        if (originalMessage != null) {
-                            originGuid to ReplyPreviewData(
-                                originalGuid = originGuid,
-                                previewText = originalMessage.text?.take(50),
-                                senderName = resolveSenderName(
-                                    originalMessage.senderAddress,
-                                    originalMessage.handleId,
-                                    addressToName,
-                                    handleIdToName
-                                ),
-                                isFromMe = originalMessage.isFromMe,
-                                hasAttachment = originalMessage.hasAttachments,
-                                isNotLoaded = false
-                            )
-                        } else {
-                            // Original message not found - mark as not loaded
-                            originGuid to ReplyPreviewData(
-                                originalGuid = originGuid,
-                                previewText = null,
-                                senderName = null,
-                                isFromMe = false,
-                                hasAttachment = false,
-                                isNotLoaded = true
-                            )
-                        }
-                    }.toMap()
-
-                    regularMessages.map { message ->
-                        val messageReactions = reactionsByMessage[message.guid].orEmpty()
-                        val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
-                        val attachments = allAttachments[message.guid].orEmpty()
-                        val replyPreview = message.threadOriginatorGuid?.let { replyPreviewMap[it] }
-                        message.toUiModel(
-                            reactions = messageReactions,
-                            smsReactions = messageSmsReactions,
-                            attachments = attachments,
-                            handleIdToName = handleIdToName,
-                            addressToName = addressToName,
-                            addressToAvatarPath = addressToAvatarPath,
-                            replyPreview = replyPreview
+            pagingController.messages
+                .map { sparseList -> sparseList.toList() }
+                .conflate()
+                .collect { messageModels ->
+                    val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
+                    _uiState.update { state ->
+                        state.copy(
+                            isLoading = false,
+                            messages = messageModels,
+                            canLoadMore = messageModels.size < pagingController.totalCount.value
                         )
                     }
+                    PerformanceProfiler.end(collectId)
                 }
-            } // End flatMapLatest
-            .collect { messageModels ->
-                val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
-                _uiState.update { state ->
-                    state.copy(
-                        isLoading = false,
-                        messages = messageModels
-                    )
+        }
+
+        // Handle attachment refresh by refreshing the paging controller
+        viewModelScope.launch {
+            _attachmentRefreshTrigger.collect { trigger ->
+                if (trigger > 0) {
+                    Log.d(TAG, "Attachment refresh triggered, refreshing paging controller")
+                    pagingController.refresh()
                 }
-                PerformanceProfiler.end(collectId)
             }
         }
     }
 
     /**
-     * Parse an SMS-style reaction message.
-     * Returns the Tapback type, quoted message text, and whether it's a removal.
-     * Matches patterns like:
-     *   - Adding: Loved "Hello there!"
-     *   - Removing: Removed a heart from "Hello there!"
-     *   - Custom emoji (iOS 16.4+): Reacted with 😂 to "Hello" or Reacted with 😂 to an image
+     * Called by ChatScreen when scroll position changes.
+     * Notifies the paging controller to load data around the visible range.
      */
-    private fun parseSmsReaction(text: String): Triple<Tapback, String, Boolean>? {
-        val trimmedText = text.trim()
-
-        // Pattern for custom emoji reactions (iOS 16.4+):
-        // - "Reacted EMOJI to an image" (attachments)
-        // - "Reacted EMOJI to "quoted text"" (text messages)
-        // - "Reacted with EMOJI to ..." (alternate format)
-        // These are filtered out but can't be displayed as standard tapbacks since they're arbitrary emojis
-        val customEmojiPattern = Regex("""^Reacted( with)? .+ to (".*"|an? .+)$""")
-        if (customEmojiPattern.matches(trimmedText)) {
-            // Return LOVE as a placeholder - the message will be filtered from view
-            // The quoted text won't match anything, preventing duplicate display
-            return Triple(Tapback.LOVE, "__custom_emoji_reaction__", false)
-        }
-
-        // Pattern for adding reactions: <Verb> "<quoted text>"
-        val addPattern = Regex("""^(Loved|Liked|Disliked|Laughed at|Emphasized|Questioned)\s+"(.+)"$""")
-        addPattern.find(trimmedText)?.let { match ->
-            val verb = match.groupValues[1]
-            val quotedText = match.groupValues[2]
-            val tapback = when (verb) {
-                "Loved" -> Tapback.LOVE
-                "Liked" -> Tapback.LIKE
-                "Disliked" -> Tapback.DISLIKE
-                "Laughed at" -> Tapback.LAUGH
-                "Emphasized" -> Tapback.EMPHASIZE
-                "Questioned" -> Tapback.QUESTION
-                else -> return null
-            }
-            return Triple(tapback, quotedText, false)
-        }
-
-        // Pattern for removing reactions: Removed a <type> from "<quoted text>"
-        val removePattern = Regex("""^Removed a (heart|like|dislike|laugh|exclamation|question mark) from\s+"(.+)"$""")
-        removePattern.find(trimmedText)?.let { match ->
-            val type = match.groupValues[1]
-            val quotedText = match.groupValues[2]
-            val tapback = when (type) {
-                "heart" -> Tapback.LOVE
-                "like" -> Tapback.LIKE
-                "dislike" -> Tapback.DISLIKE
-                "laugh" -> Tapback.LAUGH
-                "exclamation" -> Tapback.EMPHASIZE
-                "question mark" -> Tapback.QUESTION
-                else -> return null
-            }
-            return Triple(tapback, quotedText, true)
-        }
-
-        return null
+    fun onScrollPositionChanged(firstVisibleIndex: Int, lastVisibleIndex: Int) {
+        pagingController.onDataNeededAroundIndex(firstVisibleIndex, lastVisibleIndex)
     }
-
-    /**
-     * Find the original message GUID that matches the quoted text from an SMS reaction.
-     */
-    private fun findOriginalMessageGuid(quotedText: String, messages: List<MessageEntity>): String? {
-        // Handle truncated quotes (ending with "...")
-        val searchText = if (quotedText.endsWith("...")) {
-            quotedText.dropLast(3)
-        } else {
-            quotedText
-        }
-
-        // Find a message that starts with or equals the quoted text
-        return messages.find { msg ->
-            msg.text?.startsWith(searchText) == true || msg.text == quotedText
-        }?.guid
-    }
-
-    /**
-     * Synthetic reaction parsed from SMS-style reaction text
-     */
-    private data class SyntheticReaction(
-        val targetMessageGuid: String,
-        val tapback: Tapback,
-        val isFromMe: Boolean,
-        val senderName: String?
-    )
 
     private fun syncMessagesFromServer() {
         viewModelScope.launch {
@@ -1244,9 +1192,9 @@ class ChatViewModel @Inject constructor(
      */
     private suspend fun directlyAddMessageToUi(messageDto: MessageDto, eventChatGuid: String) {
         // Do heavy work on background thread to avoid blocking main thread
-        val messageModel = withContext(Dispatchers.Default) {
+        val (messageModel, messageEntity, attachments) = withContext(Dispatchers.Default) {
             // Convert DTO to Entity
-            val messageEntity = messageDto.toMessageEntity(eventChatGuid)
+            val entity = messageDto.toMessageEntity(eventChatGuid)
 
             // Get participant info for sender name and avatar resolution
             val participants = chatRepository.observeParticipantsForChats(mergedChatGuids).first()
@@ -1255,22 +1203,32 @@ class ChatViewModel @Inject constructor(
             val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
             // Load attachments for this message
-            val attachments = if (messageEntity.hasAttachments) {
-                attachmentDao.getAttachmentsForMessage(messageEntity.guid)
+            val atts = if (entity.hasAttachments) {
+                attachmentDao.getAttachmentsForMessage(entity.guid)
             } else {
                 emptyList()
             }
 
             // Convert to UI model
-            messageEntity.toUiModel(
+            val model = entity.toUiModel(
                 reactions = emptyList(), // New messages typically don't have reactions yet
-                smsReactions = emptyList(),
-                attachments = attachments,
+                attachments = atts,
                 handleIdToName = handleIdToName,
                 addressToName = addressToName,
                 addressToAvatarPath = addressToAvatarPath
             )
+
+            Triple(model, entity, atts)
         }
+
+        // PERF: Add to cache so Room Flow will reuse this object instance
+        messageCache.put(
+            guid = messageModel.guid,
+            model = messageModel,
+            sourceHash = messageEntity.contentHash(),
+            reactionsHash = 0, // New messages have no reactions
+            attachmentsHash = attachments.attachmentsHash()
+        )
 
         // Add to UI state at the correct position (beginning for DESC sort)
         // Duplicate check MUST be inside update lambda to avoid race with Room Flow
@@ -1283,6 +1241,10 @@ class ChatViewModel @Inject constructor(
             android.util.Log.d("ChatViewModel", "Added message to UI, total: ${updatedMessages.size}")
             state.copy(messages = updatedMessages)
         }
+
+        // Notify paging controller about the new message
+        // This allows it to adjust positions and reload if needed
+        pagingController.onNewMessageInserted(messageDto.guid)
     }
 
     /**
@@ -1383,6 +1345,9 @@ class ChatViewModel @Inject constructor(
                 hasError = messageDto.error != 0
             )
 
+            // PERF: Update cache so Room Flow will reuse this object instance
+            messageCache.updateModel(messageDto.guid) { updatedMessage }
+
             val updatedMessages = state.messages.toMutableList()
             updatedMessages[existingIndex] = updatedMessage
             android.util.Log.d("ChatViewModel", "Updated message at index $existingIndex")
@@ -1446,28 +1411,11 @@ class ChatViewModel @Inject constructor(
 
         val messages = messagesFlow.first()
 
-        // Process messages same as in loadMessages()
+        // Separate reactions from regular messages
         val iMessageReactions = messages.filter { it.isReaction }
-        val (smsReactionMessages, regularMessages) = messages
-            .filter { !it.isReaction }
-            .partition { msg -> msg.text?.let { parseSmsReaction(it) } != null }
-
-        val smsReactions = smsReactionMessages.mapNotNull { msg ->
-            val (tapback, quotedText, isRemoval) = parseSmsReaction(msg.text ?: "") ?: return@mapNotNull null
-            if (isRemoval) return@mapNotNull null
-            val targetGuid = findOriginalMessageGuid(quotedText, regularMessages)
-            if (targetGuid != null) {
-                SyntheticReaction(
-                    targetMessageGuid = targetGuid,
-                    tapback = tapback,
-                    isFromMe = msg.isFromMe,
-                    senderName = null
-                )
-            } else null
-        }
+        val regularMessages = messages.filter { !it.isReaction }
 
         val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
-        val smsReactionsByMessage = smsReactions.groupBy { it.targetMessageGuid }
 
         // Batch load all attachments in a single query
         val allAttachments = attachmentDao.getAttachmentsForMessages(
@@ -1476,11 +1424,9 @@ class ChatViewModel @Inject constructor(
 
         val messageModels = regularMessages.map { message ->
             val messageReactions = reactionsByMessage[message.guid].orEmpty()
-            val messageSmsReactions = smsReactionsByMessage[message.guid].orEmpty()
             val attachments = allAttachments[message.guid].orEmpty()
             message.toUiModel(
                 reactions = messageReactions,
-                smsReactions = messageSmsReactions,
                 attachments = attachments,
                 handleIdToName = handleIdToName,
                 addressToName = addressToName,
@@ -1692,11 +1638,77 @@ class ChatViewModel @Inject constructor(
         attachmentPreloader.clearTracking()
         // Clear active chat from download queue so priority is reset
         attachmentDownloadQueue.setActiveChat(null)
+        // Dispose paging controller to cancel observers
+        pagingController.dispose()
+        // Clear message cache to free memory
+        messageCache.clear()
     }
 
     fun addAttachment(uri: Uri) {
-        _pendingAttachments.update { it + uri }
-        _uiState.update { it.copy(attachmentCount = _pendingAttachments.value.size) }
+        viewModelScope.launch {
+            val currentAttachments = _pendingAttachments.value
+            val currentSendMode = _uiState.value.currentSendMode
+            val isLocalSms = _uiState.value.isLocalSmsChat
+
+            // Determine delivery mode for validation
+            val deliveryMode = when {
+                isLocalSms -> MessageDeliveryMode.LOCAL_MMS
+                currentSendMode == ChatSendMode.SMS -> MessageDeliveryMode.LOCAL_MMS
+                currentSendMode == ChatSendMode.IMESSAGE -> MessageDeliveryMode.IMESSAGE
+                else -> MessageDeliveryMode.AUTO
+            }
+
+            // Get file size for new attachment
+            val newFileSize = try {
+                attachmentRepository.getAttachmentSize(uri) ?: 0L
+            } catch (e: Exception) {
+                Log.w(TAG, "Could not determine attachment size", e)
+                0L
+            }
+
+            // Calculate existing total size
+            val existingTotalSize = currentAttachments.sumOf { existingUri ->
+                try {
+                    attachmentRepository.getAttachmentSize(existingUri) ?: 0L
+                } catch (e: Exception) {
+                    0L
+                }
+            }
+
+            // Validate
+            val validation = attachmentLimitsProvider.validateAttachment(
+                sizeBytes = newFileSize,
+                deliveryMode = deliveryMode,
+                existingTotalSize = existingTotalSize,
+                existingCount = currentAttachments.size
+            )
+
+            // Update UI based on validation result
+            _pendingAttachments.update { it + uri }
+
+            val warning = when {
+                !validation.isValid -> AttachmentWarning(
+                    message = validation.message ?: "Attachment too large",
+                    isError = true,
+                    suggestCompression = validation.suggestCompression,
+                    affectedUri = uri
+                )
+                validation.warning != null -> AttachmentWarning(
+                    message = validation.warning,
+                    isError = false,
+                    suggestCompression = false,
+                    affectedUri = uri
+                )
+                else -> null
+            }
+
+            _uiState.update {
+                it.copy(
+                    attachmentCount = _pendingAttachments.value.size,
+                    attachmentWarning = warning
+                )
+            }
+        }
     }
 
     /**
@@ -1723,12 +1735,28 @@ class ChatViewModel @Inject constructor(
 
     fun removeAttachment(uri: Uri) {
         _pendingAttachments.update { it - uri }
-        _uiState.update { it.copy(attachmentCount = _pendingAttachments.value.size) }
+        // Clear warning if removing the attachment that caused the issue
+        val currentWarning = _uiState.value.attachmentWarning
+        val clearWarning = currentWarning?.affectedUri == uri
+        _uiState.update {
+            it.copy(
+                attachmentCount = _pendingAttachments.value.size,
+                attachmentWarning = if (clearWarning) null else currentWarning
+            )
+        }
     }
 
     fun clearAttachments() {
         _pendingAttachments.value = emptyList()
-        _uiState.update { it.copy(attachmentCount = 0) }
+        _uiState.update { it.copy(attachmentCount = 0, attachmentWarning = null) }
+    }
+
+    /**
+     * Dismiss the attachment warning without removing the attachment.
+     * Use for non-error warnings the user acknowledges.
+     */
+    fun dismissAttachmentWarning() {
+        _uiState.update { it.copy(attachmentWarning = null) }
     }
 
     fun sendMessage(effectId: String? = null) {
@@ -1762,9 +1790,16 @@ class ChatViewModel @Inject constructor(
             draftSaveJob?.cancel()
             chatRepository.updateDraftText(chatGuid, null)
 
-            // Determine delivery mode
+            // Determine delivery mode based on chat type and current send mode
+            val currentSendMode = _uiState.value.currentSendMode
             val deliveryMode = when {
+                // Local SMS chats always use local delivery
                 isLocalSms -> if (attachments.isNotEmpty()) MessageDeliveryMode.LOCAL_MMS else MessageDeliveryMode.LOCAL_SMS
+                // If user has selected SMS mode, use local SMS from Android
+                currentSendMode == ChatSendMode.SMS -> if (attachments.isNotEmpty()) MessageDeliveryMode.LOCAL_MMS else MessageDeliveryMode.LOCAL_SMS
+                // iMessage mode uses server
+                currentSendMode == ChatSendMode.IMESSAGE -> MessageDeliveryMode.IMESSAGE
+                // Fallback to auto
                 else -> MessageDeliveryMode.AUTO
             }
 
@@ -1782,9 +1817,10 @@ class ChatViewModel @Inject constructor(
                     Log.d(TAG, "Message queued successfully: $localId")
                     PerformanceProfiler.end(sendId, "queued")
 
-                    // Play sound for local SMS (optimistic - actual send happens via WorkManager)
+                    // Play sound for SMS delivery (optimistic - actual send happens via WorkManager)
                     // For iMessage, sound plays when delivery is confirmed via socket event
-                    if (isLocalSms) {
+                    val isSmsSend = isLocalSms || currentSendMode == ChatSendMode.SMS
+                    if (isSmsSend) {
                         soundManager.playSendSound()
                     }
                 },
@@ -1872,62 +1908,33 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Toggle a reaction on a message.
-     * For iMessage: Uses native tapback API (adds or removes reaction).
-     * For SMS (local or server): Sends a text message like 'Loved "message text"' that iPhones understand.
+     * Only works on server-origin messages (IMESSAGE or SERVER_SMS).
+     * Uses native tapback API via BlueBubbles server.
      */
     fun toggleReaction(messageGuid: String, tapback: Tapback) {
         val message = _uiState.value.messages.find { it.guid == messageGuid } ?: return
-        val isLocalSms = _uiState.value.isLocalSmsChat
-        val isServerSms = chatGuid.startsWith("SMS;", ignoreCase = true)  // Server text forwarding
+
+        // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
+        // Local SMS/MMS cannot have tapbacks
+        if (!message.isServerOrigin) {
+            return
+        }
+
         val isRemoving = tapback in message.myReactions
 
         viewModelScope.launch {
-            when {
-                isLocalSms -> {
-                    // Local SMS: send text reaction directly via Android SMS
-                    val originalText = message.text ?: return@launch
-                    val reactionText = if (isRemoving) {
-                        tapback.toSmsRemovalText(originalText)
-                    } else {
-                        tapback.toSmsText(originalText)
-                    }
-                    messageRepository.sendUnified(
-                        chatGuid = chatGuid,
-                        text = reactionText,
-                        deliveryMode = MessageDeliveryMode.LOCAL_SMS
-                    )
-                }
-                isServerSms -> {
-                    // Server SMS (text forwarding): send text reaction via BlueBubbles server
-                    // The server will forward this as SMS to the recipient
-                    val originalText = message.text ?: return@launch
-                    val reactionText = if (isRemoving) {
-                        tapback.toSmsRemovalText(originalText)
-                    } else {
-                        tapback.toSmsText(originalText)
-                    }
-                    messageRepository.sendUnified(
-                        chatGuid = chatGuid,
-                        text = reactionText,
-                        deliveryMode = MessageDeliveryMode.IMESSAGE  // Routes through server
-                    )
-                }
-                else -> {
-                    // iMessage: use the native reaction API
-                    if (isRemoving) {
-                        messageRepository.removeReaction(
-                            chatGuid = chatGuid,
-                            messageGuid = messageGuid,
-                            reaction = tapback.apiName
-                        )
-                    } else {
-                        messageRepository.sendReaction(
-                            chatGuid = chatGuid,
-                            messageGuid = messageGuid,
-                            reaction = tapback.apiName
-                        )
-                    }
-                }
+            if (isRemoving) {
+                messageRepository.removeReaction(
+                    chatGuid = chatGuid,
+                    messageGuid = messageGuid,
+                    reaction = tapback.apiName
+                )
+            } else {
+                messageRepository.sendReaction(
+                    chatGuid = chatGuid,
+                    messageGuid = messageGuid,
+                    reaction = tapback.apiName
+                )
             }
         }
     }
@@ -2013,6 +2020,7 @@ class ChatViewModel @Inject constructor(
             _uiState.update { it.copy(isLoadingMore = true) }
 
             val startTime = System.currentTimeMillis()
+            // Sync older messages from server to fill gaps in local Room database
             messageRepository.syncMessagesForChat(
                 chatGuid = chatGuid,
                 before = oldestMessage.dateCreated,
@@ -2020,11 +2028,11 @@ class ChatViewModel @Inject constructor(
             ).fold(
                 onSuccess = { messages ->
                     val elapsed = System.currentTimeMillis() - startTime
-                    Log.d("ChatScroll", "[VM] loadMoreMessages SUCCESS: fetched=${messages.size} messages in ${elapsed}ms")
-                    // Increase the message limit to include newly fetched older messages
-                    // This triggers flatMapLatest in loadMessages() to re-query with expanded limit
-                    _messageLimit.value += messages.size
-                    Log.d("ChatScroll", "[VM] loadMoreMessages: new messageLimit=${_messageLimit.value}")
+                    Log.d("ChatScroll", "[VM] loadMoreMessages SUCCESS: synced ${messages.size} messages in ${elapsed}ms")
+
+                    // Refresh paging controller to pick up newly synced messages
+                    // The paging controller will automatically load them based on scroll position
+                    pagingController.refresh()
 
                     _uiState.update { state ->
                         state.copy(
@@ -2117,16 +2125,27 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateSearchQuery(query: String) {
-        val messages = _uiState.value.messages
-        val matchIndices = if (query.isBlank()) {
-            emptyList()
-        } else {
-            messages.mapIndexedNotNull { index, message ->
-                if (message.text?.contains(query, ignoreCase = true) == true) index else null
+        // PERF: Cancel previous search job - only latest query matters
+        searchJob?.cancel()
+
+        // Update query immediately for responsive UI
+        _uiState.update { it.copy(searchQuery = query) }
+
+        // Debounce the actual search to avoid running on every keystroke
+        searchJob = viewModelScope.launch {
+            delay(searchDebounceMs)
+
+            val messages = _uiState.value.messages
+            val matchIndices = if (query.isBlank()) {
+                emptyList()
+            } else {
+                messages.mapIndexedNotNull { index, message ->
+                    if (message.text?.contains(query, ignoreCase = true) == true) index else null
+                }
             }
+            val currentIndex = if (matchIndices.isNotEmpty()) 0 else -1
+            _uiState.update { it.copy(searchMatchIndices = matchIndices, currentSearchMatchIndex = currentIndex) }
         }
-        val currentIndex = if (matchIndices.isNotEmpty()) 0 else -1
-        _uiState.update { it.copy(searchQuery = query, searchMatchIndices = matchIndices, currentSearchMatchIndex = currentIndex) }
     }
 
     fun navigateSearchUp() {
@@ -2228,52 +2247,40 @@ class ChatViewModel @Inject constructor(
 
     private fun MessageEntity.toUiModel(
         reactions: List<MessageEntity> = emptyList(),
-        smsReactions: List<SyntheticReaction> = emptyList(),
         attachments: List<AttachmentEntity> = emptyList(),
         handleIdToName: Map<Long, String> = emptyMap(),
         addressToName: Map<String, String> = emptyMap(),
         addressToAvatarPath: Map<String, String?> = emptyMap(),
         replyPreview: ReplyPreviewData? = null
     ): MessageUiModel {
-        // Build a set of removed reactions: (isFromMe, tapbackType)
-        // These are reactions that have been explicitly removed (3xxx codes)
-        val removedReactions = reactions
-            .filter { isReactionRemoval(it.associatedMessageType) }
-            .mapNotNull { reaction ->
-                val tapbackType = parseRemovalType(reaction.associatedMessageType)
-                tapbackType?.let { Pair(reaction.isFromMe, it) }
-            }
-            .toSet()
-
-        // Parse iMessage reactions into UI models, filtering out any that have been removed
-        val iMessageReactionUiModels = reactions.mapNotNull { reaction ->
-            val tapbackType = parseReactionType(reaction.associatedMessageType)
-            tapbackType?.let {
-                // Check if this reaction was later removed by the same sender
-                val removalKey = Pair(reaction.isFromMe, it)
-                if (removalKey in removedReactions) {
-                    null // This reaction was removed, don't show it
-                } else {
-                    ReactionUiModel(
-                        tapback = it,
-                        isFromMe = reaction.isFromMe,
-                        senderName = reaction.handleId?.let { handleIdToName[it] }
-                    )
+        // Filter reactions using old BlueBubbles Flutter logic:
+        // 1. Remove duplicate GUIDs
+        // 2. Sort by date (newest first)
+        // 3. Keep only the latest reaction per sender
+        // 4. Filter out removals (types starting with "-" or 3xxx codes)
+        val uniqueReactions = reactions
+            .distinctBy { it.guid }
+            .sortedByDescending { it.dateCreated }
+            .let { sorted ->
+                val seenSenders = mutableSetOf<Long>()
+                sorted.filter { reaction ->
+                    val senderId = if (reaction.isFromMe) 0L else (reaction.handleId ?: 0L)
+                    seenSenders.add(senderId) // Returns true if not already present
                 }
             }
-        }
+            .filter { !isReactionRemoval(it.associatedMessageType) }
 
-        // Convert SMS reactions to UI models
-        val smsReactionUiModels = smsReactions.map { reaction ->
-            ReactionUiModel(
-                tapback = reaction.tapback,
-                isFromMe = reaction.isFromMe,
-                senderName = reaction.senderName
-            )
+        // Parse filtered reactions into UI models
+        val allReactions = uniqueReactions.mapNotNull { reaction ->
+            val tapbackType = parseReactionType(reaction.associatedMessageType)
+            tapbackType?.let {
+                ReactionUiModel(
+                    tapback = it,
+                    isFromMe = reaction.isFromMe,
+                    senderName = reaction.handleId?.let { id -> handleIdToName[id] }
+                )
+            }
         }
-
-        // Combine all reactions
-        val allReactions = iMessageReactionUiModels + smsReactionUiModels
 
         // Get my reactions (for highlighting in the menu)
         val myReactions = allReactions
@@ -2296,7 +2303,10 @@ class ChatViewModel @Inject constructor(
                     totalBytes = attachment.totalBytes,
                     isSticker = attachment.isSticker,
                     blurhash = attachment.blurhash,
-                    thumbnailPath = attachment.thumbnailPath
+                    thumbnailPath = attachment.thumbnailPath,
+                    transferState = attachment.transferState,
+                    transferProgress = attachment.transferProgress,
+                    isOutgoing = attachment.isOutgoing
                 )
             }
 
@@ -2678,5 +2688,31 @@ data class ChatUiState(
     val isSnoozed: Boolean = false,
     val snoozeUntil: Long? = null,
     // Reply state
-    val replyingToGuid: String? = null
+    val replyingToGuid: String? = null,
+    // iMessage availability for send mode
+    val currentSendMode: ChatSendMode = ChatSendMode.SMS, // Default to SMS until availability confirmed
+    val contactIMessageAvailable: Boolean? = null, // null = unknown/checking, true = iMessage available
+    val isCheckingIMessageAvailability: Boolean = false, // True while checking server
+    // Attachment size warnings
+    val attachmentWarning: AttachmentWarning? = null // Warning/error for pending attachments
 )
+
+/**
+ * Warning or error for pending attachments.
+ */
+data class AttachmentWarning(
+    val message: String,
+    val isError: Boolean, // true = cannot send, false = can send with warning
+    val suggestCompression: Boolean = false,
+    val affectedUri: Uri? = null // Which attachment caused the issue (for removal)
+)
+
+/**
+ * Current send mode for the chat.
+ * Defaults to SMS for safety, switches to IMESSAGE when availability is confirmed
+ * and server has been stable for 30+ seconds.
+ */
+enum class ChatSendMode {
+    SMS,      // Send via SMS (default/fallback)
+    IMESSAGE  // Send via iMessage through BlueBubbles server
+}

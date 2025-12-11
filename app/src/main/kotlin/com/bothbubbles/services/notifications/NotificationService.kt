@@ -379,16 +379,27 @@ class NotificationService @Inject constructor(
             .setName(senderName ?: chatTitle)
             .setKey(senderAddress ?: chatGuid)
 
-        // Add avatar to sender Person - use contact photo or generate one
+        // Add avatar to sender Person - load contact photo as bitmap or generate one
+        // Note: content:// URIs can't be passed directly to notifications because the
+        // notification system doesn't have permission to read contact photos. We must
+        // load the photo as a bitmap first.
         val avatarIcon: IconCompat? = if (avatarUri != null) {
-            try {
-                IconCompat.createWithContentUri(android.net.Uri.parse(avatarUri))
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to load avatar for notification: $avatarUri", e)
-                null
+            // Try to load contact photo as bitmap
+            val photoBitmap = AvatarGenerator.loadContactPhotoBitmap(context, avatarUri, 128)
+            if (photoBitmap != null) {
+                IconCompat.createWithBitmap(photoBitmap)
+            } else {
+                // Photo load failed, generate fallback avatar
+                try {
+                    val displayName = senderName ?: chatTitle
+                    AvatarGenerator.generateIconCompat(displayName, 128)
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to generate avatar bitmap", e)
+                    null
+                }
             }
         } else {
-            // Generate avatar bitmap matching UI style (same colors/initials as Avatar.kt)
+            // No contact photo available, generate avatar
             try {
                 val displayName = senderName ?: chatTitle
                 AvatarGenerator.generateIconCompat(displayName, 128)

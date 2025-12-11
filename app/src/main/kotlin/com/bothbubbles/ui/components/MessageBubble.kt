@@ -265,6 +265,12 @@ data class MessageUiModel(
     /** True if this message is a reply to another message */
     val isReply: Boolean
         get() = threadOriginatorGuid != null
+
+    /** True if this message came from the BlueBubbles server (iMessage or server-forwarded SMS).
+     * These messages can have tapback reactions sent via the server API. */
+    val isServerOrigin: Boolean
+        get() = messageSource == MessageSource.IMESSAGE.name ||
+                messageSource == MessageSource.SERVER_SMS.name
 }
 
 data class AttachmentUiModel(
@@ -278,11 +284,35 @@ data class AttachmentUiModel(
     val totalBytes: Long? = null,
     val isSticker: Boolean = false,
     val blurhash: String? = null,
-    val thumbnailPath: String? = null
+    val thumbnailPath: String? = null,
+    // Transfer state fields for snappy rendering
+    val transferState: String = "DOWNLOADED",
+    val transferProgress: Float = 0f,
+    val isOutgoing: Boolean = false
 ) {
-    /** True if the attachment needs to be downloaded (no local file available) */
+    /** True if the attachment needs to be downloaded (inbound, no local file available) */
     val needsDownload: Boolean
-        get() = localPath == null
+        get() = !isOutgoing && localPath == null && transferState != "DOWNLOADED"
+
+    /** True if this attachment is currently uploading */
+    val isUploading: Boolean
+        get() = transferState == "UPLOADING"
+
+    /** True if this attachment is currently downloading */
+    val isDownloading: Boolean
+        get() = transferState == "DOWNLOADING"
+
+    /** True if this attachment is in any transfer state */
+    val isTransferring: Boolean
+        get() = isUploading || isDownloading
+
+    /** True if transfer has failed */
+    val hasFailed: Boolean
+        get() = transferState == "FAILED"
+
+    /** True if this attachment can be displayed (has local path or is outgoing with local file) */
+    val canDisplay: Boolean
+        get() = localPath != null || (isOutgoing && transferState != "FAILED")
 
     val isImage: Boolean
         get() = mimeType?.startsWith("image/") == true
@@ -339,6 +369,8 @@ fun MessageBubble(
     onReplyIndicatorClick: ((String) -> Unit)? = null,
     // Callback when swipe gesture starts/ends. Used to hide stickers during swipe.
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    // Callback for retrying a failed message. Pass message GUID when triggered.
+    onRetry: ((String) -> Unit)? = null,
     // Group chat avatar support
     isGroupChat: Boolean = false,
     // Show avatar only on last message in a consecutive group from same sender
@@ -411,6 +443,7 @@ fun MessageBubble(
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
+                    onRetry = onRetry,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -428,6 +461,7 @@ fun MessageBubble(
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
+                    onRetry = onRetry,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -453,7 +487,8 @@ private fun SegmentedMessageBubble(
     downloadingAttachments: Map<String, Float> = emptyMap(),
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
-    onSwipeStateChanged: ((Boolean) -> Unit)? = null
+    onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    onRetry: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -510,7 +545,8 @@ private fun SegmentedMessageBubble(
     }
 
     // Check if reply is available (iMessage only, not for placed stickers)
-    val canReply = isIMessage && onReply != null && !message.isPlacedSticker
+    // Disable swipe-to-reply for failed messages and placed stickers
+    val canReply = isIMessage && onReply != null && !message.isPlacedSticker && !message.hasError
 
     // Check if swipe/tap gestures should be enabled (disabled for placed stickers)
     val gesturesEnabled = !message.isPlacedSticker
@@ -830,6 +866,47 @@ private fun SegmentedMessageBubble(
                     }
                 }
 
+                // Retry button for failed outbound messages
+                if (message.hasError && message.isFromMe && onRetry != null) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.End)
+                            .padding(end = 4.dp, top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Not Delivered",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                        Surface(
+                            onClick = { onRetry(message.guid) },
+                            color = MaterialTheme.colorScheme.errorContainer,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.height(24.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "Retry",
+                                    tint = MaterialTheme.colorScheme.error,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "Retry",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.error
+                                )
+                            }
+                        }
+                    }
+                }
+
                 // Status legend dialog
                 if (showStatusLegend) {
                     DeliveryStatusLegend(
@@ -1062,7 +1139,8 @@ private fun SimpleBubbleContent(
     downloadingAttachments: Map<String, Float> = emptyMap(),
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
-    onSwipeStateChanged: ((Boolean) -> Unit)? = null
+    onSwipeStateChanged: ((Boolean) -> Unit)? = null,
+    onRetry: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -1115,7 +1193,8 @@ private fun SimpleBubbleContent(
     }
 
     // Check if reply is available (iMessage only, not for placed stickers)
-    val canReply = isIMessage && onReply != null && !message.isPlacedSticker
+    // Disable swipe-to-reply for failed messages and placed stickers
+    val canReply = isIMessage && onReply != null && !message.isPlacedSticker && !message.hasError
 
     // Check if swipe/tap gestures should be enabled (disabled for placed stickers)
     val gesturesEnabled = !message.isPlacedSticker
@@ -1382,25 +1461,26 @@ private fun SimpleBubbleContent(
                         )
                     ) {
                         // Attachments
-                        if (message.attachments.isNotEmpty()) {
-                            Column(
-                                verticalArrangement = Arrangement.spacedBy(4.dp),
-                                modifier = Modifier.padding(bottom = if (message.text.isNullOrBlank()) 0.dp else 8.dp)
-                            ) {
-                                message.attachments.forEach { attachment ->
-                                    val isDownloading = attachment.guid in downloadingAttachments
-                                    val downloadProgress = downloadingAttachments[attachment.guid] ?: 0f
-                                    AttachmentContent(
-                                        attachment = attachment,
-                                        isFromMe = message.isFromMe,
-                                        onMediaClick = onMediaClick,
-                                        onDownloadClick = onDownloadClick,
-                                        isDownloading = isDownloading,
-                                        downloadProgress = downloadProgress
-                                    )
-                                }
-                            }
-                        }
+                        // TEMPORARILY DISABLED: Skip attachment rendering to focus on text-only performance
+                        // if (message.attachments.isNotEmpty()) {
+                        //     Column(
+                        //         verticalArrangement = Arrangement.spacedBy(4.dp),
+                        //         modifier = Modifier.padding(bottom = if (message.text.isNullOrBlank()) 0.dp else 8.dp)
+                        //     ) {
+                        //         message.attachments.forEach { attachment ->
+                        //             val isDownloading = attachment.guid in downloadingAttachments
+                        //             val downloadProgress = downloadingAttachments[attachment.guid] ?: 0f
+                        //             AttachmentContent(
+                        //                 attachment = attachment,
+                        //                 isFromMe = message.isFromMe,
+                        //                 onMediaClick = onMediaClick,
+                        //                 onDownloadClick = onDownloadClick,
+                        //                 isDownloading = isDownloading,
+                        //                 downloadProgress = downloadProgress
+                        //             )
+                        //         }
+                        //     }
+                        // }
 
                         // Subject line (bold, before message text)
                         message.subject?.let { subject ->
@@ -1599,12 +1679,13 @@ private fun SimpleBubbleContent(
                         }
 
                         // Link preview for the first URL in the message
-                        firstUrl?.let { detectedUrl ->
-                            LinkPreview(
-                                url = detectedUrl.url,
-                                isFromMe = message.isFromMe
-                            )
-                        }
+                        // TEMPORARILY DISABLED: Skip link preview rendering to focus on text-only performance
+                        // firstUrl?.let { detectedUrl ->
+                        //     LinkPreview(
+                        //         url = detectedUrl.url,
+                        //         isFromMe = message.isFromMe
+                        //     )
+                        // }
                     }
                 }
 
@@ -1656,6 +1737,47 @@ private fun SimpleBubbleContent(
                         hasError = message.hasError,
                         onClick = { showStatusLegend = true }
                     )
+                }
+            }
+
+            // Retry button for failed outbound messages
+            if (message.hasError && message.isFromMe && onRetry != null) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(end = 4.dp, top = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Not Delivered",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error
+                    )
+                    Surface(
+                        onClick = { onRetry(message.guid) },
+                        color = MaterialTheme.colorScheme.errorContainer,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.height(24.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Retry",
+                                tint = MaterialTheme.colorScheme.error,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = "Retry",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                        }
+                    }
                 }
             }
 

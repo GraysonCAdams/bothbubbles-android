@@ -89,26 +89,54 @@ fun SyncSettingsScreen(
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = syncState.stage,
-                                    style = MaterialTheme.typography.bodyMedium
+                        // iMessage progress (hide when complete)
+                        if (!syncState.iMessageComplete) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
                                 )
-                                Spacer(modifier = Modifier.height(4.dp))
-                                LinearProgressIndicator(
-                                    progress = { syncState.progress },
-                                    modifier = Modifier.fillMaxWidth()
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "iMessage: ${(syncState.iMessageProgress * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = { syncState.iMessageProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
+                            }
+                        }
+
+                        // SMS progress (show only if running and not complete)
+                        if (syncState.smsTotal > 0 && !syncState.smsComplete) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp
                                 )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "SMS: ${syncState.smsCurrent}/${syncState.smsTotal}",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    LinearProgressIndicator(
+                                        progress = { syncState.smsProgress },
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                }
                             }
                         }
                     }

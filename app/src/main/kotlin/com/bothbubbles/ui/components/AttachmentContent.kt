@@ -73,6 +73,7 @@ import com.bothbubbles.util.rememberBlurhashBitmap
  *                        streaming from webUrl.
  * @param isDownloading Whether this attachment is currently being downloaded
  * @param downloadProgress Download progress (0.0 to 1.0) when isDownloading is true
+ * @param uploadProgress Upload progress (0.0 to 1.0) for outbound attachments being uploaded
  */
 @Composable
 fun AttachmentContent(
@@ -82,14 +83,22 @@ fun AttachmentContent(
     modifier: Modifier = Modifier,
     onDownloadClick: ((String) -> Unit)? = null,
     isDownloading: Boolean = false,
-    downloadProgress: Float = 0f
+    downloadProgress: Float = 0f,
+    uploadProgress: Float = 0f
 ) {
-    // Show placeholder if manual download mode and attachment needs download
+    // Show placeholder for inbound attachments that need download
+    // This provides blurhash preview while downloading, regardless of auto/manual mode
     // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
-    val showPlaceholder = attachment.needsDownload && (onDownloadClick != null || attachment.isSticker)
+    val showPlaceholder = attachment.needsDownload || attachment.isDownloading ||
+        (attachment.isSticker && attachment.localPath == null)
 
-    // For stickers in auto-download mode, show as "downloading" even if not actively downloading yet
-    val effectiveIsDownloading = isDownloading || (attachment.isSticker && attachment.needsDownload && onDownloadClick == null)
+    // Determine effective downloading state
+    val effectiveIsDownloading = isDownloading || attachment.isDownloading ||
+        (attachment.isSticker && attachment.localPath == null && onDownloadClick == null)
+
+    // Determine if we're uploading (outbound, not yet uploaded)
+    val isUploading = attachment.isUploading
+    val effectiveUploadProgress = if (isUploading) uploadProgress.coerceIn(0f, 1f) else 0f
 
     when {
         showPlaceholder -> AttachmentPlaceholder(
@@ -103,17 +112,23 @@ fun AttachmentContent(
         attachment.isGif -> GifAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
-            modifier = modifier
+            modifier = modifier,
+            isUploading = isUploading,
+            uploadProgress = effectiveUploadProgress
         )
         attachment.isImage -> ImageAttachment(
             attachment = attachment,
             onClick = { onMediaClick(attachment.guid) },
-            modifier = modifier
+            modifier = modifier,
+            isUploading = isUploading,
+            uploadProgress = effectiveUploadProgress
         )
         attachment.isVideo -> InlineVideoAttachment(
             attachment = attachment,
             onFullscreenClick = { onMediaClick(attachment.guid) },
-            modifier = modifier
+            modifier = modifier,
+            isUploading = isUploading,
+            uploadProgress = effectiveUploadProgress
         )
         attachment.isAudio -> AudioAttachment(
             attachment = attachment,
@@ -375,7 +390,9 @@ private fun AttachmentPlaceholder(
 private fun ImageAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isUploading: Boolean = false,
+    uploadProgress: Float = 0f
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
@@ -489,6 +506,45 @@ private fun ImageAttachment(
                 }
             }
         }
+
+        // Upload progress overlay for outbound attachments
+        AnimatedVisibility(
+            visible = isUploading,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150))
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (uploadProgress > 0f) {
+                            CircularProgressIndicator(
+                                progress = { uploadProgress },
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -500,7 +556,9 @@ private fun ImageAttachment(
 private fun GifAttachment(
     attachment: AttachmentUiModel,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isUploading: Boolean = false,
+    uploadProgress: Float = 0f
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
@@ -625,6 +683,45 @@ private fun GifAttachment(
                 }
             }
         }
+
+        // Upload progress overlay for outbound attachments
+        AnimatedVisibility(
+            visible = isUploading,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150))
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.4f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (uploadProgress > 0f) {
+                            CircularProgressIndicator(
+                                progress = { uploadProgress },
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -636,7 +733,9 @@ private fun GifAttachment(
 private fun InlineVideoAttachment(
     attachment: AttachmentUiModel,
     onFullscreenClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isUploading: Boolean = false,
+    uploadProgress: Float = 0f
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -820,6 +919,44 @@ private fun InlineVideoAttachment(
             }
         }
 
+        // Upload progress overlay for outbound attachments
+        AnimatedVisibility(
+            visible = isUploading,
+            enter = fadeIn(tween(150)),
+            exit = fadeOut(tween(150))
+        ) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(Color.Black.copy(alpha = 0.5f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    shape = CircleShape,
+                    color = Color.Black.copy(alpha = 0.6f),
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        if (uploadProgress > 0f) {
+                            CircularProgressIndicator(
+                                progress = { uploadProgress },
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        } else {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(40.dp),
+                                strokeWidth = 3.dp,
+                                color = Color.White,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

@@ -12,9 +12,7 @@ import io.socket.client.Socket
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -136,18 +134,13 @@ class SocketService @Inject constructor(
         private const val EVENT_SCHEDULED_MESSAGE_ERROR = "scheduled-message-error"
         private const val EVENT_SCHEDULED_MESSAGE_DELETED = "scheduled-message-deleted"
 
-        // Retry configuration
-        private const val INITIAL_RETRY_DELAY_MS = 1000L
-        private const val MAX_RETRY_DELAY_MS = 30000L
-        private const val RETRY_DELAY_MULTIPLIER = 1.5
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var socket: Socket? = null
-    private var retryJob: Job? = null
-    private var currentRetryDelay = INITIAL_RETRY_DELAY_MS
     private var retryCount = 0
+    private var retryJob: kotlinx.coroutines.Job? = null
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -218,10 +211,12 @@ class SocketService @Inject constructor(
 
                 val options = IO.Options().apply {
                     forceNew = true
+                    // Use Socket.IO's built-in reconnection with exponential backoff
                     reconnection = true
                     reconnectionAttempts = Int.MAX_VALUE
-                    reconnectionDelay = 1000
-                    reconnectionDelayMax = 5000
+                    reconnectionDelay = 5000        // Start at 5 seconds
+                    reconnectionDelayMax = 60000    // Cap at 60 seconds
+                    randomizationFactor = 0.5       // Add jitter to prevent thundering herd
                     timeout = 20000
                     // Pass authentication via query string (like official BlueBubbles app)
                     query = "guid=$encodedPassword"
@@ -285,30 +280,8 @@ class SocketService @Inject constructor(
                 isConnecting = false
                 _connectionState.value = ConnectionState.ERROR
                 _events.tryEmit(SocketEvent.Error(e.message ?: "Connection failed"))
-                scheduleRetry()
+                // Socket.IO handles reconnection automatically with exponential backoff
             }
-        }
-    }
-
-    /**
-     * Schedule a retry with exponential backoff
-     */
-    private fun scheduleRetry() {
-        retryJob?.cancel()
-        retryJob = scope.launch {
-            retryCount++
-            _retryAttempt.value = retryCount
-            Log.d(TAG, "Scheduling retry #$retryCount in ${currentRetryDelay}ms")
-
-            delay(currentRetryDelay)
-
-            // Increase delay for next retry (exponential backoff)
-            currentRetryDelay = (currentRetryDelay * RETRY_DELAY_MULTIPLIER)
-                .toLong()
-                .coerceAtMost(MAX_RETRY_DELAY_MS)
-
-            // Attempt reconnection
-            connect()
         }
     }
 
@@ -316,9 +289,7 @@ class SocketService @Inject constructor(
      * Reset retry state (called on successful connection)
      */
     private fun resetRetryState() {
-        retryJob?.cancel()
         retryCount = 0
-        currentRetryDelay = INITIAL_RETRY_DELAY_MS
         _retryAttempt.value = 0
     }
 
@@ -326,7 +297,6 @@ class SocketService @Inject constructor(
      * Disconnect from the server
      */
     fun disconnect() {
-        retryJob?.cancel()
         socket?.disconnect()
         socket?.off()
         socket = null
@@ -411,8 +381,7 @@ class SocketService @Inject constructor(
         isConnecting = false
         _connectionState.value = ConnectionState.DISCONNECTED
         developerEventLog.get().logSocketEvent("DISCONNECTED", args.firstOrNull()?.toString())
-        // Schedule retry on unexpected disconnect
-        scheduleRetry()
+        // Socket.IO handles reconnection automatically with exponential backoff
     }
 
     private val onConnectError = Emitter.Listener { args ->
@@ -422,8 +391,7 @@ class SocketService @Inject constructor(
         _connectionState.value = ConnectionState.ERROR
         _events.tryEmit(SocketEvent.Error(error?.toString() ?: "Connection error"))
         developerEventLog.get().logSocketEvent("ERROR", error?.toString())
-        // Schedule retry on connection error
-        scheduleRetry()
+        // Socket.IO handles reconnection automatically with exponential backoff
     }
 
     private val onNewMessage = Emitter.Listener { args ->

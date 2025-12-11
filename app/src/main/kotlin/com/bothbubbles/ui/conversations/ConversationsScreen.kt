@@ -95,14 +95,12 @@ import com.bothbubbles.R
 import com.bothbubbles.services.categorization.MessageCategory
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.ui.components.Avatar
-import com.bothbubbles.ui.components.AvatarWithMessageType
 import com.bothbubbles.ui.components.ConnectionBannerState
 import com.bothbubbles.ui.components.ConnectionStatusBanner
 import com.bothbubbles.ui.components.SmsBannerState
 import com.bothbubbles.ui.components.SmsStatusBanner
 import com.bothbubbles.ui.components.ContactInfo
 import com.bothbubbles.ui.components.ContactQuickActionsPopup
-import com.bothbubbles.ui.components.getMessageSourceType
 import com.bothbubbles.ui.components.GroupAvatar
 import com.bothbubbles.ui.components.SnoozeDurationDialog
 import com.bothbubbles.ui.components.SwipeActionType
@@ -1058,24 +1056,18 @@ fun ConversationsScreen(
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Spacer(modifier = Modifier.height(12.dp))
-                            AvatarWithMessageType(
-                                messageSourceType = getMessageSourceType(conversation.lastMessageSource),
-                                backgroundColor = MaterialTheme.colorScheme.surfaceContainerLow,
-                                size = 56.dp
-                            ) {
-                                if (conversation.isGroup) {
-                                    GroupAvatar(
-                                        names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                                        avatarPaths = conversation.participantAvatarPaths,
-                                        size = 56.dp
-                                    )
-                                } else {
-                                    Avatar(
-                                        name = conversation.displayName,
-                                        avatarPath = conversation.avatarPath,
-                                        size = 56.dp
-                                    )
-                                }
+                            if (conversation.isGroup) {
+                                GroupAvatar(
+                                    names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                                    avatarPaths = conversation.participantAvatarPaths,
+                                    size = 56.dp
+                                )
+                            } else {
+                                Avatar(
+                                    name = conversation.displayName,
+                                    avatarPath = conversation.avatarPath,
+                                    size = 56.dp
+                                )
                             }
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
@@ -2293,27 +2285,21 @@ private fun GoogleStyleConversationTile(
                         }
                     }
                 } else {
-                    AvatarWithMessageType(
-                        messageSourceType = getMessageSourceType(conversation.lastMessageSource),
-                        backgroundColor = MaterialTheme.colorScheme.surface,
-                        size = 56.dp
-                    ) {
-                        if (conversation.isGroup) {
-                            GroupAvatar(
-                                names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                                avatarPaths = conversation.participantAvatarPaths,
-                                size = 56.dp
-                            )
-                        } else {
-                            Avatar(
-                                name = conversation.rawDisplayName,
-                                avatarPath = conversation.avatarPath,
-                                size = 56.dp
-                            )
-                        }
+                    if (conversation.isGroup) {
+                        GroupAvatar(
+                            names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                            avatarPaths = conversation.participantAvatarPaths,
+                            size = 56.dp
+                        )
+                    } else {
+                        Avatar(
+                            name = conversation.rawDisplayName,
+                            avatarPath = conversation.avatarPath,
+                            size = 56.dp
+                        )
                     }
 
-                    // Typing indicator badge (replaces iMessage/SMS badge position when typing)
+                    // Typing indicator badge
                     if (conversation.isTyping) {
                         Surface(
                             color = MaterialTheme.colorScheme.surface,
@@ -2814,7 +2800,7 @@ private fun PinnedConversationItem(
         // Avatar with selection checkmark
         // Outer Box sized for avatar + badge overflow (72dp + 4dp)
         Box(modifier = Modifier.size(76.dp)) {
-            // Avatar content - no clip here, AvatarWithMessageType handles its own clipping
+            // Avatar content
             Box(
                 modifier = Modifier
                     .size(76.dp) // Size includes badge overflow
@@ -2840,26 +2826,18 @@ private fun PinnedConversationItem(
                         }
                     }
                 } else {
-                    // Use same indicator size as conversation list (20dp) for consistent badge sizing
-                    AvatarWithMessageType(
-                        messageSourceType = getMessageSourceType(conversation.lastMessageSource),
-                        backgroundColor = MaterialTheme.colorScheme.surface,
-                        size = 72.dp,
-                        indicatorSizeOverride = 20.dp
-                    ) {
-                        if (conversation.isGroup) {
-                            GroupAvatar(
-                                names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                                avatarPaths = conversation.participantAvatarPaths,
-                                size = 72.dp
-                            )
-                        } else {
-                            Avatar(
-                                name = conversation.displayName,
-                                avatarPath = conversation.avatarPath,
-                                size = 72.dp
-                            )
-                        }
+                    if (conversation.isGroup) {
+                        GroupAvatar(
+                            names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                            avatarPaths = conversation.participantAvatarPaths,
+                            size = 72.dp
+                        )
+                    } else {
+                        Avatar(
+                            name = conversation.displayName,
+                            avatarPath = conversation.avatarPath,
+                            size = 72.dp
+                        )
                     }
                 }
             }

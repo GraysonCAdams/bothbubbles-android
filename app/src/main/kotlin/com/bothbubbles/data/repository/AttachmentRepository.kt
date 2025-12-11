@@ -2,6 +2,8 @@ package com.bothbubbles.data.repository
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
@@ -395,6 +397,43 @@ class AttachmentRepository @Inject constructor(
      */
     suspend fun getDownloadedSize(): Long = withContext(Dispatchers.IO) {
         attachmentsDir.listFiles()?.sumOf { it.length() } ?: 0L
+    }
+
+    /**
+     * Get the size of an attachment from a content URI.
+     * Used for validating attachment sizes before sending.
+     *
+     * @param uri Content URI of the attachment
+     * @return Size in bytes, or null if unable to determine
+     */
+    suspend fun getAttachmentSize(uri: Uri): Long? = withContext(Dispatchers.IO) {
+        try {
+            // Try to get size from content resolver (works for content:// URIs)
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                        return@withContext cursor.getLong(sizeIndex)
+                    }
+                }
+            }
+
+            // Fallback: open stream and read length
+            context.contentResolver.openInputStream(uri)?.use { input ->
+                var size = 0L
+                val buffer = ByteArray(8192)
+                var bytesRead: Int
+                while (input.read(buffer).also { bytesRead = it } != -1) {
+                    size += bytesRead
+                }
+                return@withContext size
+            }
+
+            null
+        } catch (e: Exception) {
+            Log.w(TAG, "Could not determine size for $uri", e)
+            null
+        }
     }
 
     // ===== Upload Operations =====

@@ -214,9 +214,8 @@ class SetupViewModel @Inject constructor(
     }
 
     // Sync settings
-    fun updateMessagesPerChat(count: Int) {
-        _uiState.update { it.copy(messagesPerChat = count) }
-    }
+    // NOTE: messagesPerChat is now a fixed optimal value (500) for Signal-style pagination.
+    // Users no longer select this - we load enough for context + search, and fetch more on-demand.
 
     fun updateSkipEmptyChats(skip: Boolean) {
         _uiState.update { it.copy(skipEmptyChats = skip) }
@@ -461,13 +460,20 @@ data class SetupUiState(
     val smsEnabled: Boolean = true,
     val smsCapabilityStatus: SmsCapabilityStatus? = null,
 
-    // Sync settings
-    val messagesPerChat: Int = 25,
+    // Sync settings (messagesPerChat is fixed for Signal-style pagination)
+    val messagesPerChat: Int = 500,  // Optimal for on-demand pagination - fetch more when scrolling
     val skipEmptyChats: Boolean = true,
     val isSyncing: Boolean = false,
     val syncProgress: Float = 0f,
     val isSyncComplete: Boolean = false,
     val syncError: String? = null,
+    // Separate progress tracking for iMessage and SMS
+    val iMessageProgress: Float = 0f,
+    val iMessageComplete: Boolean = false,
+    val smsProgress: Float = 0f,
+    val smsComplete: Boolean = false,
+    val smsCurrent: Int = 0,
+    val smsTotal: Int = 0,
 
     // ML model settings
     val mlModelDownloaded: Boolean = false,

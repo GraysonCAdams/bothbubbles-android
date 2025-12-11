@@ -1,0 +1,260 @@
+package com.bothbubbles.ui.chat.paging
+
+import android.util.Log
+import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.ui.chat.MessageCache
+import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.ReplyPreviewData
+import com.bothbubbles.ui.components.normalizeAddress
+import com.bothbubbles.ui.components.resolveSenderName
+import com.bothbubbles.ui.components.toUiModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
+
+/**
+ * Room-backed implementation of MessageDataSource for Signal-style pagination.
+ * Handles loading messages by position and transforming them to UI models.
+ *
+ * This class moves the transformation logic from ChatViewModel into a reusable
+ * data source that can be used by MessagePagingController.
+ */
+class RoomMessageDataSource(
+    private val chatGuids: List<String>,
+    private val messageDao: MessageDao,
+    private val attachmentDao: AttachmentDao,
+    private val handleDao: HandleDao,
+    private val chatRepository: ChatRepository,
+    private val messageRepository: MessageRepository,
+    private val messageCache: MessageCache,
+    private val syncTrigger: SyncTrigger?
+) : MessageDataSource {
+
+    companion object {
+        private const val TAG = "RoomMessageDataSource"
+    }
+
+    // Cached participant data for sender name resolution
+    private var cachedParticipants: List<HandleEntity> = emptyList()
+    private var handleIdToName: Map<Long, String> = emptyMap()
+    private var addressToName: Map<String, String> = emptyMap()
+    private var addressToAvatarPath: Map<String, String?> = emptyMap()
+
+    override suspend fun size(): Int {
+        return messageDao.getMessageCountForChats(chatGuids)
+    }
+
+    override fun observeSize(): Flow<Int> {
+        return messageDao.observeMessageCountForChats(chatGuids)
+    }
+
+    override suspend fun load(start: Int, count: Int): List<MessageUiModel> {
+        Log.d(TAG, "Loading messages: start=$start, count=$count")
+
+        // Fetch messages by position
+        val entities = messageDao.getMessagesByPosition(chatGuids, count, start)
+        Log.d(TAG, "Loaded ${entities.size} entities from Room")
+
+        // If we got fewer than expected, might need to sync from server
+        if (entities.size < count && syncTrigger != null) {
+            Log.d(TAG, "Got fewer messages than expected, triggering sync")
+            syncTrigger.requestSyncForRange(chatGuids, start, count)
+        }
+
+        if (entities.isEmpty()) {
+            return emptyList()
+        }
+
+        // Ensure participant data is loaded
+        ensureParticipantsLoaded()
+
+        // Transform to UI models
+        return transformToUiModels(entities)
+    }
+
+    override suspend fun loadByKey(guid: String): MessageUiModel? {
+        val entity = messageDao.getMessageByGuid(guid) ?: return null
+
+        // Ensure participant data is loaded
+        ensureParticipantsLoaded()
+
+        // Transform single entity
+        return transformToUiModels(listOf(entity)).firstOrNull()
+    }
+
+    override suspend fun getKey(position: Int): String? {
+        val entities = messageDao.getMessagesByPosition(chatGuids, 1, position)
+        return entities.firstOrNull()?.guid
+    }
+
+    override suspend fun getMessagePosition(guid: String): Int {
+        // First check if the message exists
+        val message = messageDao.getMessageByGuid(guid) ?: return -1
+
+        // Verify the message belongs to our chat(s)
+        if (message.chatGuid !in chatGuids) return -1
+
+        // Get position using the DAO query (counts messages newer than target)
+        return messageDao.getMessagePosition(chatGuids, guid)
+    }
+
+    /**
+     * Refresh participant data from Room.
+     * Call this when participants might have changed.
+     */
+    suspend fun refreshParticipants() {
+        loadParticipants()
+    }
+
+    private suspend fun ensureParticipantsLoaded() {
+        if (cachedParticipants.isEmpty()) {
+            loadParticipants()
+        }
+    }
+
+    private suspend fun loadParticipants() {
+        cachedParticipants = chatRepository.observeParticipantsForChats(chatGuids).first()
+
+        // Build lookup maps
+        handleIdToName = cachedParticipants.associate { it.id to it.displayName }.toMutableMap()
+        addressToName = cachedParticipants.associate { normalizeAddress(it.address) to it.displayName }
+        addressToAvatarPath = cachedParticipants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+
+        Log.d(TAG, "Loaded ${cachedParticipants.size} participants")
+    }
+
+    /**
+     * Transform message entities to UI models.
+     * This is the core transformation logic moved from ChatViewModel.
+     */
+    private suspend fun transformToUiModels(entities: List<MessageEntity>): List<MessageUiModel> {
+        if (entities.isEmpty()) return emptyList()
+
+        // Separate actual reactions (iMessage tapbacks) from regular messages
+        val iMessageReactions = entities.filter { it.isReaction }
+        val regularMessages = entities.filter { !it.isReaction }
+
+        // Group iMessage reactions by their associated message GUID
+        val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
+
+        // Batch load all attachments in a single query
+        val allAttachments = attachmentDao.getAttachmentsForMessages(
+            regularMessages.map { it.guid }
+        ).groupBy { it.messageGuid }
+
+        // Build reply preview data
+        val replyPreviewMap = buildReplyPreviewMap(regularMessages)
+
+        // Fetch missing handles for sender name resolution
+        val mutableHandleIdToName = handleIdToName.toMutableMap()
+        val missingHandleIds = regularMessages
+            .filter { !it.isFromMe && it.handleId != null && it.handleId !in mutableHandleIdToName }
+            .mapNotNull { it.handleId }
+            .distinct()
+
+        if (missingHandleIds.isNotEmpty()) {
+            val handles = handleDao.getHandlesByIds(missingHandleIds)
+            handles.forEach { handle ->
+                val normalizedAddress = normalizeAddress(handle.address)
+                val matchingName = addressToName[normalizedAddress]
+                if (matchingName != null) {
+                    mutableHandleIdToName[handle.id] = matchingName
+                } else {
+                    mutableHandleIdToName[handle.id] = handle.displayName
+                }
+            }
+        }
+
+        // Use MessageCache for incremental updates
+        val (messageModels, changedGuids) = messageCache.updateAndBuild(
+            entities = regularMessages,
+            reactions = reactionsByMessage,
+            attachments = allAttachments
+        ) { entity, reactions, attachments ->
+            val replyPreview = entity.threadOriginatorGuid?.let { replyPreviewMap[it] }
+            entity.toUiModel(
+                reactions = reactions,
+                attachments = attachments,
+                handleIdToName = mutableHandleIdToName,
+                addressToName = addressToName,
+                addressToAvatarPath = addressToAvatarPath,
+                replyPreview = replyPreview
+            )
+        }
+
+        if (changedGuids.isNotEmpty()) {
+            Log.d(TAG, "Incremental update: ${changedGuids.size} changed, ${messageModels.size - changedGuids.size} reused")
+        }
+
+        return messageModels
+    }
+
+    private suspend fun buildReplyPreviewMap(messages: List<MessageEntity>): Map<String, ReplyPreviewData> {
+        val replyGuids = messages
+            .mapNotNull { it.threadOriginatorGuid }
+            .distinct()
+
+        if (replyGuids.isEmpty()) return emptyMap()
+
+        val loadedMessagesMap = messages.associateBy { it.guid }
+
+        val missingGuids = replyGuids.filter { it !in loadedMessagesMap }
+        val fetchedOriginals = if (missingGuids.isNotEmpty()) {
+            messageRepository.getMessagesByGuids(missingGuids).associateBy { it.guid }
+        } else {
+            emptyMap()
+        }
+
+        val allMessagesMap = loadedMessagesMap + fetchedOriginals
+
+        return replyGuids.mapNotNull { originGuid ->
+            val originalMessage = allMessagesMap[originGuid]
+            if (originalMessage != null) {
+                originGuid to ReplyPreviewData(
+                    originalGuid = originGuid,
+                    previewText = originalMessage.text?.take(50),
+                    senderName = resolveSenderName(
+                        originalMessage.senderAddress,
+                        originalMessage.handleId
+                    ),
+                    isFromMe = originalMessage.isFromMe,
+                    hasAttachment = originalMessage.hasAttachments,
+                    isNotLoaded = false
+                )
+            } else {
+                originGuid to ReplyPreviewData(
+                    originalGuid = originGuid,
+                    previewText = null,
+                    senderName = null,
+                    isFromMe = false,
+                    hasAttachment = false,
+                    isNotLoaded = true
+                )
+            }
+        }.toMap()
+    }
+
+    private fun resolveSenderName(senderAddress: String?, handleId: Long?): String? {
+        // Try address first
+        senderAddress?.let { addr ->
+            val normalized = normalizeAddress(addr)
+            addressToName[normalized]?.let { return it }
+        }
+
+        // Fall back to handleId
+        handleId?.let { id ->
+            handleIdToName[id]?.let { return it }
+        }
+
+        return null
+    }
+
+    private fun normalizeAddress(address: String): String {
+        return address.filter { it.isDigit() || it == '+' }
+    }
+}

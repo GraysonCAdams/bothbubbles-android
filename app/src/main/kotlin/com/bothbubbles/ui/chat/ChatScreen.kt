@@ -58,6 +58,7 @@ import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.outlined.Mic
@@ -178,13 +179,17 @@ fun ChatScreen(
     var targetMessageHandled by remember { mutableStateOf(false) }
 
     // Handle notification deep-link: scroll to target message and highlight it
-    LaunchedEffect(targetMessageGuid, uiState.messages.isNotEmpty()) {
-        if (targetMessageGuid != null && !targetMessageHandled && uiState.messages.isNotEmpty()) {
-            val index = uiState.messages.indexOfFirst { it.guid == targetMessageGuid }
-            if (index >= 0) {
+    // Uses paging-aware jumpToMessage instead of indexOfFirst for sparse loading support
+    LaunchedEffect(targetMessageGuid) {
+        if (targetMessageGuid != null && !targetMessageHandled) {
+            // Use paging-aware jump which loads data if needed
+            val position = viewModel.jumpToMessage(targetMessageGuid)
+            if (position != null) {
+                // Small delay to let data load
+                delay(100)
                 // Scroll with offset so message isn't at the very top edge
                 // In reversed layout, negative offset moves item down (away from visual top)
-                listState.animateScrollToItem(index, scrollOffset = -100)
+                listState.animateScrollToItem(position, scrollOffset = -100)
                 // Trigger highlight animation after scroll
                 viewModel.highlightMessage(targetMessageGuid)
                 targetMessageHandled = true
@@ -277,11 +282,15 @@ fun ChatScreen(
     val threadOverlayState by viewModel.threadOverlayState.collectAsStateWithLifecycle()
 
     // Handle scroll-to-message events from thread overlay
+    // Uses paging-aware jumpToMessage instead of indexOfFirst for sparse loading support
     LaunchedEffect(Unit) {
         viewModel.scrollToGuid.collect { guid ->
-            val index = uiState.messages.indexOfFirst { it.guid == guid }
-            if (index >= 0) {
-                listState.animateScrollToItem(index)
+            // Use paging-aware jump which loads data if needed
+            val position = viewModel.jumpToMessage(guid)
+            if (position != null) {
+                // Small delay to let data load
+                delay(50)
+                listState.animateScrollToItem(position)
             }
         }
     }
@@ -291,64 +300,6 @@ fun ChatScreen(
     var canRetrySmsForMessage by remember { mutableStateOf(false) }
     val retryMenuScope = rememberCoroutineScope()
     val scrollScope = rememberCoroutineScope()
-
-    // Track if new messages arrived while scrolled away from bottom (simple boolean, no cascade)
-    var hasNewMessages by remember { mutableStateOf(false) }
-    var lastKnownMessageCount by remember { mutableIntStateOf(0) }
-
-    // Debounced "at bottom" state to avoid triggering during active scrolling
-    // Using a separate state that only updates after scrolling settles
-    var isAtBottomDebounced by remember { mutableStateOf(true) }
-
-    // Monitor scroll state and update isAtBottom only when scroll settles
-    // Uses hysteresis to prevent rapid state toggling at threshold boundary
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            // Hysteresis: different thresholds for entering vs leaving "at bottom" state
-            val atBottom = if (isAtBottomDebounced) {
-                // Once at bottom, stay "at bottom" until 150px away
-                listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 150
-            } else {
-                // To become "at bottom", must be within 50px
-                listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset < 50
-            }
-            val isScrolling = listState.isScrollInProgress
-            Pair(atBottom, isScrolling)
-        }
-            .distinctUntilChanged()
-            .collect { (atBottom, isScrolling) ->
-                // Only update when NOT actively scrolling, or when scrolling TO the bottom
-                if (!isScrolling || (atBottom && !isAtBottomDebounced)) {
-                    if (isAtBottomDebounced != atBottom) {
-                        isAtBottomDebounced = atBottom
-                        // Reset flag when returning to bottom (no state cascade - just one change)
-                        if (atBottom) {
-                            hasNewMessages = false
-                        }
-                    }
-                }
-            }
-    }
-
-    // Track new incoming messages when not at bottom (simplified - just sets a flag)
-    LaunchedEffect(uiState.messages.size) {
-        val messages = uiState.messages
-        if (messages.isEmpty()) {
-            lastKnownMessageCount = 0
-            return@LaunchedEffect
-        }
-
-        // Check for new incoming messages while scrolled away from bottom
-        if (!isAtBottomDebounced && messages.size > lastKnownMessageCount && lastKnownMessageCount > 0) {
-            val newCount = messages.size - lastKnownMessageCount
-            val newMessages = messages.take(newCount)
-            // Only track incoming messages (not from me)
-            if (newMessages.any { !it.isFromMe }) {
-                hasNewMessages = true
-            }
-        }
-        lastKnownMessageCount = messages.size
-    }
 
     // Snackbar for error display
     val snackbarHostState = remember { SnackbarHostState() }
@@ -461,17 +412,22 @@ fun ChatScreen(
         }
     }
 
-    // Track scroll position changes for state restoration and preloading
+    // Track scroll position changes for state restoration, preloading, and paging
     LaunchedEffect(listState) {
         snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val firstVisible = listState.firstVisibleItemIndex
+            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
             Triple(
-                listState.firstVisibleItemIndex,
+                firstVisible,
                 listState.firstVisibleItemScrollOffset,
-                listState.layoutInfo.visibleItemsInfo.size
+                lastVisible
             )
-        }.collect { (index, offset, visibleCount) ->
+        }.collect { (index, offset, lastVisibleIndex) ->
             // Note: logging removed to reduce main thread work during scroll
-            viewModel.updateScrollPosition(index, offset, visibleCount)
+            viewModel.updateScrollPosition(index, offset, lastVisibleIndex - index + 1)
+            // Notify paging controller about visible range for sparse loading
+            viewModel.onScrollPositionChanged(index, lastVisibleIndex)
         }
     }
 
@@ -792,6 +748,7 @@ fun ChatScreen(
                     },
                     isSending = uiState.isSending,
                     isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
+                    currentSendMode = uiState.currentSendMode,
                     smsInputBlocked = uiState.smsInputBlocked,
                     onSmsInputBlockedClick = { showSmsBlockedDialog = true },
                     hasAttachments = pendingAttachments.isNotEmpty(),
@@ -805,6 +762,15 @@ fun ChatScreen(
                         viewModel.clearAttachments()
                     },
                     isPickerExpanded = showAttachmentPicker,
+                    // Attachment warning props
+                    attachmentWarning = uiState.attachmentWarning,
+                    onDismissWarning = { viewModel.dismissAttachmentWarning() },
+                    onRemoveWarningAttachment = {
+                        uiState.attachmentWarning?.affectedUri?.let { uri ->
+                            pendingAttachments = pendingAttachments - uri
+                            viewModel.removeAttachment(uri)
+                        }
+                    },
                     // Recording mode props
                     recordingDuration = recordingDuration,
                     amplitudeHistory = amplitudeHistory,
@@ -1092,6 +1058,42 @@ fun ChatScreen(
                         uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
                     }
 
+                    // 3. PERF: Pre-compute showSenderName for group chats (O(n) once vs O(1) per-item)
+                    // Show when: group chat, incoming message, sender changed from previous (older) message
+                    val showSenderNameMap = remember(uiState.messages, uiState.isGroup) {
+                        if (!uiState.isGroup) emptyMap()
+                        else {
+                            val map = mutableMapOf<Int, Boolean>()
+                            val messages = uiState.messages
+                            for (i in messages.indices) {
+                                val message = messages[i]
+                                val previousMessage = messages.getOrNull(i + 1)
+                                map[i] = !message.isFromMe && message.senderName != null &&
+                                    (previousMessage == null || previousMessage.isFromMe ||
+                                        previousMessage.senderName != message.senderName)
+                            }
+                            map
+                        }
+                    }
+
+                    // 4. PERF: Pre-compute showAvatar for group chats (O(n) once vs O(1) per-item)
+                    // Show on the last (newest) message in a consecutive group from same sender
+                    val showAvatarMap = remember(uiState.messages, uiState.isGroup) {
+                        if (!uiState.isGroup) emptyMap()
+                        else {
+                            val map = mutableMapOf<Int, Boolean>()
+                            val messages = uiState.messages
+                            for (i in messages.indices) {
+                                val message = messages[i]
+                                val newerMessage = messages.getOrNull(i - 1)
+                                map[i] = !message.isFromMe &&
+                                    (newerMessage == null || newerMessage.isFromMe ||
+                                        newerMessage.senderName != message.senderName)
+                            }
+                            map
+                        }
+                    }
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
@@ -1129,10 +1131,16 @@ fun ChatScreen(
                             key = { _, message -> message.guid },
                             contentType = { _, message -> if (message.isFromMe) 1 else 0 }
                         ) { index, message ->
-                            // Enable tapback for all messages with text content
-                            // For iMessage: uses native tapback API
-                            // For SMS/MMS: sends translated text like 'Loved "message"'
-                            val canTapback = !message.text.isNullOrBlank()
+                            // Enable tapback for server-origin messages with content
+                            // Server-origin = IMESSAGE or SERVER_SMS (from BlueBubbles server)
+                            // Local SMS/MMS cannot have tapbacks
+                            // Tapbacks require server connection and private API
+                            val canTapback = !message.text.isNullOrBlank() &&
+                                message.isServerOrigin &&
+                                uiState.isServerConnected &&
+                                !message.guid.startsWith("temp") &&
+                                !message.guid.startsWith("error") &&
+                                !message.hasError
 
                             // Check if this message is a search match or the current match
                             val isSearchMatch = uiState.isSearchActive && index in uiState.searchMatchIndices
@@ -1182,21 +1190,9 @@ fun ChatScreen(
                             // (In reversed layout, sticker appears below/after its target message)
                             val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
-                            // Determine if sender name should be shown in group chats
-                            // Show when: group chat, incoming message, and sender changed from previous (older) message
-                            val showSenderName = uiState.isGroup && !message.isFromMe && message.senderName != null && run {
-                                val previousMessage = uiState.messages.getOrNull(index + 1)
-                                // Show name if previous message was from me, or from a different sender, or doesn't exist
-                                previousMessage == null || previousMessage.isFromMe || previousMessage.senderName != message.senderName
-                            }
-
-                            // Determine if avatar should be shown in group chats
-                            // Show on the last (newest) message in a consecutive group from same sender
-                            val showAvatar = uiState.isGroup && !message.isFromMe && run {
-                                val newerMessage = uiState.messages.getOrNull(index - 1)
-                                // Show avatar if no newer message, newer message is from me, or from different sender
-                                newerMessage == null || newerMessage.isFromMe || newerMessage.senderName != message.senderName
-                            }
+                            // PERF: Use pre-computed maps for O(1) lookup instead of runtime calculation
+                            val showSenderName = showSenderNameMap[index] ?: false
+                            val showAvatar = showAvatarMap[index] ?: false
 
                             // Fade out/hide stickers when the underlying message is being interacted with
                             // Note: associatedMessageGuid may have "p:X/" prefix (e.g., "p:0/MESSAGE_GUID")
@@ -1237,7 +1233,13 @@ fun ChatScreen(
                                     .offset(y = stickerOverlapOffset)
                                     .padding(top = topPadding)
                                     .staggeredEntrance(index)
-                                    .animateItem()
+                                    // PERF: Use snap() instead of spring animations to reduce frame drops
+                                    // during rapid scrolling and message updates (reactions, delivery status)
+                                    .animateItem(
+                                        fadeInSpec = null,
+                                        fadeOutSpec = null,
+                                        placementSpec = snap()
+                                    )
                                     .then(
                                         if (highlightAlpha.value > 0f) {
                                             Modifier.background(
@@ -1340,6 +1342,13 @@ fun ChatScreen(
                                             onSwipeStateChanged = { isSwiping ->
                                                 swipingMessageGuid = if (isSwiping) message.guid else null
                                             },
+                                            // Retry button callback - shows the retry menu
+                                            onRetry = { guid ->
+                                                selectedMessageForRetry = message
+                                                retryMenuScope.launch {
+                                                    canRetrySmsForMessage = viewModel.canRetryAsSms(guid)
+                                                }
+                                            },
                                             isGroupChat = uiState.isGroup,
                                             showAvatar = showAvatar
                                         )
@@ -1369,24 +1378,7 @@ fun ChatScreen(
                                         )
                                     }
 
-                                    // Show retry menu for failed messages
-                                    if (selectedMessageForRetry?.guid == message.guid) {
-                                        FailedMessageMenu(
-                                            visible = true,
-                                            onDismiss = { selectedMessageForRetry = null },
-                                            onRetry = {
-                                                viewModel.retryMessage(message.guid)
-                                                selectedMessageForRetry = null
-                                            },
-                                            onRetryAsSms = if (canRetrySmsForMessage) {
-                                                {
-                                                    viewModel.retryMessageAsSms(message.guid)
-                                                    selectedMessageForRetry = null
-                                                }
-                                            } else null,
-                                            isFromMe = message.isFromMe
-                                        )
-                                    }
+                                    // Retry bottom sheet is shown at Scaffold level, not per-message
                                 }
                             }
                         }
@@ -1440,34 +1432,6 @@ fun ChatScreen(
         onMessageClick = { guid -> viewModel.scrollToMessage(guid) },
         onDismiss = { viewModel.dismissThreadOverlay() }
     )
-
-    // New messages indicator - floating above message list
-    // Visibility controlled by scroll position (isAtBottomDebounced) to avoid state cascade
-    AnimatedVisibility(
-        visible = !isAtBottomDebounced && hasNewMessages,
-        modifier = Modifier
-            .align(Alignment.BottomCenter)
-            .padding(bottom = 100.dp), // Position above keyboard/input area
-        enter = fadeIn() + expandVertically(expandFrom = Alignment.Top),
-        exit = fadeOut() + shrinkVertically(shrinkTowards = Alignment.Top)
-    ) {
-        Surface(
-            onClick = {
-                // Smooth scroll to bottom - indicator will hide when isAtBottomDebounced becomes true
-                scrollScope.launch { listState.animateScrollToItem(0) }
-            },
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.primary,
-            contentColor = MaterialTheme.colorScheme.onPrimary,
-            shadowElevation = 4.dp
-        ) {
-            Text(
-                text = "New messages ↓",
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                style = MaterialTheme.typography.labelLarge
-            )
-        }
-    }
     } // End of outer Box
 
     // Effect picker bottom sheet
@@ -1487,6 +1451,145 @@ fun ChatScreen(
             },
             onDismiss = { showEffectPicker = false }
         )
+    }
+
+    // Retry bottom sheet for failed messages
+    selectedMessageForRetry?.let { failedMessage ->
+        ModalBottomSheet(
+            onDismissRequest = { selectedMessageForRetry = null },
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 32.dp)
+            ) {
+                // Header
+                Text(
+                    text = "Message Not Delivered",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Retry as iMessage option (if contact supports it)
+                if (uiState.contactIMessageAvailable == true) {
+                    Surface(
+                        onClick = {
+                            viewModel.retryMessage(failedMessage.guid)
+                            selectedMessageForRetry = null
+                        },
+                        color = Color.Transparent,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFF007AFF).copy(alpha = 0.1f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                    Icon(
+                                        Icons.Default.Refresh,
+                                        contentDescription = null,
+                                        tint = Color(0xFF007AFF),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Try Again as iMessage",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Send via BlueBubbles server",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Retry as SMS option
+                if (canRetrySmsForMessage) {
+                    Surface(
+                        onClick = {
+                            viewModel.retryMessageAsSms(failedMessage.guid)
+                            selectedMessageForRetry = null
+                        },
+                        color = Color.Transparent,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 24.dp, vertical = 16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(16.dp)
+                        ) {
+                            Surface(
+                                color = Color(0xFF34C759).copy(alpha = 0.1f),
+                                shape = CircleShape,
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                    Icon(
+                                        Icons.Default.Sms,
+                                        contentDescription = null,
+                                        tint = Color(0xFF34C759),
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+                            }
+                            Column {
+                                Text(
+                                    text = "Send as Text Message",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "Send via your phone's SMS",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Cancel option
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                    modifier = Modifier.padding(vertical = 8.dp)
+                )
+
+                Surface(
+                    onClick = { selectedMessageForRetry = null },
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(
+                        text = "Cancel",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp)
+                    )
+                }
+            }
+        }
     }
 
     // Confirmation dialogs
@@ -1687,6 +1790,7 @@ private fun UnifiedInputArea(
     onVoiceMemoPressEnd: () -> Unit,
     isSending: Boolean,
     isLocalSmsChat: Boolean,
+    currentSendMode: ChatSendMode,
     smsInputBlocked: Boolean,
     onSmsInputBlockedClick: () -> Unit,
     hasAttachments: Boolean,
@@ -1694,6 +1798,10 @@ private fun UnifiedInputArea(
     onRemoveAttachment: (Uri) -> Unit,
     onClearAllAttachments: () -> Unit,
     isPickerExpanded: Boolean,
+    // Attachment warning props
+    attachmentWarning: AttachmentWarning? = null,
+    onDismissWarning: () -> Unit = {},
+    onRemoveWarningAttachment: () -> Unit = {},
     // Recording mode props
     recordingDuration: Long,
     amplitudeHistory: List<Float>,
@@ -1709,8 +1817,11 @@ private fun UnifiedInputArea(
     onPreviewCancel: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // MMS mode is for local SMS chats when attachments or long text is present
     val isMmsMode = isLocalSmsChat && (hasAttachments || text.length > 160)
     val hasContent = text.isNotBlank() || hasAttachments
+    // Use currentSendMode for UI coloring (SMS = green, iMessage = blue)
+    val isSmsMode = currentSendMode == ChatSendMode.SMS
     val inputColors = BothBubblesTheme.bubbleColors
     val bubbleColors = BothBubblesTheme.bubbleColors
 
@@ -1769,6 +1880,87 @@ private fun UnifiedInputArea(
                                 uri = uri,
                                 onRemove = { onRemoveAttachment(uri) }
                             )
+                        }
+                    }
+                }
+            }
+
+            // Attachment size warning banner
+            AnimatedVisibility(
+                visible = attachmentWarning != null,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
+                attachmentWarning?.let { warning ->
+                    Surface(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp),
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (warning.isError)
+                            MaterialTheme.colorScheme.errorContainer
+                        else
+                            MaterialTheme.colorScheme.tertiaryContainer,
+                        tonalElevation = 2.dp
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = if (warning.isError)
+                                        Icons.Default.ErrorOutline
+                                    else
+                                        Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = if (warning.isError)
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    else
+                                        MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Text(
+                                    text = warning.message,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = if (warning.isError)
+                                        MaterialTheme.colorScheme.onErrorContainer
+                                    else
+                                        MaterialTheme.colorScheme.onTertiaryContainer
+                                )
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (warning.isError && warning.affectedUri != null) {
+                                    TextButton(
+                                        onClick = onRemoveWarningAttachment,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = "Remove",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onErrorContainer
+                                        )
+                                    }
+                                } else if (!warning.isError) {
+                                    TextButton(
+                                        onClick = onDismissWarning,
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                                    ) {
+                                        Text(
+                                            text = "Dismiss",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -1892,7 +2084,8 @@ private fun UnifiedInputArea(
                                                     "Not default SMS app"
                                                 } else {
                                                     stringResource(
-                                                        if (isLocalSmsChat) R.string.message_placeholder_text
+                                                        // Use currentSendMode for placeholder text
+                                                        if (isSmsMode) R.string.message_placeholder_text
                                                         else R.string.message_placeholder_imessage
                                                     )
                                                 },
@@ -1960,16 +2153,16 @@ private fun UnifiedInputArea(
                             },
                             onLongPress = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
                             isSending = isSending && mode == InputMode.NORMAL,
-                            isSmsMode = isLocalSmsChat,
+                            isSmsMode = isSmsMode,
                             isMmsMode = isMmsMode && mode == InputMode.NORMAL,
-                            showEffectHint = !isLocalSmsChat && mode == InputMode.NORMAL
+                            showEffectHint = !isSmsMode && mode == InputMode.NORMAL
                         )
                     } else {
                         VoiceMemoButton(
                             onClick = onVoiceMemoClick,
                             onPressStart = onVoiceMemoPressStart,
                             onPressEnd = onVoiceMemoPressEnd,
-                            isSmsMode = isLocalSmsChat,
+                            isSmsMode = isSmsMode,
                             isDisabled = smsInputBlocked
                         )
                     }
@@ -3031,104 +3224,6 @@ private fun calculateGroupPosition(
         groupsWithAbove && groupsWithBelow -> MessageGroupPosition.MIDDLE
         groupsWithAbove && !groupsWithBelow -> MessageGroupPosition.LAST   // Bottom of visual group
         else -> MessageGroupPosition.SINGLE
-    }
-}
-
-/**
- * Menu shown for failed messages with retry options.
- * Positioned above the message bubble like TapbackMenu.
- */
-@Composable
-private fun FailedMessageMenu(
-    visible: Boolean,
-    onDismiss: () -> Unit,
-    onRetry: () -> Unit,
-    onRetryAsSms: (() -> Unit)?,
-    isFromMe: Boolean,
-    modifier: Modifier = Modifier
-) {
-    if (!visible) return
-
-    androidx.compose.ui.window.Popup(
-        alignment = if (isFromMe) Alignment.TopEnd else Alignment.TopStart,
-        offset = androidx.compose.ui.unit.IntOffset(0, -100),
-        onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.PopupProperties(
-            focusable = true,
-            clippingEnabled = false
-        )
-    ) {
-        Surface(
-            modifier = modifier.padding(4.dp),
-            shape = RoundedCornerShape(12.dp),
-            tonalElevation = 6.dp,
-            shadowElevation = 4.dp,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh
-        ) {
-            Column(
-                modifier = Modifier.padding(vertical = 4.dp),
-                verticalArrangement = Arrangement.spacedBy(0.dp)
-            ) {
-                // Retry button
-                Surface(
-                    onClick = onRetry,
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Retry",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-
-                // Retry as SMS button (if available)
-                if (onRetryAsSms != null) {
-                    HorizontalDivider(
-                        color = MaterialTheme.colorScheme.outlineVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp)
-                    )
-
-                    Surface(
-                        onClick = onRetryAsSms,
-                        color = Color.Transparent,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Sms,
-                                contentDescription = null,
-                                tint = Color(0xFF34C759), // SMS green
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Text(
-                                text = "Send as SMS",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                        }
-                    }
-                }
-            }
-        }
     }
 }
 

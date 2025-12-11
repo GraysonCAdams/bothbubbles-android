@@ -1,6 +1,8 @@
 package com.bothbubbles.data.repository
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
@@ -11,6 +13,8 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.data.local.db.entity.TransferState
+import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.ProgressRequestBody
@@ -29,6 +33,7 @@ import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.sync.SyncRangeTracker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,7 +73,8 @@ class MessageRepository @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
     private val nameInferenceService: NameInferenceService,
-    private val videoCompressor: VideoCompressor
+    private val videoCompressor: VideoCompressor,
+    private val syncRangeTracker: SyncRangeTracker
 ) {
     companion object {
         private const val TAG = "MessageRepository"
@@ -96,6 +102,19 @@ class MessageRepository @Inject constructor(
      */
     fun observeMessagesForChats(chatGuids: List<String>, limit: Int, offset: Int): Flow<List<MessageEntity>> =
         messageDao.observeMessagesForChats(chatGuids, limit, offset)
+
+    /**
+     * Cursor-based pagination: observe messages before a timestamp.
+     * Used for windowed loading when scrolling to older messages.
+     */
+    fun observeMessagesBefore(chatGuid: String, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>> =
+        messageDao.observeMessagesBefore(chatGuid, beforeTimestamp, limit)
+
+    /**
+     * Cursor-based pagination for merged chats: observe messages before a timestamp.
+     */
+    fun observeMessagesBeforeForChats(chatGuids: List<String>, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>> =
+        messageDao.observeMessagesBeforeForChats(chatGuids, beforeTimestamp, limit)
 
     fun observeMessage(guid: String): Flow<MessageEntity?> =
         messageDao.observeMessageByGuid(guid)
@@ -136,7 +155,8 @@ class MessageRepository @Inject constructor(
         limit: Int = 50,
         offset: Int = 0,
         after: Long? = null,
-        before: Long? = null
+        before: Long? = null,
+        syncSource: SyncSource = SyncSource.ON_DEMAND
     ): Result<List<MessageEntity>> = runCatching {
         val response = api.getChatMessages(
             guid = chatGuid,
@@ -162,7 +182,60 @@ class MessageRepository @Inject constructor(
             syncMessageAttachments(messageDto)
         }
 
+        // Record the synced range for sparse pagination tracking
+        if (messages.isNotEmpty()) {
+            val oldestTimestamp = messages.minOf { it.dateCreated }
+            val newestTimestamp = messages.maxOf { it.dateCreated }
+            syncRangeTracker.recordSyncedRange(
+                chatGuid = chatGuid,
+                startTimestamp = oldestTimestamp,
+                endTimestamp = newestTimestamp,
+                source = syncSource
+            )
+        }
+
         messages
+    }
+
+    /**
+     * Sync messages for a specific timestamp range.
+     * Used by sparse pagination when scrolling to unsynced regions.
+     *
+     * @param chatGuid The chat to sync
+     * @param startTimestamp Oldest timestamp to fetch
+     * @param endTimestamp Newest timestamp to fetch
+     * @return Messages synced, or empty list if range was already synced
+     */
+    suspend fun syncMessagesForRange(
+        chatGuid: String,
+        startTimestamp: Long,
+        endTimestamp: Long
+    ): Result<List<MessageEntity>> {
+        // Check if range is already synced
+        if (syncRangeTracker.isRangeFullySynced(chatGuid, startTimestamp, endTimestamp)) {
+            Log.d(TAG, "Range already synced for $chatGuid: $startTimestamp - $endTimestamp")
+            return Result.success(emptyList())
+        }
+
+        // Sync with timestamp bounds
+        return syncMessagesForChat(
+            chatGuid = chatGuid,
+            after = startTimestamp,
+            before = endTimestamp,
+            limit = 100, // Reasonable limit for a range
+            syncSource = SyncSource.ON_DEMAND
+        )
+    }
+
+    /**
+     * Check if more messages are available from the server before a timestamp.
+     * Used by sparse pagination to determine if there's more history to load.
+     */
+    suspend fun hasMoreMessagesBeforeTimestamp(chatGuid: String, beforeTimestamp: Long): Boolean {
+        val oldestSynced = syncRangeTracker.getOldestSyncedTimestamp(chatGuid)
+        // If we have no sync data, or if the requested timestamp is older than our oldest sync,
+        // there might be more messages on the server
+        return oldestSynced == null || beforeTimestamp < oldestSynced
     }
 
     /**
@@ -601,6 +674,32 @@ class MessageRepository @Inject constructor(
         )
         messageDao.insertMessage(tempMessage)
 
+        // Create temporary attachment records for immediate display
+        // This allows outbound attachments to show in UI while uploading
+        val tempAttachmentGuids = mutableListOf<String>()
+        attachments.forEachIndexed { index, uri ->
+            val tempAttGuid = "$tempGuid-att-$index"
+            tempAttachmentGuids.add(tempAttGuid)
+
+            val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
+            val fileName = getFileName(uri) ?: "attachment"
+            val (width, height) = getMediaDimensions(uri, mimeType)
+
+            val tempAttachment = AttachmentEntity(
+                guid = tempAttGuid,
+                messageGuid = tempGuid,
+                mimeType = mimeType,
+                transferName = fileName,
+                isOutgoing = true,
+                localPath = uri.toString(), // Use URI as local path for display
+                width = width,
+                height = height,
+                transferState = TransferState.UPLOADING.name,
+                transferProgress = 0f
+            )
+            attachmentDao.insertAttachment(tempAttachment)
+        }
+
         // Update chat's last message
         chatDao.updateLastMessage(chatGuid, System.currentTimeMillis(), text.ifBlank { "[Attachment]" })
 
@@ -609,19 +708,25 @@ class MessageRepository @Inject constructor(
         // Upload each attachment with progress tracking
         val totalAttachments = attachments.size
         attachments.forEachIndexed { index, uri ->
+            val tempAttGuid = tempAttachmentGuids[index]
+
             val attachmentResult = uploadAttachment(
                 chatGuid = chatGuid,
-                tempGuid = "$tempGuid-att-$index",
+                tempGuid = tempAttGuid,
                 uri = uri,
                 attachmentIndex = index,
                 totalAttachments = totalAttachments
             )
             if (attachmentResult.isFailure) {
-                // Mark message as failed and reset progress
+                // Mark message and attachment as failed
                 messageDao.updateErrorStatus(tempGuid, 1)
+                attachmentDao.markTransferFailed(tempAttGuid)
                 _uploadProgress.value = null
                 throw attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
             }
+
+            // Mark this attachment as uploaded
+            attachmentDao.markUploaded(tempAttGuid)
             lastResponse = attachmentResult.getOrNull()
         }
 
@@ -653,7 +758,8 @@ class MessageRepository @Inject constructor(
         lastResponse?.let { serverMessage ->
             messageDao.replaceGuid(tempGuid, serverMessage.guid)
             // Sync attachments from the server response to local database
-            syncMessageAttachments(serverMessage)
+            // Pass tempGuid to clean up orphaned temp attachments
+            syncMessageAttachments(serverMessage, tempMessageGuid = tempGuid)
             serverMessage.toEntity(chatGuid)
         } ?: run {
             messageDao.updateErrorStatus(tempGuid, 0)
@@ -785,6 +891,43 @@ class MessageRepository @Inject constructor(
             }
             "file" -> uri.lastPathSegment
             else -> uri.lastPathSegment
+        }
+    }
+
+    /**
+     * Get media dimensions (width, height) from a content URI.
+     * Returns (null, null) if dimensions cannot be determined.
+     */
+    private fun getMediaDimensions(uri: Uri, mimeType: String): Pair<Int?, Int?> {
+        return try {
+            when {
+                mimeType.startsWith("image/") -> {
+                    // Use BitmapFactory to get image dimensions without loading full bitmap
+                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                        val options = BitmapFactory.Options().apply {
+                            inJustDecodeBounds = true
+                        }
+                        BitmapFactory.decodeStream(inputStream, null, options)
+                        Pair(options.outWidth.takeIf { it > 0 }, options.outHeight.takeIf { it > 0 })
+                    } ?: Pair(null, null)
+                }
+                mimeType.startsWith("video/") -> {
+                    // Use MediaMetadataRetriever for video dimensions
+                    val retriever = MediaMetadataRetriever()
+                    try {
+                        retriever.setDataSource(context, uri)
+                        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
+                        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
+                        Pair(width, height)
+                    } finally {
+                        retriever.release()
+                    }
+                }
+                else -> Pair(null, null)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get media dimensions for $uri", e)
+            Pair(null, null)
         }
     }
 
@@ -1042,15 +1185,38 @@ class MessageRepository @Inject constructor(
 
     // ===== Private Helpers =====
 
-    private suspend fun syncMessageAttachments(messageDto: MessageDto) {
+    /**
+     * Sync attachments from server message to local database.
+     * For outbound messages (isOutgoing=true), the attachments are already uploaded
+     * so we mark them as UPLOADED. For inbound messages, they need to be downloaded
+     * so we mark them as PENDING for auto-download.
+     *
+     * @param messageDto The server message containing attachments
+     * @param tempMessageGuid Optional temp GUID if this is replacing a temp message's attachments
+     */
+    private suspend fun syncMessageAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
+        // Delete any temp attachments that were created for immediate display
+        // These had messageGuid = tempGuid which is now orphaned after GUID replacement
+        tempMessageGuid?.let { tempGuid ->
+            attachmentDao.deleteAttachmentsForMessage(tempGuid)
+        }
+
         if (messageDto.attachments.isNullOrEmpty()) return
 
         val serverAddress = settingsDataStore.serverAddress.first()
-        val authKey = settingsDataStore.guidAuthKey.first()
 
         messageDto.attachments.forEach { attachmentDto ->
             // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
+
+            // Determine transfer state based on direction:
+            // - Outbound (isOutgoing=true): Already uploaded, mark as UPLOADED
+            // - Inbound: Needs download, mark as PENDING for auto-download
+            val transferState = if (attachmentDto.isOutgoing) {
+                TransferState.UPLOADED.name
+            } else {
+                TransferState.PENDING.name
+            }
 
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,
@@ -1066,7 +1232,9 @@ class MessageRepository @Inject constructor(
                 height = attachmentDto.height,
                 hasLivePhoto = attachmentDto.hasLivePhoto,
                 isSticker = attachmentDto.isSticker,
-                webUrl = webUrl
+                webUrl = webUrl,
+                transferState = transferState,
+                transferProgress = if (attachmentDto.isOutgoing) 1f else 0f
             )
             attachmentDao.insertAttachment(attachment)
         }

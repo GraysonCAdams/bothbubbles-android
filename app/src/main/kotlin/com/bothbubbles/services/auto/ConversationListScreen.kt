@@ -4,6 +4,8 @@ import androidx.car.app.CarContext
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
 import androidx.car.app.model.Action
+import androidx.car.app.model.ActionStrip
+import androidx.car.app.model.CarColor
 import androidx.car.app.model.CarIcon
 import androidx.car.app.model.ItemList
 import androidx.car.app.model.ListTemplate
@@ -30,6 +32,9 @@ import kotlinx.coroutines.runBlocking
 /**
  * Android Auto screen displaying the list of recent conversations.
  * Users can browse conversations and tap to view details or reply.
+ *
+ * Shows ALL recent conversations (not just ones with new messages since driving started)
+ * sorted by recency with unread and pinned conversations prioritized.
  */
 class ConversationListScreen(
     carContext: CarContext,
@@ -50,44 +55,69 @@ class ConversationListScreen(
     @Volatile
     private var cachedMessages: Map<String, MessageEntity?> = emptyMap()
 
+    // Pagination state
+    @Volatile
+    private var currentPage = 0
+
+    @Volatile
+    private var hasMoreConversations = true
+
+    @Volatile
+    private var isLoading = false
+
     init {
         refreshData()
     }
 
     private fun refreshData() {
+        if (isLoading) return
+        isLoading = true
+
         scope.launch {
             try {
-                // Get recent active chats (limit to 10 for Android Auto performance)
+                // Get ALL active chats from database - these are conversations the user has
+                // regardless of when the last message was received
                 val chats = chatDao.getActiveChats().first()
 
-                // Sort: unread+pinned first, then unread, then pinned, then by date
+                android.util.Log.d(TAG, "Found ${chats.size} total active chats")
+
+                // Sort: unread+pinned first, then unread, then pinned, then by latest message date
                 val sortedChats = chats.sortedWith(
                     compareByDescending<ChatEntity> { it.hasUnreadMessage && it.isPinned }
                         .thenByDescending { it.hasUnreadMessage }
                         .thenByDescending { it.isPinned }
                         .thenByDescending { it.lastMessageDate ?: 0L }
-                ).take(MAX_CONVERSATIONS)
+                )
 
-                cachedConversations = sortedChats
+                // Take up to the current page limit
+                val displayCount = minOf((currentPage + 1) * PAGE_SIZE, sortedChats.size)
+                val chatsToDisplay = sortedChats.take(displayCount)
+                hasMoreConversations = displayCount < sortedChats.size
 
-                // Pre-fetch latest message for each chat
-                val messagesMap = mutableMapOf<String, MessageEntity?>()
-                for (chat in sortedChats) {
-                    val messages = messageDao.observeMessagesForChat(
-                        chatGuid = chat.guid,
-                        limit = 1,
-                        offset = 0
-                    ).first()
-                    messagesMap[chat.guid] = messages.firstOrNull()
-                }
+                cachedConversations = chatsToDisplay
+
+                // Pre-fetch latest message for each chat using batch query for efficiency
+                val chatGuids = chatsToDisplay.map { it.guid }
+                val latestMessages = messageDao.getLatestMessagesForChats(chatGuids)
+                val messagesMap = latestMessages.associateBy { it.chatGuid }
                 cachedMessages = messagesMap
 
-                // Trigger UI refresh
+                android.util.Log.d(TAG, "Displaying ${chatsToDisplay.size} chats, hasMore=$hasMoreConversations")
+
+                isLoading = false
                 invalidate()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to refresh conversation data", e)
+                isLoading = false
             }
         }
+    }
+
+    private fun loadMoreConversations() {
+        if (!hasMoreConversations || isLoading) return
+        currentPage++
+        android.util.Log.d(TAG, "Loading more conversations, page=$currentPage")
+        refreshData()
     }
 
     override fun onGetTemplate(): Template {
@@ -100,13 +130,53 @@ class ConversationListScreen(
             }
         }
 
-        if (cachedConversations.isEmpty()) {
-            itemListBuilder.setNoItemsMessage("No conversations yet")
+        // Add "Load More" row if there are more conversations
+        if (hasMoreConversations && cachedConversations.isNotEmpty()) {
+            val loadMoreRow = Row.Builder()
+                .setTitle("Load More Conversations...")
+                .setOnClickListener { loadMoreConversations() }
+                .build()
+            itemListBuilder.addItem(loadMoreRow)
         }
+
+        if (cachedConversations.isEmpty()) {
+            itemListBuilder.setNoItemsMessage(
+                if (isLoading) "Loading conversations..." else "No conversations yet"
+            )
+        }
+
+        // Create compose action (FAB-style) for new message
+        val composeAction = Action.Builder()
+            .setTitle("New")
+            .setIcon(
+                CarIcon.Builder(
+                    IconCompat.createWithResource(carContext, android.R.drawable.ic_menu_edit)
+                )
+                    .setTint(CarColor.createCustom(0xFF2196F3.toInt(), 0xFF2196F3.toInt())) // Blue tint
+                    .build()
+            )
+            .setOnClickListener {
+                // Navigate to compose new message screen
+                screenManager.push(
+                    ComposeMessageScreen(
+                        carContext = carContext,
+                        chatDao = chatDao,
+                        handleDao = handleDao,
+                        messageRepository = messageRepository,
+                        onMessageSent = { refreshData() }
+                    )
+                )
+            }
+            .build()
+
+        val actionStrip = ActionStrip.Builder()
+            .addAction(composeAction)
+            .build()
 
         return ListTemplate.Builder()
             .setTitle("Messages")
             .setHeaderAction(Action.APP_ICON)
+            .setActionStrip(actionStrip)
             .setSingleList(itemListBuilder.build())
             .build()
     }
@@ -114,11 +184,20 @@ class ConversationListScreen(
     private fun buildConversationRow(chat: ChatEntity): Row? {
         val latestMessage = cachedMessages[chat.guid]
         val displayTitle = chat.displayName ?: getParticipantNames(chat)
-        val messagePreview = latestMessage?.text?.take(50) ?: "No messages"
+
+        // Build informative message preview
+        val messagePreview = buildMessagePreview(latestMessage, chat)
+
+        // Build unread indicator for title
+        val title = if (chat.hasUnreadMessage) {
+            "● $displayTitle"
+        } else {
+            displayTitle
+        }
 
         return try {
             Row.Builder()
-                .setTitle(displayTitle)
+                .setTitle(title)
                 .addText(messagePreview)
                 .setImage(
                     CarIcon.Builder(
@@ -147,6 +226,45 @@ class ConversationListScreen(
         }
     }
 
+    private fun buildMessagePreview(message: MessageEntity?, chat: ChatEntity): String {
+        if (message == null) return "No messages"
+
+        val text = message.text?.take(50) ?: ""
+        val hasAttachment = message.hasAttachments
+
+        // Build preview with sender prefix
+        // Group chats have displayName set (user named it or system generated)
+        // 1:1 chats typically don't have displayName (we show contact name instead)
+        val isGroupChat = chat.displayName != null
+        val senderPrefix = when {
+            message.isFromMe -> "You: "
+            isGroupChat -> {
+                val senderName = getSenderNameForMessage(message)
+                if (senderName.isNotBlank()) "$senderName: " else ""
+            }
+            else -> ""
+        }
+
+        val content = when {
+            text.isNotBlank() -> text
+            hasAttachment -> "📎 Attachment"
+            else -> "No content"
+        }
+
+        return senderPrefix + content
+    }
+
+    private fun getSenderNameForMessage(message: MessageEntity): String {
+        val handleId = message.handleId ?: return ""
+        return runBlocking(Dispatchers.IO) {
+            val handle = handleDao.getHandleById(handleId)
+            handle?.cachedDisplayName
+                ?: handle?.inferredName
+                ?: handle?.formattedAddress?.take(10)
+                ?: ""
+        }
+    }
+
     private fun getParticipantNames(chat: ChatEntity): String {
         return runBlocking(Dispatchers.IO) {
             val participants = chatDao.getParticipantsForChat(chat.guid)
@@ -170,6 +288,6 @@ class ConversationListScreen(
 
     companion object {
         private const val TAG = "ConversationListScreen"
-        private const val MAX_CONVERSATIONS = 10
+        private const val PAGE_SIZE = 15  // Show 15 conversations per page for better UX
     }
 }

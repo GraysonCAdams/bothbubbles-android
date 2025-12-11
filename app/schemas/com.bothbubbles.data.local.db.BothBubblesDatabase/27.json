@@ -1,8 +1,8 @@
 {
   "formatVersion": 1,
   "database": {
-    "version": 24,
-    "identityHash": "a6fb2d965951383f2d03879e9c4b96ff",
+    "version": 27,
+    "identityHash": "1e97719c235fca15395fbb4f5e88081e",
     "entities": [
       {
         "tableName": "chats",
@@ -810,7 +810,7 @@
       },
       {
         "tableName": "attachments",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `message_guid` TEXT NOT NULL, `original_row_id` INTEGER, `uti` TEXT, `mime_type` TEXT, `is_outgoing` INTEGER NOT NULL, `transfer_name` TEXT, `total_bytes` INTEGER, `height` INTEGER, `width` INTEGER, `web_url` TEXT, `has_live_photo` INTEGER NOT NULL, `hide_attachment` INTEGER NOT NULL, `is_sticker` INTEGER NOT NULL, `local_path` TEXT, `blurhash` TEXT, `thumbnail_path` TEXT, `metadata` TEXT, FOREIGN KEY(`message_guid`) REFERENCES `messages`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `message_guid` TEXT NOT NULL, `original_row_id` INTEGER, `uti` TEXT, `mime_type` TEXT, `is_outgoing` INTEGER NOT NULL, `transfer_name` TEXT, `total_bytes` INTEGER, `height` INTEGER, `width` INTEGER, `web_url` TEXT, `has_live_photo` INTEGER NOT NULL, `hide_attachment` INTEGER NOT NULL, `is_sticker` INTEGER NOT NULL, `local_path` TEXT, `blurhash` TEXT, `thumbnail_path` TEXT, `metadata` TEXT, `transfer_state` TEXT NOT NULL, `transfer_progress` REAL NOT NULL, FOREIGN KEY(`message_guid`) REFERENCES `messages`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -925,6 +925,18 @@
             "columnName": "metadata",
             "affinity": "TEXT",
             "notNull": false
+          },
+          {
+            "fieldPath": "transferState",
+            "columnName": "transfer_state",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "transferProgress",
+            "columnName": "transfer_progress",
+            "affinity": "REAL",
+            "notNull": true
           }
         ],
         "primaryKey": {
@@ -1882,12 +1894,158 @@
             ]
           }
         ]
+      },
+      {
+        "tableName": "imessage_availability_cache",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`normalized_address` TEXT NOT NULL, `check_result` TEXT NOT NULL, `checked_at` INTEGER NOT NULL, `expires_at` INTEGER NOT NULL, `session_id` TEXT NOT NULL, PRIMARY KEY(`normalized_address`))",
+        "fields": [
+          {
+            "fieldPath": "normalizedAddress",
+            "columnName": "normalized_address",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkResult",
+            "columnName": "check_result",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "checkedAt",
+            "columnName": "checked_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "expiresAt",
+            "columnName": "expires_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "sessionId",
+            "columnName": "session_id",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": false,
+          "columnNames": [
+            "normalized_address"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_imessage_availability_cache_check_result",
+            "unique": false,
+            "columnNames": [
+              "check_result"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_imessage_availability_cache_check_result` ON `${TABLE_NAME}` (`check_result`)"
+          },
+          {
+            "name": "index_imessage_availability_cache_expires_at",
+            "unique": false,
+            "columnNames": [
+              "expires_at"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_imessage_availability_cache_expires_at` ON `${TABLE_NAME}` (`expires_at`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "sync_ranges",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `chat_guid` TEXT NOT NULL, `start_timestamp` INTEGER NOT NULL, `end_timestamp` INTEGER NOT NULL, `synced_at` INTEGER NOT NULL, `sync_source` TEXT NOT NULL, FOREIGN KEY(`chat_guid`) REFERENCES `chats`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "fields": [
+          {
+            "fieldPath": "id",
+            "columnName": "id",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "chatGuid",
+            "columnName": "chat_guid",
+            "affinity": "TEXT",
+            "notNull": true
+          },
+          {
+            "fieldPath": "startTimestamp",
+            "columnName": "start_timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "endTimestamp",
+            "columnName": "end_timestamp",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncedAt",
+            "columnName": "synced_at",
+            "affinity": "INTEGER",
+            "notNull": true
+          },
+          {
+            "fieldPath": "syncSource",
+            "columnName": "sync_source",
+            "affinity": "TEXT",
+            "notNull": true
+          }
+        ],
+        "primaryKey": {
+          "autoGenerate": true,
+          "columnNames": [
+            "id"
+          ]
+        },
+        "indices": [
+          {
+            "name": "index_sync_ranges_chat_guid",
+            "unique": false,
+            "columnNames": [
+              "chat_guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_ranges_chat_guid` ON `${TABLE_NAME}` (`chat_guid`)"
+          },
+          {
+            "name": "index_sync_ranges_chat_guid_start_timestamp_end_timestamp",
+            "unique": false,
+            "columnNames": [
+              "chat_guid",
+              "start_timestamp",
+              "end_timestamp"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_ranges_chat_guid_start_timestamp_end_timestamp` ON `${TABLE_NAME}` (`chat_guid`, `start_timestamp`, `end_timestamp`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "chats",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": [
+              "chat_guid"
+            ],
+            "referencedColumns": [
+              "guid"
+            ]
+          }
+        ]
       }
     ],
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'a6fb2d965951383f2d03879e9c4b96ff')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '1e97719c235fca15395fbb4f5e88081e')"
     ]
   }
 }

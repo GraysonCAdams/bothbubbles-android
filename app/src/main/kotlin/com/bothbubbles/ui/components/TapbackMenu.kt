@@ -27,50 +27,19 @@ import androidx.compose.ui.window.PopupProperties
 
 /**
  * iMessage tapback reactions.
- * Includes SMS translation format that matches what iOS sends to non-iMessage users.
+ * These reactions can only be sent on server-origin messages (iMessage or server-forwarded SMS).
  */
 enum class Tapback(
     val apiName: String,
     val emoji: String,
-    val label: String,
-    /** SMS format verb used to translate reaction to text (e.g., "Loved" -> 'Loved "message"') */
-    val smsVerb: String,
-    /** SMS format for removing a reaction (e.g., "Removed a heart from") */
-    val smsRemovalText: String
+    val label: String
 ) {
-    LOVE("love", "❤️", "Love", "Loved", "Removed a heart from"),
-    LIKE("like", "👍", "Like", "Liked", "Removed a like from"),
-    DISLIKE("dislike", "👎", "Dislike", "Disliked", "Removed a dislike from"),
-    LAUGH("laugh", "😂", "Laugh", "Laughed at", "Removed a laugh from"),
-    EMPHASIZE("emphasize", "‼️", "Emphasize", "Emphasized", "Removed an exclamation from"),
-    QUESTION("question", "❓", "Question", "Questioned", "Removed a question mark from");
-
-    /**
-     * Format the reaction as an SMS text message that iPhones understand.
-     * Example: 'Loved "Hello there!"'
-     */
-    fun toSmsText(originalMessage: String): String {
-        val truncatedMessage = truncateMessage(originalMessage)
-        return "$smsVerb \"$truncatedMessage\""
-    }
-
-    /**
-     * Format the reaction removal as an SMS text message that iPhones understand.
-     * Example: 'Removed a heart from "Hello there!"'
-     */
-    fun toSmsRemovalText(originalMessage: String): String {
-        val truncatedMessage = truncateMessage(originalMessage)
-        return "$smsRemovalText \"$truncatedMessage\""
-    }
-
-    private fun truncateMessage(message: String): String {
-        // Truncate long messages to keep SMS reasonable
-        return if (message.length > 100) {
-            message.take(97) + "..."
-        } else {
-            message
-        }
-    }
+    LOVE("love", "❤️", "Love"),
+    LIKE("like", "👍", "Like"),
+    DISLIKE("dislike", "👎", "Dislike"),
+    LAUGH("laugh", "😂", "Laugh"),
+    EMPHASIZE("emphasize", "‼️", "Emphasize"),
+    QUESTION("question", "❓", "Question");
 
     companion object {
         fun fromApiName(name: String): Tapback? {

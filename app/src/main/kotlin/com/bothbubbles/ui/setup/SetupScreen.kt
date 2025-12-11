@@ -201,7 +201,6 @@ fun SetupScreen(
                 )
                 5 -> SyncPage(
                     uiState = uiState,
-                    onMessagesPerChatChange = viewModel::updateMessagesPerChat,
                     onSkipEmptyChatsChange = viewModel::updateSkipEmptyChats,
                     onStartSync = viewModel::startSync,
                     onBack = {
@@ -1321,7 +1320,6 @@ private fun CategoryPreviewItem(
 @Composable
 private fun SyncPage(
     uiState: SetupUiState,
-    onMessagesPerChatChange: (Int) -> Unit,
     onSkipEmptyChatsChange: (Boolean) -> Unit,
     onStartSync: () -> Unit,
     onBack: () -> Unit
@@ -1420,29 +1418,6 @@ private fun SyncPage(
                 )
 
                 Spacer(modifier = Modifier.height(32.dp))
-
-                // Messages per chat slider
-                Text(
-                    text = "Messages per conversation: ${uiState.messagesPerChat}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Slider(
-                    value = uiState.messagesPerChat.toFloat(),
-                    onValueChange = { onMessagesPerChatChange(it.toInt()) },
-                    valueRange = 10f..100f,
-                    steps = 8,
-                    modifier = Modifier.fillMaxWidth()
-                )
-
-                Text(
-                    text = "More messages = longer sync time",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                )
-
-                Spacer(modifier = Modifier.height(24.dp))
 
                 // Skip empty chats toggle
                 Surface(

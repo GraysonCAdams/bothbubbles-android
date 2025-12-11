@@ -31,7 +31,7 @@ import java.util.Locale
 
 /**
  * Android Auto screen displaying messages in a conversation.
- * Shows recent messages and provides actions to reply or mark as read.
+ * Shows recent messages with pagination and provides actions to reply or mark as read.
  */
 class ConversationDetailScreen(
     carContext: CarContext,
@@ -52,6 +52,16 @@ class ConversationDetailScreen(
     @Volatile
     private var isLoadingMessages: Boolean = true
 
+    // Pagination state
+    @Volatile
+    private var currentPage = 0
+
+    @Volatile
+    private var hasMoreMessages = true
+
+    @Volatile
+    private var totalMessageCount = 0
+
     private val dateFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
     init {
@@ -62,12 +72,19 @@ class ConversationDetailScreen(
         scope.launch {
             try {
                 isLoadingMessages = true
+
+                // Get total count to determine if there are more messages
+                totalMessageCount = messageDao.getMessageCountForChat(chat.guid)
+
+                val messageLimit = (currentPage + 1) * PAGE_SIZE
                 val messages = messageDao.observeMessagesForChat(
                     chatGuid = chat.guid,
-                    limit = MAX_MESSAGES,
+                    limit = messageLimit,
                     offset = 0
                 ).first()
+
                 cachedMessages = messages
+                hasMoreMessages = messages.size < totalMessageCount
                 isLoadingMessages = false
 
                 // If no messages found, trigger priority sync to load them immediately
@@ -78,12 +95,14 @@ class ConversationDetailScreen(
                     kotlinx.coroutines.delay(2000)
                     val refreshedMessages = messageDao.observeMessagesForChat(
                         chatGuid = chat.guid,
-                        limit = MAX_MESSAGES,
+                        limit = messageLimit,
                         offset = 0
                     ).first()
                     cachedMessages = refreshedMessages
+                    hasMoreMessages = refreshedMessages.size < totalMessageCount
                 }
 
+                android.util.Log.d(TAG, "Loaded ${cachedMessages.size} messages, total=$totalMessageCount, hasMore=$hasMoreMessages")
                 invalidate()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to refresh messages", e)
@@ -93,12 +112,28 @@ class ConversationDetailScreen(
         }
     }
 
+    private fun loadMoreMessages() {
+        if (!hasMoreMessages || isLoadingMessages) return
+        currentPage++
+        android.util.Log.d(TAG, "Loading more messages, page=$currentPage")
+        refreshMessages()
+    }
+
     override fun onGetTemplate(): Template {
         val displayTitle = chat.displayName ?: "Conversation"
 
         val itemListBuilder = ItemList.Builder()
 
-        // Add messages (newest first, but displayed oldest first for reading order)
+        // Add "Load Older" row at the top if there are more messages
+        if (hasMoreMessages && cachedMessages.isNotEmpty()) {
+            val loadOlderRow = Row.Builder()
+                .setTitle("Load Older Messages...")
+                .setOnClickListener { loadMoreMessages() }
+                .build()
+            itemListBuilder.addItem(loadOlderRow)
+        }
+
+        // Add messages (newest first in DB, but displayed oldest first for reading order)
         val messagesToShow = cachedMessages.reversed()
         for (message in messagesToShow) {
             val row = buildMessageRow(message)
@@ -198,6 +233,6 @@ class ConversationDetailScreen(
 
     companion object {
         private const val TAG = "ConversationDetailScreen"
-        private const val MAX_MESSAGES = 10
+        private const val PAGE_SIZE = 15  // Show 15 messages per page
     }
 }

@@ -134,6 +134,67 @@ interface AttachmentDao {
     @Query("UPDATE attachments SET height = :height, width = :width WHERE guid = :guid")
     suspend fun updateDimensions(guid: String, height: Int, width: Int)
 
+    // ===== Transfer State Updates =====
+
+    /**
+     * Update the transfer state for an attachment.
+     */
+    @Query("UPDATE attachments SET transfer_state = :state WHERE guid = :guid")
+    suspend fun updateTransferState(guid: String, state: String)
+
+    /**
+     * Update both transfer state and progress.
+     */
+    @Query("UPDATE attachments SET transfer_state = :state, transfer_progress = :progress WHERE guid = :guid")
+    suspend fun updateTransferProgress(guid: String, state: String, progress: Float)
+
+    /**
+     * Mark an attachment as failed with the given state.
+     */
+    @Query("UPDATE attachments SET transfer_state = 'FAILED', transfer_progress = 0 WHERE guid = :guid")
+    suspend fun markTransferFailed(guid: String)
+
+    /**
+     * Mark an attachment as downloaded and set its local path.
+     */
+    @Query("UPDATE attachments SET transfer_state = 'DOWNLOADED', transfer_progress = 1.0, local_path = :localPath WHERE guid = :guid")
+    suspend fun markDownloaded(guid: String, localPath: String)
+
+    /**
+     * Mark an attachment as uploaded (outbound attachment finished uploading).
+     */
+    @Query("UPDATE attachments SET transfer_state = 'UPLOADED', transfer_progress = 1.0 WHERE guid = :guid")
+    suspend fun markUploaded(guid: String)
+
+    /**
+     * Get attachments by transfer state.
+     */
+    @Query("SELECT * FROM attachments WHERE transfer_state = :state")
+    suspend fun getByTransferState(state: String): List<AttachmentEntity>
+
+    /**
+     * Get pending downloads for a chat using transfer state.
+     */
+    @Query("""
+        SELECT a.* FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid AND a.transfer_state IN ('PENDING', 'FAILED')
+        ORDER BY m.date_created DESC
+    """)
+    suspend fun getPendingDownloadsByState(chatGuid: String): List<AttachmentEntity>
+
+    /**
+     * Get all attachments currently uploading.
+     */
+    @Query("SELECT * FROM attachments WHERE transfer_state = 'UPLOADING'")
+    suspend fun getUploadingAttachments(): List<AttachmentEntity>
+
+    /**
+     * Get all attachments currently downloading.
+     */
+    @Query("SELECT * FROM attachments WHERE transfer_state = 'DOWNLOADING'")
+    suspend fun getDownloadingAttachments(): List<AttachmentEntity>
+
     // ===== Deletes =====
 
     @Query("DELETE FROM attachments WHERE guid = :guid")

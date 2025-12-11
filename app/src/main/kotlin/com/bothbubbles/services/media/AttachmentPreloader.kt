@@ -41,6 +41,9 @@ class AttachmentPreloader @Inject constructor(
         visibleRange: IntRange,
         preloadCount: Int = 5
     ) {
+        // TEMPORARILY DISABLED: Skip attachment preloading to focus on text-only performance
+        return
+
         // Calculate preload range (visible +/- preloadCount)
         val preloadStart = (visibleRange.first - preloadCount).coerceAtLeast(0)
         val preloadEnd = (visibleRange.last + preloadCount).coerceAtMost(attachments.size - 1)
@@ -83,6 +86,9 @@ class AttachmentPreloader @Inject constructor(
      * @param attachment The attachment to preload
      */
     fun preload(attachment: AttachmentUiModel) {
+        // TEMPORARILY DISABLED: Skip attachment preloading to focus on text-only performance
+        return
+
         if (!attachment.isImage && !attachment.isGif) return
         if (attachment.needsDownload) return
 

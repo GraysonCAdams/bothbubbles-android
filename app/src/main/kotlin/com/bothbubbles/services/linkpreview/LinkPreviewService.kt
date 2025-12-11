@@ -192,6 +192,9 @@ class LinkPreviewService @Inject constructor(
      * Fetches metadata from a URL using oEmbed if available, falling back to Open Graph
      */
     suspend fun fetchMetadata(url: String): LinkMetadataResult = withContext(Dispatchers.IO) {
+        // TEMPORARILY DISABLED: Skip link preview fetching to focus on text-only performance
+        return@withContext LinkMetadataResult.NoPreview
+
         rateLimiter.withPermit {
             try {
                 // First, try maps preview for Google Maps / Apple Maps URLs

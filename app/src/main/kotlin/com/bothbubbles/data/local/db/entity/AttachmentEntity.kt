@@ -78,7 +78,22 @@ data class AttachmentEntity(
 
     // Metadata stored as JSON
     @ColumnInfo(name = "metadata")
-    val metadata: String? = null
+    val metadata: String? = null,
+
+    /**
+     * Transfer state for tracking upload/download lifecycle.
+     * Enables snappy UI where outbound attachments show immediately while uploading,
+     * and inbound attachments show blurhash placeholders while downloading.
+     */
+    @ColumnInfo(name = "transfer_state")
+    val transferState: String = TransferState.DOWNLOADED.name,
+
+    /**
+     * Transfer progress from 0.0 to 1.0.
+     * Used for showing upload/download progress in UI.
+     */
+    @ColumnInfo(name = "transfer_progress")
+    val transferProgress: Float = 0f
 ) {
     /**
      * MIME type category (image, video, audio, etc.)
@@ -105,10 +120,47 @@ data class AttachmentEntity(
         get() = mimeCategory == "audio"
 
     /**
-     * Whether attachment has been downloaded locally
+     * Whether attachment has been downloaded locally.
+     * Uses transfer state if available, falls back to localPath check for backwards compatibility.
      */
     val isDownloaded: Boolean
-        get() = localPath != null
+        get() = transferState == TransferState.DOWNLOADED.name || localPath != null
+
+    /**
+     * Whether this attachment is currently uploading.
+     */
+    val isUploading: Boolean
+        get() = transferState == TransferState.UPLOADING.name
+
+    /**
+     * Whether this attachment is currently downloading.
+     */
+    val isDownloading: Boolean
+        get() = transferState == TransferState.DOWNLOADING.name
+
+    /**
+     * Whether this attachment is in any transfer state (uploading or downloading).
+     */
+    val isTransferring: Boolean
+        get() = isUploading || isDownloading
+
+    /**
+     * Whether this attachment transfer has failed.
+     */
+    val hasFailed: Boolean
+        get() = transferState == TransferState.FAILED.name
+
+    /**
+     * Whether this attachment needs to be downloaded (inbound, not yet downloaded).
+     */
+    val needsDownload: Boolean
+        get() = !isOutgoing && transferState == TransferState.PENDING.name && localPath == null
+
+    /**
+     * Parsed transfer state enum.
+     */
+    val transferStateEnum: TransferState
+        get() = TransferState.fromString(transferState)
 
     /**
      * Whether this attachment has valid dimensions

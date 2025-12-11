@@ -73,7 +73,9 @@ object MessageSegmentParser {
      * Simple text-only messages can use the optimized single-bubble path.
      */
     fun needsSegmentation(message: MessageUiModel, hasLinkPreview: Boolean): Boolean {
-        val hasMedia = message.attachments.any { it.isImage || it.isVideo }
-        return hasMedia || hasLinkPreview
+        // TEMPORARILY DISABLED: Skip segmentation to focus on text-only rendering
+        // val hasMedia = message.attachments.any { it.isImage || it.isVideo }
+        // return hasMedia || hasLinkPreview
+        return false
     }
 }
