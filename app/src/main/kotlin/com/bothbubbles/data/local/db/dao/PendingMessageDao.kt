@@ -115,4 +115,11 @@ interface PendingMessageDao {
      */
     @Query("SELECT COUNT(*) FROM pending_messages WHERE sync_status IN ('PENDING', 'SENDING', 'FAILED')")
     suspend fun getUnsentCount(): Int
+
+    /**
+     * Get messages stuck in SENDING status older than the given timestamp.
+     * Used at startup to reset stale SENDING messages that got interrupted.
+     */
+    @Query("SELECT * FROM pending_messages WHERE sync_status = 'SENDING' AND last_attempt_at < :olderThan")
+    suspend fun getStaleSending(olderThan: Long): List<PendingMessageEntity>
 }

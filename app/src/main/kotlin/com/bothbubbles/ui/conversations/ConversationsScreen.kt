@@ -40,6 +40,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.InlineTextContent
 import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Message
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
@@ -91,6 +92,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.activity.compose.BackHandler
 import com.bothbubbles.R
 import com.bothbubbles.services.categorization.MessageCategory
 import com.bothbubbles.services.socket.ConnectionState
@@ -98,6 +100,24 @@ import com.bothbubbles.ui.components.Avatar
 import com.bothbubbles.ui.components.ConnectionBannerState
 import com.bothbubbles.ui.components.ConnectionStatusBanner
 import com.bothbubbles.ui.components.SmsBannerState
+import com.bothbubbles.ui.settings.SettingsPanelPage
+import com.bothbubbles.ui.settings.rememberSettingsPanelNavigator
+import com.bothbubbles.ui.settings.server.ServerSettingsContent
+import com.bothbubbles.ui.settings.notifications.NotificationSettingsContent
+import com.bothbubbles.ui.settings.sms.SmsSettingsContent
+import com.bothbubbles.ui.settings.sms.SmsBackupContent
+import com.bothbubbles.ui.settings.sync.SyncSettingsContent
+import com.bothbubbles.ui.settings.swipe.SwipeSettingsContent
+import com.bothbubbles.ui.settings.about.AboutContent
+import com.bothbubbles.ui.settings.about.OpenSourceLicensesContent
+import com.bothbubbles.ui.settings.archived.ArchivedChatsContent
+import com.bothbubbles.ui.settings.blocked.BlockedContactsContent
+import com.bothbubbles.ui.settings.spam.SpamSettingsContent
+import com.bothbubbles.ui.settings.categorization.CategorizationSettingsContent
+import com.bothbubbles.ui.settings.export.ExportContent
+import com.bothbubbles.ui.settings.EffectsSettingsContent
+import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
+import com.bothbubbles.ui.settings.autoresponder.AutoResponderSettingsContent
 import com.bothbubbles.ui.components.SmsStatusBanner
 import com.bothbubbles.ui.components.ContactInfo
 import com.bothbubbles.ui.components.ContactQuickActionsPopup
@@ -108,7 +128,7 @@ import com.bothbubbles.ui.components.SwipeConfig
 import com.bothbubbles.ui.components.SwipeableConversationTile
 import com.bothbubbles.ui.components.ConversationListSkeleton
 import com.bothbubbles.ui.components.staggeredEntrance
-import com.bothbubbles.ui.components.UrlParsingUtils
+import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.settings.SettingsContent
 import com.bothbubbles.ui.settings.SettingsViewModel
 import com.bothbubbles.ui.theme.KumbhSansFamily
@@ -404,8 +424,9 @@ fun ConversationsScreen(
         }
     }
 
-    // Slightly darker background that shows behind the header and card
-    val darkerBackground = MaterialTheme.colorScheme.surfaceContainerLow
+    // Pure grayscale background for header (no color hue)
+    val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
+    val darkerBackground = if (isDarkTheme) Color(0xFF1A1A1A) else Color(0xFFEDEDED)
 
     Box(
         modifier = Modifier
@@ -2222,9 +2243,9 @@ private fun GoogleStyleConversationTile(
     hasRoundedCorners: Boolean = false,
     onAvatarClick: (() -> Unit)? = null
 ) {
+    // MD3 uses 12.dp ("Large" shape token) for list items
     val shape = when {
-        isSelectionMode -> RoundedCornerShape(50)
-        hasRoundedCorners -> RoundedCornerShape(16.dp)
+        isSelectionMode || hasRoundedCorners -> RoundedCornerShape(12.dp)
         else -> RoundedCornerShape(0.dp)
     }
     val needsPadding = isSelectionMode || hasRoundedCorners
@@ -2238,8 +2259,9 @@ private fun GoogleStyleConversationTile(
                 onLongClick = onLongClick
             ),
         shape = shape,
+        // MD3: use secondaryContainer for selected state
         color = if (isSelected) {
-            MaterialTheme.colorScheme.surfaceContainerHighest
+            MaterialTheme.colorScheme.secondaryContainer
         } else {
             MaterialTheme.colorScheme.surface
         }
@@ -3251,7 +3273,7 @@ private fun ScrollToTopButton(
 
 /**
  * Settings panel that slides in from the right.
- * Contains all settings options with a close button.
+ * Uses internal navigation with AnimatedContent for smooth transitions between settings pages.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -3261,6 +3283,35 @@ private fun SettingsPanel(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val navigator = rememberSettingsPanelNavigator()
+
+    // Handle system back button
+    BackHandler(enabled = true) {
+        if (!navigator.navigateBack()) {
+            onClose()
+        }
+    }
+
+    // Get title based on current page
+    val title = when (navigator.currentPage) {
+        SettingsPanelPage.Main -> "Settings"
+        SettingsPanelPage.Server -> "iMessage"
+        SettingsPanelPage.Archived -> "Archived"
+        SettingsPanelPage.Blocked -> "Blocked contacts"
+        SettingsPanelPage.Spam -> "Spam protection"
+        SettingsPanelPage.Categorization -> "Message categorization"
+        SettingsPanelPage.Sync -> "Sync settings"
+        SettingsPanelPage.Export -> "Export messages"
+        SettingsPanelPage.Sms -> "SMS/MMS"
+        SettingsPanelPage.SmsBackup -> "Backup & Restore"
+        SettingsPanelPage.Notifications -> "Notifications"
+        SettingsPanelPage.Swipe -> "Swipe actions"
+        SettingsPanelPage.Effects -> "Message effects"
+        SettingsPanelPage.Templates -> "Quick reply templates"
+        SettingsPanelPage.AutoResponder -> "Auto-responder"
+        SettingsPanelPage.About -> "About"
+        SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -3269,7 +3320,17 @@ private fun SettingsPanel(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { },
+                    title = { Text(title) },
+                    navigationIcon = {
+                        if (navigator.canGoBack()) {
+                            IconButton(onClick = { navigator.navigateBack() }) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "Back"
+                                )
+                            }
+                        }
+                    },
                     actions = {
                         IconButton(onClick = onClose) {
                             Icon(
@@ -3284,31 +3345,168 @@ private fun SettingsPanel(
                 )
             }
         ) { padding ->
-            val navigateFromDrawer: (String) -> Unit = { destination ->
-                onClose()
-                onNavigate(destination, true)
-            }
+            // Determine if navigation is forward or backward for animation direction
+            val isForward = remember { mutableStateOf(true) }
 
-            SettingsContent(
+            AnimatedContent(
+                targetState = navigator.currentPage,
+                transitionSpec = {
+                    if (isForward.value) {
+                        // Forward navigation: slide in from right
+                        (slideInHorizontally(
+                            initialOffsetX = { it },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ) + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(
+                            targetOffsetX = { -it / 4 },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ) + fadeOut(tween(150)))
+                    } else {
+                        // Backward navigation: slide in from left
+                        (slideInHorizontally(
+                            initialOffsetX = { -it / 4 },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ) + fadeIn(tween(200))) togetherWith
+                        (slideOutHorizontally(
+                            targetOffsetX = { it },
+                            animationSpec = tween(300, easing = FastOutSlowInEasing)
+                        ) + fadeOut(tween(150)))
+                    }
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding),
-                uiState = uiState,
-                onServerSettingsClick = { navigateFromDrawer("server") },
-                onArchivedClick = { navigateFromDrawer("archived") },
-                onBlockedClick = { navigateFromDrawer("blocked") },
-                onSpamClick = { navigateFromDrawer("spam") },
-                onCategorizationClick = { navigateFromDrawer("categorization") },
-                onSyncSettingsClick = { navigateFromDrawer("sync") },
-                onExportClick = { navigateFromDrawer("export") },
-                onSmsSettingsClick = { navigateFromDrawer("sms") },
-                onNotificationsClick = { navigateFromDrawer("notifications") },
-                onSwipeSettingsClick = { navigateFromDrawer("swipe") },
-                onEffectsSettingsClick = { navigateFromDrawer("effects") },
-                onTemplatesClick = { navigateFromDrawer("templates") },
-                onAboutClick = { navigateFromDrawer("about") },
-                viewModel = viewModel
-            )
+                label = "settings_page_transition"
+            ) { page ->
+                when (page) {
+                    SettingsPanelPage.Main -> {
+                        SettingsContent(
+                            modifier = Modifier.fillMaxSize(),
+                            uiState = uiState,
+                            onServerSettingsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Server)
+                            },
+                            onArchivedClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Archived)
+                            },
+                            onBlockedClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Blocked)
+                            },
+                            onSpamClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Spam)
+                            },
+                            onCategorizationClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Categorization)
+                            },
+                            onSyncSettingsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Sync)
+                            },
+                            onExportClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Export)
+                            },
+                            onSmsSettingsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Sms)
+                            },
+                            onNotificationsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Notifications)
+                            },
+                            onSwipeSettingsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Swipe)
+                            },
+                            onEffectsSettingsClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Effects)
+                            },
+                            onTemplatesClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.Templates)
+                            },
+                            onAutoResponderClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.AutoResponder)
+                            },
+                            onAboutClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.About)
+                            },
+                            viewModel = viewModel
+                        )
+                    }
+                    SettingsPanelPage.Server -> {
+                        ServerSettingsContent()
+                    }
+                    SettingsPanelPage.Archived -> {
+                        ArchivedChatsContent(
+                            onChatClick = { chatGuid ->
+                                onClose()
+                                onNavigate("chat:$chatGuid", false)
+                            }
+                        )
+                    }
+                    SettingsPanelPage.Blocked -> {
+                        BlockedContactsContent()
+                    }
+                    SettingsPanelPage.Spam -> {
+                        SpamSettingsContent()
+                    }
+                    SettingsPanelPage.Categorization -> {
+                        CategorizationSettingsContent()
+                    }
+                    SettingsPanelPage.Sync -> {
+                        SyncSettingsContent()
+                    }
+                    SettingsPanelPage.Export -> {
+                        ExportContent()
+                    }
+                    SettingsPanelPage.Sms -> {
+                        SmsSettingsContent(
+                            onBackupRestoreClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.SmsBackup)
+                            }
+                        )
+                    }
+                    SettingsPanelPage.SmsBackup -> {
+                        SmsBackupContent()
+                    }
+                    SettingsPanelPage.Notifications -> {
+                        NotificationSettingsContent()
+                    }
+                    SettingsPanelPage.Swipe -> {
+                        SwipeSettingsContent()
+                    }
+                    SettingsPanelPage.Effects -> {
+                        EffectsSettingsContent()
+                    }
+                    SettingsPanelPage.Templates -> {
+                        QuickReplyTemplatesContent()
+                    }
+                    SettingsPanelPage.AutoResponder -> {
+                        AutoResponderSettingsContent()
+                    }
+                    SettingsPanelPage.About -> {
+                        AboutContent(
+                            onOpenSourceLicensesClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.OpenSourceLicenses)
+                            }
+                        )
+                    }
+                    SettingsPanelPage.OpenSourceLicenses -> {
+                        OpenSourceLicensesContent()
+                    }
+                }
+            }
         }
     }
 }

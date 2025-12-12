@@ -191,7 +191,7 @@
 
         <!-- Socket.IO Foreground Service -->
         <service
-            android:name=".service.SocketForegroundService"
+            android:name=".services.foreground.SocketForegroundService"
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
@@ -265,7 +265,7 @@
 
         <!-- Boot receiver for auto-start -->
         <receiver
-            android:name=".service.BootReceiver"
+            android:name=".services.receiver.BootReceiver"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />

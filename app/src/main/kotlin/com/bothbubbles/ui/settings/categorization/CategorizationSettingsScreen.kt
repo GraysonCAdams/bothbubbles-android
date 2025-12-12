@@ -54,12 +54,34 @@ fun CategorizationSettingsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-        ) {
+        CategorizationSettingsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun CategorizationSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: CategorizationSettingsViewModel = hiltViewModel(),
+    uiState: CategorizationSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
+) {
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.downloadError) {
+        uiState.downloadError?.let { error ->
+            snackbarHostState.showSnackbar(error)
+            viewModel.clearError()
+        }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
             // Description
             Surface(
                 modifier = Modifier
@@ -243,4 +265,3 @@ fun CategorizationSettingsScreen(
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
-}

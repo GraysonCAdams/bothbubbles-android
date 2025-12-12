@@ -12,23 +12,21 @@ data class PagingConfig(
     /**
      * Number of messages to load per page when filling gaps.
      * Larger values reduce database calls but increase memory per load.
-     * Signal uses 50.
      */
-    val pageSize: Int = 50,
+    val pageSize: Int = 100,
 
     /**
      * Number of messages to prefetch beyond the visible range.
      * When user scrolls, we preload this many positions ahead in each direction.
      * Larger values provide smoother scrolling but use more memory.
      */
-    val prefetchDistance: Int = 50,
+    val prefetchDistance: Int = 100,
 
     /**
      * Number of messages to load on initial chat open.
      * Should be larger than a typical screen to avoid immediate loading.
-     * Signal loads around the current scroll position; we start at newest.
      */
-    val initialLoadSize: Int = 100,
+    val initialLoadSize: Int = 200,
 
     /**
      * Buffer pages to keep loaded on each side of visible range.
@@ -41,7 +39,14 @@ data class PagingConfig(
      * Debounce time in milliseconds for scroll position updates.
      * Prevents excessive load requests during fast scrolling.
      */
-    val scrollDebounceMs: Long = 50L
+    val scrollDebounceMs: Long = 50L,
+
+    /**
+     * When true, messages are kept in memory for the entire chat session.
+     * When false, distant messages are evicted based on bufferPages setting.
+     * Default is true to prevent re-loading when scrolling back.
+     */
+    val disableEviction: Boolean = true
 ) {
     companion object {
         /**

@@ -134,6 +134,14 @@ class SettingsDataStore @Inject constructor(
         prefs[Keys.HAS_SHOWN_PRIVATE_API_PROMPT] ?: false
     }
 
+    /**
+     * Whether the user has completed the SMS/iMessage toggle tutorial.
+     * The tutorial is shown once when first opening an eligible chat.
+     */
+    val hasCompletedSendModeTutorial: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.HAS_COMPLETED_SEND_MODE_TUTORIAL] ?: false
+    }
+
     // ===== SMS Settings =====
 
     val smsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -424,6 +432,16 @@ class SettingsDataStore @Inject constructor(
     suspend fun setHasShownPrivateApiPrompt(shown: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.HAS_SHOWN_PRIVATE_API_PROMPT] = shown
+        }
+    }
+
+    /**
+     * Mark the SMS/iMessage toggle tutorial as completed.
+     * Once completed, the tutorial will never show again.
+     */
+    suspend fun setHasCompletedSendModeTutorial(completed: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.HAS_COMPLETED_SEND_MODE_TUTORIAL] = completed
         }
     }
 
@@ -880,6 +898,48 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    // ===== Auto-Responder =====
+
+    val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_RESPONDER_ENABLED] ?: false
+    }
+
+    /**
+     * Auto-responder filter mode.
+     * - "everyone": Respond to all iMessage users
+     * - "known_senders": Only respond to contacts in address book
+     * - "favorites": Only respond to starred contacts
+     */
+    val autoResponderFilter: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_RESPONDER_FILTER] ?: "known_senders"
+    }
+
+    /**
+     * Rate limit for auto-responses per hour.
+     * Default is 10 to prevent spam in case of issues.
+     */
+    val autoResponderRateLimit: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_RESPONDER_RATE_LIMIT] ?: 10
+    }
+
+    suspend fun setAutoResponderEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setAutoResponderFilter(filter: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_RESPONDER_FILTER] = filter
+        }
+    }
+
+    suspend fun setAutoResponderRateLimit(limit: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_RESPONDER_RATE_LIMIT] = limit.coerceIn(1, 50)
+        }
+    }
+
     // ===== State Restoration =====
 
     val lastOpenChatGuid: Flow<String?> = dataStore.data.map { prefs ->
@@ -1110,5 +1170,13 @@ class SettingsDataStore @Inject constructor(
 
         // Developer Mode
         val DEVELOPER_MODE_ENABLED = booleanPreferencesKey("developer_mode_enabled")
+
+        // Auto-Responder
+        val AUTO_RESPONDER_ENABLED = booleanPreferencesKey("auto_responder_enabled")
+        val AUTO_RESPONDER_FILTER = stringPreferencesKey("auto_responder_filter")
+        val AUTO_RESPONDER_RATE_LIMIT = intPreferencesKey("auto_responder_rate_limit")
+
+        // SMS/iMessage Toggle Tutorial
+        val HAS_COMPLETED_SEND_MODE_TUTORIAL = booleanPreferencesKey("has_completed_send_mode_tutorial")
     }
 }

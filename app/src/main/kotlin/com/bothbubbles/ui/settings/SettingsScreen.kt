@@ -17,7 +17,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.sound.SoundTheme
-import com.bothbubbles.ui.settings.components.ProfileHeader
+import com.bothbubbles.ui.settings.components.BadgeStatus
+import com.bothbubbles.ui.settings.components.MessagingSectionHeader
 import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.ui.settings.components.SettingsMenuItem
 import com.bothbubbles.ui.settings.components.SettingsSectionTitle
@@ -38,6 +39,7 @@ fun SettingsScreen(
     onSwipeSettingsClick: () -> Unit = {},
     onEffectsSettingsClick: () -> Unit = {},
     onTemplatesClick: () -> Unit = {},
+    onAutoResponderClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -78,6 +80,7 @@ fun SettingsScreen(
             onSwipeSettingsClick = onSwipeSettingsClick,
             onEffectsSettingsClick = onEffectsSettingsClick,
             onTemplatesClick = onTemplatesClick,
+            onAutoResponderClick = onAutoResponderClick,
             onAboutClick = onAboutClick,
             viewModel = viewModel
         )
@@ -108,22 +111,14 @@ fun SettingsContent(
     onSwipeSettingsClick: () -> Unit,
     onEffectsSettingsClick: () -> Unit,
     onTemplatesClick: () -> Unit,
+    onAutoResponderClick: () -> Unit,
     onAboutClick: () -> Unit,
     viewModel: SettingsViewModel
 ) {
     LazyColumn(
         modifier = modifier,
-        contentPadding = PaddingValues(bottom = 16.dp)
+        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
     ) {
-        // Profile Header
-        item {
-            ProfileHeader(
-                serverUrl = uiState.serverUrl,
-                connectionState = uiState.connectionState,
-                onManageServerClick = onServerSettingsClick
-            )
-        }
-
         // Quick Actions Card
         item {
             SettingsCard(
@@ -178,7 +173,19 @@ fun SettingsContent(
 
         // Messaging Section
         item {
-            SettingsSectionTitle(title = "Messaging")
+            val iMessageStatus = when (uiState.connectionState) {
+                ConnectionState.CONNECTED -> BadgeStatus.CONNECTED
+                ConnectionState.NOT_CONFIGURED -> BadgeStatus.DISABLED
+                else -> BadgeStatus.ERROR
+            }
+            val smsStatus = if (uiState.smsEnabled) BadgeStatus.CONNECTED else BadgeStatus.DISABLED
+
+            MessagingSectionHeader(
+                iMessageStatus = iMessageStatus,
+                smsStatus = smsStatus,
+                onIMessageClick = onServerSettingsClick,
+                onSmsClick = onSmsSettingsClick
+            )
         }
 
         item {
@@ -191,6 +198,16 @@ fun SettingsContent(
                     title = stringResource(R.string.settings_notifications),
                     subtitle = "Sound, vibration, and display",
                     onClick = onNotificationsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // iMessage (BlueBubbles server)
+                SettingsMenuItem(
+                    icon = Icons.Default.Cloud,
+                    title = "iMessage",
+                    subtitle = "BlueBubbles server settings",
+                    onClick = onServerSettingsClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -211,6 +228,16 @@ fun SettingsContent(
                     title = "Quick reply templates",
                     subtitle = "Saved responses and smart suggestions",
                     onClick = onTemplatesClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Auto-responder
+                SettingsMenuItem(
+                    icon = Icons.Default.SmartToy,
+                    title = "Auto-responder",
+                    subtitle = "Greet first-time iMessage contacts",
+                    onClick = onAutoResponderClick
                 )
             }
         }
@@ -369,16 +396,6 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Server pairing
-                SettingsMenuItem(
-                    icon = Icons.Default.QrCodeScanner,
-                    title = "Server pairing",
-                    subtitle = "Reconnect or pair new server",
-                    onClick = onServerSettingsClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
                 // Sync settings
                 SettingsMenuItem(
                     icon = Icons.Default.Sync,

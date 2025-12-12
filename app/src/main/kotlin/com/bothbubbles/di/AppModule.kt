@@ -7,6 +7,7 @@ import coil.ImageLoader
 import com.bothbubbles.BothBubblesApp
 import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
@@ -133,6 +134,12 @@ object AppModule {
     @Singleton
     fun provideSyncRangeDao(database: BothBubblesDatabase): SyncRangeDao {
         return database.syncRangeDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideAutoRespondedSenderDao(database: BothBubblesDatabase): AutoRespondedSenderDao {
+        return database.autoRespondedSenderDao()
     }
 
     @Provides

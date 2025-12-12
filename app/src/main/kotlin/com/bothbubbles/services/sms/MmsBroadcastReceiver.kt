@@ -18,7 +18,7 @@ import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.spam.SpamRepository
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

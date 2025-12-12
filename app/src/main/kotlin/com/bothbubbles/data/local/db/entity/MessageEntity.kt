@@ -18,7 +18,9 @@ import androidx.room.PrimaryKey
         Index(value = ["message_source"]),
         Index(value = ["chat_guid", "date_deleted"]),
         // Covering index for pagination queries - enables O(1) position-based lookups
-        Index(value = ["chat_guid", "date_created", "date_deleted"])
+        Index(value = ["chat_guid", "date_created", "date_deleted"]),
+        // Index for efficient filtering by reaction status in BitSet pagination
+        Index(value = ["is_reaction"])
     ],
     foreignKeys = [
         ForeignKey(
@@ -149,7 +151,15 @@ data class MessageEntity(
 
     // Metadata stored as JSON
     @ColumnInfo(name = "metadata")
-    val metadata: String? = null
+    val metadata: String? = null,
+
+    /**
+     * Denormalized column indicating if this message is a reaction/tapback.
+     * Computed at insert time using [ReactionClassifier.isReaction].
+     * This enables efficient filtering in SQL queries without complex pattern matching.
+     */
+    @ColumnInfo(name = "is_reaction", defaultValue = "0")
+    val isReactionDb: Boolean = false
 ) {
     /**
      * Whether this message has been sent (no error, not pending)
@@ -159,22 +169,13 @@ data class MessageEntity(
 
     /**
      * Whether this message is a reaction/tapback.
-     * iMessage reactions can come in several formats:
-     * - Numeric codes: "2000"-"2005" (add), "3000"-"3005" (remove)
-     * - Text names: "love", "like", etc. or "-love", "-like" (remove)
-     * - With prefixes: "reaction/2000", "tapback/love", etc.
+     * Uses the denormalized [isReactionDb] column for efficiency.
+     * Falls back to computed detection for backwards compatibility with pre-migration data.
+     *
+     * @see ReactionClassifier for the centralized detection logic
      */
     val isReaction: Boolean
-        get() = associatedMessageGuid != null && associatedMessageType != null && (
-            associatedMessageType!!.contains("reaction") ||
-            associatedMessageType!!.contains("tapback") ||
-            associatedMessageType!!.contains("200") ||  // 2000-2005 (add reactions)
-            associatedMessageType!!.contains("300") ||  // 3000-3005 (remove reactions)
-            associatedMessageType in listOf(
-                "love", "like", "dislike", "laugh", "emphasize", "question",
-                "-love", "-like", "-dislike", "-laugh", "-emphasize", "-question"
-            )
-        )
+        get() = isReactionDb || ReactionClassifier.isReaction(associatedMessageGuid, associatedMessageType)
 
     /**
      * Whether this message is a group event (participant added/removed, name change)

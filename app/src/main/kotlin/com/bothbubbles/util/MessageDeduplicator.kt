@@ -6,7 +6,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -49,11 +48,12 @@ class MessageDeduplicator @Inject constructor(
 
     /**
      * Check if we should notify for this message GUID.
+     * This is a suspend function to avoid blocking coroutine threads.
      *
      * @param guid The message GUID to check
      * @return true if this is a new message we should notify for, false if already handled
      */
-    fun shouldNotifyForMessage(guid: String): Boolean {
+    suspend fun shouldNotifyForMessage(guid: String): Boolean {
         // First check in-memory cache (fast path)
         synchronized(lock) {
             if (guid in memoryCache) {
@@ -62,10 +62,8 @@ class MessageDeduplicator @Inject constructor(
             }
         }
 
-        // Check Room database (handles cross-restart dedup)
-        val existsInDb = runBlocking {
-            seenMessageDao.exists(guid)
-        }
+        // Check Room database (handles cross-restart dedup) - now properly suspending
+        val existsInDb = seenMessageDao.exists(guid)
 
         if (existsInDb) {
             // Also add to memory cache for faster future lookups
@@ -112,10 +110,8 @@ class MessageDeduplicator @Inject constructor(
     /**
      * Get count of currently tracked messages (for debugging).
      */
-    fun trackedCount(): Int {
-        return runBlocking {
-            seenMessageDao.count()
-        }
+    suspend fun trackedCount(): Int {
+        return seenMessageDao.count()
     }
 
     /**

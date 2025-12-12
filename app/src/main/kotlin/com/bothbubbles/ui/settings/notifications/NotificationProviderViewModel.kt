@@ -4,7 +4,7 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.service.SocketForegroundService
+import com.bothbubbles.services.foreground.SocketForegroundService
 import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.services.fcm.FcmTokenState
 import com.bothbubbles.services.fcm.FirebaseConfigManager

@@ -9,8 +9,8 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.ui.chat.MessageCache
-import com.bothbubbles.ui.components.MessageUiModel
-import com.bothbubbles.ui.components.ReplyPreviewData
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.ReplyPreviewData
 import com.bothbubbles.ui.components.normalizeAddress
 import com.bothbubbles.ui.components.resolveSenderName
 import com.bothbubbles.ui.components.toUiModel
@@ -70,11 +70,17 @@ class RoomMessageDataSource(
             return emptyList()
         }
 
+        // DEFENSIVE: Deduplicate by GUID (should never happen with proper DB constraints)
+        val dedupedEntities = entities.distinctBy { it.guid }
+        if (dedupedEntities.size != entities.size) {
+            Log.w(TAG, "DEDUP: Found ${entities.size - dedupedEntities.size} duplicate GUIDs in Room query result")
+        }
+
         // Ensure participant data is loaded
         ensureParticipantsLoaded()
 
         // Transform to UI models
-        return transformToUiModels(entities)
+        return transformToUiModels(dedupedEntities)
     }
 
     override suspend fun loadByKey(guid: String): MessageUiModel? {
@@ -131,28 +137,33 @@ class RoomMessageDataSource(
     /**
      * Transform message entities to UI models.
      * This is the core transformation logic moved from ChatViewModel.
+     * Note: entities are already filtered to exclude reactions by the SQL query.
      */
     private suspend fun transformToUiModels(entities: List<MessageEntity>): List<MessageUiModel> {
         if (entities.isEmpty()) return emptyList()
 
-        // Separate actual reactions (iMessage tapbacks) from regular messages
-        val iMessageReactions = entities.filter { it.isReaction }
-        val regularMessages = entities.filter { !it.isReaction }
+        // Entities are already non-reactions (filtered by SQL query for position consistency)
+        // Fetch reactions separately for these messages
+        val messageGuids = entities.map { it.guid }
+        val iMessageReactions = if (messageGuids.isNotEmpty()) {
+            messageDao.getReactionsForMessages(messageGuids)
+        } else {
+            emptyList()
+        }
 
         // Group iMessage reactions by their associated message GUID
         val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
 
         // Batch load all attachments in a single query
-        val allAttachments = attachmentDao.getAttachmentsForMessages(
-            regularMessages.map { it.guid }
-        ).groupBy { it.messageGuid }
+        val allAttachments = attachmentDao.getAttachmentsForMessages(messageGuids)
+            .groupBy { it.messageGuid }
 
         // Build reply preview data
-        val replyPreviewMap = buildReplyPreviewMap(regularMessages)
+        val replyPreviewMap = buildReplyPreviewMap(entities)
 
         // Fetch missing handles for sender name resolution
         val mutableHandleIdToName = handleIdToName.toMutableMap()
-        val missingHandleIds = regularMessages
+        val missingHandleIds = entities
             .filter { !it.isFromMe && it.handleId != null && it.handleId !in mutableHandleIdToName }
             .mapNotNull { it.handleId }
             .distinct()
@@ -172,7 +183,7 @@ class RoomMessageDataSource(
 
         // Use MessageCache for incremental updates
         val (messageModels, changedGuids) = messageCache.updateAndBuild(
-            entities = regularMessages,
+            entities = entities,
             reactions = reactionsByMessage,
             attachments = allAttachments
         ) { entity, reactions, attachments ->

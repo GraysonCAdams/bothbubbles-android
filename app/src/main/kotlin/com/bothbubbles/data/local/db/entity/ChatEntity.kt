@@ -149,7 +149,14 @@ data class ChatEntity(
     val categoryConfidence: Int = 0,
 
     @ColumnInfo(name = "category_last_updated")
-    val categoryLastUpdated: Long? = null
+    val categoryLastUpdated: Long? = null,
+
+    // Per-chat send mode preference (iMessage vs SMS toggle)
+    @ColumnInfo(name = "preferred_send_mode")
+    val preferredSendMode: String? = null, // "imessage", "sms", or null (automatic)
+
+    @ColumnInfo(name = "send_mode_manually_set", defaultValue = "0")
+    val sendModeManuallySet: Boolean = false
 ) {
     /**
      * Whether this chat uses SMS text forwarding

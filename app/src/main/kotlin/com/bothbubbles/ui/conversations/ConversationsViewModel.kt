@@ -33,7 +33,7 @@ import com.bothbubbles.ui.components.SwipeActionType
 import com.bothbubbles.ui.components.SwipeConfig
 import com.bothbubbles.ui.components.determineConnectionBannerState
 import com.bothbubbles.ui.components.determineSmsBannerState
-import com.bothbubbles.ui.components.UrlParsingUtils
+import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.SmsPermissionHelper
@@ -53,6 +53,7 @@ import java.util.*
 import javax.inject.Inject
 
 private const val PAGE_SIZE = 25
+private const val INITIAL_LOAD_TARGET = 100 // Target number of conversations for instant display on boot
 
 @OptIn(FlowPreview::class)
 @HiltViewModel
@@ -393,37 +394,37 @@ class ConversationsViewModel @Inject constructor(
             chatRepository.cleanupInvalidDisplayNames()
 
             try {
-                // Load first page of unified groups (1:1 merged iMessage+SMS)
+                // Load up to INITIAL_LOAD_TARGET from each source to guarantee 100 total
                 val queryId1 = PerformanceProfiler.start("DB.getUnifiedGroups")
-                val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, 0)
+                val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId1, "${unifiedGroups.size} groups")
 
-                // Load first page of group chats
                 val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
-                val groupChats = chatDao.getGroupChatsPaginated(PAGE_SIZE, 0)
+                val groupChats = chatDao.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId2, "${groupChats.size} chats")
 
-                // Load first page of non-group chats (for orphans not in unified groups)
                 val queryId3 = PerformanceProfiler.start("DB.getNonGroupChats")
-                val nonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, 0)
+                val nonGroupChats = chatDao.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
                 val buildId = PerformanceProfiler.start("ConversationList.build")
-                val conversations = buildConversationList(
+                val allConversations = buildConversationList(
                     unifiedGroups = unifiedGroups,
                     groupChats = groupChats,
                     nonGroupChats = nonGroupChats,
                     typingChats = _typingChats.value
                 )
+                // Take only the first INITIAL_LOAD_TARGET for initial display
+                val conversations = allConversations.take(INITIAL_LOAD_TARGET)
                 PerformanceProfiler.end(buildId, "${conversations.size} items")
 
-                // Check if more data exists beyond first page
+                // Check if more data exists beyond what we're showing
                 val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
                 val totalGroupChats = chatDao.getGroupChatCount()
                 val totalNonGroup = chatDao.getNonGroupChatCount()
-                val loadedCount = unifiedGroups.size + groupChats.size + nonGroupChats.size
                 val totalCount = totalUnified + totalGroupChats + totalNonGroup
-                val hasMore = loadedCount < totalCount
+                // More exists if we have more combined items than we're showing, or if DB has more
+                val hasMore = allConversations.size > conversations.size || totalCount > allConversations.size
 
 
                 _uiState.update { state ->

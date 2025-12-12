@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay

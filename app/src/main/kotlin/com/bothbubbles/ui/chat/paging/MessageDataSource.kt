@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.paging
 
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.flow.Flow
 
 /**

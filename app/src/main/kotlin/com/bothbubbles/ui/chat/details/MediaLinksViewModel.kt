@@ -9,7 +9,7 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.ui.components.UrlParsingUtils
+import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel

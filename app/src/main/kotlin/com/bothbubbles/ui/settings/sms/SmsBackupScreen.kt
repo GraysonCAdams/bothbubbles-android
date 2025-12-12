@@ -50,14 +50,87 @@ fun SmsBackupScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        SmsBackupContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            onStartRestore = { uri -> viewModel.startRestore(uri) }
+        )
+    }
+
+    // Backup progress/result dialogs
+    when (val progress = uiState.backupProgress) {
+        is SmsBackupProgress.Exporting,
+        is SmsBackupProgress.Saving -> {
+            BackupProgressDialog(
+                progress = progress,
+                onCancel = { viewModel.cancelBackup() }
+            )
+        }
+        is SmsBackupProgress.Complete -> {
+            BackupCompleteDialog(
+                result = progress,
+                onDismiss = { viewModel.resetBackupProgress() }
+            )
+        }
+        is SmsBackupProgress.Error -> {
+            ErrorDialog(
+                title = "Backup Failed",
+                message = progress.message,
+                onDismiss = { viewModel.resetBackupProgress() }
+            )
+        }
+        SmsBackupProgress.Cancelled,
+        SmsBackupProgress.Idle -> { /* No dialog */ }
+    }
+
+    // Restore progress/result dialogs
+    when (val progress = uiState.restoreProgress) {
+        is SmsRestoreProgress.Reading,
+        is SmsRestoreProgress.Restoring -> {
+            RestoreProgressDialog(
+                progress = progress,
+                onCancel = { viewModel.cancelRestore() }
+            )
+        }
+        is SmsRestoreProgress.Complete -> {
+            RestoreCompleteDialog(
+                result = progress,
+                onDismiss = { viewModel.resetRestoreProgress() }
+            )
+        }
+        is SmsRestoreProgress.Error -> {
+            ErrorDialog(
+                title = "Restore Failed",
+                message = progress.message,
+                onDismiss = { viewModel.resetRestoreProgress() }
+            )
+        }
+        SmsRestoreProgress.Cancelled,
+        SmsRestoreProgress.Idle -> { /* No dialog */ }
+    }
+}
+
+@Composable
+fun SmsBackupContent(
+    modifier: Modifier = Modifier,
+    viewModel: SmsBackupViewModel = hiltViewModel(),
+    uiState: SmsBackupUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    onStartRestore: (Uri) -> Unit = {}
+) {
+    val restoreFilePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        uri?.let { onStartRestore(it) }
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // Info card
             SettingsCard {
                 Column(
@@ -210,59 +283,6 @@ fun SmsBackupScreen(
             }
         }
     }
-
-    // Backup progress/result dialogs
-    when (val progress = uiState.backupProgress) {
-        is SmsBackupProgress.Exporting,
-        is SmsBackupProgress.Saving -> {
-            BackupProgressDialog(
-                progress = progress,
-                onCancel = { viewModel.cancelBackup() }
-            )
-        }
-        is SmsBackupProgress.Complete -> {
-            BackupCompleteDialog(
-                result = progress,
-                onDismiss = { viewModel.resetBackupProgress() }
-            )
-        }
-        is SmsBackupProgress.Error -> {
-            ErrorDialog(
-                title = "Backup Failed",
-                message = progress.message,
-                onDismiss = { viewModel.resetBackupProgress() }
-            )
-        }
-        SmsBackupProgress.Cancelled,
-        SmsBackupProgress.Idle -> { /* No dialog */ }
-    }
-
-    // Restore progress/result dialogs
-    when (val progress = uiState.restoreProgress) {
-        is SmsRestoreProgress.Reading,
-        is SmsRestoreProgress.Restoring -> {
-            RestoreProgressDialog(
-                progress = progress,
-                onCancel = { viewModel.cancelRestore() }
-            )
-        }
-        is SmsRestoreProgress.Complete -> {
-            RestoreCompleteDialog(
-                result = progress,
-                onDismiss = { viewModel.resetRestoreProgress() }
-            )
-        }
-        is SmsRestoreProgress.Error -> {
-            ErrorDialog(
-                title = "Restore Failed",
-                message = progress.message,
-                onDismiss = { viewModel.resetRestoreProgress() }
-            )
-        }
-        SmsRestoreProgress.Cancelled,
-        SmsRestoreProgress.Idle -> { /* No dialog */ }
-    }
-}
 
 @Composable
 private fun BackupProgressDialog(

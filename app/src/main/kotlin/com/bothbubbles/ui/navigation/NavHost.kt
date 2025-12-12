@@ -225,6 +225,7 @@ fun BothBubblesNavHost(
                         "templates" -> Screen.QuickReplyTemplates(returnToSettings)
                         "spam" -> Screen.SpamSettings(returnToSettings)
                         "categorization" -> Screen.CategorizationSettings(returnToSettings)
+                        "autoresponder" -> Screen.AutoResponderSettings(returnToSettings)
                         "about" -> Screen.About(returnToSettings)
                         "export" -> Screen.ExportMessages(returnToSettings)
                         else -> null
@@ -544,6 +545,16 @@ fun BothBubblesNavHost(
             )
         }
 
+        // Auto-Responder Settings
+        composable<Screen.AutoResponderSettings> { backStackEntry ->
+            val route: Screen.AutoResponderSettings = backStackEntry.toRoute()
+            com.bothbubbles.ui.settings.autoresponder.AutoResponderSettingsScreen(
+                onNavigateBack = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
         // Media viewer
         composable<Screen.MediaViewer> { backStackEntry ->
             MediaViewerScreen(
@@ -613,12 +624,6 @@ fun BothBubblesNavHost(
                     context.startActivity(intent)
                 }
             )
-        }
-
-        // Search - Note: Main search is integrated into ConversationsScreen
-        // This route is currently unused but kept for potential future global search
-        composable<Screen.Search> {
-            SettingsScreen(onBackClick = { navController.popBackStack() })
         }
 
         // Setup (onboarding)

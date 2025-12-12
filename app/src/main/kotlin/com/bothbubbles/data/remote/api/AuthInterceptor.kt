@@ -1,8 +1,12 @@
 package com.bothbubbles.data.remote.api
 
+import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.launchIn
+import kotlinx.coroutines.flow.onEach
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -10,11 +14,39 @@ import javax.inject.Inject
 
 /**
  * OkHttp interceptor that dynamically sets the base URL from settings
- * and adds authentication and custom headers to all requests
+ * and adds authentication and custom headers to all requests.
+ *
+ * IMPORTANT: Uses cached values instead of runBlocking to avoid blocking
+ * OkHttp's network threads, which would cause socket timeouts.
  */
 class AuthInterceptor @Inject constructor(
     private val settingsDataStore: SettingsDataStore
 ) : Interceptor {
+
+    // Cached settings values - updated reactively from DataStore
+    // Using @Volatile for thread-safe reads from OkHttp network threads
+    @Volatile private var cachedServerAddress: String = ""
+    @Volatile private var cachedAuthKey: String = ""
+    @Volatile private var cachedCustomHeaders: Map<String, String> = emptyMap()
+
+    // Background scope for collecting settings updates
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Collect settings updates in background - these run on IO dispatcher
+        // and update the cached values that intercept() reads
+        settingsDataStore.serverAddress
+            .onEach { cachedServerAddress = it }
+            .launchIn(scope)
+
+        settingsDataStore.guidAuthKey
+            .onEach { cachedAuthKey = it }
+            .launchIn(scope)
+
+        settingsDataStore.customHeaders
+            .onEach { cachedCustomHeaders = it }
+            .launchIn(scope)
+    }
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
@@ -26,20 +58,10 @@ class AuthInterceptor @Inject constructor(
             return chain.proceed(originalRequest)
         }
 
-        // Get server address from settings (this is the actual user-configured URL)
-        val serverAddress = runBlocking {
-            settingsDataStore.serverAddress.first()
-        }
-
-        // Get auth key from settings
-        val authKey = runBlocking {
-            settingsDataStore.guidAuthKey.first()
-        }
-
-        // Get custom headers from settings
-        val customHeaders = runBlocking {
-            settingsDataStore.customHeaders.first()
-        }
+        // Read cached values (non-blocking)
+        val serverAddress = cachedServerAddress
+        val authKey = cachedAuthKey
+        val customHeaders = cachedCustomHeaders
 
         // Build the actual URL by replacing the placeholder base URL with the real server address
         val baseUrl = serverAddress.toHttpUrlOrNull()
@@ -85,6 +107,9 @@ class AuthInterceptor @Inject constructor(
             requestBuilder.addHeader("skip_zrok_interstitial", "true")
         }
 
-        return chain.proceed(requestBuilder.build())
+        val finalRequest = requestBuilder.build()
+        Log.d("AuthInterceptor", "DEBUG: Request URL = ${finalRequest.url}")
+        Log.d("AuthInterceptor", "DEBUG: Request method = ${finalRequest.method}")
+        return chain.proceed(finalRequest)
     }
 }

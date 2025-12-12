@@ -19,6 +19,7 @@ import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.services.sms.SmsCapabilityStatus
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
 import android.net.ConnectivityManager
@@ -43,7 +44,8 @@ class SetupViewModel @Inject constructor(
     private val smsPermissionHelper: SmsPermissionHelper,
     private val entityExtractionService: EntityExtractionService,
     private val firebaseConfigManager: FirebaseConfigManager,
-    private val fcmTokenManager: FcmTokenManager
+    private val fcmTokenManager: FcmTokenManager,
+    private val smsRepository: SmsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SetupUiState())
@@ -423,7 +425,7 @@ class SetupViewModel @Inject constructor(
 
     fun nextPage() {
         val currentPage = _uiState.value.currentPage
-        if (currentPage < 5) {
+        if (currentPage < 6) {
             _uiState.update { it.copy(currentPage = currentPage + 1) }
         }
     }
@@ -436,7 +438,45 @@ class SetupViewModel @Inject constructor(
     }
 
     fun setPage(page: Int) {
-        _uiState.update { it.copy(currentPage = page.coerceIn(0, 5)) }
+        _uiState.update { it.copy(currentPage = page.coerceIn(0, 6)) }
+    }
+
+    // Auto-responder methods
+
+    fun loadUserPhoneNumber() {
+        val phone = smsRepository.getAvailableSims().firstOrNull()?.number
+            ?.takeIf { it.isNotBlank() }
+            ?.let { formatPhone(it) }
+        _uiState.update { it.copy(userPhoneNumber = phone) }
+    }
+
+    fun updateAutoResponderFilter(filter: String) {
+        _uiState.update { it.copy(autoResponderFilter = filter) }
+    }
+
+    fun enableAutoResponder() {
+        viewModelScope.launch {
+            settingsDataStore.setAutoResponderEnabled(true)
+            settingsDataStore.setAutoResponderFilter(_uiState.value.autoResponderFilter)
+            _uiState.update { it.copy(autoResponderEnabled = true) }
+        }
+    }
+
+    fun skipAutoResponder() {
+        viewModelScope.launch {
+            settingsDataStore.setAutoResponderEnabled(false)
+            _uiState.update { it.copy(autoResponderEnabled = false) }
+        }
+    }
+
+    private fun formatPhone(phone: String): String {
+        val digits = phone.replace(Regex("[^0-9]"), "")
+        return when {
+            digits.length == 10 -> "(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}"
+            digits.length == 11 && digits.startsWith("1") ->
+                "(${digits.substring(1, 4)}) ${digits.substring(4, 7)}-${digits.substring(7)}"
+            else -> phone
+        }
     }
 }
 
@@ -481,7 +521,12 @@ data class SetupUiState(
     val mlDownloadError: String? = null,
     val mlDownloadSkipped: Boolean = false,
     val mlEnableCellularUpdates: Boolean = false,
-    val isOnWifi: Boolean = true
+    val isOnWifi: Boolean = true,
+
+    // Auto-responder settings
+    val autoResponderFilter: String = "known_senders",
+    val autoResponderEnabled: Boolean = false,
+    val userPhoneNumber: String? = null
 ) {
     val canProceedFromPermissions: Boolean
         get() = hasNotificationPermission && hasContactsPermission

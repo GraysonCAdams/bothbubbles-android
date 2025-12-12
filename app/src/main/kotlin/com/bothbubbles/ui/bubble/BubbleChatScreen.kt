@@ -25,7 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.ui.components.Avatar
 import com.bothbubbles.ui.components.MessageBubble
-import com.bothbubbles.ui.components.MessageGroupPosition
+import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.launch

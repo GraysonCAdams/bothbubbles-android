@@ -43,23 +43,33 @@ fun SpamSettingsScreen(
             )
         }
     ) { padding ->
-        if (uiState.isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+        SpamSettingsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun SpamSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: SpamSettingsViewModel = hiltViewModel(),
+    uiState: SpamSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
+) {
+    if (uiState.isLoading) {
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            CircularProgressIndicator()
+        }
+    } else {
+        LazyColumn(
+            modifier = modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
                 // Main toggle
                 item {
                     SettingsCard {
@@ -272,4 +282,3 @@ fun SpamSettingsScreen(
             }
         }
     }
-}

@@ -7,7 +7,7 @@ import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.LinkPreviewFetchStatus
 import com.bothbubbles.services.linkpreview.LinkMetadataResult
 import com.bothbubbles.services.linkpreview.LinkPreviewService
-import com.bothbubbles.ui.components.UrlParsingUtils
+import com.bothbubbles.util.parsing.UrlParsingUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers

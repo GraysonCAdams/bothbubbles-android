@@ -65,7 +65,7 @@ fun SetupScreen(
         }
     }
 
-    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 6 })
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 7 })
 
     // Sync pager state with viewmodel
     LaunchedEffect(uiState.currentPage) {
@@ -93,14 +93,15 @@ fun SetupScreen(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // Calculate visible pages based on mode
-        val visiblePages = remember(skipWelcome, skipSmsSetup, uiState.allPermissionsGranted) {
+        val visiblePages = remember(skipWelcome, skipSmsSetup, uiState.allPermissionsGranted, uiState.isConnectionSuccessful) {
             buildList {
                 if (!skipWelcome) add(0)  // Welcome
                 if (!skipWelcome || !uiState.allPermissionsGranted) add(1)  // Permissions
                 add(2)  // Server Connection (always shown)
                 if (!skipSmsSetup) add(3)  // SMS Setup
                 if (!skipSmsSetup) add(4)  // Categorization
-                add(5)  // Sync (always shown when server connected)
+                if (!skipSmsSetup && uiState.isConnectionSuccessful) add(5)  // Auto-Responder (only if server connected)
+                add(6)  // Sync (always shown when server connected)
             }
         }
 
@@ -155,7 +156,7 @@ fun SetupScreen(
                     onNext = {
                         coroutineScope.launch {
                             // Skip SMS setup page if in reconnect mode
-                            pagerState.animateScrollToPage(if (skipSmsSetup) 5 else 3)
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 6 else 3)
                         }
                         Unit
                     },
@@ -193,20 +194,47 @@ fun SetupScreen(
                     onDownloadMlModel = viewModel::downloadMlModel,
                     onSkip = {
                         viewModel.skipMlDownload()
-                        coroutineScope.launch { pagerState.animateScrollToPage(5) }
+                        // Go to Auto-Responder if server connected, else Sync
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 5 else 6)
+                        }
                     },
                     onMlCellularUpdateChange = viewModel::updateMlCellularAutoUpdate,
-                    onNext = { coroutineScope.launch { pagerState.animateScrollToPage(5) } },
+                    onNext = {
+                        // Go to Auto-Responder if server connected, else Sync
+                        coroutineScope.launch {
+                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 5 else 6)
+                        }
+                    },
                     onBack = { coroutineScope.launch { pagerState.animateScrollToPage(3) } }
                 )
-                5 -> SyncPage(
+                5 -> AutoResponderSetupPage(
+                    uiState = uiState,
+                    onFilterModeChange = viewModel::updateAutoResponderFilter,
+                    onEnable = {
+                        viewModel.enableAutoResponder()
+                        coroutineScope.launch { pagerState.animateScrollToPage(6) }
+                    },
+                    onSkip = {
+                        viewModel.skipAutoResponder()
+                        coroutineScope.launch { pagerState.animateScrollToPage(6) }
+                    },
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(4) } },
+                    onLoadPhoneNumber = viewModel::loadUserPhoneNumber
+                )
+                6 -> SyncPage(
                     uiState = uiState,
                     onSkipEmptyChatsChange = viewModel::updateSkipEmptyChats,
                     onStartSync = viewModel::startSync,
                     onBack = {
                         coroutineScope.launch {
-                            // Go back to Categorization if SMS setup was not skipped, else Server Connection
-                            pagerState.animateScrollToPage(if (skipSmsSetup) 2 else 4)
+                            // Go back to Auto-Responder if server connected, Categorization if not skipped, else Server
+                            val targetPage = when {
+                                uiState.isConnectionSuccessful && !skipSmsSetup -> 5  // Auto-Responder
+                                !skipSmsSetup -> 4  // Categorization
+                                else -> 2  // Server Connection
+                            }
+                            pagerState.animateScrollToPage(targetPage)
                         }
                     }
                 )
@@ -1472,6 +1500,238 @@ private fun SyncPage(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun AutoResponderSetupPage(
+    uiState: SetupUiState,
+    onFilterModeChange: (String) -> Unit,
+    onEnable: () -> Unit,
+    onSkip: () -> Unit,
+    onBack: () -> Unit,
+    onLoadPhoneNumber: () -> Unit
+) {
+    // Load phone number when page is displayed
+    LaunchedEffect(Unit) {
+        onLoadPhoneNumber()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(24.dp)
+            .verticalScroll(rememberScrollState()),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Icon
+        Surface(
+            modifier = Modifier.size(80.dp),
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    Icons.Default.SmartToy,
+                    contentDescription = null,
+                    modifier = Modifier.size(40.dp),
+                    tint = MaterialTheme.colorScheme.onPrimary
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        Text(
+            text = "Auto-Responder",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        Text(
+            text = "Let new iMessage contacts know how to reach you",
+            style = MaterialTheme.typography.bodyMedium,
+            textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Message Preview Card
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = "Message Preview",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Chat bubble style preview
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = buildAutoResponderMessage(uiState.userPhoneNumber),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.padding(12.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // Filter selection
+        Text(
+            text = "Auto-respond to first message from:",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        AutoResponderFilterOption(
+            title = "Everyone",
+            subtitle = "All iMessage users",
+            selected = uiState.autoResponderFilter == "everyone",
+            onClick = { onFilterModeChange("everyone") }
+        )
+
+        AutoResponderFilterOption(
+            title = "Known contacts",
+            subtitle = "Only people in your contacts",
+            selected = uiState.autoResponderFilter == "known_senders",
+            onClick = { onFilterModeChange("known_senders") }
+        )
+
+        AutoResponderFilterOption(
+            title = "Favorites only",
+            subtitle = "Only starred contacts",
+            selected = uiState.autoResponderFilter == "favorites",
+            onClick = { onFilterModeChange("favorites") }
+        )
+
+        Spacer(modifier = Modifier.weight(1f))
+
+        // Enable button
+        Button(
+            onClick = onEnable,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
+            Icon(Icons.Default.Check, contentDescription = null)
+            Spacer(modifier = Modifier.width(8.dp))
+            Text("Enable Auto-Responder")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // Skip button
+        TextButton(onClick = onSkip) {
+            Text("Skip, I'll let them know myself")
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Navigation row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start
+        ) {
+            TextButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Back")
+            }
+        }
+
+        Text(
+            text = "You can change this later in Settings",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun AutoResponderFilterOption(
+    title: String,
+    subtitle: String,
+    selected: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        onClick = onClick
+    ) {
+        Row(
+            modifier = Modifier.padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            RadioButton(
+                selected = selected,
+                onClick = onClick
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    }
+                )
+                Text(
+                    text = subtitle,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (selected) {
+                        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    }
+                )
+            }
+        }
+    }
+}
+
+private fun buildAutoResponderMessage(phoneNumber: String?): String {
+    val baseMessage = "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
+        "Please add this email to my contact card so I can reach you through " +
+        "my phone number or email."
+
+    return if (phoneNumber != null) {
+        "$baseMessage You can still also reach me at $phoneNumber"
+    } else {
+        baseMessage
     }
 }
 

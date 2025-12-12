@@ -2,6 +2,7 @@ package com.bothbubbles.ui.components
 
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.util.PhoneNumberFormatter
 import java.text.SimpleDateFormat
 import java.util.*

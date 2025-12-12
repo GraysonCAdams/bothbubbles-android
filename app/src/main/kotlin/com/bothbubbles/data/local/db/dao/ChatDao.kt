@@ -326,6 +326,13 @@ interface ChatDao {
     @Query("UPDATE chats SET unread_count = :count WHERE guid = :guid")
     suspend fun updateUnreadCount(guid: String, count: Int)
 
+    /**
+     * Atomically increment the unread count by 1.
+     * This prevents race conditions when messages arrive via both FCM and Socket.IO simultaneously.
+     */
+    @Query("UPDATE chats SET unread_count = unread_count + 1 WHERE guid = :guid")
+    suspend fun incrementUnreadCount(guid: String)
+
     @Query("DELETE FROM chats")
     suspend fun deleteAllChats()
 
@@ -434,6 +441,15 @@ interface ChatDao {
 
     @Query("UPDATE chats SET category = NULL, category_confidence = 0, category_last_updated = NULL WHERE guid = :guid")
     suspend fun clearCategory(guid: String)
+
+    // ===== Send Mode Preference =====
+
+    @Query("""
+        UPDATE chats
+        SET preferred_send_mode = :mode, send_mode_manually_set = :manuallySet
+        WHERE guid = :guid
+    """)
+    suspend fun updatePreferredSendMode(guid: String, mode: String?, manuallySet: Boolean)
 
     // ===== Transactions =====
 

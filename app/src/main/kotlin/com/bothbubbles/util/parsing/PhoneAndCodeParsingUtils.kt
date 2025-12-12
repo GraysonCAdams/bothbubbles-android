@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.util.parsing
 
 import java.util.regex.Pattern
 

@@ -1,7 +1,7 @@
 package com.bothbubbles.services.smartreply
 
 import android.util.Log
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
 import com.google.mlkit.nl.smartreply.SmartReply
 import com.google.mlkit.nl.smartreply.SmartReplySuggestionResult
 import com.google.mlkit.nl.smartreply.TextMessage

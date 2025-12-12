@@ -5,6 +5,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -219,4 +220,104 @@ fun SettingsSectionTitle(
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     )
+}
+
+/**
+ * Status badge for messaging services (iMessage/SMS)
+ */
+@Composable
+fun StatusBadge(
+    label: String,
+    status: BadgeStatus,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val statusColor = when (status) {
+        BadgeStatus.CONNECTED -> ConnectedGreen
+        BadgeStatus.ERROR -> DisconnectedRed
+        BadgeStatus.DISABLED -> MaterialTheme.colorScheme.outline
+    }
+
+    Surface(
+        onClick = onClick,
+        modifier = modifier,
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Status dot - filled for connected/error, hollow for disabled
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .then(
+                        if (status == BadgeStatus.DISABLED) {
+                            Modifier
+                                .background(Color.Transparent)
+                                .border(1.5.dp, statusColor, CircleShape)
+                        } else {
+                            Modifier.background(statusColor)
+                        }
+                    )
+            )
+
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        }
+    }
+}
+
+enum class BadgeStatus {
+    CONNECTED,
+    ERROR,
+    DISABLED
+}
+
+/**
+ * Messaging section header with status badges for iMessage and SMS
+ */
+@Composable
+fun MessagingSectionHeader(
+    iMessageStatus: BadgeStatus,
+    smsStatus: BadgeStatus,
+    onIMessageClick: () -> Unit,
+    onSmsClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = "Messaging",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            StatusBadge(
+                label = "iMessage",
+                status = iMessageStatus,
+                onClick = onIMessageClick
+            )
+            StatusBadge(
+                label = "SMS",
+                status = smsStatus,
+                onClick = onSmsClick
+            )
+        }
+    }
 }

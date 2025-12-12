@@ -74,14 +74,33 @@ fun NotificationSettingsScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        NotificationSettingsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            hasNotificationPermission = hasNotificationPermission,
+            onRequestPermission = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun NotificationSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: NotificationSettingsViewModel = hiltViewModel(),
+    uiState: NotificationSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    hasNotificationPermission: Boolean = true,
+    onRequestPermission: () -> Unit = {}
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // System permission card (if needed)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !hasNotificationPermission) {
                 Card(
@@ -118,9 +137,7 @@ fun NotificationSettingsScreen(
                         }
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
-                            onClick = {
-                                permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                            },
+                            onClick = onRequestPermission,
                             modifier = Modifier.align(Alignment.End)
                         ) {
                             Text("Enable")
@@ -226,7 +243,6 @@ fun NotificationSettingsScreen(
             }
         }
     }
-}
 
 private fun getBubbleFilterDescription(mode: String): String {
     return when (mode) {

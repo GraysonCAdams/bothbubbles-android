@@ -46,10 +46,23 @@ fun ServerSettingsScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
+        ServerSettingsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun ServerSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: ServerSettingsViewModel = hiltViewModel(),
+    uiState: ServerSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
+) {
+    Column(
+            modifier = modifier
                 .fillMaxSize()
-                .padding(padding)
                 .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -274,4 +287,3 @@ fun ServerSettingsScreen(
             }
         }
     }
-}

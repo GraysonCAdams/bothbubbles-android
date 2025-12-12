@@ -6,7 +6,7 @@ import android.os.PersistableBundle
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionManager
 import android.util.Log
-import com.bothbubbles.data.repository.MessageDeliveryMode
+import com.bothbubbles.services.messaging.MessageDeliveryMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton

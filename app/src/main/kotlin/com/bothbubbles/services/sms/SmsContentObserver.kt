@@ -14,7 +14,7 @@ import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow

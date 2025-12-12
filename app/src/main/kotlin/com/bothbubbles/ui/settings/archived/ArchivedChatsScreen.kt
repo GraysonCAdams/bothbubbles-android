@@ -42,80 +42,89 @@ fun ArchivedChatsScreen(
             )
         }
     ) { padding ->
-        if (uiState.archivedChats.isEmpty()) {
-            // Empty state
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentAlignment = Alignment.Center
+        ArchivedChatsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            onChatClick = onChatClick
+        )
+    }
+}
+
+@Composable
+fun ArchivedChatsContent(
+    modifier: Modifier = Modifier,
+    viewModel: ArchivedChatsViewModel = hiltViewModel(),
+    uiState: ArchivedChatsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    onChatClick: (String) -> Unit = {}
+) {
+    if (uiState.archivedChats.isEmpty()) {
+        // Empty state
+        Box(
+            modifier = modifier.fillMaxSize(),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(32.dp)
             ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Text(
-                        text = "No archived conversations",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "Archived conversations will appear here",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "No archived conversations",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Archived conversations will appear here",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-            ) {
-                items(
-                    items = uiState.archivedChats,
-                    key = { it.guid }
-                ) { chat ->
-                    val formattedIdentifier = chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
-                    ListItem(
-                        headlineContent = {
+        }
+    } else {
+        LazyColumn(modifier = modifier.fillMaxSize()) {
+            items(
+                items = uiState.archivedChats,
+                key = { it.guid }
+            ) { chat ->
+                val formattedIdentifier = chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                ListItem(
+                    headlineContent = {
+                        Text(
+                            text = chat.displayName ?: formattedIdentifier ?: "",
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    },
+                    supportingContent = chat.lastMessageText?.let {
+                        {
                             Text(
-                                text = chat.displayName ?: formattedIdentifier ?: "",
+                                text = it,
                                 maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                overflow = TextOverflow.Ellipsis,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        },
-                        supportingContent = chat.lastMessageText?.let {
-                            {
-                                Text(
-                                    text = it,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        },
-                        leadingContent = {
-                            Avatar(
-                                name = chat.displayName ?: formattedIdentifier ?: "?",
-                                size = 48.dp
+                        }
+                    },
+                    leadingContent = {
+                        Avatar(
+                            name = chat.displayName ?: formattedIdentifier ?: "?",
+                            size = 48.dp
+                        )
+                    },
+                    trailingContent = {
+                        IconButton(
+                            onClick = { viewModel.unarchiveChat(chat.guid) }
+                        ) {
+                            Icon(
+                                Icons.Default.Unarchive,
+                                contentDescription = "Unarchive"
                             )
-                        },
-                        trailingContent = {
-                            IconButton(
-                                onClick = { viewModel.unarchiveChat(chat.guid) }
-                            ) {
-                                Icon(
-                                    Icons.Default.Unarchive,
-                                    contentDescription = "Unarchive"
-                                )
-                            }
-                        },
-                        modifier = Modifier.clickable { onChatClick(chat.guid) }
-                    )
-                    HorizontalDivider()
-                }
+                        }
+                    },
+                    modifier = Modifier.clickable { onChatClick(chat.guid) }
+                )
+                HorizontalDivider()
             }
         }
     }

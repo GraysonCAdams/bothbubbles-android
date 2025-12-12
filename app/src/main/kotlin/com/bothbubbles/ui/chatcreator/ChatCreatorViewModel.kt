@@ -13,7 +13,7 @@ import com.bothbubbles.data.remote.api.dto.CreateChatRequest
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers

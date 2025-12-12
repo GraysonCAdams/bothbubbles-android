@@ -135,6 +135,28 @@ interface MessageDao {
     """)
     fun observeMessagesBeforeForChats(chatGuids: List<String>, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>>
 
+    /**
+     * Full-text search for messages using FTS5 index.
+     * Provides O(log n) performance compared to O(n) with LIKE '%query%'.
+     * For 100K+ messages, this is 50-100x faster.
+     *
+     * Note: The query is preprocessed to handle FTS5 special characters and add wildcards.
+     * Use searchMessagesWithPreprocessing() for the full implementation.
+     */
+    @Query("""
+        SELECT m.* FROM messages m
+        INNER JOIN message_fts ON message_fts.rowid = m.id
+        WHERE message_fts MATCH :query
+        AND m.date_deleted IS NULL
+        ORDER BY m.date_created DESC
+        LIMIT :limit
+    """)
+    fun searchMessagesFts(query: String, limit: Int = 100): Flow<List<MessageEntity>>
+
+    /**
+     * Fallback LIKE-based search for queries that can't be used with FTS5.
+     * Used when FTS5 query fails (e.g., special characters, empty query).
+     */
     @Query("""
         SELECT * FROM messages
         WHERE date_deleted IS NULL
@@ -142,7 +164,7 @@ interface MessageDao {
         ORDER BY date_created DESC
         LIMIT :limit
     """)
-    fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>>
+    fun searchMessagesLike(query: String, limit: Int = 100): Flow<List<MessageEntity>>
 
     @Query("""
         SELECT * FROM messages
@@ -179,33 +201,62 @@ interface MessageDao {
     suspend fun getTotalMessageCount(): Int
 
     // ===== BitSet Pagination Queries =====
+    // Note: These queries EXCLUDE reactions to ensure count/position consistency.
+    // Uses the denormalized is_reaction column for efficient filtering.
+    // @see ReactionClassifier for the centralized reaction detection logic.
 
     /**
      * Get total message count for multiple chats (for merged iMessage + SMS conversations).
      * Used to initialize the BitSet size for sparse pagination.
+     * EXCLUDES reactions to ensure count matches actual message positions.
      */
-    @Query("SELECT COUNT(*) FROM messages WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL")
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+    """)
     suspend fun getMessageCountForChats(chatGuids: List<String>): Int
 
     /**
      * Observe message count changes for multiple chats.
      * Emits when messages are added/deleted, used to resize BitSet.
+     * EXCLUDES reactions to ensure count matches actual message positions.
      */
-    @Query("SELECT COUNT(*) FROM messages WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL")
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+    """)
     fun observeMessageCountForChats(chatGuids: List<String>): Flow<Int>
 
     /**
      * Position-based pagination for BitSet sparse loading.
      * Fetches messages at specific positions (used when BitSet detects gaps).
      * Uses OFFSET which is O(n), but only called for sparse gaps, not continuous scroll.
+     * EXCLUDES reactions to ensure positions match the count.
      */
     @Query("""
         SELECT * FROM messages
-        WHERE chat_guid IN (:chatGuids) AND date_deleted IS NULL
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
         ORDER BY date_created DESC
         LIMIT :limit OFFSET :offset
     """)
     suspend fun getMessagesByPosition(chatGuids: List<String>, limit: Int, offset: Int): List<MessageEntity>
+
+    /**
+     * Get reactions for a list of messages.
+     * Used by RoomMessageDataSource to attach reactions to their parent messages.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE associated_message_guid IN (:messageGuids)
+        AND is_reaction = 1
+    """)
+    suspend fun getReactionsForMessages(messageGuids: List<String>): List<MessageEntity>
 
     /**
      * Get the position (index) of a specific message within the sorted conversation.

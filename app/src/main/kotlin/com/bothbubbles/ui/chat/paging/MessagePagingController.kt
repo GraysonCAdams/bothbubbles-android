@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.chat.paging
 
 import android.util.Log
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.util.BitSet
 
 /**
@@ -47,12 +49,24 @@ class MessagePagingController(
     // GUID to position mapping for efficient updates
     private val guidToPosition = mutableMapOf<String, Int>()
 
+    // Track message GUIDs that have been loaded this session (for animation control)
+    // Messages in this set should not animate when scrolled back into view
+    private val seenMessageGuids = mutableSetOf<String>()
+
     // Current total size (from database)
     private var totalSize = 0
 
     // Current visible range for determining what to keep in memory
     private var visibleStart = 0
     private var visibleEnd = 0
+
+    // Mutex for coroutine-safe synchronization of state mutations
+    // Using Mutex instead of synchronized because coroutines suspend
+    private val stateMutex = Mutex()
+
+    // Generation counter to detect stale loads after position shifts
+    // Incremented on every shiftPositions() call - all in-flight loads become invalid
+    private var generation = 0L
 
     // Loading state
     private val _isLoading = MutableStateFlow(false)
@@ -70,6 +84,12 @@ class MessagePagingController(
     // Total message count
     private val _totalCount = MutableStateFlow(0)
     val totalCount: StateFlow<Int> = _totalCount.asStateFlow()
+
+    // Track whether initial load has completed (for animation control)
+    // Messages loaded during initial load should appear instantly (no animation)
+    // Messages arriving after initial load (new incoming) should animate
+    private val _initialLoadComplete = MutableStateFlow(false)
+    val initialLoadComplete: StateFlow<Boolean> = _initialLoadComplete.asStateFlow()
 
     // Debounce job for scroll updates
     private var scrollDebounceJob: Job? = null
@@ -206,19 +226,32 @@ class MessagePagingController(
     }
 
     /**
+     * Check if a message has been loaded this session.
+     * Used to skip entrance animations for messages that were already displayed.
+     */
+    fun hasBeenSeen(guid: String): Boolean = guid in seenMessageGuids
+
+    /**
      * Update a single message by GUID.
      * Used for real-time updates (reactions, delivery status, etc.)
      */
     fun updateMessage(guid: String) {
-        val position = guidToPosition[guid] ?: return
-
         scope.launch {
             try {
+                // Get position under lock
+                val position = stateMutex.withLock { guidToPosition[guid] } ?: return@launch
+
                 val updatedModel = dataSource.loadByKey(guid)
                 if (updatedModel != null) {
-                    sparseData[position] = updatedModel
-                    emitMessages()
-                    Log.d(TAG, "Updated message at position $position: $guid")
+                    stateMutex.withLock {
+                        // Re-verify position hasn't changed
+                        val currentPosition = guidToPosition[guid]
+                        if (currentPosition != null) {
+                            sparseData[currentPosition] = updatedModel
+                            emitMessagesLocked()
+                            Log.d(TAG, "Updated message at position $currentPosition: $guid")
+                        }
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to update message: $guid", e)
@@ -249,9 +282,14 @@ class MessagePagingController(
         Log.d(TAG, "Force refresh requested")
 
         scope.launch {
-            loadStatus.clear()
-            sparseData.clear()
-            guidToPosition.clear()
+            stateMutex.withLock {
+                // Increment generation to invalidate any in-flight loads
+                generation++
+                activeLoadJobs.clear()
+                loadStatus.clear()
+                sparseData.clear()
+                guidToPosition.clear()
+            }
 
             // Get fresh size
             totalSize = dataSource.size()
@@ -291,6 +329,7 @@ class MessagePagingController(
             _error.value = "Failed to load messages: ${e.message}"
         } finally {
             _isLoading.value = false
+            _initialLoadComplete.value = true
         }
     }
 
@@ -302,23 +341,21 @@ class MessagePagingController(
         totalSize = newSize
         _totalCount.value = newSize
 
-        when {
-            newSize > oldSize -> {
-                // New messages added (likely at position 0)
-                val addedCount = newSize - oldSize
+        scope.launch {
+            when {
+                newSize > oldSize -> {
+                    // New messages added (likely at position 0)
+                    val addedCount = newSize - oldSize
 
-                // Shift existing positions
-                shiftPositions(addedCount)
+                    // Shift existing positions (atomic with mutex)
+                    shiftPositions(addedCount)
 
-                // Load the new messages at the beginning
-                scope.launch {
+                    // Load the new messages at the beginning
                     loadRange(0, minOf(addedCount + config.prefetchDistance, newSize))
                 }
-            }
-            newSize < oldSize -> {
-                // Messages deleted
-                // For simplicity, reload the visible range
-                scope.launch {
+                newSize < oldSize -> {
+                    // Messages deleted
+                    // For simplicity, reload the visible range
                     val loadStart = maxOf(0, visibleStart - config.prefetchDistance)
                     val loadEnd = minOf(visibleEnd + config.prefetchDistance, newSize)
                     loadRange(loadStart, loadEnd)
@@ -327,38 +364,50 @@ class MessagePagingController(
         }
     }
 
-    private fun shiftPositions(shiftBy: Int) {
-        // Create new shifted maps
-        val newSparseData = mutableMapOf<Int, MessageUiModel>()
-        val newGuidToPosition = mutableMapOf<String, Int>()
+    private suspend fun shiftPositions(shiftBy: Int) {
+        stateMutex.withLock {
+            // Increment generation FIRST to invalidate ALL in-flight loads immediately
+            generation++
 
-        sparseData.forEach { (oldPosition, model) ->
-            val newPosition = oldPosition + shiftBy
-            if (newPosition < totalSize) {
-                newSparseData[newPosition] = model
-                newGuidToPosition[model.guid] = newPosition
-            }
-        }
+            // Create new shifted maps
+            val newSparseData = mutableMapOf<Int, MessageUiModel>()
+            val newGuidToPosition = mutableMapOf<String, Int>()
 
-        // Update BitSet
-        val newLoadStatus = BitSet()
-        for (i in 0 until loadStatus.length()) {
-            if (loadStatus.get(i)) {
-                val newPosition = i + shiftBy
-                if (newPosition < totalSize) {
-                    newLoadStatus.set(newPosition)
+            sparseData.forEach { (oldPosition, model) ->
+                val newPosition = oldPosition + shiftBy
+                if (newPosition >= 0 && newPosition < totalSize) {
+                    newSparseData[newPosition] = model
+                    newGuidToPosition[model.guid] = newPosition
                 }
             }
+
+            // Update BitSet
+            val newLoadStatus = BitSet()
+            for (i in 0 until loadStatus.length()) {
+                if (loadStatus.get(i)) {
+                    val newPosition = i + shiftBy
+                    if (newPosition >= 0 && newPosition < totalSize) {
+                        newLoadStatus.set(newPosition)
+                    }
+                }
+            }
+
+            // Atomic swap - all three data structures updated together under lock
+            sparseData.clear()
+            sparseData.putAll(newSparseData)
+            guidToPosition.clear()
+            guidToPosition.putAll(newGuidToPosition)
+            loadStatus.clear()
+            loadStatus.or(newLoadStatus)
+
+            // Clear active load jobs - their positions are now invalid
+            activeLoadJobs.clear()
+
+            Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy (generation=$generation)")
+
+            // NOTE: Don't emit here - wait for loadRange() to complete so we have consistent data
+            // Emitting here with position 0 empty causes IndexOutOfBoundsException during scroll
         }
-
-        sparseData.clear()
-        sparseData.putAll(newSparseData)
-        guidToPosition.clear()
-        guidToPosition.putAll(newGuidToPosition)
-        loadStatus.clear()
-        loadStatus.or(newLoadStatus)
-
-        Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy")
     }
 
     private fun loadAroundRange(firstVisible: Int, lastVisible: Int) {
@@ -384,8 +433,10 @@ class MessagePagingController(
             }
         }
 
-        // Evict data far from visible range
-        evictDistantData()
+        // Evict data far from visible range (now suspend, run in scope)
+        scope.launch {
+            evictDistantData()
+        }
     }
 
     private fun findGaps(start: Int, end: Int): List<IntRange> {
@@ -417,67 +468,118 @@ class MessagePagingController(
 
         if (count <= 0) return
 
-        // Check if already loading this range
-        synchronized(activeLoadJobs) {
+        // Capture generation and register load under mutex
+        val loadGeneration: Long
+        val shouldProceed = stateMutex.withLock {
+            // Check if this exact range is already being loaded
             if (activeLoadJobs.any { it.first <= start && it.last >= end - 1 }) {
-                Log.d(TAG, "Already loading range [$start, $end)")
+                Log.d(TAG, "Skipping load for range [$start, $end) - already in progress")
                 return
             }
             activeLoadJobs.add(range)
+            loadGeneration = generation
+            true
         }
 
+        if (!shouldProceed) return
+
         try {
-            Log.d(TAG, "Loading range [$start, $end) ($count messages)")
+            Log.d(TAG, "Loading range [$start, $end) ($count messages) at generation $loadGeneration")
             _isLoading.value = true
 
+            // Async DB query - this is where we yield and races can happen
             val models = dataSource.load(start, count)
 
-            // Store loaded messages
-            models.forEachIndexed { index, model ->
-                val position = start + index
-                sparseData[position] = model
-                guidToPosition[model.guid] = position
-                loadStatus.set(position)
-            }
+            // Validate and write under mutex
+            stateMutex.withLock {
+                // If generation changed, our positions are stale - discard
+                if (generation != loadGeneration) {
+                    Log.d(TAG, "Discarding stale load for [$start, $end): gen $loadGeneration != $generation")
+                    activeLoadJobs.remove(range)
+                    return
+                }
 
-            Log.d(TAG, "Loaded ${models.size} messages for range [$start, $end)")
-            emitMessages()
+                // Store loaded messages with GUID conflict detection
+                models.forEachIndexed { index, model ->
+                    val position = start + index
+
+                    // CRITICAL: Check if this GUID already exists at a DIFFERENT position
+                    val existingPosition = guidToPosition[model.guid]
+                    if (existingPosition != null && existingPosition != position) {
+                        // Remove the OLD entry to prevent duplicates
+                        Log.w(TAG, "GUID CONFLICT: ${model.guid} exists at position $existingPosition, storing at $position - removing old entry")
+                        sparseData.remove(existingPosition)
+                        loadStatus.clear(existingPosition)
+                    }
+
+                    sparseData[position] = model
+                    guidToPosition[model.guid] = position
+                    loadStatus.set(position)
+                    seenMessageGuids.add(model.guid)
+                }
+
+                activeLoadJobs.remove(range)
+                Log.d(TAG, "Loaded ${models.size} messages for range [$start, $end)")
+
+                emitMessagesLocked()
+            }
 
         } catch (e: Exception) {
             Log.e(TAG, "Failed to load range [$start, $end)", e)
             _error.value = "Failed to load messages: ${e.message}"
-        } finally {
-            synchronized(activeLoadJobs) {
+            stateMutex.withLock {
                 activeLoadJobs.remove(range)
             }
-            _isLoading.value = activeLoadJobs.isEmpty()
+        } finally {
+            _isLoading.value = stateMutex.withLock { activeLoadJobs.isEmpty() }
         }
     }
 
-    private fun evictDistantData() {
-        if (sparseData.size <= config.pageSize * config.bufferPages * 2) {
-            return // Not enough data to warrant eviction
-        }
+    private suspend fun evictDistantData() {
+        // Skip eviction if disabled - keep all messages in memory for the session
+        if (config.disableEviction) return
 
-        val keepStart = maxOf(0, visibleStart - config.pageSize * config.bufferPages)
-        val keepEnd = minOf(totalSize, visibleEnd + config.pageSize * config.bufferPages)
-
-        val toEvict = sparseData.keys.filter { it < keepStart || it >= keepEnd }
-
-        if (toEvict.isEmpty()) return
-
-        toEvict.forEach { position ->
-            sparseData[position]?.let { model ->
-                guidToPosition.remove(model.guid)
+        stateMutex.withLock {
+            if (sparseData.size <= config.pageSize * config.bufferPages * 2) {
+                return@withLock // Not enough data to warrant eviction
             }
-            sparseData.remove(position)
-            loadStatus.clear(position)
-        }
 
-        Log.d(TAG, "Evicted ${toEvict.size} messages outside range [$keepStart, $keepEnd)")
+            val keepStart = maxOf(0, visibleStart - config.pageSize * config.bufferPages)
+            val keepEnd = minOf(totalSize, visibleEnd + config.pageSize * config.bufferPages)
+
+            val toEvict = sparseData.keys.filter { it < keepStart || it >= keepEnd }
+
+            if (toEvict.isEmpty()) return@withLock
+
+            toEvict.forEach { position ->
+                sparseData[position]?.let { model ->
+                    guidToPosition.remove(model.guid)
+                }
+                sparseData.remove(position)
+                loadStatus.clear(position)
+            }
+
+            Log.d(TAG, "Evicted ${toEvict.size} messages outside range [$keepStart, $keepEnd)")
+
+            emitMessagesLocked()
+        }
     }
 
-    private fun emitMessages() {
+    /**
+     * Emit messages to the UI. Acquires lock if not already held.
+     * Use emitMessagesLocked() when already holding stateMutex.
+     */
+    private suspend fun emitMessages() {
+        stateMutex.withLock {
+            emitMessagesLocked()
+        }
+    }
+
+    /**
+     * Emit messages to the UI. Caller MUST hold stateMutex.
+     * This is safe to call from within withLock blocks.
+     */
+    private fun emitMessagesLocked() {
         val list = SparseMessageList(
             totalSize = totalSize,
             loadedData = sparseData.toMap(),
@@ -547,11 +649,24 @@ data class SparseMessageList(
     /**
      * Get all loaded messages as a list (for backwards compatibility).
      * Note: This loses position information. Use sparingly.
+     *
+     * DEFENSIVE: Includes deduplication as final safety net before UI.
+     * If duplicates are detected, they are logged and filtered out.
      */
     fun toList(): List<MessageUiModel> {
+        val seenGuids = mutableSetOf<String>()
         return loadedData.entries
             .sortedBy { it.key }
-            .map { it.value }
+            .mapNotNull { (position, model) ->
+                if (model.guid in seenGuids) {
+                    // This should never happen if upstream mutex logic works correctly
+                    Log.w("SparseMessageList", "DEDUP: Duplicate GUID ${model.guid} at position $position - skipping")
+                    null
+                } else {
+                    seenGuids.add(model.guid)
+                    model
+                }
+            }
     }
 
     /**

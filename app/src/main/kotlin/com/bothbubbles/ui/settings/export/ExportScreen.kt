@@ -67,14 +67,96 @@ fun ExportScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        ExportContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            onShowChatPicker = { showChatPicker = true },
+            onShowStartDatePicker = { showStartDatePicker = true },
+            onShowEndDatePicker = { showEndDatePicker = true }
+        )
+    }
+
+    // Chat picker dialog
+    if (showChatPicker) {
+        ChatSelectionDialog(
+            chats = uiState.availableChats,
+            selectedChatGuids = uiState.selectedChatGuids,
+            onChatToggle = { viewModel.toggleChatSelection(it) },
+            onSelectAll = { viewModel.setAllChatsSelected(true) },
+            onDeselectAll = { viewModel.setAllChatsSelected(false) },
+            onDismiss = { showChatPicker = false }
+        )
+    }
+
+    // Date picker dialogs
+    if (showStartDatePicker) {
+        DatePickerDialog(
+            title = "Start Date",
+            selectedDate = uiState.startDate,
+            onDateSelected = { viewModel.setStartDate(it) },
+            onDismiss = { showStartDatePicker = false }
+        )
+    }
+
+    if (showEndDatePicker) {
+        DatePickerDialog(
+            title = "End Date",
+            selectedDate = uiState.endDate,
+            onDateSelected = { viewModel.setEndDate(it) },
+            onDismiss = { showEndDatePicker = false }
+        )
+    }
+
+    // Progress/Result dialog
+    when (val progress = uiState.exportProgress) {
+        is ExportProgress.Loading,
+        is ExportProgress.Generating,
+        is ExportProgress.Saving -> {
+            ExportProgressDialog(
+                progress = progress,
+                onCancel = { viewModel.cancelExport() }
+            )
+        }
+        is ExportProgress.Complete -> {
+            ExportCompleteDialog(
+                result = progress,
+                onDismiss = { viewModel.resetExportState() }
+            )
+        }
+        is ExportProgress.Error -> {
+            ExportErrorDialog(
+                message = progress.message,
+                onDismiss = { viewModel.resetExportState() }
+            )
+        }
+        ExportProgress.Cancelled -> {
+            LaunchedEffect(Unit) {
+                viewModel.resetExportState()
+            }
+        }
+        ExportProgress.Idle -> { /* No dialog */ }
+    }
+}
+
+@Composable
+fun ExportContent(
+    modifier: Modifier = Modifier,
+    viewModel: ExportViewModel = hiltViewModel(),
+    uiState: ExportUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    onShowChatPicker: () -> Unit = {},
+    onShowStartDatePicker: () -> Unit = {},
+    onShowEndDatePicker: () -> Unit = {}
+) {
+    val dateFormatter = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // Format selection
             SettingsCard {
                 Column(
@@ -203,7 +285,7 @@ fun ExportScreen(
                         },
                         trailingContent = if (!uiState.exportAllChats) {
                             {
-                                IconButton(onClick = { showChatPicker = true }) {
+                                IconButton(onClick = onShowChatPicker) {
                                     Icon(Icons.Default.Edit, contentDescription = "Select")
                                 }
                             }
@@ -264,7 +346,7 @@ fun ExportScreen(
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { showStartDatePicker = true },
+                                onClick = onShowStartDatePicker,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
@@ -274,7 +356,7 @@ fun ExportScreen(
                                 )
                             }
                             OutlinedButton(
-                                onClick = { showEndDatePicker = true },
+                                onClick = onShowEndDatePicker,
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text(
@@ -306,69 +388,6 @@ fun ExportScreen(
             }
         }
     }
-
-    // Chat picker dialog
-    if (showChatPicker) {
-        ChatSelectionDialog(
-            chats = uiState.availableChats,
-            selectedChatGuids = uiState.selectedChatGuids,
-            onChatToggle = { viewModel.toggleChatSelection(it) },
-            onSelectAll = { viewModel.setAllChatsSelected(true) },
-            onDeselectAll = { viewModel.setAllChatsSelected(false) },
-            onDismiss = { showChatPicker = false }
-        )
-    }
-
-    // Date picker dialogs
-    if (showStartDatePicker) {
-        DatePickerDialog(
-            title = "Start Date",
-            selectedDate = uiState.startDate,
-            onDateSelected = { viewModel.setStartDate(it) },
-            onDismiss = { showStartDatePicker = false }
-        )
-    }
-
-    if (showEndDatePicker) {
-        DatePickerDialog(
-            title = "End Date",
-            selectedDate = uiState.endDate,
-            onDateSelected = { viewModel.setEndDate(it) },
-            onDismiss = { showEndDatePicker = false }
-        )
-    }
-
-    // Progress/Result dialog
-    when (val progress = uiState.exportProgress) {
-        is ExportProgress.Loading,
-        is ExportProgress.Generating,
-        is ExportProgress.Saving -> {
-            ExportProgressDialog(
-                progress = progress,
-                onCancel = { viewModel.cancelExport() }
-            )
-        }
-        is ExportProgress.Complete -> {
-            ExportCompleteDialog(
-                result = progress,
-                onDismiss = { viewModel.resetExportState() }
-            )
-        }
-        is ExportProgress.Error -> {
-            ExportErrorDialog(
-                message = progress.message,
-                onDismiss = { viewModel.resetExportState() }
-            )
-        }
-        ExportProgress.Cancelled -> {
-            // Just reset, no dialog needed
-            LaunchedEffect(Unit) {
-                viewModel.resetExportState()
-            }
-        }
-        ExportProgress.Idle -> { /* No dialog */ }
-    }
-}
 
 @Composable
 private fun ChatSelectionDialog(

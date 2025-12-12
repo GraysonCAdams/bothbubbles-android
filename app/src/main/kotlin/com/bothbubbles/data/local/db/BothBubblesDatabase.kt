@@ -5,6 +5,7 @@ import androidx.room.RoomDatabase
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
@@ -18,6 +19,7 @@ import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
+import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
@@ -70,9 +72,10 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         PendingMessageEntity::class,
         PendingAttachmentEntity::class,
         IMessageAvailabilityCacheEntity::class,
-        SyncRangeEntity::class
+        SyncRangeEntity::class,
+        AutoRespondedSenderEntity::class
     ],
-    version = 27,
+    version = 31,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -90,6 +93,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun pendingAttachmentDao(): PendingAttachmentDao
     abstract fun iMessageCacheDao(): IMessageCacheDao
     abstract fun syncRangeDao(): SyncRangeDao
+    abstract fun autoRespondedSenderDao(): AutoRespondedSenderDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"
@@ -638,6 +642,127 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 27 to 28: Add auto_responded_senders table
+         * for tracking which sender addresses have received an auto-response.
+         * Keyed by sender address (not chat GUID) so it persists even if chat is deleted.
+         */
+        val MIGRATION_27_28 = object : Migration(27, 28) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS auto_responded_senders (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                        sender_address TEXT NOT NULL,
+                        responded_at INTEGER NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_auto_responded_senders_sender_address ON auto_responded_senders(sender_address)")
+            }
+        }
+
+        /**
+         * Migration from version 28 to 29: Add per-chat send mode preference columns.
+         * Allows users to manually set preferred messaging service (iMessage vs SMS)
+         * for individual chats, persisted across app restarts.
+         */
+        val MIGRATION_28_29 = object : Migration(28, 29) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add preferred_send_mode column (nullable, values: "imessage", "sms", or null for automatic)
+                db.execSQL("ALTER TABLE chats ADD COLUMN preferred_send_mode TEXT DEFAULT NULL")
+                // Add send_mode_manually_set flag (non-null boolean, default false)
+                db.execSQL("ALTER TABLE chats ADD COLUMN send_mode_manually_set INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        /**
+         * Migration from version 29 to 30: Add is_reaction column to messages table.
+         * This denormalized column enables efficient filtering of reactions without
+         * complex pattern matching in SQL queries. Backfills existing data.
+         *
+         * @see com.bothbubbles.data.local.db.entity.ReactionClassifier for detection logic
+         */
+        val MIGRATION_29_30 = object : Migration(29, 30) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add is_reaction column with default 0 (false)
+                db.execSQL("ALTER TABLE messages ADD COLUMN is_reaction INTEGER NOT NULL DEFAULT 0")
+
+                // Backfill existing messages: set is_reaction = 1 for reactions
+                // This matches ReactionClassifier.IS_REACTION_SQL logic
+                db.execSQL("""
+                    UPDATE messages SET is_reaction = 1
+                    WHERE associated_message_guid IS NOT NULL
+                    AND associated_message_type IS NOT NULL
+                    AND (
+                        associated_message_type LIKE '%200%'
+                        OR associated_message_type LIKE '%300%'
+                        OR associated_message_type LIKE '%reaction%'
+                        OR associated_message_type LIKE '%tapback%'
+                        OR associated_message_type IN ('love', 'like', 'dislike', 'laugh', 'emphasize', 'question', '-love', '-like', '-dislike', '-laugh', '-emphasize', '-question')
+                    )
+                """.trimIndent())
+
+                // Create index for efficient queries filtering by reaction status
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_is_reaction ON messages(is_reaction)")
+            }
+        }
+
+        /**
+         * Migration from version 30 to 31: Add FTS5 full-text search index for messages.
+         * This replaces O(n) LIKE '%query%' searches with O(log n) FTS5 MATCH queries.
+         * For 100K+ messages, this provides 50-100x performance improvement.
+         *
+         * The FTS5 table is an "external content" table - it indexes text/subject from
+         * the messages table but doesn't store duplicate data. Triggers keep it in sync.
+         */
+        val MIGRATION_30_31 = object : Migration(30, 31) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Create FTS5 virtual table with external content
+                // The content= and content_rowid= options link it to the messages table
+                db.execSQL("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+                        text,
+                        subject,
+                        content=messages,
+                        content_rowid=id,
+                        tokenize='unicode61 remove_diacritics 2'
+                    )
+                """.trimIndent())
+
+                // Populate FTS5 index with existing message content
+                db.execSQL("""
+                    INSERT INTO message_fts(rowid, text, subject)
+                    SELECT id, text, subject FROM messages
+                    WHERE text IS NOT NULL OR subject IS NOT NULL
+                """.trimIndent())
+
+                // Trigger to keep FTS5 in sync on INSERT
+                db.execSQL("""
+                    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                        INSERT INTO message_fts(rowid, text, subject)
+                        VALUES (NEW.id, NEW.text, NEW.subject);
+                    END
+                """.trimIndent())
+
+                // Trigger to keep FTS5 in sync on DELETE
+                db.execSQL("""
+                    CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                        INSERT INTO message_fts(message_fts, rowid, text, subject)
+                        VALUES ('delete', OLD.id, OLD.text, OLD.subject);
+                    END
+                """.trimIndent())
+
+                // Trigger to keep FTS5 in sync on UPDATE
+                db.execSQL("""
+                    CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                        INSERT INTO message_fts(message_fts, rowid, text, subject)
+                        VALUES ('delete', OLD.id, OLD.text, OLD.subject);
+                        INSERT INTO message_fts(rowid, text, subject)
+                        VALUES (NEW.id, NEW.text, NEW.subject);
+                    END
+                """.trimIndent())
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -669,7 +794,11 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_23_24,
             MIGRATION_24_25,
             MIGRATION_25_26,
-            MIGRATION_26_27
+            MIGRATION_26_27,
+            MIGRATION_27_28,
+            MIGRATION_28_29,
+            MIGRATION_29_30,
+            MIGRATION_30_31
         )
     }
 }

@@ -59,12 +59,25 @@ fun EffectsSettingsScreen(
             )
         }
     ) { paddingValues ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues)
-                .verticalScroll(rememberScrollState())
-        ) {
+        EffectsSettingsContent(
+            modifier = Modifier.padding(paddingValues),
+            uiState = uiState,
+            viewModel = viewModel
+        )
+    }
+}
+
+@Composable
+fun EffectsSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: EffectsSettingsViewModel = hiltViewModel(),
+    uiState: EffectsSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
             // Power saver mode banner
             if (uiState.isPowerSaveMode) {
                 Row(
@@ -137,7 +150,6 @@ fun EffectsSettingsScreen(
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
-}
 
 @Composable
 private fun SettingsSection(

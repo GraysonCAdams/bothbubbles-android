@@ -1,4 +1,4 @@
-package com.bothbubbles.service
+package com.bothbubbles.services.receiver
 
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -6,6 +6,7 @@ import android.content.Intent
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.foreground.SocketForegroundService
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

@@ -169,6 +169,7 @@ fun Modifier.pressScale(
  * Use this for list items that should animate in with delay.
  *
  * @param index The index of this item (used for stagger delay calculation)
+ * @param enabled Whether animation is enabled. When false, items appear instantly.
  * @param baseDelay Delay per item in milliseconds
  * @param maxDelay Maximum total delay
  * @param duration Animation duration in milliseconds
@@ -176,12 +177,13 @@ fun Modifier.pressScale(
 @Composable
 fun Modifier.staggeredEntrance(
     index: Int,
+    enabled: Boolean = true,
     baseDelay: Int = 30,
     maxDelay: Int = 200,
     duration: Int = MotionTokens.Duration.MEDIUM_2
 ): Modifier {
-    // Only animate first 15 items to avoid performance issues
-    if (index > 15) return this
+    // Skip animation entirely when disabled or for items beyond index 15
+    if (!enabled || index > 15) return this
 
     var hasAppeared by remember { mutableStateOf(false) }
 

@@ -356,7 +356,8 @@ private fun SwipeBackground(
         modifier = Modifier
             .fillMaxSize()
             .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(16.dp))
+            // MD3: use 12.dp ("Large" shape token) for list items
+            .clip(RoundedCornerShape(12.dp))
             .background(color)
             .padding(horizontal = 24.dp),
         contentAlignment = when (dismissDirection) {

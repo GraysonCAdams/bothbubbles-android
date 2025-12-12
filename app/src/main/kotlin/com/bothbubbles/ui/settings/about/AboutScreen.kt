@@ -51,14 +51,31 @@ fun AboutScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        AboutContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            onOpenSourceLicensesClick = onOpenSourceLicensesClick
+        )
+    }
+}
+
+@Composable
+fun AboutContent(
+    modifier: Modifier = Modifier,
+    viewModel: AboutViewModel = hiltViewModel(),
+    uiState: AboutUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    onOpenSourceLicensesClick: () -> Unit = {}
+) {
+    val context = LocalContext.current
+
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // App info header
             SettingsCard {
                 Column(
@@ -275,4 +292,3 @@ fun AboutScreen(
             )
         }
     }
-}

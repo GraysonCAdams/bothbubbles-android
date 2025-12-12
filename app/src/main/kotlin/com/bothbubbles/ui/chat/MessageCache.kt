@@ -2,7 +2,7 @@ package com.bothbubbles.ui.chat
 
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
 
 /**
  * Cached message with content hashes for change detection.

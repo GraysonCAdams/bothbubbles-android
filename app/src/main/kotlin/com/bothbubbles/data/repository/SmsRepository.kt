@@ -17,7 +17,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.sms.*
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers

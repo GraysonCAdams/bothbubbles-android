@@ -100,6 +100,9 @@ sealed interface Screen {
     data class CategorizationSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class AutoResponderSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class MediaViewer(
         val attachmentGuid: String,
         val chatGuid: String
@@ -116,9 +119,6 @@ sealed interface Screen {
 
     @Serializable
     data class PlacesGallery(val chatGuid: String) : Screen
-
-    @Serializable
-    data object Search : Screen
 
     @Serializable
     data class Camera(val chatGuid: String) : Screen

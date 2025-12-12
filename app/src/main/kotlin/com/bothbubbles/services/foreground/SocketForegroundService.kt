@@ -1,4 +1,4 @@
-package com.bothbubbles.service
+package com.bothbubbles.services.foreground
 
 import android.app.Notification
 import android.app.PendingIntent

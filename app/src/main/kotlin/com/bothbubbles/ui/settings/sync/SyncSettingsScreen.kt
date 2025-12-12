@@ -43,14 +43,100 @@ fun SyncSettingsScreen(
             )
         }
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        SyncSettingsContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            showCleanSyncDialog = showCleanSyncDialog,
+            onShowCleanSyncDialog = { showCleanSyncDialog = it },
+            showDisconnectDialog = showDisconnectDialog,
+            onShowDisconnectDialog = { showDisconnectDialog = it }
+        )
+    }
+
+    // Clean sync confirmation dialog
+    if (showCleanSyncDialog) {
+        AlertDialog(
+            onDismissRequest = { showCleanSyncDialog = false },
+            icon = { Icon(Icons.Default.Warning, contentDescription = null) },
+            title = { Text("Clean sync?") },
+            text = {
+                Text(
+                    "This will delete all local messages and conversations, then re-download everything from the server. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showCleanSyncDialog = false
+                        viewModel.cleanSync()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Clean sync")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showCleanSyncDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Disconnect server confirmation dialog
+    if (showDisconnectDialog) {
+        AlertDialog(
+            onDismissRequest = { showDisconnectDialog = false },
+            icon = { Icon(Icons.Default.CloudOff, contentDescription = null) },
+            title = { Text("Disconnect from server?") },
+            text = {
+                Text(
+                    "This will remove all iMessage conversations and messages synced from the BlueBubbles server. " +
+                    "Local SMS/MMS messages will be preserved. This cannot be undone."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDisconnectDialog = false
+                        viewModel.disconnectServer()
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error
+                    )
+                ) {
+                    Text("Disconnect")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisconnectDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun SyncSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: SyncSettingsViewModel = hiltViewModel(),
+    uiState: SyncSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    showCleanSyncDialog: Boolean = false,
+    onShowCleanSyncDialog: (Boolean) -> Unit = {},
+    showDisconnectDialog: Boolean = false,
+    onShowDisconnectDialog: (Boolean) -> Unit = {}
+) {
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // Last sync info card
             SettingsCard {
                 Column(
@@ -206,7 +292,7 @@ fun SyncSettingsScreen(
                             )
                         },
                         modifier = Modifier.then(
-                            if (syncState !is SyncState.Syncing) Modifier.clickable { showCleanSyncDialog = true }
+                            if (syncState !is SyncState.Syncing) Modifier.clickable { onShowCleanSyncDialog(true) }
                             else Modifier
                         )
                     )
@@ -267,7 +353,7 @@ fun SyncSettingsScreen(
                             )
                         },
                         modifier = Modifier.then(
-                            if (syncState !is SyncState.Syncing) Modifier.clickable { showDisconnectDialog = true }
+                            if (syncState !is SyncState.Syncing) Modifier.clickable { onShowDisconnectDialog(true) }
                             else Modifier
                         )
                     )
@@ -340,69 +426,3 @@ fun SyncSettingsScreen(
             }
         }
     }
-
-    // Clean sync confirmation dialog
-    if (showCleanSyncDialog) {
-        AlertDialog(
-            onDismissRequest = { showCleanSyncDialog = false },
-            icon = { Icon(Icons.Default.Warning, contentDescription = null) },
-            title = { Text("Clean sync?") },
-            text = {
-                Text(
-                    "This will delete all local messages and conversations, then re-download everything from the server. This cannot be undone."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showCleanSyncDialog = false
-                        viewModel.cleanSync()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Clean sync")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showCleanSyncDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-
-    // Disconnect server confirmation dialog
-    if (showDisconnectDialog) {
-        AlertDialog(
-            onDismissRequest = { showDisconnectDialog = false },
-            icon = { Icon(Icons.Default.CloudOff, contentDescription = null) },
-            title = { Text("Disconnect from server?") },
-            text = {
-                Text(
-                    "This will remove all iMessage conversations and messages synced from the BlueBubbles server. " +
-                    "Local SMS/MMS messages will be preserved. This cannot be undone."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showDisconnectDialog = false
-                        viewModel.disconnectServer()
-                    },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error
-                    )
-                ) {
-                    Text("Disconnect")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showDisconnectDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
-}

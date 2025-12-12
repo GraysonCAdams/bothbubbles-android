@@ -219,8 +219,6 @@ private val libraries = listOf(
 fun OpenSourceLicensesScreen(
     onNavigateBack: () -> Unit
 ) {
-    val context = LocalContext.current
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -236,35 +234,38 @@ fun OpenSourceLicensesScreen(
             )
         }
     ) { padding ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            item {
-                Text(
-                    text = "This app uses the following open source libraries:",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(bottom = 8.dp)
-                )
-            }
+        OpenSourceLicensesContent(modifier = Modifier.padding(padding))
+    }
+}
 
-            items(libraries) { library ->
-                LicenseCard(
-                    library = library,
-                    onOpenUrl = { url ->
-                        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                        context.startActivity(intent)
-                    }
-                )
-            }
+@Composable
+fun OpenSourceLicensesContent(modifier: Modifier = Modifier) {
+    val context = LocalContext.current
 
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-            }
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        item {
+            Text(
+                text = "This app uses the following open source libraries:",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(bottom = 8.dp)
+            )
+        }
+        items(libraries) { library ->
+            LicenseCard(
+                library = library,
+                onOpenUrl = { url ->
+                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                    context.startActivity(intent)
+                }
+            )
+        }
+        item {
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }

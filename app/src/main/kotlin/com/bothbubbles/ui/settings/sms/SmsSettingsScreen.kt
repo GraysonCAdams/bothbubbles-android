@@ -52,23 +52,37 @@ fun SmsSettingsScreen(
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        SmsSettingsContent(
+            modifier = Modifier.padding(paddingValues),
+            uiState = uiState,
+            viewModel = viewModel,
+            onBackupRestoreClick = onBackupRestoreClick,
+            onRequestPermissions = { permissionLauncher.launch(viewModel.getMissingPermissions()) },
+            onRequestDefaultSmsApp = { defaultSmsLauncher.launch(viewModel.getDefaultSmsAppIntent()) }
+        )
+    }
+}
+
+@Composable
+fun SmsSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: SmsSettingsViewModel = hiltViewModel(),
+    uiState: SmsSettingsUiState = viewModel.uiState.collectAsState().value,
+    onBackupRestoreClick: () -> Unit = {},
+    onRequestPermissions: () -> Unit = {},
+    onRequestDefaultSmsApp: () -> Unit = {}
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // Device capability status
             item {
                 SmsCapabilityCard(
                     status = uiState.capabilityStatus,
-                    onRequestPermissions = {
-                        permissionLauncher.launch(viewModel.getMissingPermissions())
-                    },
-                    onRequestDefaultSmsApp = {
-                        defaultSmsLauncher.launch(viewModel.getDefaultSmsAppIntent())
-                    }
+                    onRequestPermissions = onRequestPermissions,
+                    onRequestDefaultSmsApp = onRequestDefaultSmsApp
                 )
             }
 
@@ -229,7 +243,6 @@ fun SmsSettingsScreen(
             }
         }
     }
-}
 
 @Composable
 private fun SmsCapabilityCard(

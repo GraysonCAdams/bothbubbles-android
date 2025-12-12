@@ -16,6 +16,7 @@ import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
+import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
@@ -123,7 +124,7 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Enqueue a WorkManager job to send a pending message.
      */
-    private fun enqueueWorker(pendingMessageId: Long, localId: String) {
+    private suspend fun enqueueWorker(pendingMessageId: Long, localId: String) {
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -139,16 +140,15 @@ class PendingMessageRepository @Inject constructor(
             .build()
 
         // Use unique work to prevent duplicate sends
+        // KEEP policy prevents replacing an in-flight job, avoiding race conditions
         workManager.enqueueUniqueWork(
             "${MessageSendWorker.UNIQUE_WORK_PREFIX}$localId",
-            ExistingWorkPolicy.REPLACE,
+            ExistingWorkPolicy.KEEP,
             workRequest
         )
 
         // Store work request ID for cancellation
-        kotlinx.coroutines.runBlocking {
-            pendingMessageDao.updateWorkRequestId(pendingMessageId, workRequest.id.toString())
-        }
+        pendingMessageDao.updateWorkRequestId(pendingMessageId, workRequest.id.toString())
 
         Log.d(TAG, "Enqueued send worker for $localId (workId=${workRequest.id})")
     }
@@ -216,6 +216,17 @@ class PendingMessageRepository @Inject constructor(
      * Called at app startup to restart stalled jobs.
      */
     suspend fun reEnqueuePendingMessages() {
+        // Reset messages stuck in SENDING status (app was killed during send)
+        // Consider stale if SENDING for more than 2 minutes
+        val staleThreshold = System.currentTimeMillis() - (2 * 60 * 1000)
+        val staleSending = pendingMessageDao.getStaleSending(staleThreshold)
+        if (staleSending.isNotEmpty()) {
+            Log.i(TAG, "Found ${staleSending.size} stale SENDING messages, resetting to PENDING")
+            staleSending.forEach { message ->
+                pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING.name)
+            }
+        }
+
         val pending = pendingMessageDao.getPendingAndFailed()
         var reEnqueuedCount = 0
 

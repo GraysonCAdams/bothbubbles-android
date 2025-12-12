@@ -58,13 +58,26 @@ fun SwipeSettingsScreen(
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(paddingValues),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
+        SwipeSettingsContent(
+            modifier = Modifier.padding(paddingValues),
+            uiState = uiState,
+            viewModel = viewModel
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SwipeSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: SwipeSettingsViewModel = hiltViewModel(),
+    uiState: SwipeSettingsUiState = viewModel.uiState.collectAsState().value
+) {
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
             // Enable/Disable swipe gestures
             item {
                 SwitchSettingCard(
@@ -130,7 +143,6 @@ fun SwipeSettingsScreen(
             }
         }
     }
-}
 
 @Composable
 private fun SwipePreviewCard(

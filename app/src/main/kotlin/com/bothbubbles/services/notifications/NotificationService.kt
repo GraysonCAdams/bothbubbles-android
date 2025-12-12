@@ -29,7 +29,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.AvatarGenerator
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope

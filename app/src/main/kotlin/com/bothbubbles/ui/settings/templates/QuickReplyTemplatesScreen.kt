@@ -52,87 +52,13 @@ fun QuickReplyTemplatesScreen(
             )
         }
     ) { padding ->
-        when {
-            uiState.isLoading -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator()
-                }
-            }
-
-            uiState.templates.isEmpty() -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp)
-                    ) {
-                        Icon(
-                            Icons.Default.Quickreply,
-                            contentDescription = null,
-                            modifier = Modifier.size(64.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "No templates yet",
-                            style = MaterialTheme.typography.titleMedium
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "Create quick reply templates for common responses",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.Center
-                        )
-                        Spacer(modifier = Modifier.height(24.dp))
-                        OutlinedButton(onClick = { showAddDialog = true }) {
-                            Icon(Icons.Default.Add, contentDescription = null)
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text("Add template")
-                        }
-                    }
-                }
-            }
-
-            else -> {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(padding),
-                    contentPadding = PaddingValues(vertical = 8.dp)
-                ) {
-                    item {
-                        Text(
-                            text = "Templates appear as suggestion chips above the message input and in notification quick replies. Favorites and most-used templates are shown first.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
-
-                    items(
-                        items = uiState.templates,
-                        key = { it.id }
-                    ) { template ->
-                        TemplateItem(
-                            template = template,
-                            onEdit = { showEditDialog = template },
-                            onDelete = { viewModel.deleteTemplate(template.id) },
-                            onToggleFavorite = { viewModel.toggleFavorite(template.id) }
-                        )
-                    }
-                }
-            }
-        }
+        QuickReplyTemplatesContent(
+            modifier = Modifier.padding(padding),
+            uiState = uiState,
+            viewModel = viewModel,
+            onShowAddDialog = { showAddDialog = true },
+            onShowEditDialog = { showEditDialog = it }
+        )
     }
 
     // Add template dialog
@@ -187,6 +113,88 @@ fun QuickReplyTemplatesScreen(
                 }
             }
         )
+    }
+}
+
+@Composable
+fun QuickReplyTemplatesContent(
+    modifier: Modifier = Modifier,
+    viewModel: QuickReplyTemplatesViewModel = hiltViewModel(),
+    uiState: QuickReplyTemplatesUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
+    onShowAddDialog: () -> Unit = {},
+    onShowEditDialog: (QuickReplyTemplateEntity) -> Unit = {}
+) {
+    when {
+        uiState.isLoading -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
+        }
+        uiState.templates.isEmpty() -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.padding(32.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Quickreply,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "No templates yet",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Create quick reply templates for common responses",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    OutlinedButton(onClick = onShowAddDialog) {
+                        Icon(Icons.Default.Add, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Add template")
+                    }
+                }
+            }
+        }
+        else -> {
+            LazyColumn(
+                modifier = modifier.fillMaxSize(),
+                contentPadding = PaddingValues(vertical = 8.dp)
+            ) {
+                item {
+                    Text(
+                        text = "Templates appear as suggestion chips above the message input and in notification quick replies. Favorites and most-used templates are shown first.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                    )
+                }
+                items(
+                    items = uiState.templates,
+                    key = { it.id }
+                ) { template ->
+                    TemplateItem(
+                        template = template,
+                        onEdit = { onShowEditDialog(template) },
+                        onDelete = { viewModel.deleteTemplate(template.id) },
+                        onToggleFavorite = { viewModel.toggleFavorite(template.id) }
+                    )
+                }
+            }
+        }
     }
 }
 

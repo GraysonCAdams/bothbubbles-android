@@ -36,7 +36,7 @@ interface BothBubblesApi {
     @GET("api/v1/chat/{guid}/message")
     suspend fun getChatMessages(
         @Path("guid") guid: String,
-        @Query("limit") limit: Int = 25,
+        @Query("limit") limit: Int = 100,
         @Query("offset") offset: Int = 0,
         @Query("sort") sort: String = "DESC",
         @Query("with") with: String = "attachment,handle,attributedBody,messageSummaryInfo",

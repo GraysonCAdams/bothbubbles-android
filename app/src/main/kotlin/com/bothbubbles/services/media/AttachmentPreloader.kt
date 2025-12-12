@@ -5,7 +5,7 @@ import android.util.Log
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.size.Precision
-import com.bothbubbles.ui.components.AttachmentUiModel
+import com.bothbubbles.ui.components.message.AttachmentUiModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton

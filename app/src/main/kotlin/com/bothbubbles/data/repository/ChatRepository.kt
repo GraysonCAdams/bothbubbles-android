@@ -14,7 +14,7 @@ import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.ChatDto
 import com.bothbubbles.data.remote.api.dto.ChatQueryRequest
 import com.bothbubbles.services.contacts.AndroidContactsService
-import com.bothbubbles.ui.components.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -299,6 +299,17 @@ class ChatRepository @Inject constructor(
      */
     suspend fun updateLastMessage(chatGuid: String, text: String?, date: Long) {
         chatDao.updateLatestMessageDate(chatGuid, date)
+    }
+
+    /**
+     * Update the preferred send mode for a chat (iMessage vs SMS toggle).
+     *
+     * @param chatGuid The chat GUID
+     * @param mode The preferred mode ("imessage", "sms", or null for automatic)
+     * @param manuallySet Whether the user manually set this preference
+     */
+    suspend fun updatePreferredSendMode(chatGuid: String, mode: String?, manuallySet: Boolean) {
+        chatDao.updatePreferredSendMode(chatGuid, mode, manuallySet)
     }
 
     // ===== Data Cleanup =====

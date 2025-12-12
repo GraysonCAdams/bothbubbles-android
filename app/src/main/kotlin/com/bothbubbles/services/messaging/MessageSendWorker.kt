@@ -9,7 +9,7 @@ import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
-import com.bothbubbles.data.repository.MessageDeliveryMode
+import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.data.repository.MessageRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -95,6 +95,7 @@ class MessageSendWorker @AssistedInject constructor(
             }
 
             // Send via repository
+            // Pass localId as tempGuid to ensure same ID is used across retries
             val result = messageRepository.sendUnified(
                 chatGuid = pendingMessage.chatGuid,
                 text = pendingMessage.text ?: "",
@@ -102,7 +103,8 @@ class MessageSendWorker @AssistedInject constructor(
                 effectId = pendingMessage.effectId,
                 subject = pendingMessage.subject,
                 attachments = attachmentUris,
-                deliveryMode = deliveryMode
+                deliveryMode = deliveryMode,
+                tempGuid = pendingMessage.localId
             )
 
             if (result.isSuccess) {

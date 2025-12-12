@@ -42,10 +42,12 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.animateContentSize
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
@@ -63,6 +65,8 @@ import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.Videocam
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
@@ -82,6 +86,7 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -96,15 +101,20 @@ import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.R
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.FallbackReason
+import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
+import com.bothbubbles.ui.chat.components.SendModeToggleButton
+import com.bothbubbles.ui.chat.components.SendModeTutorialOverlay
 import com.bothbubbles.ui.components.AttachmentPickerPanel
+import com.bothbubbles.ui.components.EmojiPickerPanel
 import com.bothbubbles.ui.components.Avatar
 import com.bothbubbles.ui.components.GroupAvatar
 import com.bothbubbles.ui.components.DateSeparator
 import com.bothbubbles.ui.components.ForwardableChatInfo
 import com.bothbubbles.ui.components.ForwardMessageDialog
+import com.bothbubbles.ui.components.JumpToBottomIndicator
 import com.bothbubbles.ui.components.MessageBubble
-import com.bothbubbles.ui.components.MessageGroupPosition
-import com.bothbubbles.ui.components.MessageUiModel
+import com.bothbubbles.ui.components.message.MessageGroupPosition
+import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.ScheduleMessageDialog
 import com.bothbubbles.ui.components.SmartReplyChips
 import com.bothbubbles.ui.components.SpamSafetyBanner
@@ -151,6 +161,17 @@ fun ChatScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
+
+    // LRU cached scroll position (for instant restore when re-opening recently viewed chat)
+    val cachedScrollPosition by viewModel.cachedScrollPosition.collectAsStateWithLifecycle()
+
+    // Determine effective scroll position: navigation state takes priority, then LRU cache
+    val effectiveScrollPosition = if (initialScrollPosition > 0 || initialScrollOffset > 0) {
+        Pair(initialScrollPosition, initialScrollOffset)
+    } else {
+        cachedScrollPosition ?: Pair(0, 0)
+    }
+
     // Cache window keeps ~50 messages composed beyond viewport (matching fossify-reference)
     // ahead = prefetch before visible, behind = retain after scrolling past
     @OptIn(ExperimentalFoundationApi::class)
@@ -158,18 +179,18 @@ fun ChatScreen(
     @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(
         cacheWindow = cacheWindow,
-        initialFirstVisibleItemIndex = initialScrollPosition,
-        initialFirstVisibleItemScrollOffset = initialScrollOffset
+        initialFirstVisibleItemIndex = effectiveScrollPosition.first,
+        initialFirstVisibleItemScrollOffset = effectiveScrollPosition.second
     )
 
     // Track if scroll position has been restored
-    var scrollRestored by remember { mutableStateOf(initialScrollPosition == 0 && initialScrollOffset == 0) }
+    var scrollRestored by remember { mutableStateOf(effectiveScrollPosition.first == 0 && effectiveScrollPosition.second == 0) }
 
     // Restore scroll position after messages load (if we have state to restore)
-    LaunchedEffect(uiState.messages.isNotEmpty(), initialScrollPosition, initialScrollOffset) {
-        if (!scrollRestored && uiState.messages.isNotEmpty() && (initialScrollPosition > 0 || initialScrollOffset > 0)) {
+    LaunchedEffect(uiState.messages.isNotEmpty(), effectiveScrollPosition) {
+        if (!scrollRestored && uiState.messages.isNotEmpty() && (effectiveScrollPosition.first > 0 || effectiveScrollPosition.second > 0)) {
             // Scroll to restored position after messages have loaded
-            listState.scrollToItem(initialScrollPosition, initialScrollOffset)
+            listState.scrollToItem(effectiveScrollPosition.first, effectiveScrollPosition.second)
             scrollRestored = true
             onScrollPositionRestored()
         }
@@ -247,6 +268,7 @@ fun ChatScreen(
 
     // Attachment picker state
     var showAttachmentPicker by remember { mutableStateOf(false) }
+    var showEmojiPicker by remember { mutableStateOf(false) }
     var showScheduleDialog by remember { mutableStateOf(false) }
 
     // vCard options dialog state
@@ -261,6 +283,12 @@ fun ChatScreen(
     val replayEffectsOnScroll by viewModel.replayEffectsOnScroll.collectAsStateWithLifecycle()
     val reduceMotion by viewModel.reduceMotion.collectAsStateWithLifecycle()
     val activeScreenEffectState by viewModel.activeScreenEffect.collectAsStateWithLifecycle()
+
+    // Animation control: only animate new messages after initial load completes
+    val initialLoadComplete by viewModel.initialLoadComplete.collectAsStateWithLifecycle()
+
+    // Track when fetching older messages from server (for loading indicator at top)
+    val isLoadingFromServer by viewModel.isLoadingFromServer.collectAsStateWithLifecycle()
 
     // Attachment download settings and progress
     val autoDownloadEnabled by viewModel.autoDownloadEnabled.collectAsStateWithLifecycle()
@@ -328,6 +356,7 @@ fun ChatScreen(
     var recordingDuration by remember { mutableLongStateOf(0L) }
     var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
     var recordingFile by remember { mutableStateOf<java.io.File?>(null) }
+    var isNoiseCancellationEnabled by remember { mutableStateOf(true) }
 
     // Voice memo preview/playback state
     var isPreviewingVoiceMemo by remember { mutableStateOf(false) }
@@ -358,6 +387,7 @@ fun ChatScreen(
             // Start recording after permission granted
             startVoiceMemoRecording(
                 context = context,
+                enableNoiseCancellation = isNoiseCancellationEnabled,
                 onRecorderCreated = { recorder, file ->
                     mediaRecorder = recorder
                     recordingFile = file
@@ -642,6 +672,16 @@ fun ChatScreen(
                     onCameraClick = onCameraClick
                 )
 
+                // Emoji picker panel (slides up above input)
+                EmojiPickerPanel(
+                    visible = showEmojiPicker,
+                    onDismiss = { showEmojiPicker = false },
+                    onEmojiSelected = { emoji ->
+                        viewModel.updateDraft(draftText + emoji)
+                        showEmojiPicker = false
+                    }
+                )
+
                 // Determine input mode for unified handling
                 val inputMode = when {
                     isRecording -> InputMode.RECORDING
@@ -707,6 +747,12 @@ fun ChatScreen(
                     onAttachClick = {
                         showAttachmentPicker = !showAttachmentPicker
                     },
+                    onEmojiClick = {
+                        showEmojiPicker = !showEmojiPicker
+                    },
+                    onImageClick = {
+                        imagePickerLauncher.launch("image/*")
+                    },
                     onVoiceMemoClick = {
                         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     },
@@ -714,6 +760,7 @@ fun ChatScreen(
                         if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
                             startVoiceMemoRecording(
                                 context = context,
+                                enableNoiseCancellation = isNoiseCancellationEnabled,
                                 onRecorderCreated = { recorder, file ->
                                     mediaRecorder = recorder
                                     recordingFile = file
@@ -808,6 +855,55 @@ fun ChatScreen(
                         }
                         recordingFile = null
                     },
+                    isNoiseCancellationEnabled = isNoiseCancellationEnabled,
+                    onNoiseCancellationToggle = {
+                        isNoiseCancellationEnabled = !isNoiseCancellationEnabled
+                    },
+                    onRecordingStop = {
+                        // Stop recording and go to preview mode
+                        try {
+                            mediaRecorder?.stop()
+                            mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
+                        } catch (_: Exception) { }
+                        mediaRecorder?.release()
+                        mediaRecorder = null
+                        isRecording = false
+                        recordingFile?.let { file ->
+                            if (file.exists() && file.length() > 0) {
+                                isPreviewingVoiceMemo = true
+                                playbackDuration = recordingDuration
+                            } else {
+                                file.delete()
+                                recordingFile = null
+                            }
+                        }
+                    },
+                    onRecordingRestart = {
+                        // Cancel current recording and start fresh
+                        try {
+                            mediaRecorder?.stop()
+                        } catch (_: Exception) { }
+                        mediaRecorder?.release()
+                        mediaRecorder = null
+                        recordingFile?.delete()
+                        recordingFile = null
+                        recordingDuration = 0L
+                        // Start new recording immediately
+                        startVoiceMemoRecording(
+                            context = context,
+                            enableNoiseCancellation = isNoiseCancellationEnabled,
+                            onRecorderCreated = { recorder, file ->
+                                mediaRecorder = recorder
+                                recordingFile = file
+                                isRecording = true
+                                mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
+                            },
+                            onError = { error ->
+                                isRecording = false
+                                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                            }
+                        )
+                    },
                     // Preview mode props
                     previewDuration = playbackDuration,
                     playbackPosition = playbackPosition,
@@ -866,6 +962,21 @@ fun ChatScreen(
                         isPreviewingVoiceMemo = false
                         recordingFile?.delete()
                         recordingFile = null
+                    },
+                    // Send mode toggle props
+                    canToggleSendMode = uiState.canToggleSendMode,
+                    showSendModeRevealAnimation = uiState.showSendModeRevealAnimation,
+                    tutorialState = uiState.tutorialState,
+                    onModeToggle = { newMode ->
+                        val success = viewModel.setSendMode(newMode, persist = true)
+                        if (success) {
+                            // Progress tutorial if active
+                            viewModel.onTutorialToggleSuccess()
+                        }
+                        success
+                    },
+                    onRevealAnimationComplete = {
+                        viewModel.markRevealAnimationShown()
                     }
                 )
             }
@@ -900,6 +1011,21 @@ fun ChatScreen(
         var previousNewestGuid by remember { mutableStateOf<String?>(null) }
         var hasInitiallyLoaded by remember { mutableStateOf(false) }
 
+        // Track new messages while scrolled away from bottom (for jump-to-bottom indicator)
+        var newMessageCountWhileAway by remember { mutableStateOf(0) }
+
+        // Derive whether user is scrolled away from bottom (with reverseLayout=true, index 0 = bottom)
+        val isScrolledAwayFromBottom by remember {
+            derivedStateOf { listState.firstVisibleItemIndex > 3 }
+        }
+
+        // Reset new message count when user scrolls back to bottom
+        LaunchedEffect(isScrolledAwayFromBottom) {
+            if (!isScrolledAwayFromBottom) {
+                newMessageCountWhileAway = 0
+            }
+        }
+
         // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
         // This ensures tall content like link previews isn't clipped by the keyboard
         LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
@@ -920,11 +1046,16 @@ fun ChatScreen(
             val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestGuid
             previousNewestGuid = newestGuid
 
-            if (isNewMessage && isNearBottom) {
-                // Small delay to let the message render and calculate its height
-                kotlinx.coroutines.delay(100)
-                // Use instant scroll instead of animated to avoid jank during animation
-                listState.scrollToItem(0)
+            if (isNewMessage) {
+                if (isNearBottom) {
+                    // Small delay to let the message render and calculate its height
+                    kotlinx.coroutines.delay(100)
+                    // Use instant scroll instead of animated to avoid jank during animation
+                    listState.scrollToItem(0)
+                } else {
+                    // User is scrolled away - increment new message counter
+                    newMessageCountWhileAway++
+                }
             }
         }
 
@@ -1017,17 +1148,35 @@ fun ChatScreen(
                 onDismiss = viewModel::dismissSaveContactBanner
             )
 
+            // Delayed loading indicator - only show after 500ms to avoid flash
+            var showDelayedLoader by remember { mutableStateOf(false) }
+            LaunchedEffect(initialLoadComplete) {
+                if (!initialLoadComplete) {
+                    showDelayedLoader = false
+                    delay(500)
+                    if (!initialLoadComplete) {
+                        showDelayedLoader = true
+                    }
+                }
+            }
+
             when {
-                uiState.isLoading -> {
+                // Show skeleton only after 500ms delay and only if still loading
+                !initialLoadComplete && showDelayedLoader -> {
                     MessageListSkeleton(
                         count = 10,
                         modifier = Modifier.fillMaxSize()
                     )
                 }
-                uiState.messages.isEmpty() -> {
+                // Show empty state only when we're CERTAIN there are no messages
+                initialLoadComplete && uiState.messages.isEmpty() -> {
                     EmptyStateMessages(
                         modifier = Modifier.fillMaxSize()
                     )
+                }
+                // Show blank screen while initial load in progress (before 200ms delay)
+                !initialLoadComplete && uiState.messages.isEmpty() -> {
+                    Box(modifier = Modifier.fillMaxSize())
                 }
                 else -> {
                     // Animate top padding when save contact banner is shown
@@ -1094,18 +1243,19 @@ fun ChatScreen(
                         }
                     }
 
-                    LazyColumn(
-                        modifier = Modifier.fillMaxSize(),
-                        state = listState,
-                        reverseLayout = true,
-                        contentPadding = PaddingValues(
-                            start = 16.dp,
-                            end = 16.dp,
-                            top = bannerTopPadding,
-                            bottom = 8.dp
-                        )
-                        // Spacing is handled per-item based on group position
-                    ) {
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        LazyColumn(
+                            modifier = Modifier.fillMaxSize(),
+                            state = listState,
+                            reverseLayout = true,
+                            contentPadding = PaddingValues(
+                                start = 16.dp,
+                                end = 16.dp,
+                                top = bannerTopPadding,
+                                bottom = 8.dp
+                            )
+                            // Spacing is handled per-item based on group position
+                        ) {
                         // Spam safety banner - shows at the bottom when chat is marked as spam
                         // Since reverseLayout=true, adding at start puts it at visual bottom
                         if (uiState.isSpam) {
@@ -1232,7 +1382,9 @@ fun ChatScreen(
                                     .alpha(stickerFadeAlpha)
                                     .offset(y = stickerOverlapOffset)
                                     .padding(top = topPadding)
-                                    .staggeredEntrance(index)
+                                    // Messages appear instantly in groups as they're fetched
+                                    // No entrance animation - only new incoming messages via socket should animate
+                                    .staggeredEntrance(index = index, enabled = false)
                                     // PERF: Use snap() instead of spring animations to reduce frame drops
                                     // during rapid scrolling and message updates (reactions, delivery status)
                                     .animateItem(
@@ -1397,6 +1549,15 @@ fun ChatScreen(
                             }
                         }
 
+                        // Loading indicator - shows when fetching older messages from server
+                        // Since reverseLayout=true, adding at end puts it at visual top
+                        // Acts as soft scroll boundary while fetch is in progress
+                        if (isLoadingFromServer && uiState.messages.isNotEmpty()) {
+                            item(key = "loading_more_indicator") {
+                                LoadingMoreIndicator()
+                            }
+                        }
+
                         // Syncing indicator - shows skeleton bubbles at top while fetching messages
                         // Since reverseLayout=true, adding at end puts it at visual top
                         if (uiState.isSyncingMessages && uiState.messages.isNotEmpty()) {
@@ -1411,6 +1572,22 @@ fun ChatScreen(
                                 }
                             }
                         }
+                        }
+
+                        // Jump to bottom / new messages indicator
+                        JumpToBottomIndicator(
+                            visible = isScrolledAwayFromBottom,
+                            newMessageCount = newMessageCountWhileAway,
+                            onClick = {
+                                scrollScope.launch {
+                                    listState.animateScrollToItem(0)
+                                    newMessageCountWhileAway = 0
+                                }
+                            },
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 16.dp)
+                        )
                     }
                 }
             }
@@ -1761,6 +1938,14 @@ fun ChatScreen(
             viewModel.clearForwardSuccess()
         }
     }
+
+    // Tutorial overlay - full screen overlay on top of everything
+    SendModeTutorialOverlay(
+        tutorialState = uiState.tutorialState,
+        onTutorialProgress = { newState ->
+            viewModel.updateTutorialState(newState)
+        }
+    )
 }
 
 /**
@@ -1785,6 +1970,8 @@ private fun UnifiedInputArea(
     onSendClick: () -> Unit,
     onSendLongPress: () -> Unit,
     onAttachClick: () -> Unit,
+    onEmojiClick: () -> Unit,
+    onImageClick: () -> Unit,
     onVoiceMemoClick: () -> Unit,
     onVoiceMemoPressStart: () -> Unit,
     onVoiceMemoPressEnd: () -> Unit,
@@ -1807,6 +1994,10 @@ private fun UnifiedInputArea(
     amplitudeHistory: List<Float>,
     onRecordingCancel: () -> Unit,
     onRecordingSend: () -> Unit,
+    isNoiseCancellationEnabled: Boolean = true,
+    onNoiseCancellationToggle: () -> Unit = {},
+    onRecordingStop: () -> Unit = {},
+    onRecordingRestart: () -> Unit = {},
     // Preview mode props
     previewDuration: Long,
     playbackPosition: Long,
@@ -1815,6 +2006,12 @@ private fun UnifiedInputArea(
     onReRecord: () -> Unit,
     onPreviewSend: () -> Unit,
     onPreviewCancel: () -> Unit,
+    // Send mode toggle props
+    canToggleSendMode: Boolean = false,
+    showSendModeRevealAnimation: Boolean = false,
+    tutorialState: TutorialState = TutorialState.NOT_SHOWN,
+    onModeToggle: (ChatSendMode) -> Boolean = { false },
+    onRevealAnimationComplete: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // MMS mode is for local SMS chats when attachments or long text is present
@@ -1831,7 +2028,9 @@ private fun UnifiedInputArea(
         color = inputColors.inputBackground
     ) {
         Column(
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 6.dp)
         ) {
             // Attachment previews (only in normal mode)
             AnimatedVisibility(
@@ -1970,23 +2169,23 @@ private fun UnifiedInputArea(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 64.dp) // Fixed minimum height for consistency
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .height(IntrinsicSize.Min)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Left side cancel button - only visible in recording/preview modes
+                // Left side cancel button - only visible in preview mode (recording has controls in panel)
                 AnimatedVisibility(
-                    visible = mode != InputMode.NORMAL,
+                    visible = mode == InputMode.PREVIEW,
                     enter = fadeIn(animationSpec = tween(150)) +
                         slideInHorizontally(animationSpec = tween(200)) { -it / 2 },
                     exit = fadeOut(animationSpec = tween(150)) +
                         slideOutHorizontally(animationSpec = tween(200)) { -it / 2 }
                 ) {
                     Row {
-                        // Cancel button for recording/preview modes
+                        // Cancel button for preview mode
                         Surface(
-                            onClick = if (mode == InputMode.RECORDING) onRecordingCancel else onPreviewCancel,
-                            modifier = Modifier.size(40.dp),
+                            onClick = onPreviewCancel,
+                            modifier = Modifier.size(32.dp),
                             shape = CircleShape,
                             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
                         ) {
@@ -1998,7 +2197,7 @@ private fun UnifiedInputArea(
                                     Icons.Default.Close,
                                     contentDescription = stringResource(R.string.action_cancel),
                                     tint = MaterialTheme.colorScheme.error,
-                                    modifier = Modifier.size(24.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
                             }
                         }
@@ -2024,44 +2223,52 @@ private fun UnifiedInputArea(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .heightIn(min = 48.dp),
-                                shape = RoundedCornerShape(24.dp),
+                                    .heightIn(min = 36.dp),
+                                shape = RoundedCornerShape(18.dp),
                                 color = inputColors.inputFieldBackground
                             ) {
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(start = 8.dp, end = 4.dp),
+                                        .padding(start = 6.dp, end = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Add button with circle outline inside the text field
+                                    // Add button - solid circle that rotates to X when drawer open
+                                    val addButtonRotation by animateFloatAsState(
+                                        targetValue = if (isPickerExpanded) 45f else 0f,
+                                        animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                        label = "addButtonRotation"
+                                    )
+                                    val addButtonColor by animateColorAsState(
+                                        targetValue = if (isPickerExpanded) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            inputColors.inputIcon.copy(alpha = 0.7f)
+                                        },
+                                        animationSpec = tween(200),
+                                        label = "addButtonColor"
+                                    )
                                     Surface(
                                         onClick = onAttachClick,
-                                        modifier = Modifier.size(32.dp),
+                                        modifier = Modifier.size(28.dp),
                                         shape = CircleShape,
-                                        color = Color.Transparent,
-                                        border = BorderStroke(
-                                            width = 1.5.dp,
-                                            color = if (isPickerExpanded) {
-                                                MaterialTheme.colorScheme.primary
-                                            } else {
-                                                inputColors.inputIcon.copy(alpha = 0.6f)
-                                            }
-                                        )
+                                        color = addButtonColor
                                     ) {
                                         Box(
                                             modifier = Modifier.fillMaxSize(),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Icon(
-                                                imageVector = if (isPickerExpanded) Icons.Default.Close else Icons.Default.Add,
+                                                imageVector = Icons.Default.Add,
                                                 contentDescription = stringResource(R.string.attach_file),
                                                 tint = if (isPickerExpanded) {
-                                                    MaterialTheme.colorScheme.primary
+                                                    MaterialTheme.colorScheme.onPrimary
                                                 } else {
-                                                    inputColors.inputIcon
+                                                    inputColors.inputFieldBackground
                                                 },
-                                                modifier = Modifier.size(20.dp)
+                                                modifier = Modifier
+                                                    .size(18.dp)
+                                                    .graphicsLayer { rotationZ = addButtonRotation }
                                             )
                                         }
                                     }
@@ -2108,14 +2315,45 @@ private fun UnifiedInputArea(
                                         ),
                                         maxLines = 4
                                     )
+
+                                    // Emoji icon button
+                                    IconButton(
+                                        onClick = onEmojiClick,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.EmojiEmotions,
+                                            contentDescription = stringResource(R.string.emoji),
+                                            tint = inputColors.inputIcon,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+
+                                    // Image/Gallery icon button
+                                    IconButton(
+                                        onClick = onImageClick,
+                                        modifier = Modifier.size(32.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Outlined.Image,
+                                            contentDescription = stringResource(R.string.image),
+                                            tint = inputColors.inputIcon,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
                                 }
                             }
                         }
                         InputMode.RECORDING -> {
-                            // Recording indicator with waveform
-                            RecordingContent(
+                            // Expanded recording panel with controls
+                            ExpandedRecordingPanel(
                                 duration = recordingDuration,
                                 amplitudeHistory = amplitudeHistory,
+                                isNoiseCancellationEnabled = isNoiseCancellationEnabled,
+                                onNoiseCancellationToggle = onNoiseCancellationToggle,
+                                onStop = onRecordingStop,
+                                onRestart = onRecordingRestart,
+                                onAttach = onRecordingSend,
                                 inputColors = inputColors
                             )
                         }
@@ -2133,38 +2371,73 @@ private fun UnifiedInputArea(
                     }
                 }
 
-                Spacer(modifier = Modifier.width(8.dp))
+                // Hide right side buttons during RECORDING mode (controls are in the expanded panel)
+                AnimatedVisibility(
+                    visible = mode != InputMode.RECORDING,
+                    enter = fadeIn(animationSpec = tween(150)) +
+                        slideInHorizontally(animationSpec = tween(200)) { it / 2 },
+                    exit = fadeOut(animationSpec = tween(150)) +
+                        slideOutHorizontally(animationSpec = tween(200)) { it / 2 }
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(modifier = Modifier.width(6.dp))
 
-                // Right side action button - voice memo or send (stays in fixed position)
-                Crossfade(
-                    targetState = when {
-                        mode == InputMode.RECORDING || mode == InputMode.PREVIEW -> true
-                        hasContent -> true
-                        else -> false
-                    },
-                    label = "action_button"
-                ) { showSend ->
-                    if (showSend) {
-                        SendButton(
-                            onClick = when (mode) {
-                                InputMode.RECORDING -> onRecordingSend
-                                InputMode.PREVIEW -> onPreviewSend
-                                InputMode.NORMAL -> onSendClick
+                        // Right side action button - voice memo or send
+                        Crossfade(
+                            targetState = when {
+                                tutorialState == TutorialState.STEP_1_SWIPE_UP ||
+                                        tutorialState == TutorialState.STEP_2_SWIPE_BACK -> true
+                                mode == InputMode.PREVIEW -> true
+                                hasContent -> true
+                                else -> false
                             },
-                            onLongPress = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
-                            isSending = isSending && mode == InputMode.NORMAL,
-                            isSmsMode = isSmsMode,
-                            isMmsMode = isMmsMode && mode == InputMode.NORMAL,
-                            showEffectHint = !isSmsMode && mode == InputMode.NORMAL
-                        )
-                    } else {
-                        VoiceMemoButton(
-                            onClick = onVoiceMemoClick,
-                            onPressStart = onVoiceMemoPressStart,
-                            onPressEnd = onVoiceMemoPressEnd,
-                            isSmsMode = isSmsMode,
-                            isDisabled = smsInputBlocked
-                        )
+                            label = "action_button"
+                        ) { showSend ->
+                            if (showSend) {
+                                // Use toggle button in normal mode when toggle is available
+                                if (mode == InputMode.NORMAL && canToggleSendMode) {
+                                    SendModeToggleButton(
+                                        onClick = onSendClick,
+                                        onLongPress = onSendLongPress,
+                                        currentMode = currentSendMode,
+                                        canToggle = canToggleSendMode,
+                                        onModeToggle = onModeToggle,
+                                        isSending = isSending,
+                                        isMmsMode = isMmsMode,
+                                        showRevealAnimation = showSendModeRevealAnimation,
+                                        tutorialActive = tutorialState == TutorialState.STEP_1_SWIPE_UP ||
+                                                tutorialState == TutorialState.STEP_2_SWIPE_BACK,
+                                        onAnimationConfigChange = { config ->
+                                            // Mark animation as complete when it finishes
+                                            if (config.phase == SendButtonAnimationPhase.IDLE) {
+                                                onRevealAnimationComplete()
+                                            }
+                                        }
+                                    )
+                                } else {
+                                    // Fall back to regular send button for preview or when toggle not available
+                                    SendButton(
+                                        onClick = when (mode) {
+                                            InputMode.PREVIEW -> onPreviewSend
+                                            else -> onSendClick
+                                        },
+                                        onLongPress = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
+                                        isSending = isSending && mode == InputMode.NORMAL,
+                                        isSmsMode = isSmsMode,
+                                        isMmsMode = isMmsMode && mode == InputMode.NORMAL,
+                                        showEffectHint = !isSmsMode && mode == InputMode.NORMAL
+                                    )
+                                }
+                            } else {
+                                VoiceMemoButton(
+                                    onClick = onVoiceMemoClick,
+                                    onPressStart = onVoiceMemoPressStart,
+                                    onPressEnd = onVoiceMemoPressEnd,
+                                    isSmsMode = isSmsMode,
+                                    isDisabled = smsInputBlocked
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -2176,9 +2449,14 @@ private fun UnifiedInputArea(
  * Recording mode center content with pulsing indicator and waveform
  */
 @Composable
-private fun RecordingContent(
+private fun ExpandedRecordingPanel(
     duration: Long,
     amplitudeHistory: List<Float>,
+    isNoiseCancellationEnabled: Boolean,
+    onNoiseCancellationToggle: () -> Unit,
+    onStop: () -> Unit,
+    onRestart: () -> Unit,
+    onAttach: () -> Unit,
     inputColors: BubbleColors,
     modifier: Modifier = Modifier
 ) {
@@ -2202,65 +2480,167 @@ private fun RecordingContent(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 48.dp),
+            .animateContentSize(
+                animationSpec = spring(
+                    dampingRatio = Spring.DampingRatioLowBouncy,
+                    stiffness = Spring.StiffnessMediumLow
+                )
+            ),
         shape = RoundedCornerShape(24.dp),
         color = inputColors.inputFieldBackground
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically
+                .padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Pulsing red recording dot
-            Box(
-                modifier = Modifier
-                    .size(12.dp)
-                    .background(
-                        color = Color.Red.copy(alpha = pulseAlpha),
-                        shape = CircleShape
-                    )
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            // Real-time waveform visualization
+            // Timer row with pulsing dot
             Row(
-                modifier = Modifier.weight(1f),
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                // Pulsing red recording dot
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            color = Color.Red.copy(alpha = pulseAlpha),
+                            shape = CircleShape
+                        )
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = formattedDuration,
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = inputColors.inputText
+                )
+            }
+
+            // Waveform visualization - larger
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(60.dp),
+                horizontalArrangement = Arrangement.spacedBy(3.dp, Alignment.CenterHorizontally),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 amplitudeHistory.forEachIndexed { index, amplitude ->
-                    val targetHeight = (4f + amplitude * 20f).coerceIn(4f, 24f)
+                    val targetHeight = (8f + amplitude * 48f).coerceIn(8f, 56f)
                     val animatedHeight by animateFloatAsState(
                         targetValue = targetHeight,
                         animationSpec = spring(
-                            dampingRatio = Spring.DampingRatioMediumBouncy,
-                            stiffness = Spring.StiffnessLow
+                            dampingRatio = 0.6f,
+                            stiffness = 400f
                         ),
                         label = "bar_$index"
                     )
 
                     Box(
                         modifier = Modifier
-                            .width(3.dp)
+                            .width(4.dp)
                             .height(animatedHeight.dp)
                             .background(
                                 color = Color.Red.copy(alpha = 0.8f),
-                                shape = RoundedCornerShape(1.5.dp)
+                                shape = RoundedCornerShape(2.dp)
                             )
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.width(12.dp))
+            // Noise cancellation toggle row
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.Mic,
+                    contentDescription = null,
+                    tint = inputColors.inputText.copy(alpha = 0.7f),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = stringResource(R.string.noise_cancellation) + " " +
+                           if (isNoiseCancellationEnabled) "ON" else "OFF",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = inputColors.inputText.copy(alpha = 0.7f)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Switch(
+                    checked = isNoiseCancellationEnabled,
+                    onCheckedChange = { onNoiseCancellationToggle() },
+                    modifier = Modifier.height(24.dp),
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = MaterialTheme.colorScheme.primary,
+                        checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                )
+            }
 
-            // Duration display
-            Text(
-                text = formattedDuration,
-                style = MaterialTheme.typography.bodyMedium,
-                color = inputColors.inputText
-            )
+            // Bottom controls row: Restart, Stop, Attach
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Restart button
+                TextButton(onClick = onRestart) {
+                    Icon(
+                        Icons.Default.RestartAlt,
+                        contentDescription = stringResource(R.string.restart_recording),
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(stringResource(R.string.restart_recording))
+                }
+
+                // Red stop button (prominent)
+                Surface(
+                    onClick = onStop,
+                    modifier = Modifier.size(56.dp),
+                    shape = CircleShape,
+                    color = Color.Red
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Stop square icon
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .background(Color.White, RoundedCornerShape(4.dp))
+                        )
+                    }
+                }
+
+                // Attach button (pill shape with checkmark)
+                Surface(
+                    onClick = onAttach,
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = stringResource(R.string.attach_voice_memo),
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -2577,7 +2957,8 @@ private fun SendButton(
 
     Box(
         modifier = modifier
-            .size(48.dp)
+            .fillMaxHeight()
+            .aspectRatio(1f)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
@@ -2603,7 +2984,7 @@ private fun SendButton(
     ) {
         if (isSending) {
             CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
+                modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
                 color = contentColor
             )
@@ -2618,13 +2999,13 @@ private fun SendButton(
                         Icons.AutoMirrored.Filled.Send,
                         contentDescription = stringResource(R.string.send_message),
                         tint = contentColor,
-                        modifier = Modifier.size(18.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                     Text(
                         text = "MMS",
                         style = MaterialTheme.typography.labelSmall,
                         color = contentColor,
-                        modifier = Modifier.padding(top = 1.dp)
+                        fontSize = 8.sp
                     )
                 }
             } else {
@@ -2632,7 +3013,7 @@ private fun SendButton(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.send_message),
                     tint = contentColor,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -2668,8 +3049,9 @@ private fun VoiceMemoButton(
 
     Box(
         modifier = modifier
-            .size(48.dp)
-            .clip(CircleShape)
+            .fillMaxHeight()
+            .aspectRatio(1.3f)
+            .clip(RoundedCornerShape(50))
             .background(containerColor)
             .then(
                 if (isDisabled) Modifier else Modifier.pointerInput(Unit) {
@@ -2714,7 +3096,7 @@ private fun VoiceMemoButton(
         Icon(
             Icons.Filled.GraphicEq,
             contentDescription = stringResource(R.string.voice_memo),
-            modifier = Modifier.size(24.dp),
+            modifier = Modifier.size(20.dp),
             tint = if (isDisabled) Color.White.copy(alpha = 0.4f) else Color.White
         )
     }
@@ -2974,6 +3356,7 @@ private fun SmsFallbackBanner(
  */
 private fun startVoiceMemoRecording(
     context: android.content.Context,
+    enableNoiseCancellation: Boolean = true,
     onRecorderCreated: (MediaRecorder, java.io.File) -> Unit,
     onError: (String) -> Unit
 ) {
@@ -2991,7 +3374,11 @@ private fun startVoiceMemoRecording(
         }
 
         recorder.apply {
-            setAudioSource(MediaRecorder.AudioSource.MIC)
+            // Use VOICE_RECOGNITION for built-in noise suppression when enabled
+            setAudioSource(
+                if (enableNoiseCancellation) MediaRecorder.AudioSource.VOICE_RECOGNITION
+                else MediaRecorder.AudioSource.MIC
+            )
             setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
             setAudioSamplingRate(44100)
