@@ -232,6 +232,42 @@ SocketEvent.NewMessage → SocketEventHandler
 3. **LOCAL_MMS** - Direct MMS from Android device
 4. **AUTO** - Auto-select based on chat type and server connection
 
+## Message Sync Mechanisms
+
+The app uses multiple layers to ensure messages are never missed, as BlueBubbles server push can be unreliable:
+
+### 1. Primary: Socket.IO Push
+- Real-time message delivery via persistent socket connection
+- Handled by `SocketEventHandler` → `MessageEventHandler`
+
+### 2. Secondary: FCM Push
+- Firebase Cloud Messaging as backup when socket disconnects
+- Handled by `FcmMessageHandler`
+- Triggers socket reconnect after showing notification
+
+### 3. Fallback: Adaptive Polling (ChatViewModel)
+- Polls every 2 seconds when socket has been quiet for >5 seconds
+- Only active while viewing a chat
+- Catches messages missed by push mechanisms
+- Key constants: `POLL_INTERVAL_MS = 2000L`, `SOCKET_QUIET_THRESHOLD_MS = 5000L`
+
+### 4. Fallback: Foreground Resume Sync (ChatViewModel)
+- Syncs when app returns from background
+- Fetches up to 25 recent messages for active chat
+- Uses `AppLifecycleTracker.foregroundState` StateFlow
+
+### 5. Fallback: Background Sync Worker
+- `BackgroundSyncWorker` runs every 15 minutes (Android minimum)
+- Syncs up to 10 recent chats, 20 messages each
+- Shows notifications if app is backgrounded and new messages found
+- Scheduled in `BothBubblesApp.initializeBackgroundSync()`
+- Respects chat notification settings (muted/snoozed)
+
+### Key Files
+- `services/sync/BackgroundSyncWorker.kt` - Background periodic sync
+- `services/AppLifecycleTracker.kt` - App foreground/background state
+- `ui/chat/ChatViewModel.kt` - Adaptive polling and foreground resume sync
+
 ## Workflow
 
 - **Do not automatically build** after making code changes. Only build when explicitly requested by the user.

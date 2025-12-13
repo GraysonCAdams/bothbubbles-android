@@ -10,10 +10,11 @@ import android.util.Log
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -30,7 +31,9 @@ import javax.inject.Singleton
 class MmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
-    private val smsPermissionHelper: SmsPermissionHelper
+    private val smsPermissionHelper: SmsPermissionHelper,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "MmsSendService"
@@ -44,9 +47,6 @@ class MmsSendService @Inject constructor(
 
     // Use the improved PDU builder
     private val pduBuilder = MmsPduBuilder(context)
-
-    // Coroutine scope for cleanup tasks
-    private val cleanupScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Send an MMS message
@@ -64,7 +64,7 @@ class MmsSendService @Inject constructor(
         chatGuid: String,
         subject: String? = null,
         subscriptionId: Int = -1
-    ): Result<MessageEntity> = withContext(Dispatchers.IO) {
+    ): Result<MessageEntity> = withContext(ioDispatcher) {
         runCatching {
             val timestamp = System.currentTimeMillis()
             val providerMessage = insertMmsToProvider(recipients, text, attachments, subject)
@@ -130,7 +130,7 @@ class MmsSendService @Inject constructor(
 
             // Clean up temp file after a delay (system needs it briefly for sending)
             // Using a coroutine with delay is more reliable than deleteOnExit()
-            cleanupScope.launch {
+            applicationScope.launch(ioDispatcher) {
                 delay(30_000) // Wait 30 seconds for MMS to be sent
                 try {
                     if (pduFile.exists()) {
@@ -196,7 +196,7 @@ class MmsSendService @Inject constructor(
         text: String?,
         attachments: List<Uri>,
         subject: String?
-    ): MmsProviderRef? = withContext(Dispatchers.IO) {
+    ): MmsProviderRef? = withContext(ioDispatcher) {
         if (!smsPermissionHelper.isDefaultSmsApp()) return@withContext null
 
         try {

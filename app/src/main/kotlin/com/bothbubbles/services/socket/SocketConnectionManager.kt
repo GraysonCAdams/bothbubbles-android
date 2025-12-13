@@ -10,13 +10,13 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.MainDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -30,14 +30,15 @@ class SocketConnectionManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val socketService: SocketService,
     private val socketEventHandler: SocketEventHandler,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @MainDispatcher private val mainDispatcher: CoroutineDispatcher
 ) : DefaultLifecycleObserver {
 
     companion object {
         private const val TAG = "SocketConnectionManager"
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var isInitialized = false
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
 
@@ -76,7 +77,7 @@ class SocketConnectionManager @Inject constructor(
     override fun onStop(owner: LifecycleOwner) {
         // App went to background
         // Check if foreground service mode is active - if so, let the service manage the socket
-        scope.launch {
+        applicationScope.launch(mainDispatcher) {
             val provider = try {
                 settingsDataStore.notificationProvider.first()
             } catch (e: Exception) {
@@ -122,7 +123,7 @@ class SocketConnectionManager @Inject constructor(
     }
 
     private fun attemptConnection() {
-        scope.launch {
+        applicationScope.launch(mainDispatcher) {
             // Check if server is configured
             if (!socketService.isServerConfigured()) {
                 Log.d(TAG, "Server not configured - skipping connection")

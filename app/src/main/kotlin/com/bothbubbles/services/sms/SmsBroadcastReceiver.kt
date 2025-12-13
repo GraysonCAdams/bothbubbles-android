@@ -19,6 +19,7 @@ import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -26,10 +27,13 @@ import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -39,6 +43,13 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class SmsBroadcastReceiver : BroadcastReceiver() {
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface SmsBroadcastReceiverEntryPoint {
+        @ApplicationScope
+        fun applicationScope(): CoroutineScope
+    }
 
     companion object {
         private const val TAG = "SmsBroadcastReceiver"
@@ -80,8 +91,6 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     @Inject
     lateinit var activeConversationManager: ActiveConversationManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Telephony.Sms.Intents.SMS_RECEIVED_ACTION -> handleSmsReceived(context, intent)
@@ -107,11 +116,20 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "SMS_DELIVER_ACTION - received ${messages.size} message parts")
 
-        scope.launch {
+        val pendingResult = goAsync()
+
+        val entryPoint = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            SmsBroadcastReceiverEntryPoint::class.java
+        )
+
+        entryPoint.applicationScope().launch(Dispatchers.IO) {
             try {
                 processIncomingSms(context, messages)
             } catch (e: Exception) {
                 Log.e(TAG, "Error processing SMS", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }

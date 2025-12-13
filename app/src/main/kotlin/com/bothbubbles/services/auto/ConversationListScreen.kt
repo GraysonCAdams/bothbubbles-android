@@ -22,12 +22,14 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * Android Auto screen displaying the list of recent conversations.
@@ -46,7 +48,8 @@ class ConversationListScreen(
     private val syncService: SyncService? = null
 ) : Screen(carContext) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Screen-local scope that follows screen lifecycle
+    private val screenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Cache for conversations to avoid blocking the main thread
     @Volatile
@@ -65,7 +68,17 @@ class ConversationListScreen(
     @Volatile
     private var isLoading = false
 
+    // Caches to avoid blocking calls during UI rendering
+    private val senderNameCache = mutableMapOf<Long, String>()
+    private val participantNameCache = mutableMapOf<String, String>()
+
     init {
+        // Register lifecycle observer to cancel scope when screen is destroyed
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                screenScope.cancel()
+            }
+        })
         refreshData()
     }
 
@@ -73,7 +86,7 @@ class ConversationListScreen(
         if (isLoading) return
         isLoading = true
 
-        scope.launch {
+        screenScope.launch {
             try {
                 // Get ALL active chats from database - these are conversations the user has
                 // regardless of when the last message was received
@@ -101,6 +114,40 @@ class ConversationListScreen(
                 val latestMessages = messageDao.getLatestMessagesForChats(chatGuids)
                 val messagesMap = latestMessages.associateBy { it.chatGuid }
                 cachedMessages = messagesMap
+
+                // Pre-fetch sender names for all latest messages (batch query for efficiency)
+                val handleIds = latestMessages.mapNotNull { it.handleId }.distinct()
+                if (handleIds.isNotEmpty()) {
+                    val handles = handleDao.getHandlesByIds(handleIds)
+                    handles.forEach { handle ->
+                        val displayName = handle.cachedDisplayName
+                            ?: handle.inferredName
+                            ?: handle.formattedAddress?.take(10)
+                            ?: ""
+                        senderNameCache[handle.id] = displayName
+                    }
+                }
+
+                // Pre-fetch participant names for all chats
+                for (chat in chatsToDisplay) {
+                    val participants = chatDao.getParticipantsForChat(chat.guid)
+                    val participantNames = when {
+                        participants.isEmpty() -> chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+                        participants.size == 1 -> {
+                            participants.first().cachedDisplayName
+                                ?: participants.first().formattedAddress
+                                ?: participants.first().address
+                        }
+                        else -> {
+                            participants.take(3).joinToString(", ") { handle ->
+                                handle.cachedDisplayName
+                                    ?: handle.formattedAddress?.take(10)
+                                    ?: handle.address.take(10)
+                            }
+                        }
+                    }
+                    participantNameCache[chat.guid] = participantNames
+                }
 
                 android.util.Log.d(TAG, "Displaying ${chatsToDisplay.size} chats, hasMore=$hasMoreConversations")
 
@@ -256,34 +303,13 @@ class ConversationListScreen(
 
     private fun getSenderNameForMessage(message: MessageEntity): String {
         val handleId = message.handleId ?: return ""
-        return runBlocking(Dispatchers.IO) {
-            val handle = handleDao.getHandleById(handleId)
-            handle?.cachedDisplayName
-                ?: handle?.inferredName
-                ?: handle?.formattedAddress?.take(10)
-                ?: ""
-        }
+        // Use pre-fetched cache to avoid blocking calls
+        return senderNameCache[handleId] ?: ""
     }
 
     private fun getParticipantNames(chat: ChatEntity): String {
-        return runBlocking(Dispatchers.IO) {
-            val participants = chatDao.getParticipantsForChat(chat.guid)
-            when {
-                participants.isEmpty() -> chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
-                participants.size == 1 -> {
-                    participants.first().cachedDisplayName
-                        ?: participants.first().formattedAddress
-                        ?: participants.first().address
-                }
-                else -> {
-                    participants.take(3).joinToString(", ") { handle ->
-                        handle.cachedDisplayName
-                            ?: handle.formattedAddress?.take(10)
-                            ?: handle.address.take(10)
-                    }
-                }
-            }
-        }
+        // Use pre-fetched cache to avoid blocking calls
+        return participantNameCache[chat.guid] ?: ""
     }
 
     companion object {

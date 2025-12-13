@@ -9,13 +9,14 @@ import android.os.Build
 import android.util.Log
 import com.bothbubbles.R
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -45,14 +46,14 @@ class SoundManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore,
     private val appLifecycleTracker: Lazy<AppLifecycleTracker>,
-    private val activeConversationManager: ActiveConversationManager
+    private val activeConversationManager: ActiveConversationManager,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "SoundManager"
         private const val MAX_STREAMS = 2
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val audioManager: AudioManager by lazy {
         context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -135,7 +136,7 @@ class SoundManager @Inject constructor(
      * Respects DND, sound mode, and user settings.
      */
     fun playSendSound() {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
                 Log.d(TAG, "App in background - skipping send sound (use system notification)")
                 return@launch
@@ -156,7 +157,7 @@ class SoundManager @Inject constructor(
      * @param chatGuid The chat GUID for the incoming message
      */
     fun playReceiveSound(chatGuid: String) {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
                 Log.d(TAG, "App in background - skipping receive sound (use system notification)")
                 return@launch
@@ -178,7 +179,7 @@ class SoundManager @Inject constructor(
      * Used when user selects a new sound theme in settings.
      */
     fun previewSounds(theme: SoundTheme) {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             // Play receive sound first
             playSoundDirect(getReceiveSoundId(theme))
             // Wait a moment, then play send sound

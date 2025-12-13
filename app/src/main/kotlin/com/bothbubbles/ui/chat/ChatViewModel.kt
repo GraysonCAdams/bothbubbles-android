@@ -33,6 +33,7 @@ import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentDownloadQueue
@@ -114,7 +115,8 @@ class ChatViewModel @Inject constructor(
     private val messageDao: MessageDao,
     private val iMessageAvailabilityService: IMessageAvailabilityService,
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
-    private val chatStateCache: ChatStateCache
+    private val chatStateCache: ChatStateCache,
+    private val appLifecycleTracker: AppLifecycleTracker
 ) : ViewModel() {
 
     companion object {
@@ -123,6 +125,10 @@ class ChatViewModel @Inject constructor(
         private const val SERVER_STABILITY_PERIOD_MS = 30_000L // 30 seconds stable before allowing iMessage
         private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
         private const val FLIP_FLOP_THRESHOLD = 3 // 3+ state changes = unstable server
+
+        // Adaptive polling: catches missed messages when push is unreliable
+        private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
+        private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -340,6 +346,11 @@ class ChatViewModel @Inject constructor(
     // iMessage availability check cooldown (per-session, resets on ViewModel creation)
     private var lastAvailabilityCheck: Long = 0
 
+    // Adaptive polling: tracks when we last received a socket message for this chat
+    // Used to detect when push may have failed and trigger fallback polling
+    @Volatile
+    private var lastSocketMessageTime: Long = System.currentTimeMillis()
+
     init {
         // Check LRU cache for previously viewed chat state (instant restore)
         val cachedState = chatStateCache.get(chatGuid)
@@ -377,6 +388,8 @@ class ChatViewModel @Inject constructor(
         observeUploadProgress()
         saveCurrentChatState()
         observeQueuedMessages()
+        startAdaptivePolling() // Catches missed messages when push is unreliable
+        observeForegroundResume() // Sync when app returns from background
 
         // Check if iMessage is available again (for chats in SMS fallback mode)
         // Delay slightly to ensure chat data is loaded first
@@ -1530,12 +1543,109 @@ class ChatViewModel @Inject constructor(
                 .collect { event ->
                     android.util.Log.d("ChatViewModel", "Socket: New message received for ${event.chatGuid}, guid=${event.message.guid}")
 
+                    // Update socket activity timestamp (for adaptive polling)
+                    lastSocketMessageTime = System.currentTimeMillis()
+
                     // Notify paging controller about the new message
                     // Room Flow will handle the actual message display (single source of truth)
                     pagingController.onNewMessageInserted(event.message.guid)
 
                     // Mark as read since user is viewing the chat
                     markAsRead()
+                }
+        }
+    }
+
+    /**
+     * Adaptive polling to catch messages missed by push notifications.
+     *
+     * BlueBubbles server occasionally fails to push messages via Socket/FCM.
+     * This polling mechanism activates when the socket has been "quiet" for
+     * longer than SOCKET_QUIET_THRESHOLD_MS, fetching any messages newer than
+     * what we have locally.
+     *
+     * The polling is lightweight (~200 bytes request, 0-2KB response) and runs
+     * against the local BlueBubbles server (< 5ms query time).
+     */
+    private fun startAdaptivePolling() {
+        // Skip polling for local SMS chats (no server to poll)
+        if (messageRepository.isLocalSmsChat(chatGuid)) return
+
+        viewModelScope.launch {
+            while (true) {
+                delay(POLL_INTERVAL_MS)
+
+                // Only poll if socket has been quiet for a while
+                val timeSinceLastSocketMessage = System.currentTimeMillis() - lastSocketMessageTime
+                if (timeSinceLastSocketMessage < SOCKET_QUIET_THRESHOLD_MS) {
+                    continue // Socket is active, trust push
+                }
+
+                // Only poll if socket is connected (server is reachable)
+                if (!socketService.isConnected()) {
+                    continue
+                }
+
+                // Get the timestamp of the newest message we have locally
+                val newestMessage = _uiState.value.messages.firstOrNull()
+                val afterTimestamp = newestMessage?.dateCreated
+
+                try {
+                    val result = messageRepository.syncMessagesForChat(
+                        chatGuid = chatGuid,
+                        limit = 10,
+                        after = afterTimestamp
+                    )
+                    result.onSuccess { messages ->
+                        if (messages.isNotEmpty()) {
+                            Log.d(TAG, "Adaptive polling found ${messages.size} missed message(s)")
+                        }
+                    }
+                } catch (e: Exception) {
+                    // Silently ignore polling errors - this is a fallback mechanism
+                    Log.d(TAG, "Adaptive polling error: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Sync messages when app returns to foreground.
+     *
+     * This catches any messages that may have been missed while the app
+     * was in the background (e.g., if FCM/socket failed to deliver).
+     */
+    private fun observeForegroundResume() {
+        // Skip for local SMS chats (no server to sync from)
+        if (messageRepository.isLocalSmsChat(chatGuid)) return
+
+        viewModelScope.launch {
+            appLifecycleTracker.foregroundState
+                .collect { isInForeground ->
+                    if (isInForeground) {
+                        Log.d(TAG, "App resumed - syncing for missed messages")
+                        // Reset socket activity timer so adaptive polling doesn't immediately fire
+                        lastSocketMessageTime = System.currentTimeMillis()
+
+                        // Sync recent messages to catch any missed while backgrounded
+                        val newestMessage = _uiState.value.messages.firstOrNull()
+                        val afterTimestamp = newestMessage?.dateCreated
+
+                        try {
+                            val result = messageRepository.syncMessagesForChat(
+                                chatGuid = chatGuid,
+                                limit = 25,
+                                after = afterTimestamp
+                            )
+                            result.onSuccess { messages ->
+                                if (messages.isNotEmpty()) {
+                                    Log.d(TAG, "Foreground sync found ${messages.size} missed message(s)")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "Foreground sync error: ${e.message}")
+                        }
+                    }
                 }
         }
     }

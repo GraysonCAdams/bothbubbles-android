@@ -8,10 +8,11 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.util.PhoneNumberFormatter
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -51,13 +52,13 @@ class IMessageAvailabilityService @Inject constructor(
     private val api: BothBubblesApi,
     private val cacheDao: IMessageCacheDao,
     private val socketService: SocketService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "IMessageAvailability"
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Unique ID for this app session - used to detect cache from previous sessions
     private val sessionId = UUID.randomUUID().toString()
@@ -74,7 +75,7 @@ class IMessageAvailabilityService @Inject constructor(
 
     init {
         // Listen for server reconnection to re-check unreachable addresses
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             socketService.connectionState.collect { state ->
                 if (state == ConnectionState.CONNECTED) {
                     onServerReconnected()
@@ -83,7 +84,7 @@ class IMessageAvailabilityService @Inject constructor(
         }
 
         // Cleanup expired entries on startup
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             cleanupExpiredCache()
         }
     }
@@ -173,7 +174,7 @@ class IMessageAvailabilityService @Inject constructor(
         Log.i(TAG, "Server reconnected, re-checking ${unreachable.size} unreachable addresses")
 
         unreachable.forEach { entry ->
-            scope.launch {
+            applicationScope.launch(ioDispatcher) {
                 performCheck(entry.normalizedAddress)
             }
         }
@@ -184,7 +185,7 @@ class IMessageAvailabilityService @Inject constructor(
      * Uses HttpURLConnection instead of OkHttp to bypass potential OkHttp issues.
      */
     private suspend fun performCheck(normalizedAddress: String): Result<Boolean> {
-        return withContext(Dispatchers.IO) {
+        return withContext(ioDispatcher) {
             try {
                 Log.d(TAG, "DEBUG performCheck: Calling API via HttpURLConnection for $normalizedAddress")
 

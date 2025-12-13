@@ -21,12 +21,14 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.PhoneNumberFormatter
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 
 /**
  * Android Auto screen for composing a new message.
@@ -46,7 +48,8 @@ class ComposeMessageScreen(
     private val onMessageSent: () -> Unit
 ) : Screen(carContext) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Screen-local scope that follows screen lifecycle
+    private val screenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
     private var recentContacts: List<ContactItem> = emptyList()
@@ -58,11 +61,17 @@ class ComposeMessageScreen(
     private var selectedContact: ContactItem? = null
 
     init {
+        // Register lifecycle observer to cancel scope when screen is destroyed
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                screenScope.cancel()
+            }
+        })
         loadRecentContacts()
     }
 
     private fun loadRecentContacts() {
-        scope.launch {
+        screenScope.launch {
             try {
                 // Get recent chats to extract contacts
                 val chats = chatDao.getActiveChats().first()
@@ -219,7 +228,7 @@ class ComposeMessageScreen(
             ).show()
 
             // Navigate to the conversation detail screen where voice reply is available
-            scope.launch {
+            screenScope.launch {
                 val chat = chatDao.getChatByGuid(contact.chatGuid)
                 if (chat != null) {
                     screenManager.popToRoot()

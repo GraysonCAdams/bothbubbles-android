@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -143,6 +144,7 @@ interface MessageDao {
      * Note: The query is preprocessed to handle FTS5 special characters and add wildcards.
      * Use searchMessagesWithPreprocessing() for the full implementation.
      */
+    @SkipQueryVerification // FTS5 virtual table created in migration, Room can't validate at compile time
     @Query("""
         SELECT m.* FROM messages m
         INNER JOIN message_fts ON message_fts.rowid = m.id
@@ -165,6 +167,19 @@ interface MessageDao {
         LIMIT :limit
     """)
     fun searchMessagesLike(query: String, limit: Int = 100): Flow<List<MessageEntity>>
+
+    /**
+     * Search messages by text content using LIKE-based search.
+     * This is the primary search method used by the UI.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND (text LIKE '%' || :query || '%' OR subject LIKE '%' || :query || '%')
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>>
 
     @Query("""
         SELECT * FROM messages

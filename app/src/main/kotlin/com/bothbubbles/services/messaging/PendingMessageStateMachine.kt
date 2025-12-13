@@ -78,25 +78,32 @@ class PendingMessageStateMachine @Inject constructor(
             val message = pendingMessageDao.getById(messageId)
                 ?: return TransitionResult.NotFound
 
-            when (message.syncStatus) {
-                PendingSyncStatus.PENDING, PendingSyncStatus.FAILED -> {
+            val currentStatus = message.syncStatus
+            when (currentStatus) {
+                PendingSyncStatus.PENDING.name, PendingSyncStatus.FAILED.name -> {
                     // Valid transition
-                    pendingMessageDao.updateStatus(messageId, PendingSyncStatus.SENDING)
-                    pendingMessageDao.updateLastAttemptAt(messageId, System.currentTimeMillis())
-                    Log.d(TAG, "Message $messageId: ${message.syncStatus} -> SENDING")
+                    pendingMessageDao.updateStatusWithTimestamp(messageId, PendingSyncStatus.SENDING.name, System.currentTimeMillis())
+                    Log.d(TAG, "Message $messageId: $currentStatus -> SENDING")
                     TransitionResult.Success(PendingSyncStatus.SENDING)
                 }
-                PendingSyncStatus.SENDING -> {
+                PendingSyncStatus.SENDING.name -> {
                     // Already sending - could be a retry, allow it
                     Log.w(TAG, "Message $messageId already SENDING, allowing re-entry")
                     TransitionResult.Success(PendingSyncStatus.SENDING)
                 }
-                PendingSyncStatus.SENT -> {
+                PendingSyncStatus.SENT.name -> {
                     // Cannot send an already-sent message
                     TransitionResult.InvalidTransition(
-                        currentState = message.syncStatus,
+                        currentState = PendingSyncStatus.valueOf(currentStatus),
                         requestedState = PendingSyncStatus.SENDING,
                         reason = "Message already sent successfully"
+                    )
+                }
+                else -> {
+                    TransitionResult.InvalidTransition(
+                        currentState = PendingSyncStatus.PENDING, // fallback
+                        requestedState = PendingSyncStatus.SENDING,
+                        reason = "Unknown status: $currentStatus"
                     )
                 }
             }
@@ -119,25 +126,22 @@ class PendingMessageStateMachine @Inject constructor(
             val message = pendingMessageDao.getById(messageId)
                 ?: return TransitionResult.NotFound
 
-            when (message.syncStatus) {
-                PendingSyncStatus.SENDING -> {
+            val currentStatus = message.syncStatus
+            when (currentStatus) {
+                PendingSyncStatus.SENDING.name -> {
                     // Valid transition
-                    pendingMessageDao.updateStatusAndServerGuid(
-                        messageId,
-                        PendingSyncStatus.SENT,
-                        serverGuid
-                    )
+                    pendingMessageDao.markAsSent(messageId, serverGuid)
                     Log.d(TAG, "Message $messageId: SENDING -> SENT (server: $serverGuid)")
                     TransitionResult.Success(PendingSyncStatus.SENT)
                 }
-                PendingSyncStatus.SENT -> {
+                PendingSyncStatus.SENT.name -> {
                     // Already sent - idempotent, just return success
                     Log.w(TAG, "Message $messageId already SENT")
                     TransitionResult.Success(PendingSyncStatus.SENT)
                 }
                 else -> {
                     TransitionResult.InvalidTransition(
-                        currentState = message.syncStatus,
+                        currentState = PendingSyncStatus.valueOf(currentStatus),
                         requestedState = PendingSyncStatus.SENT,
                         reason = "Can only mark SENDING messages as SENT"
                     )
@@ -162,32 +166,33 @@ class PendingMessageStateMachine @Inject constructor(
             val message = pendingMessageDao.getById(messageId)
                 ?: return TransitionResult.NotFound
 
-            when (message.syncStatus) {
-                PendingSyncStatus.SENDING -> {
+            val currentStatus = message.syncStatus
+            when (currentStatus) {
+                PendingSyncStatus.SENDING.name -> {
                     // Valid transition
                     pendingMessageDao.updateStatusWithError(
                         messageId,
-                        PendingSyncStatus.FAILED,
+                        PendingSyncStatus.FAILED.name,
                         errorMessage,
-                        message.retryCount + 1
+                        System.currentTimeMillis()
                     )
                     Log.d(TAG, "Message $messageId: SENDING -> FAILED ($errorMessage)")
                     TransitionResult.Success(PendingSyncStatus.FAILED)
                 }
-                PendingSyncStatus.FAILED -> {
+                PendingSyncStatus.FAILED.name -> {
                     // Already failed - update error message
                     pendingMessageDao.updateStatusWithError(
                         messageId,
-                        PendingSyncStatus.FAILED,
+                        PendingSyncStatus.FAILED.name,
                         errorMessage,
-                        message.retryCount
+                        System.currentTimeMillis()
                     )
                     Log.w(TAG, "Message $messageId already FAILED, updating error")
                     TransitionResult.Success(PendingSyncStatus.FAILED)
                 }
                 else -> {
                     TransitionResult.InvalidTransition(
-                        currentState = message.syncStatus,
+                        currentState = PendingSyncStatus.valueOf(currentStatus),
                         requestedState = PendingSyncStatus.FAILED,
                         reason = "Can only mark SENDING messages as FAILED"
                     )
@@ -211,32 +216,40 @@ class PendingMessageStateMachine @Inject constructor(
             val message = pendingMessageDao.getById(messageId)
                 ?: return TransitionResult.NotFound
 
-            when (message.syncStatus) {
-                PendingSyncStatus.FAILED -> {
+            val currentStatus = message.syncStatus
+            when (currentStatus) {
+                PendingSyncStatus.FAILED.name -> {
                     // Valid transition - reset to PENDING for re-queue
-                    pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING)
+                    pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
                     Log.d(TAG, "Message $messageId: FAILED -> PENDING (retry)")
                     TransitionResult.Success(PendingSyncStatus.PENDING)
                 }
-                PendingSyncStatus.PENDING -> {
+                PendingSyncStatus.PENDING.name -> {
                     // Already pending - idempotent
                     Log.w(TAG, "Message $messageId already PENDING")
                     TransitionResult.Success(PendingSyncStatus.PENDING)
                 }
-                PendingSyncStatus.SENDING -> {
+                PendingSyncStatus.SENDING.name -> {
                     // Cannot retry while sending
                     TransitionResult.InvalidTransition(
-                        currentState = message.syncStatus,
+                        currentState = PendingSyncStatus.SENDING,
                         requestedState = PendingSyncStatus.PENDING,
                         reason = "Cannot retry while message is being sent"
                     )
                 }
-                PendingSyncStatus.SENT -> {
+                PendingSyncStatus.SENT.name -> {
                     // Cannot retry sent messages
                     TransitionResult.InvalidTransition(
-                        currentState = message.syncStatus,
+                        currentState = PendingSyncStatus.SENT,
                         requestedState = PendingSyncStatus.PENDING,
                         reason = "Cannot retry already-sent message"
+                    )
+                }
+                else -> {
+                    TransitionResult.InvalidTransition(
+                        currentState = PendingSyncStatus.PENDING, // fallback
+                        requestedState = PendingSyncStatus.PENDING,
+                        reason = "Unknown status: $currentStatus"
                     )
                 }
             }
@@ -256,7 +269,7 @@ class PendingMessageStateMachine @Inject constructor(
     suspend fun resetStuckMessages(stuckThresholdMs: Long = 120_000L): Int {
         return try {
             val cutoffTime = System.currentTimeMillis() - stuckThresholdMs
-            val stuckMessages = pendingMessageDao.getStuckSendingMessages(cutoffTime)
+            val stuckMessages = pendingMessageDao.getStaleSending(cutoffTime)
 
             if (stuckMessages.isEmpty()) {
                 return 0
@@ -264,7 +277,7 @@ class PendingMessageStateMachine @Inject constructor(
 
             Log.w(TAG, "Found ${stuckMessages.size} stuck SENDING messages, resetting to PENDING")
             for (message in stuckMessages) {
-                pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING)
+                pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING.name)
                 Log.d(TAG, "Reset stuck message ${message.id} (localId: ${message.localId})")
             }
 

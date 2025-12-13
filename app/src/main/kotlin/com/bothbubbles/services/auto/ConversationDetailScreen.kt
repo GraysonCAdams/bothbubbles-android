@@ -19,12 +19,14 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -44,7 +46,8 @@ class ConversationDetailScreen(
     private val onRefresh: () -> Unit
 ) : Screen(carContext) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Screen-local scope that follows screen lifecycle
+    private val screenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
     private var cachedMessages: List<MessageEntity> = emptyList()
@@ -62,14 +65,23 @@ class ConversationDetailScreen(
     @Volatile
     private var totalMessageCount = 0
 
+    // Cache for sender names to avoid blocking calls
+    private val senderNameCache = mutableMapOf<Long, String>()
+
     private val dateFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
 
     init {
+        // Register lifecycle observer to cancel scope when screen is destroyed
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                screenScope.cancel()
+            }
+        })
         refreshMessages()
     }
 
     private fun refreshMessages() {
-        scope.launch {
+        screenScope.launch {
             try {
                 isLoadingMessages = true
 
@@ -87,6 +99,19 @@ class ConversationDetailScreen(
                 hasMoreMessages = messages.size < totalMessageCount
                 isLoadingMessages = false
 
+                // Pre-fetch sender names for all messages (batch query for efficiency)
+                val handleIds = messages.mapNotNull { it.handleId }.distinct()
+                if (handleIds.isNotEmpty()) {
+                    val handles = handleDao.getHandlesByIds(handleIds)
+                    handles.forEach { handle ->
+                        val displayName = handle.cachedDisplayName
+                            ?: handle.inferredName
+                            ?: handle.formattedAddress
+                            ?: handle.address.let { PhoneNumberFormatter.format(it) }
+                        senderNameCache[handle.id] = displayName
+                    }
+                }
+
                 // If no messages found, trigger priority sync to load them immediately
                 if (messages.isEmpty() && syncService != null) {
                     android.util.Log.i(TAG, "No messages found, triggering priority sync for ${chat.guid}")
@@ -100,6 +125,19 @@ class ConversationDetailScreen(
                     ).first()
                     cachedMessages = refreshedMessages
                     hasMoreMessages = refreshedMessages.size < totalMessageCount
+
+                    // Also pre-fetch sender names for refreshed messages
+                    val refreshedHandleIds = refreshedMessages.mapNotNull { it.handleId }.distinct()
+                    if (refreshedHandleIds.isNotEmpty()) {
+                        val refreshedHandles = handleDao.getHandlesByIds(refreshedHandleIds)
+                        refreshedHandles.forEach { handle ->
+                            val displayName = handle.cachedDisplayName
+                                ?: handle.inferredName
+                                ?: handle.formattedAddress
+                                ?: handle.address.let { PhoneNumberFormatter.format(it) }
+                            senderNameCache[handle.id] = displayName
+                        }
+                    }
                 }
 
                 android.util.Log.d(TAG, "Loaded ${cachedMessages.size} messages, total=$totalMessageCount, hasMore=$hasMoreMessages")
@@ -175,7 +213,7 @@ class ConversationDetailScreen(
         val markReadAction = Action.Builder()
             .setTitle("Mark Read")
             .setOnClickListener {
-                scope.launch {
+                screenScope.launch {
                     try {
                         chatRepository.markChatAsRead(chat.guid)
                         CarToast.makeText(carContext, "Marked as read", CarToast.LENGTH_SHORT).show()
@@ -221,14 +259,8 @@ class ConversationDetailScreen(
 
     private fun getSenderName(message: MessageEntity): String {
         val handleId = message.handleId ?: return ""
-        val handle = runBlocking(Dispatchers.IO) {
-            handleDao.getHandleById(handleId)
-        }
-        return handle?.cachedDisplayName
-            ?: handle?.inferredName
-            ?: handle?.formattedAddress
-            ?: handle?.address?.let { PhoneNumberFormatter.format(it) }
-            ?: ""
+        // Use pre-fetched cache to avoid blocking calls
+        return senderNameCache[handleId] ?: ""
     }
 
     companion object {

@@ -461,12 +461,14 @@ fun ChatScreen(
         }
     }
 
-    // Cleanup recording and playback on dispose
+    // Cleanup recording and playback on dispose, and notify ViewModel we're leaving
     DisposableEffect(Unit) {
         onDispose {
             mediaRecorder?.release()
             mediaPlayer?.release()
             mediaActionSound.release()
+            // Notify ViewModel we're leaving the chat to clear active conversation tracking
+            viewModel.onChatLeave()
         }
     }
 

@@ -58,6 +58,13 @@ import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
 import com.bothbubbles.ui.components.message.ThreadChain
+import com.bothbubbles.util.parsing.DateParsingUtils
+import com.bothbubbles.util.parsing.DetectedCode
+import com.bothbubbles.util.parsing.DetectedDate
+import com.bothbubbles.util.parsing.DetectedPhoneNumber
+import com.bothbubbles.util.parsing.DetectedUrl
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
+import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.ui.theme.MessageShapes
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
@@ -1358,7 +1365,8 @@ private fun SimpleBubbleContent(
                                     },
                                     offset = phoneMenuOffset
                                 ) {
-                                    selectedPhoneNumber?.let { phone ->
+                                    val phone = selectedPhoneNumber
+                                    if (phone != null) {
                                         DropdownMenuItem(
                                             text = { Text("Send message") },
                                             onClick = {

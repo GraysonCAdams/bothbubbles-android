@@ -1,15 +1,16 @@
 package com.bothbubbles.services.fcm
 
 import android.util.Log
+import com.bothbubbles.di.ApplicationScope
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -45,6 +46,10 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
         entryPoint.fcmTokenManager()
     }
 
+    private val applicationScope: CoroutineScope by lazy {
+        entryPoint.applicationScope()
+    }
+
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "FirebaseMessagingService created")
@@ -62,11 +67,11 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
     /**
      * Called when a message is received from FCM.
      *
-     * IMPORTANT: Uses runBlocking to ensure message processing completes before
-     * this method returns. Without this, if the app process is killed immediately
-     * after onMessageReceived returns, the notification may not be shown.
+     * Uses application-scoped coroutine to process messages asynchronously.
+     * FirebaseMessagingService keeps the process alive for ~20 seconds for high-priority
+     * messages, giving enough time for processing. Using runBlocking would risk ANR.
      *
-     * The timeout ensures we don't block indefinitely if something goes wrong.
+     * The timeout ensures we don't process indefinitely if something goes wrong.
      */
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
@@ -75,20 +80,20 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
         val type = message.data["type"]
         Log.d(TAG, "FCM message received: id=$messageId, type=$type")
 
-        // Use runBlocking to ensure processing completes before method returns.
-        // This prevents message/notification loss if the app is killed immediately.
-        runBlocking {
-            val result = withTimeoutOrNull(FCM_PROCESSING_TIMEOUT_MS) {
-                withContext(Dispatchers.IO) {
-                    try {
-                        fcmMessageHandler.handleMessage(message)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Error handling FCM message", e)
-                    }
+        // Use application scope for async processing.
+        // FCM high-priority messages keep process alive for ~20 seconds.
+        applicationScope.launch(Dispatchers.IO) {
+            try {
+                val result = withTimeoutOrNull(FCM_PROCESSING_TIMEOUT_MS) {
+                    fcmMessageHandler.handleMessage(message)
                 }
-            }
-            if (result == null) {
-                Log.w(TAG, "FCM message processing timed out after ${FCM_PROCESSING_TIMEOUT_MS}ms")
+                if (result == null) {
+                    Log.w(TAG, "FCM message processing timed out after ${FCM_PROCESSING_TIMEOUT_MS}ms")
+                } else {
+                    Log.d(TAG, "FCM message processed successfully: id=$messageId")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error handling FCM message: id=$messageId", e)
             }
         }
     }
@@ -120,4 +125,6 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
 interface FirebaseServiceEntryPoint {
     fun fcmMessageHandler(): FcmMessageHandler
     fun fcmTokenManager(): FcmTokenManager
+    @ApplicationScope
+    fun applicationScope(): CoroutineScope
 }

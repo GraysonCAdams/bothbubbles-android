@@ -21,6 +21,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.components.message.MessageGroupPosition
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.ThreadChain
 
 /**
  * Full-screen overlay showing a thread of messages (original + replies).
@@ -222,9 +225,11 @@ fun AnimatedThreadOverlay(
         exit = fadeOut() + slideOutVertically { it / 3 },
         modifier = modifier
     ) {
-        threadChain?.let { chain ->
+        // Use non-null assertion since AnimatedVisibility only shows content when visible=true
+        // and we only set visible=true when threadChain != null
+        if (threadChain != null) {
             ThreadOverlay(
-                threadChain = chain,
+                threadChain = threadChain,
                 onMessageClick = onMessageClick,
                 onDismiss = onDismiss
             )

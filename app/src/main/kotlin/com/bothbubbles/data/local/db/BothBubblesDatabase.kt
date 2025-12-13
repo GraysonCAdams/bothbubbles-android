@@ -712,53 +712,68 @@ abstract class BothBubblesDatabase : RoomDatabase() {
          *
          * The FTS5 table is an "external content" table - it indexes text/subject from
          * the messages table but doesn't store duplicate data. Triggers keep it in sync.
+         *
+         * NOTE: FTS5 is not available on all Android devices (depends on system SQLite).
+         * If FTS5 is unavailable, we skip creating it and fall back to LIKE-based search.
          */
         val MIGRATION_30_31 = object : Migration(30, 31) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                // Create FTS5 virtual table with external content
-                // The content= and content_rowid= options link it to the messages table
-                db.execSQL("""
-                    CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
-                        text,
-                        subject,
-                        content=messages,
-                        content_rowid=id,
-                        tokenize='unicode61 remove_diacritics 2'
+                // FTS5 may not be available on all Android devices - wrap in try-catch
+                // and fall back to LIKE-based search if unavailable
+                try {
+                    // Create FTS5 virtual table with external content
+                    // The content= and content_rowid= options link it to the messages table
+                    db.execSQL("""
+                        CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(
+                            text,
+                            subject,
+                            content=messages,
+                            content_rowid=id,
+                            tokenize='unicode61 remove_diacritics 2'
+                        )
+                    """.trimIndent())
+
+                    // Populate FTS5 index with existing message content
+                    db.execSQL("""
+                        INSERT INTO message_fts(rowid, text, subject)
+                        SELECT id, text, subject FROM messages
+                        WHERE text IS NOT NULL OR subject IS NOT NULL
+                    """.trimIndent())
+
+                    // Trigger to keep FTS5 in sync on INSERT
+                    db.execSQL("""
+                        CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+                            INSERT INTO message_fts(rowid, text, subject)
+                            VALUES (NEW.id, NEW.text, NEW.subject);
+                        END
+                    """.trimIndent())
+
+                    // Trigger to keep FTS5 in sync on DELETE
+                    db.execSQL("""
+                        CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+                            INSERT INTO message_fts(message_fts, rowid, text, subject)
+                            VALUES ('delete', OLD.id, OLD.text, OLD.subject);
+                        END
+                    """.trimIndent())
+
+                    // Trigger to keep FTS5 in sync on UPDATE
+                    db.execSQL("""
+                        CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+                            INSERT INTO message_fts(message_fts, rowid, text, subject)
+                            VALUES ('delete', OLD.id, OLD.text, OLD.subject);
+                            INSERT INTO message_fts(rowid, text, subject)
+                            VALUES (NEW.id, NEW.text, NEW.subject);
+                        END
+                    """.trimIndent())
+
+                    android.util.Log.i("BothBubblesDatabase", "FTS5 full-text search enabled")
+                } catch (e: Exception) {
+                    // FTS5 not available on this device - fall back to LIKE-based search
+                    android.util.Log.w(
+                        "BothBubblesDatabase",
+                        "FTS5 not available, falling back to LIKE-based search: ${e.message}"
                     )
-                """.trimIndent())
-
-                // Populate FTS5 index with existing message content
-                db.execSQL("""
-                    INSERT INTO message_fts(rowid, text, subject)
-                    SELECT id, text, subject FROM messages
-                    WHERE text IS NOT NULL OR subject IS NOT NULL
-                """.trimIndent())
-
-                // Trigger to keep FTS5 in sync on INSERT
-                db.execSQL("""
-                    CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
-                        INSERT INTO message_fts(rowid, text, subject)
-                        VALUES (NEW.id, NEW.text, NEW.subject);
-                    END
-                """.trimIndent())
-
-                // Trigger to keep FTS5 in sync on DELETE
-                db.execSQL("""
-                    CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
-                        INSERT INTO message_fts(message_fts, rowid, text, subject)
-                        VALUES ('delete', OLD.id, OLD.text, OLD.subject);
-                    END
-                """.trimIndent())
-
-                // Trigger to keep FTS5 in sync on UPDATE
-                db.execSQL("""
-                    CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
-                        INSERT INTO message_fts(message_fts, rowid, text, subject)
-                        VALUES ('delete', OLD.id, OLD.text, OLD.subject);
-                        INSERT INTO message_fts(rowid, text, subject)
-                        VALUES (NEW.id, NEW.text, NEW.subject);
-                    END
-                """.trimIndent())
+                }
             }
         }
 

@@ -10,13 +10,14 @@ import androidx.lifecycle.ProcessLifecycleOwner
 import com.bothbubbles.BothBubblesApp
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.fcm.FcmTokenManager
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.MainDispatcher
 import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -53,7 +54,9 @@ class ConnectionModeManager @Inject constructor(
     private val fcmTokenManager: FcmTokenManager,
     private val firebaseConfigManager: FirebaseConfigManager,
     private val developerEventLog: DeveloperEventLog,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @MainDispatcher private val mainDispatcher: CoroutineDispatcher
 ) : DefaultLifecycleObserver {
 
     companion object {
@@ -63,7 +66,6 @@ class ConnectionModeManager @Inject constructor(
         private const val FCM_STATUS_NOTIFICATION_ID = 9999
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var isInitialized = false
     private var backgroundDisconnectJob: kotlinx.coroutines.Job? = null
 
@@ -89,7 +91,7 @@ class ConnectionModeManager @Inject constructor(
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
         // Observe socket connection state
-        scope.launch {
+        applicationScope.launch(mainDispatcher) {
             socketService.connectionState.collect { state ->
                 updateMode(state)
                 developerEventLog.logConnectionChange(
@@ -110,7 +112,7 @@ class ConnectionModeManager @Inject constructor(
     }
 
     private fun initializeFcm() {
-        scope.launch {
+        applicationScope.launch(mainDispatcher) {
             try {
                 if (!firebaseConfigManager.isInitialized()) {
                     Log.d(TAG, "Initializing Firebase for FCM")
@@ -135,7 +137,7 @@ class ConnectionModeManager @Inject constructor(
         backgroundDisconnectJob = null
 
         // Connect socket for real-time events
-        scope.launch {
+        applicationScope.launch(mainDispatcher) {
             if (socketService.isServerConfigured()) {
                 socketService.connect()
                 developerEventLog.logConnectionChange(
@@ -154,7 +156,7 @@ class ConnectionModeManager @Inject constructor(
 
         // Delay disconnect to handle quick app switches
         backgroundDisconnectJob?.cancel()
-        backgroundDisconnectJob = scope.launch {
+        backgroundDisconnectJob = applicationScope.launch(mainDispatcher) {
             Log.d(TAG, "onStop: Waiting ${BACKGROUND_DISCONNECT_DELAY_MS}ms before switching to FCM...")
             delay(BACKGROUND_DISCONNECT_DELAY_MS)
 

@@ -8,10 +8,14 @@ import android.provider.Telephony.Sms
 import android.telephony.SmsManager
 import android.telephony.SmsMessage
 import android.util.Log
+import com.bothbubbles.di.ApplicationScope
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -24,6 +28,13 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class SmsStatusReceiver : BroadcastReceiver() {
 
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface SmsStatusReceiverEntryPoint {
+        @ApplicationScope
+        fun applicationScope(): CoroutineScope
+    }
+
     companion object {
         private const val TAG = "SmsStatusReceiver"
         private const val EXTRA_ERROR_CODE = "errorCode"
@@ -32,19 +43,30 @@ class SmsStatusReceiver : BroadcastReceiver() {
     @Inject
     lateinit var smsSendService: SmsSendService
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onReceive(context: Context, intent: Intent) {
         val messageGuid = intent.getStringExtra(SmsSendService.EXTRA_MESSAGE_GUID) ?: return
         val partIndex = intent.getIntExtra(SmsSendService.EXTRA_PART_INDEX, 0)
 
-        when (intent.action) {
-            SmsSendService.ACTION_SMS_SENT -> handleSentResult(context, messageGuid, partIndex, intent)
-            SmsSendService.ACTION_SMS_DELIVERED -> handleDeliveredResult(context, messageGuid, partIndex, intent)
+        val pendingResult = goAsync()
+
+        val entryPoint = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            SmsStatusReceiverEntryPoint::class.java
+        )
+
+        entryPoint.applicationScope().launch(Dispatchers.IO) {
+            try {
+                when (intent.action) {
+                    SmsSendService.ACTION_SMS_SENT -> handleSentResult(context, messageGuid, partIndex, intent)
+                    SmsSendService.ACTION_SMS_DELIVERED -> handleDeliveredResult(context, messageGuid, partIndex, intent)
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 
-    private fun handleSentResult(context: Context, messageGuid: String, partIndex: Int, intent: Intent) {
+    private suspend fun handleSentResult(context: Context, messageGuid: String, partIndex: Int, intent: Intent) {
         val errorCode = intent.getIntExtra(EXTRA_ERROR_CODE, 0)
 
         val (status, errorMessage) = when (resultCode) {
@@ -94,28 +116,26 @@ class SmsStatusReceiver : BroadcastReceiver() {
             }
         }
 
-        scope.launch {
-            // Check if this is a retryable error and attempt auto-retry
-            if (status == "failed" && SmsErrorHelper.isRetryable(resultCode)) {
-                val retryInitiated = smsSendService.retrySms(messageGuid, resultCode)
-                if (retryInitiated) {
-                    Log.d(TAG, "Auto-retry initiated for message: $messageGuid")
-                    return@launch // Don't update status - retrySms handles it
-                }
-                // If retry not initiated (max retries exceeded), fall through to update as failed
-                Log.d(TAG, "Auto-retry not possible for message: $messageGuid (max retries exceeded)")
+        // Check if this is a retryable error and attempt auto-retry
+        if (status == "failed" && SmsErrorHelper.isRetryable(resultCode)) {
+            val retryInitiated = smsSendService.retrySms(messageGuid, resultCode)
+            if (retryInitiated) {
+                Log.d(TAG, "Auto-retry initiated for message: $messageGuid")
+                return // Don't update status - retrySms handles it
             }
-
-            smsSendService.updateMessageStatus(
-                messageGuid = messageGuid,
-                status = status,
-                errorCode = if (status == "failed") resultCode else null,
-                errorMessage = errorMessage
-            )
+            // If retry not initiated (max retries exceeded), fall through to update as failed
+            Log.d(TAG, "Auto-retry not possible for message: $messageGuid (max retries exceeded)")
         }
+
+        smsSendService.updateMessageStatus(
+            messageGuid = messageGuid,
+            status = status,
+            errorCode = if (status == "failed") resultCode else null,
+            errorMessage = errorMessage
+        )
     }
 
-    private fun handleDeliveredResult(context: Context, messageGuid: String, partIndex: Int, intent: Intent) {
+    private suspend fun handleDeliveredResult(context: Context, messageGuid: String, partIndex: Int, intent: Intent) {
         val deliveryStatus = extractDeliveryStatus(intent)
 
         val (status, errorMessage) = when (deliveryStatus) {
@@ -137,14 +157,12 @@ class SmsStatusReceiver : BroadcastReceiver() {
             }
         }
 
-        scope.launch {
-            smsSendService.updateMessageStatus(
-                messageGuid = messageGuid,
-                status = status,
-                errorCode = if (status == "delivery_failed") deliveryStatus else null,
-                errorMessage = errorMessage
-            )
-        }
+        smsSendService.updateMessageStatus(
+            messageGuid = messageGuid,
+            status = status,
+            errorCode = if (status == "delivery_failed") deliveryStatus else null,
+            errorMessage = errorMessage
+        )
     }
 
     /**

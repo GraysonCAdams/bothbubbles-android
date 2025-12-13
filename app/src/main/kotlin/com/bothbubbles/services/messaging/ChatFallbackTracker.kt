@@ -2,11 +2,12 @@ package com.bothbubbles.services.messaging
 
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,13 +34,13 @@ enum class FallbackReason {
 @Singleton
 class ChatFallbackTracker @Inject constructor(
     private val socketService: SocketService,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "ChatFallbackTracker"
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // In-memory map of chat GUIDs to their fallback state
     private val fallbackChats = ConcurrentHashMap<String, ChatFallbackEntry>()
@@ -53,12 +54,12 @@ class ChatFallbackTracker @Inject constructor(
     val fallbackStates: StateFlow<Map<String, ChatFallbackEntry>> = _fallbackStates.asStateFlow()
 
     init {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             restorePersistedFallbacks()
         }
 
         // Observe server connection state to restore iMessage mode when reconnected
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             socketService.connectionState
                 .collect { state ->
                     if (state == ConnectionState.CONNECTED) {
@@ -75,7 +76,7 @@ class ChatFallbackTracker @Inject constructor(
         val entry = ChatFallbackEntry(reason, System.currentTimeMillis())
         fallbackChats[chatGuid] = entry
         updateObservable()
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             chatDao.updateFallbackState(chatGuid, true, reason.name, entry.updatedAt)
         }
         Log.i(TAG, "Chat $chatGuid entered SMS fallback mode: $reason")
@@ -87,7 +88,7 @@ class ChatFallbackTracker @Inject constructor(
     fun exitFallbackMode(chatGuid: String) {
         fallbackChats.remove(chatGuid)
         updateObservable()
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             chatDao.updateFallbackState(chatGuid, false, null, null)
         }
         Log.i(TAG, "Chat $chatGuid exited SMS fallback mode")

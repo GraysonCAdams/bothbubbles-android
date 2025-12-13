@@ -2,9 +2,10 @@ package com.bothbubbles.util
 
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -23,7 +24,9 @@ import javax.inject.Singleton
  */
 @Singleton
 class MessageDeduplicator @Inject constructor(
-    private val seenMessageDao: SeenMessageDao
+    private val seenMessageDao: SeenMessageDao,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
 
     companion object {
@@ -33,15 +36,13 @@ class MessageDeduplicator @Inject constructor(
         private val RETENTION_DURATION_MS = TimeUnit.HOURS.toMillis(24)
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     // In-memory cache for fast lookups (supplements Room for current session)
     private val memoryCache = LinkedHashSet<String>()
     private val lock = Any()
 
     init {
         // Clean up old entries on startup
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             cleanupOldEntries()
         }
     }
@@ -90,7 +91,7 @@ class MessageDeduplicator @Inject constructor(
         }
 
         // Persist to Room
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             seenMessageDao.markAsSeen(guid)
         }
     }
@@ -102,7 +103,7 @@ class MessageDeduplicator @Inject constructor(
         synchronized(lock) {
             memoryCache.clear()
         }
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             seenMessageDao.clear()
         }
     }

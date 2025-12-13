@@ -43,13 +43,7 @@ object NetworkModule {
         }
     }
 
-    @Provides
-    @Singleton
-    fun provideAuthInterceptor(
-        settingsDataStore: SettingsDataStore
-    ): AuthInterceptor {
-        return AuthInterceptor(settingsDataStore)
-    }
+    // AuthInterceptor is auto-wired by Hilt (has @Inject constructor)
 
     /**
      * Trust manager that accepts all certificates (for self-signed BlueBubbles servers)

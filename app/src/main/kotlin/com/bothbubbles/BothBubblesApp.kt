@@ -16,18 +16,21 @@ import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.ContactsContentObserver
 import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.socket.SocketConnectionManager
+import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.HiltAndroidApp
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -51,6 +54,9 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     lateinit var appLifecycleTracker: AppLifecycleTracker
 
     @Inject
+    lateinit var activeConversationManager: ActiveConversationManager
+
+    @Inject
     lateinit var smsRepository: SmsRepository
 
     @Inject
@@ -65,7 +71,13 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     @Inject
     lateinit var pendingMessageRepository: PendingMessageRepository
 
-    private val applicationScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Inject
+    @ApplicationScope
+    lateinit var applicationScope: CoroutineScope
+
+    @Inject
+    @IoDispatcher
+    lateinit var ioDispatcher: CoroutineDispatcher
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -111,6 +123,9 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
         appLifecycleTracker.initialize()
         PerformanceProfiler.end(lifecycleId)
 
+        // Initialize active conversation manager (clears active chat when app backgrounds)
+        activeConversationManager.initialize()
+
         // Initialize developer mode from settings
         initializeDeveloperMode()
 
@@ -136,6 +151,9 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
         // Re-enqueue any pending messages from previous session
         initializePendingMessageQueue()
 
+        // Schedule background sync worker (catches messages missed by push/socket)
+        initializeBackgroundSync()
+
         PerformanceProfiler.end(startupId)
         Log.d("PerfProfiler", "App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
     }
@@ -145,7 +163,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
      * Enables event logging if developer mode was previously enabled.
      */
     private fun initializeDeveloperMode() {
-        applicationScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 val developerModeEnabled = settingsDataStore.developerModeEnabled.first()
                 developerEventLog.setEnabled(developerModeEnabled)
@@ -164,7 +182,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
      * This detects external SMS sent via Android Auto, Google Assistant, etc.
      */
     private fun initializeSmsObserver() {
-        applicationScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 val setupComplete = settingsDataStore.isSetupComplete.first()
                 if (!setupComplete) return@launch
@@ -225,7 +243,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
      * This monitors Android contacts for changes and updates cached contact info.
      */
     private fun initializeContactsObserver() {
-        applicationScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 val setupComplete = settingsDataStore.isSetupComplete.first()
                 if (!setupComplete) return@launch
@@ -244,7 +262,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
      * This publishes recent conversations as share targets in the Android share sheet.
      */
     private fun initializeShortcutService() {
-        applicationScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 val setupComplete = settingsDataStore.isSetupComplete.first()
                 if (!setupComplete) return@launch
@@ -263,7 +281,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
      * This ensures messages survive app kills and device reboots.
      */
     private fun initializePendingMessageQueue() {
-        applicationScope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 val setupComplete = settingsDataStore.isSetupComplete.first()
                 if (!setupComplete) return@launch
@@ -278,6 +296,24 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "Error initializing pending message queue", e)
+            }
+        }
+    }
+
+    /**
+     * Schedule background sync worker to periodically check for missed messages.
+     * This is a fallback mechanism for when Socket.IO push and FCM fail to deliver.
+     * Runs every 15 minutes (Android's minimum interval for periodic work).
+     */
+    private fun initializeBackgroundSync() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                BackgroundSyncWorker.schedule(this@BothBubblesApp)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error scheduling background sync", e)
             }
         }
     }

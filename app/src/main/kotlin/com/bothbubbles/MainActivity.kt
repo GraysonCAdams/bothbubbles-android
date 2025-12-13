@@ -35,6 +35,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -60,31 +61,34 @@ class MainActivity : ComponentActivity() {
 
         // Check crash protection and get state restoration data synchronously
         // This needs to happen before setting content to determine start destination
+        // Bounded by 2 second timeout to prevent ANR if DataStore is slow
         val stateRestorationData = runBlocking {
-            val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
-            android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
-            if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null) {
-                // Skip restoration if crash protection triggered, handling share intent, or notification deep link
-                android.util.Log.d("StateRestore", "Skipping restoration")
-                null
-            } else {
-                // Try to restore previous state
-                val lastChatGuid = settingsDataStore.lastOpenChatGuid.first()
-                android.util.Log.d("StateRestore", "lastChatGuid=$lastChatGuid")
-                if (lastChatGuid != null) {
-                    val data = StateRestorationData(
-                        chatGuid = lastChatGuid,
-                        mergedGuids = settingsDataStore.lastOpenChatMergedGuids.first(),
-                        scrollPosition = settingsDataStore.lastScrollPosition.first(),
-                        scrollOffset = settingsDataStore.lastScrollOffset.first()
-                    )
-                    android.util.Log.d("StateRestore", "Restoring: $data")
-                    data
-                } else {
-                    android.util.Log.d("StateRestore", "No chat to restore")
+            withTimeoutOrNull(2000L) {
+                val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
+                android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
+                if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null) {
+                    // Skip restoration if crash protection triggered, handling share intent, or notification deep link
+                    android.util.Log.d("StateRestore", "Skipping restoration")
                     null
+                } else {
+                    // Try to restore previous state
+                    val lastChatGuid = settingsDataStore.lastOpenChatGuid.first()
+                    android.util.Log.d("StateRestore", "lastChatGuid=$lastChatGuid")
+                    if (lastChatGuid != null) {
+                        val data = StateRestorationData(
+                            chatGuid = lastChatGuid,
+                            mergedGuids = settingsDataStore.lastOpenChatMergedGuids.first(),
+                            scrollPosition = settingsDataStore.lastScrollPosition.first(),
+                            scrollOffset = settingsDataStore.lastScrollOffset.first()
+                        )
+                        android.util.Log.d("StateRestore", "Restoring: $data")
+                        data
+                    } else {
+                        android.util.Log.d("StateRestore", "No chat to restore")
+                        null
+                    }
                 }
-            }
+            } // Returns null if timeout - app starts fresh without state restoration
         }
 
         setContent {

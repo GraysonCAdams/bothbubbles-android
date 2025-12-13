@@ -11,11 +11,12 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -39,14 +40,14 @@ import javax.inject.Singleton
 class FcmTokenManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore,
-    private val firebaseConfigManager: FirebaseConfigManager
+    private val firebaseConfigManager: FirebaseConfigManager,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "FcmTokenManager"
         private const val WORK_NAME = "fcm_token_registration"
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _tokenState = MutableStateFlow<FcmTokenState>(FcmTokenState.Unknown)
     val tokenState: StateFlow<FcmTokenState> = _tokenState.asStateFlow()
@@ -59,7 +60,7 @@ class FcmTokenManager @Inject constructor(
      * for background push notifications when the app is backgrounded.
      */
     fun initialize() {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             // Check if setup is complete before trying to initialize Firebase
             val setupComplete = settingsDataStore.isSetupComplete.first()
             if (!setupComplete) {
@@ -155,7 +156,7 @@ class FcmTokenManager @Inject constructor(
      */
     fun onTokenRefreshed(newToken: String) {
         Log.d(TAG, "Token refreshed: ${newToken.take(10)}...")
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             settingsDataStore.setFcmToken(newToken)
             settingsDataStore.setFcmTokenRegistered(false)
             _tokenState.value = FcmTokenState.Available(newToken)

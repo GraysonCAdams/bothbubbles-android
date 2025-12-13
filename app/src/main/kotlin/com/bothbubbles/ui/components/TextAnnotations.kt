@@ -7,6 +7,9 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.withStyle
+import com.bothbubbles.util.parsing.DetectedCode
+import com.bothbubbles.util.parsing.DetectedDate
+import com.bothbubbles.util.parsing.DetectedPhoneNumber
 
 /**
  * Utility functions for building AnnotatedStrings with clickable elements.

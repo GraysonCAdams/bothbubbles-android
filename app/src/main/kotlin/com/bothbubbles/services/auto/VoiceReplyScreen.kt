@@ -14,9 +14,12 @@ import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.repository.MessageRepository
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 /**
@@ -30,7 +33,17 @@ class VoiceReplyScreen(
     private val onMessageSent: () -> Unit
 ) : Screen(carContext) {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    // Screen-local scope that follows screen lifecycle
+    private val screenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    init {
+        // Register lifecycle observer to cancel scope when screen is destroyed
+        lifecycle.addObserver(object : DefaultLifecycleObserver {
+            override fun onDestroy(owner: LifecycleOwner) {
+                screenScope.cancel()
+            }
+        })
+    }
 
     @Volatile
     private var messageText: String = ""
@@ -121,7 +134,7 @@ class VoiceReplyScreen(
         isSending = true
         invalidate()
 
-        scope.launch {
+        screenScope.launch {
             try {
                 messageRepository.sendMessage(
                     chatGuid = chat.guid,

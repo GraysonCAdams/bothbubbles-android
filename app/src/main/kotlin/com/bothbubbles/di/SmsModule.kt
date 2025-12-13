@@ -39,37 +39,8 @@ object SmsModule {
         return SmsSendService(context, messageDao, smsPermissionHelper)
     }
 
-    @Provides
-    @Singleton
-    fun provideMmsSendService(
-        @ApplicationContext context: Context,
-        messageDao: MessageDao,
-        smsPermissionHelper: SmsPermissionHelper
-    ): MmsSendService {
-        return MmsSendService(context, messageDao, smsPermissionHelper)
-    }
-
-    @Provides
-    @Singleton
-    fun provideSmsContentObserver(
-        @ApplicationContext context: Context,
-        smsContentProvider: SmsContentProvider,
-        chatDao: ChatDao,
-        messageDao: MessageDao,
-        notificationService: NotificationService,
-        activeConversationManager: ActiveConversationManager,
-        androidContactsService: AndroidContactsService
-    ): SmsContentObserver {
-        return SmsContentObserver(
-            context,
-            smsContentProvider,
-            chatDao,
-            messageDao,
-            notificationService,
-            activeConversationManager,
-            androidContactsService
-        )
-    }
+    // MmsSendService is auto-wired by Hilt (has @Inject constructor)
+    // SmsContentObserver is auto-wired by Hilt (has @Inject constructor)
 
     @Provides
     @Singleton

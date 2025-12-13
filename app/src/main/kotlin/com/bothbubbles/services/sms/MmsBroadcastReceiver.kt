@@ -14,15 +14,19 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -40,6 +44,13 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class MmsBroadcastReceiver : BroadcastReceiver() {
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface MmsBroadcastReceiverEntryPoint {
+        @ApplicationScope
+        fun applicationScope(): CoroutineScope
+    }
 
     companion object {
         private const val TAG = "MmsBroadcastReceiver"
@@ -95,8 +106,6 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     @Inject
     lateinit var activeConversationManager: ActiveConversationManager
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onReceive(context: Context, intent: Intent) {
         // Only handle MMS when we are the default SMS app
         if (!smsPermissionHelper.isDefaultSmsApp()) {
@@ -138,10 +147,14 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
         Log.d(TAG, "MMS notification from: ${notification.from}, subject: ${notification.subject}, size: ${notification.messageSize}")
 
-        // Get pending result to allow async processing
         val pendingResult = goAsync()
 
-        scope.launch {
+        val entryPoint = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            MmsBroadcastReceiverEntryPoint::class.java
+        )
+
+        entryPoint.applicationScope().launch(Dispatchers.IO) {
             try {
                 processMmsNotification(context, notification, pdu, subscriptionId)
             } catch (e: Exception) {

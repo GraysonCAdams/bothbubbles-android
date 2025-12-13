@@ -59,6 +59,7 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
+import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.util.rememberBlurhashBitmap
 
 /**

@@ -2,9 +2,10 @@ package com.bothbubbles.data.remote.api
 
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -20,7 +21,9 @@ import javax.inject.Inject
  * OkHttp's network threads, which would cause socket timeouts.
  */
 class AuthInterceptor @Inject constructor(
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : Interceptor {
 
     // Cached settings values - updated reactively from DataStore
@@ -29,23 +32,20 @@ class AuthInterceptor @Inject constructor(
     @Volatile private var cachedAuthKey: String = ""
     @Volatile private var cachedCustomHeaders: Map<String, String> = emptyMap()
 
-    // Background scope for collecting settings updates
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     init {
         // Collect settings updates in background - these run on IO dispatcher
         // and update the cached values that intercept() reads
         settingsDataStore.serverAddress
             .onEach { cachedServerAddress = it }
-            .launchIn(scope)
+            .launchIn(applicationScope)
 
         settingsDataStore.guidAuthKey
             .onEach { cachedAuthKey = it }
-            .launchIn(scope)
+            .launchIn(applicationScope)
 
         settingsDataStore.customHeaders
             .onEach { cachedCustomHeaders = it }
-            .launchIn(scope)
+            .launchIn(applicationScope)
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {

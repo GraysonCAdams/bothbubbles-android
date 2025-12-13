@@ -1,6 +1,9 @@
 package com.bothbubbles.services
 
 import android.util.Log
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,12 +16,34 @@ import javax.inject.Singleton
  *
  * ChatScreen should call setActiveConversation() when entering a chat
  * and clearActiveConversation() when leaving.
+ *
+ * The active conversation is also automatically cleared when the app
+ * goes to background, ensuring notifications are shown when the app
+ * is not visible.
  */
 @Singleton
-class ActiveConversationManager @Inject constructor() {
+class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver {
 
     companion object {
         private const val TAG = "ActiveConversationMgr"
+    }
+
+    private var isInitialized = false
+
+    /**
+     * Initialize lifecycle observation. Should be called once from Application.onCreate()
+     */
+    fun initialize() {
+        if (isInitialized) return
+        isInitialized = true
+        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        Log.d(TAG, "Initialized with ProcessLifecycleOwner")
+    }
+
+    override fun onStop(owner: LifecycleOwner) {
+        // App went to background - clear active conversation so notifications show
+        Log.d(TAG, "App backgrounded - clearing active conversation")
+        clearActiveConversation()
     }
 
     // The currently active chat GUID (null if no chat is open)

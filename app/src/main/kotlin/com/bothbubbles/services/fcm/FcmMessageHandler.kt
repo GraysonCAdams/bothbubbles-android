@@ -5,6 +5,8 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
@@ -13,11 +15,11 @@ import com.bothbubbles.util.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.google.firebase.messaging.RemoteMessage
 import dagger.Lazy
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -39,10 +41,18 @@ class FcmMessageHandler @Inject constructor(
     private val androidContactsService: AndroidContactsService,
     private val messageDeduplicator: MessageDeduplicator,
     private val activeConversationManager: ActiveConversationManager,
-    private val developerEventLog: Lazy<DeveloperEventLog>
+    private val developerEventLog: Lazy<DeveloperEventLog>,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "FcmMessageHandler"
+
+        // Debug flag: set to true to allow notifications for own messages (for testing)
+        private const val DEBUG_ALLOW_OWN_MESSAGE_NOTIFICATIONS = false
+
+        // Debug flag: set to true to skip the active conversation check (for testing)
+        private const val DEBUG_SKIP_ACTIVE_CONVERSATION_CHECK = false
 
         // FCM message types from BlueBubbles server
         private const val TYPE_NEW_MESSAGE = "new-message"
@@ -56,8 +66,6 @@ class FcmMessageHandler @Inject constructor(
         private const val TYPE_SERVER_UPDATE = "server-update"
         private const val TYPE_FT_CALL_STATUS_CHANGED = "ft-call-status-changed"
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /**
      * Handle an incoming FCM message.
@@ -94,22 +102,51 @@ class FcmMessageHandler @Inject constructor(
     }
 
     private suspend fun handleNewMessage(data: Map<String, String>) {
-        // If socket is connected, it will handle the message with full data
-        if (socketService.isConnected()) {
-            Log.d(TAG, "Socket connected, skipping FCM notification")
+        // BlueBubbles server sends message data as a JSON string in the "data" field
+        val dataJsonString = data["data"]
+        if (dataJsonString.isNullOrBlank()) {
+            Log.w(TAG, "FCM new-message missing 'data' field")
+            triggerSocketReconnect()
             return
         }
 
-        // Extract basic info from FCM payload
-        val chatGuid = data["chatGuid"]
-        val messageGuid = data["guid"] ?: data["messageGuid"]
-        val messageText = data["text"] ?: data["message"] ?: ""
-        val senderAddress = data["handle"]
-        val isFromMe = data["isFromMe"]?.toBoolean() ?: false
-
-        if (chatGuid.isNullOrBlank() || messageGuid.isNullOrBlank()) {
-            Log.w(TAG, "FCM new-message missing required fields")
+        // Parse the JSON data
+        val messageJson: JSONObject
+        try {
+            messageJson = JSONObject(dataJsonString)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse FCM message JSON", e)
             triggerSocketReconnect()
+            return
+        }
+
+        // Extract basic info from parsed JSON
+        val messageGuid = messageJson.optString("guid", "")
+        val messageText = messageJson.optString("text", "")
+        val isFromMe = messageJson.optBoolean("isFromMe", false)
+        val expressiveSendStyleId = messageJson.optString("expressiveSendStyleId", null)
+        val hasAttachments = messageJson.optJSONArray("attachments")?.length()?.let { it > 0 } ?: false
+
+        // Extract chat GUID from chats array
+        val chatsArray = messageJson.optJSONArray("chats")
+        val chatGuid = chatsArray?.optJSONObject(0)?.optString("guid", "")
+
+        // Extract sender address from handle object
+        val handleObj = messageJson.optJSONObject("handle")
+        val senderAddress = handleObj?.optString("address", null)
+
+        // Always log FCM message details for debugging (even if socket handles it)
+        Log.d(TAG, "FCM new-message: guid=$messageGuid, text='$messageText', isFromMe=$isFromMe, chatGuid=$chatGuid")
+
+        if (chatGuid.isNullOrBlank() || messageGuid.isBlank()) {
+            Log.w(TAG, "FCM new-message missing required fields: chatGuid=$chatGuid, messageGuid=$messageGuid")
+            triggerSocketReconnect()
+            return
+        }
+
+        // If socket is connected, it will handle the message with full data
+        if (socketService.isConnected()) {
+            Log.d(TAG, "Socket connected, skipping FCM notification (socket will handle)")
             return
         }
 
@@ -151,7 +188,7 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // Resolve sender name and avatar - try contact lookup first
-        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, data["senderName"])
+        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
 
         // For 1:1 chats, use sender's contact name as title; for groups, use group name
         val isGroup = chat?.isGroup ?: false
@@ -164,10 +201,8 @@ class FcmMessageHandler @Inject constructor(
                 ?: ""
         }
 
-        // Check for invisible ink effect
-        val expressiveSendStyleId = data["expressiveSendStyleId"]
+        // Check for invisible ink effect (expressiveSendStyleId and hasAttachments already extracted above)
         val isInvisibleInk = MessageEffect.fromStyleId(expressiveSendStyleId) == MessageEffect.Bubble.InvisibleInk
-        val hasAttachments = data["hasAttachments"]?.toBoolean() ?: false
         val notificationText = if (isInvisibleInk) {
             if (hasAttachments) "Image sent with Invisible Ink" else "Message sent with Invisible Ink"
         } else {
@@ -189,6 +224,7 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // Show notification
+        Log.d(TAG, "DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
         notificationService.showMessageNotification(
             chatGuid = chatGuid,
             chatTitle = chatTitle,
@@ -200,6 +236,7 @@ class FcmMessageHandler @Inject constructor(
             avatarUri = senderAvatarUri,
             participantNames = participantNames
         )
+        Log.d(TAG, "DEBUG: Notification shown successfully!")
 
         // Trigger socket reconnect to sync full data
         triggerSocketReconnect()
@@ -295,7 +332,7 @@ class FcmMessageHandler @Inject constructor(
     private fun triggerSocketReconnect() {
         if (!socketService.isConnected()) {
             Log.d(TAG, "Triggering socket reconnect")
-            scope.launch {
+            applicationScope.launch(ioDispatcher) {
                 // Small delay to avoid immediate reconnect spam
                 delay(1000)
                 socketService.connect()

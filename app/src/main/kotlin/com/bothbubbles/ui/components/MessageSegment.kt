@@ -1,5 +1,9 @@
 package com.bothbubbles.ui.components
 
+import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.util.parsing.DetectedUrl
+
 /**
  * Represents a distinct renderable segment of a message.
  * Messages are segmented to allow media and link previews to render

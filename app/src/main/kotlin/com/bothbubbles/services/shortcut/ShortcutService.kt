@@ -12,14 +12,15 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,7 +46,9 @@ import javax.inject.Singleton
 class ShortcutService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "ShortcutService"
@@ -55,7 +58,6 @@ class ShortcutService @Inject constructor(
         private const val SHARE_TARGET_CATEGORY = "com.bothbubbles.category.SHARE_TARGET"
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var observationJob: Job? = null
     private var debounceJob: Job? = null
 
@@ -70,7 +72,7 @@ class ShortcutService @Inject constructor(
 
         Log.d(TAG, "Starting share target observation")
 
-        observationJob = scope.launch {
+        observationJob = applicationScope.launch(ioDispatcher) {
             // Combine unified groups (1:1 chats) and group chats into a single stream
             combine(
                 unifiedChatGroupDao.observeActiveGroups(),
@@ -109,7 +111,7 @@ class ShortcutService @Inject constructor(
         groupChats: List<ChatEntity>
     ) {
         debounceJob?.cancel()
-        debounceJob = scope.launch {
+        debounceJob = applicationScope.launch(ioDispatcher) {
             delay(DEBOUNCE_MS)
             updateShortcuts(unifiedGroups, groupChats)
         }

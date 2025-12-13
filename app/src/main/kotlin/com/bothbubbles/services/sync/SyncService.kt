@@ -11,10 +11,11 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.categorization.CategorizationRepository
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
@@ -72,7 +73,9 @@ class SyncService @Inject constructor(
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val settingsDataStore: SettingsDataStore,
     private val categorizationRepository: CategorizationRepository,
-    private val syncRangeTracker: SyncRangeTracker
+    private val syncRangeTracker: SyncRangeTracker,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "SyncService"
@@ -83,8 +86,6 @@ class SyncService @Inject constructor(
 
     /** Lightweight data for queuing chats for message sync */
     private data class ChatSyncTask(val guid: String, val displayName: String?)
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
@@ -457,7 +458,7 @@ class SyncService @Inject constructor(
      * This bumps the chat to immediate sync without blocking UI.
      */
     fun prioritizeChatSync(chatGuid: String, limit: Int = MESSAGE_PAGE_SIZE) {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 Log.i(TAG, "Priority syncing chat: $chatGuid")
                 messageRepository.syncMessagesForChat(
@@ -735,7 +736,7 @@ class SyncService @Inject constructor(
             Log.d(TAG, "Skipping initial sync - sync already in progress")
             return
         }
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             performInitialSync(messagesPerChat)
         }
     }
@@ -749,7 +750,7 @@ class SyncService @Inject constructor(
             Log.d(TAG, "Skipping background sync - sync already in progress")
             return
         }
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             performIncrementalSync()
         }
     }

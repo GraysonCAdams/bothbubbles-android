@@ -7,11 +7,12 @@ import android.os.Looper
 import android.provider.ContactsContract
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -36,14 +37,15 @@ import javax.inject.Singleton
 class ContactsContentObserver @Inject constructor(
     @ApplicationContext private val context: Context,
     private val handleDao: HandleDao,
-    private val androidContactsService: AndroidContactsService
+    private val androidContactsService: AndroidContactsService,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "ContactsObserver"
         private const val DEBOUNCE_MS = 2000L // 2 seconds debounce for rapid contact edits
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var observer: ContentObserver? = null
     private var debounceJob: Job? = null
 
@@ -96,7 +98,7 @@ class ContactsContentObserver @Inject constructor(
      */
     private fun debounceAndRefresh() {
         debounceJob?.cancel()
-        debounceJob = scope.launch {
+        debounceJob = applicationScope.launch(ioDispatcher) {
             delay(DEBOUNCE_MS)
             refreshAllCachedContacts()
         }

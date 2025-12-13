@@ -14,15 +14,14 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.cancel
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
 import javax.inject.Inject
 
 /**
@@ -69,7 +68,16 @@ class SocketForegroundService : Service() {
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    @Inject
+    @ApplicationScope
+    lateinit var applicationScope: CoroutineScope
+
+    @Inject
+    @IoDispatcher
+    lateinit var ioDispatcher: CoroutineDispatcher
+
+    // Service-scoped job for notification updates - cancelled when service is destroyed
+    private var notificationJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -90,8 +98,12 @@ class SocketForegroundService : Service() {
         // Start foreground with initial notification
         startForeground(NOTIFICATION_ID, createNotification("Connecting..."))
 
+        // Cancel any existing job before starting a new one (prevents duplicates on restart)
+        notificationJob?.cancel()
+
         // Connect socket and observe status
-        scope.launch {
+        // Store job so we can cancel it when service is destroyed
+        notificationJob = applicationScope.launch(ioDispatcher) {
             try {
                 // Connect to socket
                 socketService.connect()
@@ -119,8 +131,11 @@ class SocketForegroundService : Service() {
 
     override fun onDestroy() {
         Log.d(TAG, "Service destroyed")
-        scope.cancel()
+        // Cancel the notification update job - prevents zombie collectors
+        notificationJob?.cancel()
+        notificationJob = null
         // Don't disconnect socket here - let SocketConnectionManager handle it
+        // Don't cancel applicationScope - it's application-wide
         super.onDestroy()
     }
 

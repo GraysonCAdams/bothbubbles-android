@@ -13,6 +13,8 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -38,14 +40,15 @@ class SmsContentObserver @Inject constructor(
     private val messageDao: MessageDao,
     private val notificationService: NotificationService,
     private val activeConversationManager: ActiveConversationManager,
-    private val androidContactsService: AndroidContactsService
+    private val androidContactsService: AndroidContactsService,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "SmsContentObserver"
         private const val DEBOUNCE_MS = 500L
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var smsObserver: ContentObserver? = null
     private var mmsObserver: ContentObserver? = null
 
@@ -65,7 +68,7 @@ class SmsContentObserver @Inject constructor(
         Log.d(TAG, "Starting SMS/MMS content observers")
 
         // Initialize last IDs
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             lastSmsId = getLatestSmsId()
             lastMmsId = getLatestMmsId()
         }
@@ -125,7 +128,7 @@ class SmsContentObserver @Inject constructor(
 
     private fun debounceAndProcess(action: suspend () -> Unit) {
         debounceJob?.cancel()
-        debounceJob = scope.launch {
+        debounceJob = applicationScope.launch(ioDispatcher) {
             delay(DEBOUNCE_MS)
             action()
         }

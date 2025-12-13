@@ -7,10 +7,14 @@ import android.os.Build
 import android.provider.Telephony
 import android.util.Log
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.di.ApplicationScope
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -29,6 +33,13 @@ import javax.inject.Inject
 @AndroidEntryPoint
 class SmsProviderChangedReceiver : BroadcastReceiver() {
 
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface SmsProviderChangedReceiverEntryPoint {
+        @ApplicationScope
+        fun applicationScope(): CoroutineScope
+    }
+
     companion object {
         private const val TAG = "SmsProviderChanged"
     }
@@ -38,8 +49,6 @@ class SmsProviderChangedReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var smsPermissionHelper: SmsPermissionHelper
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override fun onReceive(context: Context, intent: Intent) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.N) {
@@ -59,7 +68,12 @@ class SmsProviderChangedReceiver : BroadcastReceiver() {
 
         val pendingResult = goAsync()
 
-        scope.launch {
+        val entryPoint = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            SmsProviderChangedReceiverEntryPoint::class.java
+        )
+
+        entryPoint.applicationScope().launch(Dispatchers.IO) {
             try {
                 if (isNowDefault) {
                     handleBecameDefault()

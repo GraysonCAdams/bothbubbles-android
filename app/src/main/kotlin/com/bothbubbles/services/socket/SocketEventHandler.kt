@@ -7,9 +7,10 @@ import com.bothbubbles.services.socket.handlers.MessageEventHandler
 import com.bothbubbles.services.socket.handlers.SystemEventHandler
 import com.bothbubbles.services.sync.SyncService
 import dagger.Lazy
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -66,13 +67,14 @@ class SocketEventHandler @Inject constructor(
     private val chatEventHandler: ChatEventHandler,
     private val systemEventHandler: SystemEventHandler,
     private val syncService: Lazy<SyncService>,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "SocketEventHandler"
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var isListening = false
 
     /**
@@ -91,14 +93,14 @@ class SocketEventHandler @Inject constructor(
         isListening = true
 
         // Listen for socket events (messages, typing, etc.)
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             socketService.events.collect { event ->
                 handleEvent(event)
             }
         }
 
         // Listen for connection state changes and trigger incremental sync on connect
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             socketService.connectionState
                 .collect { state ->
                     if (state == ConnectionState.CONNECTED) {
@@ -145,7 +147,7 @@ class SocketEventHandler @Inject constructor(
         try {
             when (event) {
                 // Message events -> MessageEventHandler
-                is SocketEvent.NewMessage -> messageEventHandler.handleNewMessage(event, _uiRefreshEvents, scope)
+                is SocketEvent.NewMessage -> messageEventHandler.handleNewMessage(event, _uiRefreshEvents, applicationScope)
                 is SocketEvent.MessageUpdated -> messageEventHandler.handleMessageUpdated(event, _uiRefreshEvents)
                 is SocketEvent.MessageDeleted -> messageEventHandler.handleMessageDeleted(event, _uiRefreshEvents)
                 is SocketEvent.MessageSendError -> messageEventHandler.handleMessageSendError(event, _uiRefreshEvents)

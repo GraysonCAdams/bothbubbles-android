@@ -4,9 +4,10 @@ import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -35,7 +36,9 @@ import javax.inject.Singleton
 @Singleton
 class AttachmentDownloadQueue @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
-    private val attachmentDao: AttachmentDao
+    private val attachmentDao: AttachmentDao,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "AttachmentDownloadQueue"
@@ -85,7 +88,6 @@ class AttachmentDownloadQueue @Inject constructor(
             get() = if (totalBytes > 0) bytesDownloaded.toFloat() / totalBytes else 0f
     }
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val semaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
 
     // Priority queue for pending downloads
@@ -231,7 +233,7 @@ class AttachmentDownloadQueue @Inject constructor(
     }
 
     private fun processQueue() {
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             Log.d("ChatScroll", "[DownloadQueue] processQueue started, pendingSize=${pendingQueue.size}")
             while (pendingQueue.isNotEmpty()) {
                 val request = pendingQueue.poll() ?: break

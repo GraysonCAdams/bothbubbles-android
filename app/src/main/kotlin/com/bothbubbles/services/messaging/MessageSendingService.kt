@@ -171,7 +171,7 @@ class MessageSendingService @Inject constructor(
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
         // Check if this is a retry (temp message already exists)
-        val existingMessage = messageDao.getByGuid(tempGuid)
+        val existingMessage = messageDao.getMessageByGuid(tempGuid)
         if (existingMessage != null) {
             Log.d(TAG, "Retry detected for text message tempGuid=$tempGuid, checking if already sent")
             // If the message was already successfully sent (has no error), return it
@@ -265,7 +265,7 @@ class MessageSendingService @Inject constructor(
             // Server didn't return the message, mark as sent
             messageDao.updateErrorStatus(tempGuid, 0)
             // Return existing message on retry, or fetch the one we just created
-            existingMessage ?: messageDao.getByGuid(tempGuid)
+            existingMessage ?: messageDao.getMessageByGuid(tempGuid)
                 ?: throw Exception("Failed to find temp message: $tempGuid")
         }
     }
@@ -516,7 +516,7 @@ class MessageSendingService @Inject constructor(
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
         // Check if this is a retry (temp message already exists)
-        val existingMessage = messageDao.getByGuid(tempGuid)
+        val existingMessage = messageDao.getMessageByGuid(tempGuid)
         val isRetry = existingMessage != null
 
         // Build attachment GUIDs list
@@ -576,7 +576,7 @@ class MessageSendingService @Inject constructor(
             val tempAttGuid = tempAttachmentGuids[index]
 
             // Check if this attachment was already uploaded (retry case)
-            val existingAttachment = attachmentDao.getByGuid(tempAttGuid)
+            val existingAttachment = attachmentDao.getAttachmentByGuid(tempAttGuid)
             if (existingAttachment?.transferState == TransferState.UPLOADED.name) {
                 Log.d(TAG, "Skipping already-uploaded attachment: $tempAttGuid")
                 return@forEachIndexed
@@ -642,7 +642,7 @@ class MessageSendingService @Inject constructor(
         } ?: run {
             messageDao.updateErrorStatus(tempGuid, 0)
             // Return existing message on retry, or fetch it if we just created it
-            existingMessage ?: messageDao.getByGuid(tempGuid)
+            existingMessage ?: messageDao.getMessageByGuid(tempGuid)
                 ?: throw Exception("Failed to find temp message: $tempGuid")
         }
     }

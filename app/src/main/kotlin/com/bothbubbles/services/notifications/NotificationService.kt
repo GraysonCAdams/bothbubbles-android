@@ -28,13 +28,14 @@ import com.bothbubbles.ui.call.IncomingCallActivity
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.AvatarGenerator
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -46,7 +47,9 @@ class NotificationService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val androidContactsService: AndroidContactsService,
     private val chatDao: ChatDao,
-    private val quickReplyTemplateRepository: QuickReplyTemplateRepository
+    private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "NotificationService"
@@ -76,7 +79,6 @@ class NotificationService @Inject constructor(
     }
 
     private val notificationManager = NotificationManagerCompat.from(context)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     // Cached values to avoid blocking calls
     @Volatile private var cachedBubbleFilterMode: String = "all"
@@ -85,17 +87,17 @@ class NotificationService @Inject constructor(
     init {
         createNotificationChannels()
         // Initialize cached values in background
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             cachedBubbleFilterMode = settingsDataStore.bubbleFilterMode.first()
             cachedTemplateChoices = quickReplyTemplateRepository.getNotificationChoices(maxCount = 3)
         }
         // Keep cached values updated
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             settingsDataStore.bubbleFilterMode.collect { mode ->
                 cachedBubbleFilterMode = mode
             }
         }
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             quickReplyTemplateRepository.observeAllTemplates().collect {
                 cachedTemplateChoices = quickReplyTemplateRepository.getNotificationChoices(maxCount = 3)
             }

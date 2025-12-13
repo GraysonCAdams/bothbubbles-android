@@ -12,10 +12,14 @@ import androidx.core.app.RemoteInput
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.FaceTimeRepository
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.di.ApplicationScope
+import dagger.hilt.EntryPoint
+import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.EntryPointAccessors
+import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -24,6 +28,13 @@ import javax.inject.Inject
  */
 @AndroidEntryPoint
 class NotificationReceiver : BroadcastReceiver() {
+
+    @EntryPoint
+    @InstallIn(SingletonComponent::class)
+    interface NotificationReceiverEntryPoint {
+        @ApplicationScope
+        fun applicationScope(): CoroutineScope
+    }
 
     companion object {
         private const val TAG = "NotificationReceiver"
@@ -41,53 +52,60 @@ class NotificationReceiver : BroadcastReceiver() {
     @Inject
     lateinit var notificationService: NotificationService
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-
     override fun onReceive(context: Context, intent: Intent) {
-        when (intent.action) {
-            NotificationService.ACTION_REPLY -> handleReply(intent)
-            NotificationService.ACTION_MARK_READ -> handleMarkRead(intent)
-            NotificationService.ACTION_COPY_CODE -> handleCopyCode(context, intent)
-            NotificationService.ACTION_ANSWER_FACETIME -> handleAnswerFaceTime(context, intent)
-            NotificationService.ACTION_DECLINE_FACETIME -> handleDeclineFaceTime(intent)
+        val pendingResult = goAsync()
+
+        val entryPoint = EntryPointAccessors.fromApplication(
+            context.applicationContext,
+            NotificationReceiverEntryPoint::class.java
+        )
+
+        entryPoint.applicationScope().launch(Dispatchers.IO) {
+            try {
+                when (intent.action) {
+                    NotificationService.ACTION_REPLY -> handleReply(intent)
+                    NotificationService.ACTION_MARK_READ -> handleMarkRead(intent)
+                    NotificationService.ACTION_COPY_CODE -> handleCopyCode(context, intent)
+                    NotificationService.ACTION_ANSWER_FACETIME -> handleAnswerFaceTime(context, intent)
+                    NotificationService.ACTION_DECLINE_FACETIME -> handleDeclineFaceTime(intent)
+                }
+            } finally {
+                pendingResult.finish()
+            }
         }
     }
 
-    private fun handleReply(intent: Intent) {
+    private suspend fun handleReply(intent: Intent) {
         val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
         val replyText = RemoteInput.getResultsFromIntent(intent)
             ?.getCharSequence(NotificationService.EXTRA_REPLY_TEXT)
             ?.toString() ?: return
 
-        scope.launch {
-            try {
-                messageRepository.sendMessage(
-                    chatGuid = chatGuid,
-                    text = replyText
-                )
+        try {
+            messageRepository.sendMessage(
+                chatGuid = chatGuid,
+                text = replyText
+            )
 
-                // Clear the notification after successful reply
-                notificationService.cancelNotification(chatGuid)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to send reply for chat $chatGuid", e)
-            }
+            // Clear the notification after successful reply
+            notificationService.cancelNotification(chatGuid)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to send reply for chat $chatGuid", e)
         }
     }
 
-    private fun handleMarkRead(intent: Intent) {
+    private suspend fun handleMarkRead(intent: Intent) {
         val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
 
-        scope.launch {
-            try {
-                chatRepository.markChatAsRead(chatGuid)
-                notificationService.cancelNotification(chatGuid)
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to mark chat $chatGuid as read", e)
-            }
+        try {
+            chatRepository.markChatAsRead(chatGuid)
+            notificationService.cancelNotification(chatGuid)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to mark chat $chatGuid as read", e)
         }
     }
 
-    private fun handleCopyCode(context: Context, intent: Intent) {
+    private suspend fun handleCopyCode(context: Context, intent: Intent) {
         val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
         val code = intent.getStringExtra(NotificationService.EXTRA_CODE_TO_COPY) ?: return
 
@@ -101,38 +119,34 @@ class NotificationReceiver : BroadcastReceiver() {
         notificationService.cancelNotification(chatGuid)
     }
 
-    private fun handleAnswerFaceTime(context: Context, intent: Intent) {
+    private suspend fun handleAnswerFaceTime(context: Context, intent: Intent) {
         val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
 
-        scope.launch {
-            faceTimeRepository.answerCall(callUuid).fold(
-                onSuccess = { link ->
-                    // Dismiss notification
-                    notificationService.dismissFaceTimeCallNotification(callUuid)
+        faceTimeRepository.answerCall(callUuid).fold(
+            onSuccess = { link ->
+                // Dismiss notification
+                notificationService.dismissFaceTimeCallNotification(callUuid)
 
-                    // Open FaceTime link in browser
-                    val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply {
-                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                    }
-                    context.startActivity(browserIntent)
-                },
-                onFailure = { e ->
-                    Toast.makeText(
-                        context,
-                        "Failed to answer: ${e.message}",
-                        Toast.LENGTH_SHORT
-                    ).show()
+                // Open FaceTime link in browser
+                val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(link)).apply {
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
-            )
-        }
+                context.startActivity(browserIntent)
+            },
+            onFailure = { e ->
+                Toast.makeText(
+                    context,
+                    "Failed to answer: ${e.message}",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+        )
     }
 
-    private fun handleDeclineFaceTime(intent: Intent) {
+    private suspend fun handleDeclineFaceTime(intent: Intent) {
         val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
 
-        scope.launch {
-            faceTimeRepository.declineCall(callUuid)
-            notificationService.dismissFaceTimeCallNotification(callUuid)
-        }
+        faceTimeRepository.declineCall(callUuid)
+        notificationService.dismissFaceTimeCallNotification(callUuid)
     }
 }

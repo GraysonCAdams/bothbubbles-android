@@ -10,9 +10,10 @@ import com.squareup.moshi.Moshi
 import io.socket.client.IO
 import io.socket.client.Socket
 import io.socket.emitter.Emitter
+import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -105,7 +106,9 @@ class SocketService @Inject constructor(
     private val moshi: Moshi,
     private val soundManager: Lazy<SoundManager>,
     private val okHttpClient: OkHttpClient,
-    private val developerEventLog: Lazy<DeveloperEventLog>
+    private val developerEventLog: Lazy<DeveloperEventLog>,
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
         private const val TAG = "SocketService"
@@ -135,8 +138,6 @@ class SocketService @Inject constructor(
         private const val EVENT_SCHEDULED_MESSAGE_DELETED = "scheduled-message-deleted"
 
     }
-
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private var socket: Socket? = null
     private var retryCount = 0
@@ -187,7 +188,7 @@ class SocketService @Inject constructor(
         // Cancel any pending retry
         retryJob?.cancel()
 
-        scope.launch {
+        applicationScope.launch(ioDispatcher) {
             try {
                 isConnecting = true
                 _connectionState.value = ConnectionState.CONNECTING

@@ -122,6 +122,18 @@ interface ChatDao {
     @Query("SELECT guid FROM chats WHERE date_deleted IS NULL ORDER BY latest_message_date DESC")
     suspend fun getAllChatGuids(): List<String>
 
+    /**
+     * Get the most recently active chats for background sync.
+     * Returns non-deleted, non-archived chats ordered by latest message date.
+     */
+    @Query("""
+        SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_archived = 0
+        ORDER BY latest_message_date DESC
+        LIMIT :limit
+    """)
+    suspend fun getRecentChats(limit: Int): List<ChatEntity>
+
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND has_unread_message = 1")
     fun getUnreadChatCount(): Flow<Int>
 
@@ -465,6 +477,34 @@ interface ChatDao {
         deleteParticipantsForChat(chatGuid)
         val crossRefs = participantIds.map { ChatHandleCrossRef(chatGuid, it) }
         insertChatHandleCrossRefs(crossRefs)
+    }
+
+    /**
+     * Atomically sync a single chat with its participants.
+     * Replaces existing participants with the provided list.
+     * Use this for individual chat sync operations to ensure data consistency.
+     */
+    @Transaction
+    suspend fun syncChatWithParticipants(chat: ChatEntity, participantIds: List<Long>) {
+        insertChat(chat)
+        deleteParticipantsForChat(chat.guid)
+        val crossRefs = participantIds.map { ChatHandleCrossRef(chat.guid, it) }
+        insertChatHandleCrossRefs(crossRefs)
+    }
+
+    /**
+     * Atomically sync multiple chats with their participants in a single transaction.
+     * This prevents partial state if the app crashes during sync.
+     * @param chatParticipantPairs List of pairs: (ChatEntity, List<participantIds>)
+     */
+    @Transaction
+    suspend fun syncChatsWithParticipants(chatParticipantPairs: List<Pair<ChatEntity, List<Long>>>) {
+        chatParticipantPairs.forEach { (chat, participantIds) ->
+            insertChat(chat)
+            deleteParticipantsForChat(chat.guid)
+            val crossRefs = participantIds.map { ChatHandleCrossRef(chat.guid, it) }
+            insertChatHandleCrossRefs(crossRefs)
+        }
     }
 }
 
