@@ -4,9 +4,9 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -28,8 +28,8 @@ data class PlacesUiState(
 @HiltViewModel
 class PlacesViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val messageDao: MessageDao,
-    private val handleDao: HandleDao
+    private val messageRepository: MessageRepository,
+    private val handleRepository: HandleRepository
 ) : ViewModel() {
 
     private val route: Screen.PlacesGallery = savedStateHandle.toRoute()
@@ -49,7 +49,7 @@ class PlacesViewModel @Inject constructor(
         "www.google.com/maps"
     )
 
-    val uiState: StateFlow<PlacesUiState> = messageDao.getMessagesWithUrlsForChat(chatGuid)
+    val uiState: StateFlow<PlacesUiState> = messageRepository.getMessagesWithUrlsForChat(chatGuid)
         .map { messages ->
             val places = messages.flatMap { message ->
                 extractPlacesFromMessage(message)
@@ -87,7 +87,7 @@ class PlacesViewModel @Inject constructor(
             "You"
         } else {
             message.handleId?.let { handleId ->
-                val handle = handleDao.getHandleById(handleId)
+                val handle = handleRepository.getHandleById(handleId)
                 handle?.displayName ?: handle?.address?.let { PhoneNumberFormatter.format(it) }
             } ?: ""
         }

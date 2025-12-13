@@ -7,6 +7,7 @@ import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.services.messaging.IncomingMessageHandler
 import com.bothbubbles.services.autoresponder.AutoResponderService
 import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -36,6 +37,7 @@ import javax.inject.Singleton
 @Singleton
 class MessageEventHandler @Inject constructor(
     private val messageRepository: MessageRepository,
+    private val incomingMessageHandler: IncomingMessageHandler,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val notificationService: NotificationService,
@@ -76,8 +78,8 @@ class MessageEventHandler @Inject constructor(
     ) {
         Log.d(TAG, "Handling new message: ${event.message.guid}")
 
-        // Save message to database
-        val savedMessage = messageRepository.handleIncomingMessage(event.message, event.chatGuid)
+        // Save message to database via IncomingMessageHandler (services layer)
+        val savedMessage = incomingMessageHandler.handleIncomingMessage(event.message, event.chatGuid)
 
         // Emit UI refresh events for immediate updates
         uiRefreshEvents.tryEmit(UiRefreshEvent.NewMessage(event.chatGuid, savedMessage.guid))
@@ -209,7 +211,7 @@ class MessageEventHandler @Inject constructor(
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
         Log.d(TAG, "Handling message update: ${event.message.guid}")
-        messageRepository.handleMessageUpdate(event.message, event.chatGuid)
+        incomingMessageHandler.handleMessageUpdate(event.message, event.chatGuid)
 
         // Emit UI refresh events for immediate updates (read receipts, delivery status, edits)
         uiRefreshEvents.tryEmit(UiRefreshEvent.MessageUpdated(event.chatGuid, event.message.guid))

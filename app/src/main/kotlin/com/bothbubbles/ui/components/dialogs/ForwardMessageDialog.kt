@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.dialogs
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*

@@ -1,10 +1,12 @@
 package com.bothbubbles.ui.bubble
 
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.components.message.MessageUiModel
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -27,6 +29,7 @@ class BubbleChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val socketService: SocketService
 ) : ViewModel() {
 
@@ -138,7 +141,7 @@ class BubbleChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            messageRepository.sendUnified(
+            messageSendingService.sendUnified(
                 chatGuid = chatGuid,
                 text = text
             ).fold(
@@ -157,6 +160,7 @@ class BubbleChatViewModel @Inject constructor(
 /**
  * UI state for the bubble chat screen.
  */
+@Stable
 data class BubbleChatUiState(
     val chatTitle: String = "",
     val messages: List<MessageUiModel> = emptyList(),

@@ -2,16 +2,14 @@ package com.bothbubbles.ui.settings.spam
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.HandleRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -19,7 +17,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SpamSettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val handleDao: HandleDao
+    private val handleRepository: HandleRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SpamSettingsUiState())
@@ -51,7 +49,7 @@ class SpamSettingsViewModel @Inject constructor(
 
     private fun loadWhitelistedHandles() {
         viewModelScope.launch {
-            handleDao.getAllHandles().collect { handles ->
+            handleRepository.getAllHandles().collect { handles ->
                 val whitelisted = handles.filter { it.isWhitelisted }
                 _uiState.update { it.copy(whitelistedHandles = whitelisted) }
             }
@@ -72,7 +70,7 @@ class SpamSettingsViewModel @Inject constructor(
 
     fun removeFromWhitelist(handle: HandleEntity) {
         viewModelScope.launch {
-            handleDao.updateWhitelisted(handle.id, false)
+            handleRepository.updateWhitelisted(handle.id, false)
         }
     }
 }

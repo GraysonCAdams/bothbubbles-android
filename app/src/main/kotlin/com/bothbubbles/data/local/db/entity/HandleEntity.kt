@@ -1,11 +1,13 @@
 package com.bothbubbles.data.local.db.entity
 
+import androidx.compose.runtime.Stable
 import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import com.bothbubbles.util.PhoneNumberFormatter
 
+@Stable
 @Entity(
     tableName = "handles",
     indices = [

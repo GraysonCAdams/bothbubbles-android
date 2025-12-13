@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.common
 
 /**
  * Represents the available snooze durations for conversations.

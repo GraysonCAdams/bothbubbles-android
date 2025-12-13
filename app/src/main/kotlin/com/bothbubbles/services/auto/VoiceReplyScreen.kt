@@ -13,7 +13,7 @@ import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 class VoiceReplyScreen(
     carContext: CarContext,
     private val chat: ChatEntity,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val onMessageSent: () -> Unit
 ) : Screen(carContext) {
 
@@ -136,7 +136,7 @@ class VoiceReplyScreen(
 
         screenScope.launch {
             try {
-                messageRepository.sendMessage(
+                messageSendingService.sendMessage(
                     chatGuid = chat.guid,
                     text = messageText
                 )

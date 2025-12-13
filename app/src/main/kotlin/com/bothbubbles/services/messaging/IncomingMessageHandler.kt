@@ -35,7 +35,7 @@ class IncomingMessageHandler @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService
-) {
+) : IncomingMessageProcessor {
     companion object {
         private const val TAG = "IncomingMessageHandler"
     }
@@ -46,7 +46,7 @@ class IncomingMessageHandler @Inject constructor(
      * This method is safe against duplicate processing - if the same message arrives
      * via both FCM and Socket.IO, the unread count will only be incremented once.
      */
-    suspend fun handleIncomingMessage(messageDto: MessageDto, chatGuid: String): MessageEntity {
+    override suspend fun handleIncomingMessage(messageDto: MessageDto, chatGuid: String): MessageEntity {
         val message = messageDto.toEntity(chatGuid)
 
         // CRITICAL: Check if message already exists BEFORE any side effects
@@ -88,7 +88,7 @@ class IncomingMessageHandler @Inject constructor(
     /**
      * Handle message update (read receipt, delivery, edit, etc.)
      */
-    suspend fun handleMessageUpdate(messageDto: MessageDto, chatGuid: String) {
+    override suspend fun handleMessageUpdate(messageDto: MessageDto, chatGuid: String) {
         val existingMessage = messageDao.getMessageByGuid(messageDto.guid)
         if (existingMessage != null) {
             val updated = messageDto.toEntity(chatGuid).copy(id = existingMessage.id)
@@ -100,7 +100,7 @@ class IncomingMessageHandler @Inject constructor(
      * Sync attachments for an incoming message to local database.
      * Incoming attachments are marked as PENDING for auto-download.
      */
-    suspend fun syncIncomingAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
+    override suspend fun syncIncomingAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
         // Delete any temp attachments that were created for immediate display
         tempMessageGuid?.let { tempGuid ->
             attachmentDao.deleteAttachmentsForMessage(tempGuid)

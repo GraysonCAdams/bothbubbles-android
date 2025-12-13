@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.common
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -410,5 +410,67 @@ fun PulsingLoadingIndicator(
             modifier = Modifier.size((48 * scale).dp),
             strokeWidth = 4.dp
         )
+    }
+}
+
+// ====================
+// Preview Functions
+// ====================
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Conversation Tile Skeleton")
+@Composable
+private fun ConversationTileSkeletonPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        ConversationTileSkeleton()
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Message Bubble Skeleton - Incoming")
+@Composable
+private fun MessageBubbleSkeletonIncomingPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubbleSkeleton(isFromMe = false)
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Message Bubble Skeleton - Outgoing")
+@Composable
+private fun MessageBubbleSkeletonOutgoingPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubbleSkeleton(isFromMe = true)
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Empty Conversations")
+@Composable
+private fun EmptyConversationsPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        EmptyConversations()
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Empty Search Results")
+@Composable
+private fun EmptySearchResultsPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        EmptySearchResults()
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(
+    showBackground = true,
+    name = "Empty States - Dark Mode",
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES
+)
+@Composable
+private fun EmptyStatesDarkPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper(darkTheme = true) {
+        Column {
+            ConversationTileSkeleton()
+            Spacer(modifier = Modifier.height(16.dp))
+            MessageBubbleSkeleton(isFromMe = false)
+            Spacer(modifier = Modifier.height(8.dp))
+            MessageBubbleSkeleton(isFromMe = true)
+        }
     }
 }

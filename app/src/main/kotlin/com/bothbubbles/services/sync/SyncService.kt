@@ -14,6 +14,8 @@ import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.categorization.CategorizationRepository
+import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.retryWithBackoffResult
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.async
@@ -110,7 +112,11 @@ class SyncService @Inject constructor(
     suspend fun performInitialSync(
         messagesPerChat: Int = MESSAGE_PAGE_SIZE,
         onProgress: ((progress: Int, processedChats: Int, totalChats: Int, syncedMessages: Int) -> Unit)? = null
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = retryWithBackoffResult(
+        times = NetworkConfig.DEFAULT_RETRY_ATTEMPTS,
+        initialDelayMs = NetworkConfig.DEFAULT_INITIAL_DELAY_MS,
+        maxDelayMs = NetworkConfig.DEFAULT_MAX_DELAY_MS
+    ) {
         Log.i(TAG, "Starting initial sync (concurrent mode)")
 
         // Mark sync as started and store settings for potential resume

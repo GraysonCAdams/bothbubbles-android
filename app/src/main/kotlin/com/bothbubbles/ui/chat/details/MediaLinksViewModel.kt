@@ -4,11 +4,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.AttachmentRepository
+import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -47,9 +47,9 @@ enum class MediaFilter {
 @HiltViewModel
 class MediaLinksViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val attachmentDao: AttachmentDao,
-    private val messageDao: MessageDao,
-    private val handleDao: HandleDao
+    private val attachmentRepository: AttachmentRepository,
+    private val messageRepository: MessageRepository,
+    private val handleRepository: HandleRepository
 ) : ViewModel() {
 
     private val route: Screen.MediaGallery = savedStateHandle.toRoute()
@@ -71,14 +71,14 @@ class MediaLinksViewModel @Inject constructor(
     )
 
     // Flow that extracts links from messages
-    private val linksFlow = messageDao.getMessagesWithUrlsForChat(chatGuid)
+    private val linksFlow = messageRepository.getMessagesWithUrlsForChat(chatGuid)
         .map { messages ->
             messages.flatMap { message -> extractLinksFromMessage(message) }
         }
 
     val uiState: StateFlow<MediaLinksUiState> = combine(
-        attachmentDao.getImagesForChat(chatGuid),
-        attachmentDao.getVideosForChat(chatGuid),
+        attachmentRepository.getImagesForChat(chatGuid),
+        attachmentRepository.getVideosForChat(chatGuid),
         linksFlow,
         _selectedFilter
     ) { images, videos, links, filter ->
@@ -113,7 +113,7 @@ class MediaLinksViewModel @Inject constructor(
             "You"
         } else {
             message.handleId?.let { handleId ->
-                val handle = handleDao.getHandleById(handleId)
+                val handle = handleRepository.getHandleById(handleId)
                 handle?.displayName ?: handle?.address?.let { PhoneNumberFormatter.format(it) }
             } ?: ""
         }

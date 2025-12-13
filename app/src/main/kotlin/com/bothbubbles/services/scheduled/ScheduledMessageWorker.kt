@@ -7,7 +7,7 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.entity.ScheduledMessageStatus
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 
@@ -23,7 +23,7 @@ class ScheduledMessageWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
     private val scheduledMessageDao: ScheduledMessageDao,
-    private val messageRepository: MessageRepository
+    private val messageSendingService: MessageSendingService
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -68,8 +68,8 @@ class ScheduledMessageWorker @AssistedInject constructor(
                     .map { android.net.Uri.parse(it) }
             } ?: emptyList()
 
-            // Send the message
-            val result = messageRepository.sendMessage(
+            // Send the message via MessageSendingService
+            val result = messageSendingService.sendMessage(
                 chatGuid = scheduledMessage.chatGuid,
                 text = scheduledMessage.text ?: ""
             )

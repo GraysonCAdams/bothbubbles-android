@@ -16,7 +16,7 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -41,7 +41,7 @@ class ConversationDetailScreen(
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val syncService: SyncService? = null,
     private val onRefresh: () -> Unit
 ) : Screen(carContext) {
@@ -200,7 +200,7 @@ class ConversationDetailScreen(
                     VoiceReplyScreen(
                         carContext = carContext,
                         chat = chat,
-                        messageRepository = messageRepository,
+                        messageSendingService = messageSendingService,
                         onMessageSent = {
                             refreshMessages()
                             onRefresh()

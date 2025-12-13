@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.common
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -33,7 +33,19 @@ class LinkPreviewViewModel @Inject constructor(
     private val linkPreviewRepository: LinkPreviewRepository
 ) : ViewModel() {
 
-    private val _previewCache = mutableMapOf<String, MutableStateFlow<LinkPreviewState>>()
+    companion object {
+        private const val MAX_CACHE_SIZE = 50 // Limit cache to 50 URLs per chat session
+    }
+
+    // LRU cache using LinkedHashMap with accessOrder=true
+    // Automatically evicts oldest entries when capacity is exceeded
+    private val _previewCache = object : LinkedHashMap<String, MutableStateFlow<LinkPreviewState>>(
+        MAX_CACHE_SIZE, 0.75f, true
+    ) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, MutableStateFlow<LinkPreviewState>>?): Boolean {
+            return size > MAX_CACHE_SIZE
+        }
+    }
 
     /**
      * Gets the preview state for a URL
@@ -80,6 +92,11 @@ class LinkPreviewViewModel @Inject constructor(
         viewModelScope.launch {
             linkPreviewRepository.refreshLinkPreview(url)
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        _previewCache.clear()
     }
 }
 

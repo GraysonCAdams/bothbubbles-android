@@ -11,7 +11,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
 
@@ -35,7 +35,7 @@ class BothBubblesCarAppService : CarAppService() {
     lateinit var chatRepository: ChatRepository
 
     @Inject
-    lateinit var messageRepository: MessageRepository
+    lateinit var messageSendingService: MessageSendingService
 
     override fun createHostValidator(): HostValidator {
         // Allow all hosts in debug builds, only known hosts in release
@@ -54,7 +54,7 @@ class BothBubblesCarAppService : CarAppService() {
             messageDao = messageDao,
             handleDao = handleDao,
             chatRepository = chatRepository,
-            messageRepository = messageRepository
+            messageSendingService = messageSendingService
         )
     }
 }
@@ -67,7 +67,7 @@ class BothBubblesAutoSession(
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
-    private val messageRepository: MessageRepository
+    private val messageSendingService: MessageSendingService
 ) : Session() {
 
     override fun onCreateScreen(intent: Intent): Screen {
@@ -77,7 +77,7 @@ class BothBubblesAutoSession(
             messageDao = messageDao,
             handleDao = handleDao,
             chatRepository = chatRepository,
-            messageRepository = messageRepository
+            messageSendingService = messageSendingService
         )
     }
 }

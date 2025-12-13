@@ -15,7 +15,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.bothbubbles.ui.components.Avatar
+import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlin.math.roundToInt

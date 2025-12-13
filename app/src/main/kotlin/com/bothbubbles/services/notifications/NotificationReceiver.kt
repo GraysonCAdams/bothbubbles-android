@@ -11,8 +11,8 @@ import android.widget.Toast
 import androidx.core.app.RemoteInput
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.FaceTimeRepository
-import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.di.ApplicationScope
+import com.bothbubbles.services.messaging.MessageSendingService
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
@@ -41,7 +41,7 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     @Inject
-    lateinit var messageRepository: MessageRepository
+    lateinit var messageSendingService: MessageSendingService
 
     @Inject
     lateinit var chatRepository: ChatRepository
@@ -82,7 +82,7 @@ class NotificationReceiver : BroadcastReceiver() {
             ?.toString() ?: return
 
         try {
-            messageRepository.sendMessage(
+            messageSendingService.sendMessage(
                 chatGuid = chatGuid,
                 text = replyText
             )

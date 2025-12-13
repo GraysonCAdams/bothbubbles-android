@@ -29,8 +29,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
-import com.bothbubbles.ui.components.Avatar
-import com.bothbubbles.ui.components.GroupAvatar
+import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.components.common.GroupAvatar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

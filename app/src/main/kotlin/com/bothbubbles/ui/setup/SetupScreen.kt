@@ -42,7 +42,7 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.bothbubbles.ui.components.QrCodeScanner
+import com.bothbubbles.ui.components.common.QrCodeScanner
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalFoundationApi::class)

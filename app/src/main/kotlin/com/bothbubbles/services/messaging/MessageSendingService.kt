@@ -27,6 +27,10 @@ import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sms.SmsSendService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.util.error.MessageError
+import com.bothbubbles.util.error.NetworkError
+import com.bothbubbles.util.error.SmsError
+import com.bothbubbles.util.error.safeCall
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -95,7 +99,7 @@ class MessageSendingService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
     private val videoCompressor: VideoCompressor
-) {
+) : MessageSender {
     companion object {
         private const val TAG = "MessageSendingService"
     }
@@ -103,12 +107,12 @@ class MessageSendingService @Inject constructor(
     // ===== Upload Progress Tracking =====
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
-    val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
+    override val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
 
     /**
      * Reset upload progress state
      */
-    fun resetUploadProgress() {
+    override fun resetUploadProgress() {
         _uploadProgress.value = null
     }
 
@@ -118,7 +122,7 @@ class MessageSendingService @Inject constructor(
      * Send a message via the appropriate channel.
      * This is the primary method for sending messages that auto-selects the delivery mode.
      */
-    suspend fun sendUnified(
+    override suspend fun sendUnified(
         chatGuid: String,
         text: String,
         replyToGuid: String? = null,
@@ -159,14 +163,14 @@ class MessageSendingService @Inject constructor(
      * Send a new message via iMessage.
      * If the send fails and autoRetryAsSms is enabled, automatically retries via SMS.
      */
-    suspend fun sendMessage(
+    override suspend fun sendMessage(
         chatGuid: String,
         text: String,
         replyToGuid: String? = null,
         effectId: String? = null,
         subject: String? = null,
         providedTempGuid: String? = null // Stable ID for retry idempotency
-    ): Result<MessageEntity> = runCatching {
+    ): Result<MessageEntity> = safeCall {
         // Use provided tempGuid if available (for retries), otherwise generate new one
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
@@ -176,7 +180,7 @@ class MessageSendingService @Inject constructor(
             Log.d(TAG, "Retry detected for text message tempGuid=$tempGuid, checking if already sent")
             // If the message was already successfully sent (has no error), return it
             if (existingMessage.error == 0) {
-                return@runCatching existingMessage
+                return@safeCall existingMessage
             }
             // Otherwise continue to retry sending
         }
@@ -237,16 +241,16 @@ class MessageSendingService @Inject constructor(
                 if (smsResult.isSuccess) {
                     // Replace the temp message with the SMS message
                     messageDao.deleteMessage(tempGuid)
-                    return@runCatching smsResult.getOrThrow()
+                    return@safeCall smsResult.getOrThrow()
                 } else {
                     // SMS also failed - mark as failed
                     messageDao.updateErrorStatus(tempGuid, 1)
-                    throw smsResult.exceptionOrNull() ?: Exception("SMS send failed")
+                    throw smsResult.exceptionOrNull() ?: MessageError.SendFailed(tempGuid, "SMS send failed")
                 }
             } else {
                 // Mark message as failed (no auto-retry)
                 messageDao.updateErrorStatus(tempGuid, 1)
-                throw Exception(body?.message ?: "Failed to send message")
+                throw MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message")
             }
         }
 
@@ -266,19 +270,19 @@ class MessageSendingService @Inject constructor(
             messageDao.updateErrorStatus(tempGuid, 0)
             // Return existing message on retry, or fetch the one we just created
             existingMessage ?: messageDao.getMessageByGuid(tempGuid)
-                ?: throw Exception("Failed to find temp message: $tempGuid")
+                ?: throw MessageError.SendFailed(tempGuid, "Failed to find temp message")
         }
     }
 
     /**
      * Send a reaction/tapback
      */
-    suspend fun sendReaction(
+    override suspend fun sendReaction(
         chatGuid: String,
         messageGuid: String,
         reaction: String, // e.g., "love", "like", "dislike", "laugh", "emphasize", "question"
         partIndex: Int = 0
-    ): Result<MessageEntity> = runCatching {
+    ): Result<MessageEntity> = safeCall {
         val response = api.sendReaction(
             SendReactionRequest(
                 chatGuid = chatGuid,
@@ -290,10 +294,10 @@ class MessageSendingService @Inject constructor(
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
-            throw Exception(body?.message ?: "Failed to send reaction")
+            throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to send reaction")
         }
 
-        val reactionMessage = body.data ?: throw Exception("No reaction returned")
+        val reactionMessage = body.data ?: throw NetworkError.ServerError(response.code(), "No reaction returned")
         val entity = reactionMessage.toEntity(chatGuid)
         messageDao.insertMessage(entity)
 
@@ -306,12 +310,12 @@ class MessageSendingService @Inject constructor(
     /**
      * Remove a reaction - sends the same reaction again to toggle it off
      */
-    suspend fun removeReaction(
+    override suspend fun removeReaction(
         chatGuid: String,
         messageGuid: String,
         reaction: String,
         partIndex: Int = 0
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = safeCall {
         // In iMessage, sending the same reaction again removes it
         val removeReaction = "-$reaction" // Prefix with - to remove
         api.sendReaction(
@@ -328,12 +332,12 @@ class MessageSendingService @Inject constructor(
     /**
      * Edit a message (iOS 16+)
      */
-    suspend fun editMessage(
+    override suspend fun editMessage(
         chatGuid: String,
         messageGuid: String,
         newText: String,
         partIndex: Int = 0
-    ): Result<MessageEntity> = runCatching {
+    ): Result<MessageEntity> = safeCall {
         val response = api.editMessage(
             guid = messageGuid,
             request = EditMessageRequest(
@@ -344,23 +348,23 @@ class MessageSendingService @Inject constructor(
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
-            throw Exception(body?.message ?: "Failed to edit message")
+            throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to edit message")
         }
 
         // Update local message
         messageDao.updateMessageText(messageGuid, newText, System.currentTimeMillis())
 
-        messageDao.getMessageByGuid(messageGuid) ?: throw Exception("Message not found")
+        messageDao.getMessageByGuid(messageGuid) ?: throw MessageError.SendFailed(messageGuid, "Message not found")
     }
 
     /**
      * Unsend a message (iOS 16+)
      */
-    suspend fun unsendMessage(
+    override suspend fun unsendMessage(
         chatGuid: String,
         messageGuid: String,
         partIndex: Int = 0
-    ): Result<Unit> = runCatching {
+    ): Result<Unit> = safeCall {
         api.unsendMessage(
             guid = messageGuid,
             request = UnsendMessageRequest(partIndex = partIndex)
@@ -373,9 +377,9 @@ class MessageSendingService @Inject constructor(
     /**
      * Retry sending a failed message
      */
-    suspend fun retryMessage(messageGuid: String): Result<MessageEntity> = runCatching {
+    override suspend fun retryMessage(messageGuid: String): Result<MessageEntity> = safeCall {
         val message = messageDao.getMessageByGuid(messageGuid)
-            ?: throw Exception("Message not found")
+            ?: throw MessageError.SendFailed(messageGuid, "Message not found")
 
         // Reset error status
         messageDao.updateErrorStatus(messageGuid, 0)
@@ -402,16 +406,16 @@ class MessageSendingService @Inject constructor(
      * Retry sending a failed iMessage as SMS/MMS.
      * This marks the original message as superseded and sends a new message via SMS.
      */
-    suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> = runCatching {
+    override suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> = safeCall {
         val message = messageDao.getMessageByGuid(messageGuid)
-            ?: throw Exception("Message not found")
+            ?: throw MessageError.SendFailed(messageGuid, "Message not found")
 
         val chat = chatDao.getChatByGuid(message.chatGuid)
 
         // Check if we can send SMS for this chat
         val address = extractAddressFromChatGuid(message.chatGuid)
         if (address == null || !address.isPhoneNumber()) {
-            throw Exception("Cannot send SMS to this contact (no phone number)")
+            throw SmsError.PermissionDenied(Exception("Cannot send SMS to this contact (no phone number)"))
         }
 
         // Soft delete the original failed message
@@ -443,7 +447,7 @@ class MessageSendingService @Inject constructor(
     /**
      * Check if a failed iMessage can be retried as SMS
      */
-    suspend fun canRetryAsSms(messageGuid: String): Boolean {
+    override suspend fun canRetryAsSms(messageGuid: String): Boolean {
         val message = messageDao.getMessageByGuid(messageGuid) ?: return false
 
         // Only failed iMessages can be retried as SMS
@@ -460,12 +464,12 @@ class MessageSendingService @Inject constructor(
      * Forward a message to another conversation.
      * Copies the message text and attachments to the target chat.
      */
-    suspend fun forwardMessage(
+    override suspend fun forwardMessage(
         messageGuid: String,
         targetChatGuid: String
-    ): Result<MessageEntity> = runCatching {
+    ): Result<MessageEntity> = safeCall {
         val originalMessage = messageDao.getMessageByGuid(messageGuid)
-            ?: throw Exception("Original message not found")
+            ?: throw MessageError.SendFailed(messageGuid, "Original message not found")
 
         // Get attachments for the original message
         val attachments = attachmentDao.getAttachmentsForMessage(messageGuid)
@@ -511,7 +515,7 @@ class MessageSendingService @Inject constructor(
         effectId: String? = null,
         subject: String? = null,
         providedTempGuid: String? = null // Stable ID for retry idempotency
-    ): Result<MessageEntity> = runCatching {
+    ): Result<MessageEntity> = safeCall {
         // Use provided tempGuid if available (for retries), otherwise generate new one
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
@@ -621,7 +625,7 @@ class MessageSendingService @Inject constructor(
             val body = response.body()
             if (!response.isSuccessful || body == null || body.status != 200) {
                 messageDao.updateErrorStatus(tempGuid, 1)
-                throw Exception(body?.message ?: "Failed to send message")
+                throw MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message")
             }
             lastResponse = body.data
         }
@@ -643,7 +647,7 @@ class MessageSendingService @Inject constructor(
             messageDao.updateErrorStatus(tempGuid, 0)
             // Return existing message on retry, or fetch it if we just created it
             existingMessage ?: messageDao.getMessageByGuid(tempGuid)
-                ?: throw Exception("Failed to find temp message: $tempGuid")
+                ?: throw MessageError.SendFailed(tempGuid, "Failed to find temp message")
         }
     }
 
@@ -657,7 +661,7 @@ class MessageSendingService @Inject constructor(
         uri: Uri,
         attachmentIndex: Int = 0,
         totalAttachments: Int = 1
-    ): Result<MessageDto> = runCatching {
+    ): Result<MessageDto> = safeCall {
         val contentResolver = context.contentResolver
 
         // Get file name from URI
@@ -707,12 +711,12 @@ class MessageSendingService @Inject constructor(
                 // Compression failed, use original
                 Log.w(TAG, "Video compression failed, using original")
                 bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw Exception("Cannot read attachment")
+                    ?: throw MessageError.UnsupportedAttachment("unknown")
             }
         } else {
             // Read file bytes directly
             bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw Exception("Cannot read attachment")
+                ?: throw MessageError.UnsupportedAttachment("unknown")
         }
 
         Log.d(TAG, "Uploading attachment: $fileName ($mimeType, ${bytes.size} bytes)")
@@ -750,10 +754,10 @@ class MessageSendingService @Inject constructor(
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
-            throw Exception(body?.message ?: "Failed to upload attachment")
+            throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to upload attachment")
         }
 
-        body.data ?: throw Exception("No message returned from attachment upload")
+        body.data ?: throw NetworkError.ServerError(response.code(), "No message returned from attachment upload")
     }
 
     /**
@@ -968,21 +972,21 @@ class MessageSendingService @Inject constructor(
     }
 
     /**
-     * Check if carrier messaging is ready. Returns an exception if not ready, null if ready.
+     * Check if carrier messaging is ready. Returns an AppError if not ready, null if ready.
      */
-    private fun ensureCarrierReady(requireMms: Boolean = false): IllegalStateException? {
+    private fun ensureCarrierReady(requireMms: Boolean = false): SmsError? {
         val status = smsPermissionHelper.getSmsCapabilityStatus()
         if (!status.deviceSupportsSms) {
-            return IllegalStateException("This device cannot send SMS/MMS messages")
+            return SmsError.PermissionDenied(Exception("This device cannot send SMS/MMS messages"))
         }
         if (!status.isDefaultSmsApp) {
-            return IllegalStateException("Set BlueBubbles as the default SMS app to send carrier messages")
+            return SmsError.NoDefaultApp()
         }
         if (!status.canSendSms) {
-            return IllegalStateException("Grant SMS permissions to BlueBubbles to send carrier messages")
+            return SmsError.PermissionDenied()
         }
         if (requireMms && !status.deviceSupportsMms) {
-            return IllegalStateException("This device cannot send MMS messages")
+            return SmsError.PermissionDenied(Exception("This device cannot send MMS messages"))
         }
         return null
     }

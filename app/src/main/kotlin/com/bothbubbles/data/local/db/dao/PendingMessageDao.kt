@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
@@ -97,6 +98,25 @@ interface PendingMessageDao {
      */
     @Query("DELETE FROM pending_messages WHERE local_id = :localId")
     suspend fun deleteByLocalId(localId: String)
+
+    /**
+     * Mark message as successfully sent with server GUID.
+     * Also updates the chat's last message info if needed.
+     */
+    @Transaction
+    suspend fun markMessageSentAndUpdateChat(
+        tempGuid: String,
+        finalGuid: String,
+        chatDao: ChatDao,
+        chatGuid: String
+    ) {
+        val pending = getByLocalId(tempGuid) ?: return
+        markAsSent(pending.id, finalGuid)
+
+        // Note: ChatEntity does not have last_message_guid column, so we cannot update it.
+        // If schema changes in future, uncomment this:
+        // chatDao.updateLastMessageGuid(chatGuid, finalGuid)
+    }
 
     /**
      * Clean up sent messages (run periodically).

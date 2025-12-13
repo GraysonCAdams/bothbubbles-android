@@ -4,12 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -32,7 +30,6 @@ data class MediaGalleryUiState(
 @HiltViewModel
 class MediaGalleryViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val attachmentDao: AttachmentDao,
     private val attachmentRepository: AttachmentRepository
 ) : ViewModel() {
 
@@ -41,9 +38,9 @@ class MediaGalleryViewModel @Inject constructor(
     val mediaType: String = route.mediaType
 
     val uiState: StateFlow<MediaGalleryUiState> = when (mediaType) {
-        "images" -> attachmentDao.getImagesForChat(chatGuid)
-        "videos" -> attachmentDao.getVideosForChat(chatGuid)
-        else -> attachmentDao.getAttachmentsForChat(chatGuid)
+        "images" -> attachmentRepository.getImagesForChat(chatGuid)
+        "videos" -> attachmentRepository.getVideosForChat(chatGuid)
+        else -> attachmentRepository.getAttachmentsForChat(chatGuid)
     }.map { attachments ->
         MediaGalleryUiState(
             attachments = attachments,

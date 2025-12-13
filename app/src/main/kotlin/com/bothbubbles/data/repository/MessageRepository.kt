@@ -1,7 +1,6 @@
 package com.bothbubbles.data.repository
 
 import android.content.Context
-import android.net.Uri
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -13,14 +12,12 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.data.remote.api.dto.MessageQueryRequest
-import com.bothbubbles.services.messaging.IncomingMessageHandler
-import com.bothbubbles.services.messaging.MessageDeliveryMode
-import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.messaging.UploadProgress
 import com.bothbubbles.services.sync.SyncRangeTracker
+import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.retryWithBackoff
+import com.bothbubbles.util.retryWithRateLimitAwareness
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.StateFlow
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -29,11 +26,10 @@ import javax.inject.Singleton
  *
  * This repository follows clean architecture principles:
  * - Provides data access operations (CRUD, queries, sync)
- * - Delegates business logic (sending, routing) to services layer
- * - Does not depend on services layer implementation details
+ * - Does NOT depend on services layer
  *
- * For sending messages, use [MessageSendingService] directly or via delegation methods here.
- * For incoming message handling, use [IncomingMessageHandler].
+ * For sending messages, use MessageSendingService directly.
+ * For incoming message handling, use IncomingMessageHandler directly.
  */
 @Singleton
 class MessageRepository @Inject constructor(
@@ -43,19 +39,11 @@ class MessageRepository @Inject constructor(
     private val api: BothBubblesApi,
     private val settingsDataStore: SettingsDataStore,
     private val syncRangeTracker: SyncRangeTracker,
-    // Services layer - injected for delegation
-    private val messageSendingService: MessageSendingService,
-    private val incomingMessageHandler: IncomingMessageHandler
+    private val attachmentRepository: AttachmentRepository
 ) {
     companion object {
         private const val TAG = "MessageRepository"
     }
-
-    // ===== Upload Progress (delegated to MessageSendingService) =====
-
-    val uploadProgress: StateFlow<UploadProgress?> get() = messageSendingService.uploadProgress
-
-    fun resetUploadProgress() = messageSendingService.resetUploadProgress()
 
     // ===== Local Query Operations =====
 
@@ -110,10 +98,74 @@ class MessageRepository @Inject constructor(
     fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>> =
         messageDao.searchMessages(query, limit)
 
+    /**
+     * Get messages containing URLs for link gallery.
+     */
+    fun getMessagesWithUrlsForChat(chatGuid: String): Flow<List<MessageEntity>> =
+        messageDao.getMessagesWithUrlsForChat(chatGuid)
+
+    /**
+     * Get the latest message for a specific chat.
+     */
+    suspend fun getLatestMessageForChat(chatGuid: String): MessageEntity? =
+        messageDao.getLatestMessageForChat(chatGuid)
+
+    /**
+     * Batch fetch the latest messages for multiple chats.
+     */
+    suspend fun getLatestMessagesForChats(chatGuids: List<String>): List<MessageEntity> =
+        messageDao.getLatestMessagesForChats(chatGuids)
+
+    /**
+     * Get the message by its GUID.
+     */
+    suspend fun getMessageByGuid(guid: String): MessageEntity? =
+        messageDao.getMessageByGuid(guid)
+
+    /**
+     * Delete all messages from the database.
+     */
+    suspend fun deleteAllMessages() {
+        messageDao.deleteAllMessages()
+    }
+
+    // ===== Paging Operations =====
+
+    /**
+     * Get message count for multiple chats (used by paging).
+     */
+    suspend fun getMessageCountForChats(chatGuids: List<String>): Int =
+        messageDao.getMessageCountForChats(chatGuids)
+
+    /**
+     * Observe message count for multiple chats (used by paging).
+     */
+    fun observeMessageCountForChats(chatGuids: List<String>): Flow<Int> =
+        messageDao.observeMessageCountForChats(chatGuids)
+
+    /**
+     * Get messages by position for pagination (most recent first).
+     */
+    suspend fun getMessagesByPosition(chatGuids: List<String>, limit: Int, offset: Int): List<MessageEntity> =
+        messageDao.getMessagesByPosition(chatGuids, limit, offset)
+
+    /**
+     * Get the position of a message within a chat list.
+     */
+    suspend fun getMessagePosition(chatGuids: List<String>, guid: String): Int =
+        messageDao.getMessagePosition(chatGuids, guid)
+
+    /**
+     * Batch get reactions for multiple messages.
+     */
+    suspend fun getReactionsForMessages(messageGuids: List<String>): List<MessageEntity> =
+        messageDao.getReactionsForMessages(messageGuids)
+
     // ===== Remote Sync Operations =====
 
     /**
-     * Fetch messages for a chat from server
+     * Fetch messages for a chat from server.
+     * Retries with exponential backoff on transient network errors.
      */
     suspend fun syncMessagesForChat(
         chatGuid: String,
@@ -123,43 +175,51 @@ class MessageRepository @Inject constructor(
         before: Long? = null,
         syncSource: SyncSource = SyncSource.ON_DEMAND
     ): Result<List<MessageEntity>> = runCatching {
-        val response = api.getChatMessages(
-            guid = chatGuid,
-            limit = limit,
-            offset = offset,
-            sort = "DESC",
-            before = before,
-            after = after
-        )
+        retryWithBackoff(
+            times = NetworkConfig.SYNC_RETRY_ATTEMPTS,
+            initialDelayMs = NetworkConfig.SYNC_INITIAL_DELAY_MS,
+            maxDelayMs = NetworkConfig.SYNC_MAX_DELAY_MS
+        ) {
+            val response = retryWithRateLimitAwareness {
+                api.getChatMessages(
+                    guid = chatGuid,
+                    limit = limit,
+                    offset = offset,
+                    sort = "DESC",
+                    before = before,
+                    after = after
+                )
+            }
 
-        val body = response.body()
-        if (!response.isSuccessful || body == null) {
-            throw Exception(body?.message ?: "Failed to fetch messages")
+            val body = response.body()
+            if (!response.isSuccessful || body == null) {
+                throw Exception(body?.message ?: "Failed to fetch messages")
+            }
+
+            val messages = body.data.orEmpty().map { it.toEntity(chatGuid) }
+
+            // Batch insert messages (more efficient than individual inserts)
+            messageDao.insertMessages(messages)
+
+            // Sync attachments via AttachmentRepository (data layer, no service dependency)
+            body.data.orEmpty().forEach { messageDto ->
+                attachmentRepository.syncAttachmentsFromDto(messageDto)
+            }
+
+            // Record the synced range for sparse pagination tracking
+            if (messages.isNotEmpty()) {
+                val oldestTimestamp = messages.minOf { it.dateCreated }
+                val newestTimestamp = messages.maxOf { it.dateCreated }
+                syncRangeTracker.recordSyncedRange(
+                    chatGuid = chatGuid,
+                    startTimestamp = oldestTimestamp,
+                    endTimestamp = newestTimestamp,
+                    source = syncSource
+                )
+            }
+
+            messages
         }
-
-        val messages = body.data.orEmpty().map { it.toEntity(chatGuid) }
-
-        // Batch insert messages (more efficient than individual inserts)
-        messageDao.insertMessages(messages)
-
-        // Sync attachments
-        body.data.orEmpty().forEach { messageDto ->
-            incomingMessageHandler.syncIncomingAttachments(messageDto)
-        }
-
-        // Record the synced range for sparse pagination tracking
-        if (messages.isNotEmpty()) {
-            val oldestTimestamp = messages.minOf { it.dateCreated }
-            val newestTimestamp = messages.maxOf { it.dateCreated }
-            syncRangeTracker.recordSyncedRange(
-                chatGuid = chatGuid,
-                startTimestamp = oldestTimestamp,
-                endTimestamp = newestTimestamp,
-                source = syncSource
-            )
-        }
-
-        messages
     }
 
     /**
@@ -207,176 +267,59 @@ class MessageRepository @Inject constructor(
      * Fetch all messages across all chats since a given timestamp.
      * This is much more efficient than iterating through each chat for incremental sync.
      * Returns the number of new messages synced.
+     * Retries with exponential backoff on transient network errors.
      */
     suspend fun syncMessagesGlobally(
         after: Long,
         limit: Int = 1000
     ): Result<Int> = runCatching {
-        val response = api.queryMessages(
-            MessageQueryRequest(
-                after = after,
-                limit = limit,
-                sort = "DESC"
-            )
-        )
-
-        val body = response.body()
-        if (!response.isSuccessful || body == null) {
-            throw Exception(body?.message ?: "Failed to fetch messages")
-        }
-
-        val messageDtos = body.data.orEmpty()
-
-        // Transform messages with their chat GUIDs, filtering out ones without chats
-        val messagesWithChats = messageDtos.mapNotNull { messageDto ->
-            val chatGuid = messageDto.chats?.firstOrNull()?.guid
-            if (chatGuid != null) {
-                messageDto to messageDto.toEntity(chatGuid)
-            } else {
-                Log.w(TAG, "Message ${messageDto.guid} has no associated chat, skipping")
-                null
+        retryWithBackoff(
+            times = NetworkConfig.SYNC_RETRY_ATTEMPTS,
+            initialDelayMs = NetworkConfig.SYNC_INITIAL_DELAY_MS,
+            maxDelayMs = NetworkConfig.SYNC_MAX_DELAY_MS
+        ) {
+            val response = retryWithRateLimitAwareness {
+                api.queryMessages(
+                    MessageQueryRequest(
+                        after = after,
+                        limit = limit,
+                        sort = "DESC"
+                    )
+                )
             }
+
+            val body = response.body()
+            if (!response.isSuccessful || body == null) {
+                throw Exception(body?.message ?: "Failed to fetch messages")
+            }
+
+            val messageDtos = body.data.orEmpty()
+
+            // Transform messages with their chat GUIDs, filtering out ones without chats
+            val messagesWithChats = messageDtos.mapNotNull { messageDto ->
+                val chatGuid = messageDto.chats?.firstOrNull()?.guid
+                if (chatGuid != null) {
+                    messageDto to messageDto.toEntity(chatGuid)
+                } else {
+                    Log.w(TAG, "Message ${messageDto.guid} has no associated chat, skipping")
+                    null
+                }
+            }
+
+            // Batch insert all valid messages (more efficient than individual inserts)
+            val messages = messagesWithChats.map { it.second }
+            messageDao.insertMessages(messages)
+
+            // Sync attachments for all messages via AttachmentRepository (data layer, no service dependency)
+            messagesWithChats.forEach { (messageDto, _) ->
+                attachmentRepository.syncAttachmentsFromDto(messageDto)
+            }
+
+            val syncedCount = messagesWithChats.size
+            Log.i(TAG, "Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
+            syncedCount
         }
-
-        // Batch insert all valid messages (more efficient than individual inserts)
-        val messages = messagesWithChats.map { it.second }
-        messageDao.insertMessages(messages)
-
-        // Sync attachments for all messages
-        messagesWithChats.forEach { (messageDto, _) ->
-            incomingMessageHandler.syncIncomingAttachments(messageDto)
-        }
-
-        val syncedCount = messagesWithChats.size
-        Log.i(TAG, "Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
-        syncedCount
     }
-
-    // ===== Send Operations (delegated to MessageSendingService) =====
-
-    /**
-     * Send a message via the appropriate channel.
-     * This is the primary method for sending messages that auto-selects the delivery mode.
-     */
-    suspend fun sendUnified(
-        chatGuid: String,
-        text: String,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        subject: String? = null,
-        attachments: List<Uri> = emptyList(),
-        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
-        subscriptionId: Int = -1,
-        tempGuid: String? = null
-    ): Result<MessageEntity> = messageSendingService.sendUnified(
-        chatGuid = chatGuid,
-        text = text,
-        replyToGuid = replyToGuid,
-        effectId = effectId,
-        subject = subject,
-        attachments = attachments,
-        deliveryMode = deliveryMode,
-        subscriptionId = subscriptionId,
-        tempGuid = tempGuid
-    )
-
-    /**
-     * Send a new message via iMessage.
-     */
-    suspend fun sendMessage(
-        chatGuid: String,
-        text: String,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        subject: String? = null,
-        providedTempGuid: String? = null
-    ): Result<MessageEntity> = messageSendingService.sendMessage(
-        chatGuid = chatGuid,
-        text = text,
-        replyToGuid = replyToGuid,
-        effectId = effectId,
-        subject = subject,
-        providedTempGuid = providedTempGuid
-    )
-
-    /**
-     * Send a reaction/tapback
-     */
-    suspend fun sendReaction(
-        chatGuid: String,
-        messageGuid: String,
-        reaction: String,
-        partIndex: Int = 0
-    ): Result<MessageEntity> = messageSendingService.sendReaction(chatGuid, messageGuid, reaction, partIndex)
-
-    /**
-     * Remove a reaction
-     */
-    suspend fun removeReaction(
-        chatGuid: String,
-        messageGuid: String,
-        reaction: String,
-        partIndex: Int = 0
-    ): Result<Unit> = messageSendingService.removeReaction(chatGuid, messageGuid, reaction, partIndex)
-
-    /**
-     * Edit a message (iOS 16+)
-     */
-    suspend fun editMessage(
-        chatGuid: String,
-        messageGuid: String,
-        newText: String,
-        partIndex: Int = 0
-    ): Result<MessageEntity> = messageSendingService.editMessage(chatGuid, messageGuid, newText, partIndex)
-
-    /**
-     * Unsend a message (iOS 16+)
-     */
-    suspend fun unsendMessage(
-        chatGuid: String,
-        messageGuid: String,
-        partIndex: Int = 0
-    ): Result<Unit> = messageSendingService.unsendMessage(chatGuid, messageGuid, partIndex)
-
-    /**
-     * Retry sending a failed message
-     */
-    suspend fun retryMessage(messageGuid: String): Result<MessageEntity> =
-        messageSendingService.retryMessage(messageGuid)
-
-    /**
-     * Retry sending a failed iMessage as SMS/MMS.
-     */
-    suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> =
-        messageSendingService.retryAsSms(messageGuid)
-
-    /**
-     * Check if a failed iMessage can be retried as SMS
-     */
-    suspend fun canRetryAsSms(messageGuid: String): Boolean =
-        messageSendingService.canRetryAsSms(messageGuid)
-
-    /**
-     * Forward a message to another conversation.
-     */
-    suspend fun forwardMessage(
-        messageGuid: String,
-        targetChatGuid: String
-    ): Result<MessageEntity> = messageSendingService.forwardMessage(messageGuid, targetChatGuid)
-
-    // ===== Incoming Message Handling (delegated to IncomingMessageHandler) =====
-
-    /**
-     * Handle a new message from server (via Socket.IO or push)
-     */
-    suspend fun handleIncomingMessage(messageDto: MessageDto, chatGuid: String): MessageEntity =
-        incomingMessageHandler.handleIncomingMessage(messageDto, chatGuid)
-
-    /**
-     * Handle message update (read receipt, delivery, edit, etc.)
-     */
-    suspend fun handleMessageUpdate(messageDto: MessageDto, chatGuid: String) =
-        incomingMessageHandler.handleMessageUpdate(messageDto, chatGuid)
 
     // ===== Local Mutation Operations =====
 

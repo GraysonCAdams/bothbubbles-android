@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.message
 
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
@@ -53,6 +53,7 @@ enum class Tapback(
 /**
  * Represents a reaction on a message with sender info
  */
+@Immutable
 data class ReactionUiModel(
     val tapback: Tapback,
     val isFromMe: Boolean,

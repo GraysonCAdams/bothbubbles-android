@@ -15,7 +15,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.bothbubbles.ui.components.Avatar
+import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.util.PhoneNumberFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)

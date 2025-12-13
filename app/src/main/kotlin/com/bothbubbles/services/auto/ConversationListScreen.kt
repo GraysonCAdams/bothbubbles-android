@@ -19,7 +19,7 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -44,7 +44,7 @@ class ConversationListScreen(
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val syncService: SyncService? = null
 ) : Screen(carContext) {
 
@@ -128,9 +128,11 @@ class ConversationListScreen(
                     }
                 }
 
-                // Pre-fetch participant names for all chats
+                // Pre-fetch participant names for all chats (PERF: single batch query)
+                val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+                    .groupBy({ it.chatGuid }, { it.handle })
                 for (chat in chatsToDisplay) {
-                    val participants = chatDao.getParticipantsForChat(chat.guid)
+                    val participants = participantsByChat[chat.guid] ?: emptyList()
                     val participantNames = when {
                         participants.isEmpty() -> chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
                         participants.size == 1 -> {
@@ -209,7 +211,7 @@ class ConversationListScreen(
                         carContext = carContext,
                         chatDao = chatDao,
                         handleDao = handleDao,
-                        messageRepository = messageRepository,
+                        messageSendingService = messageSendingService,
                         onMessageSent = { refreshData() }
                     )
                 )
@@ -260,7 +262,7 @@ class ConversationListScreen(
                             messageDao = messageDao,
                             handleDao = handleDao,
                             chatRepository = chatRepository,
-                            messageRepository = messageRepository,
+                            messageSendingService = messageSendingService,
                             syncService = syncService,
                             onRefresh = { refreshData() }
                         )

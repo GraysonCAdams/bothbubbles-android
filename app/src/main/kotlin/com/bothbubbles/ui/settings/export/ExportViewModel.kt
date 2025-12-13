@@ -2,7 +2,7 @@ package com.bothbubbles.ui.settings.export
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.export.ExportConfig
 import com.bothbubbles.services.export.ExportFormat
 import com.bothbubbles.services.export.ExportProgress
@@ -21,7 +21,7 @@ import javax.inject.Inject
 @HiltViewModel
 class ExportViewModel @Inject constructor(
     private val exportService: MessageExportService,
-    private val chatDao: ChatDao
+    private val chatRepository: ChatRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ExportUiState())
@@ -35,7 +35,7 @@ class ExportViewModel @Inject constructor(
 
     private fun loadChats() {
         viewModelScope.launch {
-            chatDao.getAllChats().collect { chats ->
+            chatRepository.getAllChats().collect { chats ->
                 val chatInfoList = chats.map { chat ->
                     ExportableChatInfo(
                         guid = chat.guid,

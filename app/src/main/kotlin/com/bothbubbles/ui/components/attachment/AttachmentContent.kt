@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.attachment
 
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility

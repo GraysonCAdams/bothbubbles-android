@@ -5,34 +5,35 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
-import com.bothbubbles.ui.components.ConnectionBannerState
-import com.bothbubbles.ui.components.SmsBannerState
-import com.bothbubbles.ui.components.SwipeActionType
-import com.bothbubbles.ui.components.SwipeConfig
-import com.bothbubbles.ui.components.determineConnectionBannerState
-import com.bothbubbles.ui.components.determineSmsBannerState
+import com.bothbubbles.ui.components.common.ConnectionBannerState
+import com.bothbubbles.ui.components.common.SmsBannerState
+import com.bothbubbles.ui.components.conversation.SwipeActionType
+import com.bothbubbles.ui.components.conversation.SwipeConfig
+import com.bothbubbles.ui.components.common.determineConnectionBannerState
+import com.bothbubbles.ui.components.common.determineSmsBannerState
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
@@ -46,7 +47,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import android.text.format.DateFormat
+import com.bothbubbles.ui.util.StableList
+import com.bothbubbles.ui.util.toStable
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
@@ -61,11 +63,10 @@ class ConversationsViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val application: Application,
     private val chatRepository: ChatRepository,
-    private val attachmentDao: AttachmentDao,
-    private val chatDao: ChatDao,
-    private val handleDao: HandleDao,
-    private val messageDao: MessageDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val attachmentRepository: AttachmentRepository,
+    private val handleRepository: HandleRepository,
+    private val messageRepository: MessageRepository,
+    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
     private val socketService: SocketService,
     private val syncService: SyncService,
     private val settingsDataStore: SettingsDataStore,
@@ -396,15 +397,15 @@ class ConversationsViewModel @Inject constructor(
             try {
                 // Load up to INITIAL_LOAD_TARGET from each source to guarantee 100 total
                 val queryId1 = PerformanceProfiler.start("DB.getUnifiedGroups")
-                val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(INITIAL_LOAD_TARGET, 0)
+                val unifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId1, "${unifiedGroups.size} groups")
 
                 val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
-                val groupChats = chatDao.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
+                val groupChats = chatRepository.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId2, "${groupChats.size} chats")
 
                 val queryId3 = PerformanceProfiler.start("DB.getNonGroupChats")
-                val nonGroupChats = chatDao.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
+                val nonGroupChats = chatRepository.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
                 PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
                 val buildId = PerformanceProfiler.start("ConversationList.build")
@@ -419,9 +420,9 @@ class ConversationsViewModel @Inject constructor(
                 PerformanceProfiler.end(buildId, "${conversations.size} items")
 
                 // Check if more data exists beyond what we're showing
-                val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
-                val totalGroupChats = chatDao.getGroupChatCount()
-                val totalNonGroup = chatDao.getNonGroupChatCount()
+                val totalUnified = unifiedChatGroupRepository.getActiveGroupCount()
+                val totalGroupChats = chatRepository.getGroupChatCount()
+                val totalNonGroup = chatRepository.getNonGroupChatCount()
                 val totalCount = totalUnified + totalGroupChats + totalNonGroup
                 // More exists if we have more combined items than we're showing, or if DB has more
                 val hasMore = allConversations.size > conversations.size || totalCount > allConversations.size
@@ -430,7 +431,7 @@ class ConversationsViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
-                        conversations = conversations,
+                        conversations = conversations.toStable(),
                         canLoadMore = hasMore,
                         currentPage = 0
                     )
@@ -452,9 +453,9 @@ class ConversationsViewModel @Inject constructor(
     private fun observeDataChanges() {
         viewModelScope.launch {
             combine(
-                unifiedChatGroupDao.observeActiveGroupCount(),
-                chatDao.observeGroupChatCount(),
-                chatDao.observeNonGroupChatCount(),
+                unifiedChatGroupRepository.observeActiveGroupCount(),
+                chatRepository.observeGroupChatCount(),
+                chatRepository.observeNonGroupChatCount(),
                 _typingChats,
                 _searchQuery
             ) { _, _, _, _, _ -> Unit }
@@ -479,13 +480,13 @@ class ConversationsViewModel @Inject constructor(
 
         try {
             // Re-fetch all loaded unified groups
-            val unifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(totalLoaded, 0)
+            val unifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(totalLoaded, 0)
 
             // Re-fetch all loaded group chats
-            val groupChats = chatDao.getGroupChatsPaginated(totalLoaded, 0)
+            val groupChats = chatRepository.getGroupChatsPaginated(totalLoaded, 0)
 
             // Re-fetch all loaded non-group chats
-            val nonGroupChats = chatDao.getNonGroupChatsPaginated(totalLoaded, 0)
+            val nonGroupChats = chatRepository.getNonGroupChatsPaginated(totalLoaded, 0)
 
             val typingChats = _typingChats.value
             val query = _searchQuery.value
@@ -508,16 +509,16 @@ class ConversationsViewModel @Inject constructor(
             }
 
             // Check if more data exists
-            val totalUnified = unifiedChatGroupDao.getActiveGroupCount()
-            val totalGroupChats = chatDao.getGroupChatCount()
-            val totalNonGroup = chatDao.getNonGroupChatCount()
+            val totalUnified = unifiedChatGroupRepository.getActiveGroupCount()
+            val totalGroupChats = chatRepository.getGroupChatCount()
+            val totalNonGroup = chatRepository.getNonGroupChatCount()
             val loadedCount = unifiedGroups.size + groupChats.size + nonGroupChats.size
             val totalCount = totalUnified + totalGroupChats + totalNonGroup
             val hasMore = loadedCount < totalCount
 
             _uiState.update { state ->
                 state.copy(
-                    conversations = filtered,
+                    conversations = filtered.toStable(),
                     canLoadMore = hasMore
                 )
             }
@@ -542,13 +543,13 @@ class ConversationsViewModel @Inject constructor(
                 val offset = nextPage * PAGE_SIZE
 
                 // Load next page of unified groups
-                val moreUnifiedGroups = unifiedChatGroupDao.getActiveGroupsPaginated(PAGE_SIZE, offset)
+                val moreUnifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(PAGE_SIZE, offset)
 
                 // Load next page of group chats
-                val moreGroupChats = chatDao.getGroupChatsPaginated(PAGE_SIZE, offset)
+                val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
 
                 // Load next page of non-group chats
-                val moreNonGroupChats = chatDao.getNonGroupChatsPaginated(PAGE_SIZE, offset)
+                val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
                 val newConversations = buildConversationList(
                     unifiedGroups = moreUnifiedGroups,
@@ -571,7 +572,7 @@ class ConversationsViewModel @Inject constructor(
                 _uiState.update { state ->
                     state.copy(
                         isLoadingMore = false,
-                        conversations = merged,
+                        conversations = merged.toStable(),
                         currentPage = nextPage,
                         canLoadMore = newConversations.isNotEmpty()
                     )
@@ -605,7 +606,7 @@ class ConversationsViewModel @Inject constructor(
         val batchPrepId = PerformanceProfiler.start("BatchPrep.collectGuids")
         val groupIds = unifiedGroups.map { it.id }
         val allMembers = if (groupIds.isNotEmpty()) {
-            unifiedChatGroupDao.getChatGuidsForGroups(groupIds)
+            unifiedChatGroupRepository.getChatGuidsForGroups(groupIds)
         } else {
             emptyList()
         }
@@ -624,7 +625,7 @@ class ConversationsViewModel @Inject constructor(
         // OPTIMIZATION: Batch fetch all chats in a single query
         val batchChatsId = PerformanceProfiler.start("DB.batchGetChats")
         val allChatsMap = if (allGroupChatGuids.isNotEmpty()) {
-            chatDao.getChatsByGuids(allGroupChatGuids).associateBy { it.guid }
+            chatRepository.getChatsByGuids(allGroupChatGuids).associateBy { it.guid }
         } else {
             emptyMap()
         }
@@ -633,12 +634,24 @@ class ConversationsViewModel @Inject constructor(
         // OPTIMIZATION: Batch fetch all latest messages in a single query
         val batchMsgId = PerformanceProfiler.start("DB.batchGetLatestMessages")
         val latestMessagesMap = if (allGroupChatGuids.isNotEmpty()) {
-            messageDao.getLatestMessagesForChats(allGroupChatGuids)
+            messageRepository.getLatestMessagesForChats(allGroupChatGuids)
                 .associateBy { it.chatGuid }
         } else {
             emptyMap()
         }
         PerformanceProfiler.end(batchMsgId, "${latestMessagesMap.size} messages")
+
+        // OPTIMIZATION: Batch fetch all participants in a single query
+        val batchParticipantsId = PerformanceProfiler.start("DB.batchGetParticipants")
+        val participantsWithChatGuids = if (allGroupChatGuids.isNotEmpty()) {
+            chatRepository.getParticipantsWithChatGuids(allGroupChatGuids)
+        } else {
+            emptyList()
+        }
+        val participantsByChatMap = participantsWithChatGuids
+            .groupBy { it.chatGuid }
+            .mapValues { entry -> entry.value.map { it.handle } }
+        PerformanceProfiler.end(batchParticipantsId, "${participantsWithChatGuids.size} participants")
 
         // Process unified chat groups with pre-fetched data
         // NOTE: Participants are fetched per-group to avoid cross-contamination of contact names
@@ -650,7 +663,8 @@ class ConversationsViewModel @Inject constructor(
                 chatGuids = chatGuids,
                 typingChats = typingChats,
                 latestMessagesMap = latestMessagesMap,
-                chatsMap = allChatsMap
+                chatsMap = allChatsMap,
+                participantsMap = participantsByChatMap
             )
             if (uiModel != null) {
                 conversations.add(uiModel)
@@ -699,25 +713,17 @@ class ConversationsViewModel @Inject constructor(
 
         // Get all chats in this group
         val chatsId = PerformanceProfiler.start("DB.getChatsByGuid", "${chatGuids.size} guids")
-        val chats = chatGuids.mapNotNull { chatDao.getChatByGuid(it) }
+        val chats = chatGuids.mapNotNull { chatRepository.getChatByGuid(it) }
         PerformanceProfiler.end(chatsId, "${chats.size} chats")
         if (chats.isEmpty()) {
             PerformanceProfiler.end(uiModelId, "no chats")
             return null
         }
 
-        // Find the most recent message across all chats
-        // NOTE: This is an N+1 query pattern - consider batching
-        val msgId = PerformanceProfiler.start("DB.getLatestMessages", "${chatGuids.size} queries")
-        var latestMessage: MessageEntity? = null
-        var latestTimestamp = 0L
-        for (chatGuid in chatGuids) {
-            val msg = messageDao.getLatestMessageForChat(chatGuid)
-            if (msg != null && msg.dateCreated > latestTimestamp) {
-                latestMessage = msg
-                latestTimestamp = msg.dateCreated
-            }
-        }
+        // Find the most recent message across all chats (PERF: single batch query)
+        val msgId = PerformanceProfiler.start("DB.getLatestMessages", "1 batch query")
+        val latestMessages = messageRepository.getLatestMessagesForChats(chatGuids)
+        val latestMessage = latestMessages.maxByOrNull { it.dateCreated }
         PerformanceProfiler.end(msgId, "found: ${latestMessage != null}")
 
         // Use the primary chat for display info
@@ -763,7 +769,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get attachments for the latest message
         val attachments = if (latestMessage?.hasAttachments == true) {
-            attachmentDao.getAttachmentsForMessage(latestMessage.guid)
+            attachmentRepository.getAttachmentsForMessage(latestMessage.guid)
         } else emptyList()
         val firstAttachment = attachments.firstOrNull()
         val attachmentCount = attachments.size
@@ -818,7 +824,7 @@ class ConversationsViewModel @Inject constructor(
         // Get reaction preview data
         val reactionPreviewData = if (messageType == MessageType.REACTION && latestMessage != null) {
             val originalGuid = latestMessage.associatedMessageGuid
-            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val originalMessage = originalGuid?.let { messageRepository.getMessageByGuid(it) }
             val tapbackInfo = parseTapbackType(latestMessage.associatedMessageType)
             ReactionPreviewData(
                 tapbackVerb = tapbackInfo.verb,
@@ -911,7 +917,8 @@ class ConversationsViewModel @Inject constructor(
         chatGuids: List<String>,
         typingChats: Set<String>,
         latestMessagesMap: Map<String, MessageEntity>,
-        chatsMap: Map<String, ChatEntity>
+        chatsMap: Map<String, ChatEntity>,
+        participantsMap: Map<String, List<HandleEntity>>
     ): ConversationUiModel? {
         val uiModelId = PerformanceProfiler.start("UnifiedGroup.toUiModelOpt", group.identifier)
         if (chatGuids.isEmpty()) {
@@ -941,7 +948,10 @@ class ConversationsViewModel @Inject constructor(
         val primaryChat = chats.find { it.guid == group.primaryChatGuid } ?: chats.first()
 
         // Get participants for this specific group's chats (not batched to avoid cross-contamination)
-        val groupParticipants = chatRepository.getParticipantsForChats(chatGuids)
+        // OPTIMIZATION: Use pre-fetched participants from batch query
+        val groupParticipants = chatGuids.flatMap { chatGuid ->
+            participantsMap[chatGuid] ?: emptyList()
+        }.distinctBy { it.id }
         val primaryParticipant = chatRepository.getBestParticipant(groupParticipants)
         val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: group.identifier
 
@@ -973,7 +983,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get attachments for the latest message
         val attachments = if (latestMessage?.hasAttachments == true) {
-            attachmentDao.getAttachmentsForMessage(latestMessage.guid)
+            attachmentRepository.getAttachmentsForMessage(latestMessage.guid)
         } else emptyList()
         val firstAttachment = attachments.firstOrNull()
         val attachmentCount = attachments.size
@@ -1028,7 +1038,7 @@ class ConversationsViewModel @Inject constructor(
         // Get reaction preview data
         val reactionPreviewData = if (messageType == MessageType.REACTION && latestMessage != null) {
             val originalGuid = latestMessage.associatedMessageGuid
-            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val originalMessage = originalGuid?.let { messageRepository.getMessageByGuid(it) }
             val tapbackInfo = parseTapbackType(latestMessage.associatedMessageType)
             ReactionPreviewData(
                 tapbackVerb = tapbackInfo.verb,
@@ -1274,7 +1284,7 @@ class ConversationsViewModel @Inject constructor(
                                 conv.copy(unreadCount = 0)
                             } else conv
                         }
-                        state.copy(conversations = updated)
+                        state.copy(conversations = updated.toStable())
                     }
                 }
         }
@@ -1414,7 +1424,7 @@ class ConversationsViewModel @Inject constructor(
                 .collect { query ->
                     if (query.length >= 2) {
                         // Get text matches
-                        val textMatchMessages = messageDao.searchMessages(query, 50).first()
+                        val textMatchMessages = messageRepository.searchMessages(query, 50).first()
 
                         // Get link preview title matches
                         val linkTitleMatches = linkPreviewRepository.searchByTitle(query, 20)
@@ -1424,7 +1434,7 @@ class ConversationsViewModel @Inject constructor(
                         // Search messages containing matched link URLs
                         val linkMatchMessages = mutableListOf<MessageEntity>()
                         for (url in matchedUrls) {
-                            linkMatchMessages.addAll(messageDao.searchMessages(url, 10).first())
+                            linkMatchMessages.addAll(messageRepository.searchMessages(url, 10).first())
                         }
 
                         // Combine and deduplicate by message guid
@@ -1433,12 +1443,12 @@ class ConversationsViewModel @Inject constructor(
                             .take(50)
 
                         val results = allMessages.mapNotNull { message ->
-                            val chat = chatDao.getChatByGuid(message.chatGuid)
+                            val chat = chatRepository.getChatByGuid(message.chatGuid)
                             if (chat != null) {
                                 val messageText = message.text ?: ""
 
                                 // Get participant info for avatar
-                                val participants = chatDao.getParticipantsForChat(message.chatGuid)
+                                val participants = chatRepository.getParticipantsForChat(message.chatGuid)
                                 val primaryParticipant = participants.firstOrNull()
 
                                 // Determine message type and get link preview data
@@ -1484,9 +1494,9 @@ class ConversationsViewModel @Inject constructor(
                                 )
                             } else null
                         }
-                        _uiState.update { it.copy(messageSearchResults = results) }
+                        _uiState.update { it.copy(messageSearchResults = results.toStable()) }
                     } else {
-                        _uiState.update { it.copy(messageSearchResults = emptyList()) }
+                        _uiState.update { it.copy(messageSearchResults = emptyList<MessageSearchResult>().toStable()) }
                     }
                 }
         }
@@ -1518,7 +1528,7 @@ class ConversationsViewModel @Inject constructor(
                     if (conv.guid == chatGuid) conv.copy(isSnoozed = true, snoozeUntil = snoozeUntil)
                     else conv
                 }
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Persist to database in background
@@ -1534,7 +1544,7 @@ class ConversationsViewModel @Inject constructor(
                     if (conv.guid == chatGuid) conv.copy(isSnoozed = false, snoozeUntil = null)
                     else conv
                 }
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Persist to database in background
@@ -1550,7 +1560,7 @@ class ConversationsViewModel @Inject constructor(
                     if (conv.guid == chatGuid) conv.copy(unreadCount = 1)
                     else conv
                 }
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Persist to database in background
@@ -1623,11 +1633,11 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             try {
                 // Clear all local data
-                messageDao.deleteAllMessages()
-                chatDao.deleteAllChatHandleCrossRefs()
-                chatDao.deleteAllChats()
-                handleDao.deleteAllHandles()
-                unifiedChatGroupDao.deleteAllData()
+                messageRepository.deleteAllMessages()
+                chatRepository.deleteAllChatHandleCrossRefs()
+                chatRepository.deleteAllChats()
+                handleRepository.deleteAllHandles()
+                unifiedChatGroupRepository.deleteAllData()
 
                 // Clear sync progress and reset setup
                 settingsDataStore.clearSyncProgress()
@@ -1678,7 +1688,7 @@ class ConversationsViewModel @Inject constructor(
                         .thenBy { it.pinIndex }
                         .thenByDescending { it.lastMessageTimestamp }
                 )
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Emit scroll event when pinning (not unpinning)
@@ -1692,9 +1702,9 @@ class ConversationsViewModel @Inject constructor(
             // Persist to database in background - update both chats and unified_chat_groups
             chatRepository.setPinned(chatGuid, newPinState, if (newPinState) newPinIndex else null)
             // Also update the unified chat group for this chat
-            val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+            val group = unifiedChatGroupRepository.getGroupForChat(chatGuid)
             if (group != null) {
-                unifiedChatGroupDao.updatePinStatus(group.id, newPinState, if (newPinState) newPinIndex else null)
+                unifiedChatGroupRepository.updatePinStatus(group.id, newPinState, if (newPinState) newPinIndex else null)
             }
         }
     }
@@ -1729,16 +1739,16 @@ class ConversationsViewModel @Inject constructor(
                         .thenBy { it.pinIndex }
                         .thenByDescending { it.lastMessageTimestamp }
                 )
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Persist to database - update both chats table and unified_chat_groups table
             reorderedGuids.forEachIndexed { index, guid ->
                 chatRepository.setPinned(guid, true, index)
                 // Also update the unified chat group for this chat
-                val group = unifiedChatGroupDao.getGroupForChat(guid)
+                val group = unifiedChatGroupRepository.getGroupForChat(guid)
                 if (group != null) {
-                    unifiedChatGroupDao.updatePinStatus(group.id, true, index)
+                    unifiedChatGroupRepository.updatePinStatus(group.id, true, index)
                 }
             }
         }
@@ -1753,7 +1763,7 @@ class ConversationsViewModel @Inject constructor(
             try {
                 val avatarPath = saveGroupPhoto(chatGuid, uri)
                 if (avatarPath != null) {
-                    chatDao.updateCustomAvatarPath(chatGuid, avatarPath)
+                    chatRepository.updateCustomAvatarPath(chatGuid, avatarPath)
                 }
             } catch (e: Exception) {
                 android.util.Log.e("ConversationsViewModel", "Failed to set group photo", e)
@@ -1804,7 +1814,7 @@ class ConversationsViewModel @Inject constructor(
                     if (conv.guid == chatGuid) conv.copy(isMuted = newMuteState)
                     else conv
                 }
-                state.copy(conversations = updatedConversations)
+                state.copy(conversations = updatedConversations.toStable())
             }
 
             // Persist to database in background
@@ -1927,7 +1937,7 @@ class ConversationsViewModel @Inject constructor(
      */
     fun dismissInferredName(address: String) {
         viewModelScope.launch {
-            handleDao.clearInferredNameByAddress(address)
+            handleRepository.clearInferredNameByAddress(address)
         }
     }
 
@@ -1946,12 +1956,12 @@ class ConversationsViewModel @Inject constructor(
     }
 
     private suspend fun ChatEntity.toUiModel(typingChats: Set<String>): ConversationUiModel {
-        val lastMessage = messageDao.getLatestMessageForChat(guid)
+        val lastMessage = messageRepository.getLatestMessageForChat(guid)
         val rawMessageText = lastMessage?.text ?: lastMessageText ?: ""
         val isFromMe = lastMessage?.isFromMe ?: false
 
         // Get participants for this chat
-        val participants = chatDao.getParticipantsForChat(guid)
+        val participants = chatRepository.getParticipantsForChat(guid)
         val participantNames = participants.map { it.displayName }
         val participantAvatarPaths = participants.map { it.cachedAvatarPath }
         val primaryParticipant = participants.firstOrNull()
@@ -1960,7 +1970,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get attachments for the last message
         val attachments = if (lastMessage?.hasAttachments == true) {
-            attachmentDao.getAttachmentsForMessage(lastMessage.guid)
+            attachmentRepository.getAttachmentsForMessage(lastMessage.guid)
         } else emptyList()
         val firstAttachment = attachments.firstOrNull()
         val attachmentCount = attachments.size
@@ -2029,7 +2039,7 @@ class ConversationsViewModel @Inject constructor(
         // Get reaction preview data if this is a reaction
         val reactionPreviewData = if (messageType == MessageType.REACTION && lastMessage != null) {
             val originalGuid = lastMessage.associatedMessageGuid
-            val originalMessage = originalGuid?.let { messageDao.getMessageByGuid(it) }
+            val originalMessage = originalGuid?.let { messageRepository.getMessageByGuid(it) }
             val tapbackInfo = parseTapbackType(lastMessage.associatedMessageType)
             ReactionPreviewData(
                 tapbackVerb = tapbackInfo.verb,
@@ -2268,7 +2278,7 @@ class ConversationsViewModel @Inject constructor(
         return when (message.itemType) {
             1 -> { // Participant change
                 val participantName = message.handleId?.let { handleId ->
-                    handleDao.getHandleById(handleId)?.displayName
+                    handleRepository.getHandleById(handleId)?.displayName
                 } ?: "Someone"
                 val firstName = extractFirstName(participantName)
                 when (message.groupActionType) {
@@ -2379,6 +2389,7 @@ class ConversationsViewModel @Inject constructor(
     }
 }
 
+@Stable
 data class ConversationsUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
@@ -2402,11 +2413,11 @@ data class ConversationsUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
     val smsBannerState: SmsBannerState = SmsBannerState.Disabled,
-    val conversations: List<ConversationUiModel> = emptyList(),
+    val conversations: StableList<ConversationUiModel> = emptyList<ConversationUiModel>().toStable(),
     val searchQuery: String = "",
     val error: String? = null,
     val swipeConfig: SwipeConfig = SwipeConfig(),
-    val messageSearchResults: List<MessageSearchResult> = emptyList(),
+    val messageSearchResults: StableList<MessageSearchResult> = emptyList<MessageSearchResult>().toStable(),
     val useSimpleAppTitle: Boolean = false,
     val userProfileName: String? = null,
     val userProfileAvatarUri: String? = null,
@@ -2452,6 +2463,7 @@ data class ConversationsUiState(
  * Represents a message that matched a search query.
  * Contains all data needed to render using GoogleStyleConversationTile.
  */
+@Stable
 data class MessageSearchResult(
     val messageGuid: String,
     val chatGuid: String,
@@ -2498,6 +2510,7 @@ data class MessageSearchResult(
     )
 }
 
+@Stable
 data class ConversationUiModel(
     val guid: String,
     val displayName: String,
@@ -2579,6 +2592,7 @@ enum class MessageType {
 /**
  * Data for reaction preview text generation
  */
+@Immutable
 data class ReactionPreviewData(
     val tapbackVerb: String,      // "Liked", "Loved", "Laughed at", etc.
     val originalText: String?,    // Truncated original message text

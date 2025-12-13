@@ -5,17 +5,15 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.CreateChatRequest
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,8 +26,8 @@ import javax.inject.Inject
 @HiltViewModel
 class GroupCreatorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val handleDao: HandleDao,
-    private val chatDao: ChatDao,
+    private val handleRepository: HandleRepository,
+    private val chatRepository: ChatRepository,
     private val api: BothBubblesApi,
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
@@ -77,7 +75,7 @@ class GroupCreatorViewModel @Inject constructor(
 
             // Build a lookup map for iMessage availability from cached handles
             val handleServiceMap = mutableMapOf<String, String>()
-            handleDao.getAllHandlesOnce().forEach { handle ->
+            handleRepository.getAllHandlesOnce().forEach { handle ->
                 val normalized = normalizeAddress(handle.address)
                 // Prefer iMessage when we know it's available
                 if (handle.isIMessage || !handleServiceMap.containsKey(normalized)) {
@@ -328,7 +326,7 @@ class GroupCreatorViewModel @Inject constructor(
                         // Create local MMS group chat
                         val chatGuid = "mms;-;${addresses.joinToString(",")}"
 
-                        val existingChat = chatDao.getChatByGuid(chatGuid)
+                        val existingChat = chatRepository.getChatByGuid(chatGuid)
                         if (existingChat == null) {
                             val newChat = ChatEntity(
                                 guid = chatGuid,
@@ -342,7 +340,7 @@ class GroupCreatorViewModel @Inject constructor(
                                 lastMessageDate = System.currentTimeMillis(),
                                 lastMessageText = null
                             )
-                            chatDao.insertChat(newChat)
+                            chatRepository.insertChat(newChat)
                         }
 
                         _uiState.update {

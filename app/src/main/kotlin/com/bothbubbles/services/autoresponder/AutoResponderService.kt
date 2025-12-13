@@ -5,8 +5,8 @@ import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.imessage.IMessageAvailabilityService
 import kotlinx.coroutines.flow.first
@@ -23,7 +23,7 @@ import javax.inject.Singleton
 class AutoResponderService @Inject constructor(
     private val autoRespondedSenderDao: AutoRespondedSenderDao,
     private val chatDao: ChatDao,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val iMessageAvailabilityService: IMessageAvailabilityService,
     private val androidContactsService: AndroidContactsService,
     private val smsRepository: SmsRepository,
@@ -111,7 +111,7 @@ class AutoResponderService @Inject constructor(
         Log.d(TAG, "Sending auto-response to $senderAddress: $message")
 
         return try {
-            val sendResult = messageRepository.sendMessage(chatGuid, message)
+            val sendResult = messageSendingService.sendMessage(chatGuid, message)
             if (sendResult.isSuccess) {
                 // Track by SENDER ADDRESS so it persists even if chat is deleted
                 autoRespondedSenderDao.insert(AutoRespondedSenderEntity(senderAddress = senderAddress))

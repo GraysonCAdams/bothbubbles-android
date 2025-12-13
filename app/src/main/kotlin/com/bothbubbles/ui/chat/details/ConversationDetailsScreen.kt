@@ -32,12 +32,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
-import com.bothbubbles.ui.components.Avatar
-import com.bothbubbles.ui.components.ContactInfo
-import com.bothbubbles.ui.components.ContactQuickActionsPopup
-import com.bothbubbles.ui.components.ConversationAvatar
-import com.bothbubbles.ui.components.SnoozeDuration
-import com.bothbubbles.ui.components.SnoozeDurationDialog
+import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.components.dialogs.ContactInfo
+import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
+import com.bothbubbles.ui.components.common.ConversationAvatar
+import com.bothbubbles.ui.components.common.SnoozeDuration
+import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
 import com.bothbubbles.util.PhoneNumberFormatter
 import java.io.File
 

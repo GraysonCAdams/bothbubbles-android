@@ -23,7 +23,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.navigation.compose.rememberNavController
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.developer.ConnectionModeManager
-import com.bothbubbles.ui.components.DeveloperConnectionOverlay
+import com.bothbubbles.ui.components.common.DeveloperConnectionOverlay
 import com.bothbubbles.ui.navigation.BothBubblesNavHost
 import com.bothbubbles.ui.navigation.NotificationDeepLinkData
 import com.bothbubbles.ui.navigation.Screen

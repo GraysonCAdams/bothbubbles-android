@@ -9,8 +9,6 @@ import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
-import com.bothbubbles.services.messaging.MessageDeliveryMode
-import com.bothbubbles.data.repository.MessageRepository
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
@@ -24,7 +22,7 @@ import java.io.File
  * Key responsibilities:
  * 1. Load pending message from database
  * 2. Load persisted attachments
- * 3. Send via MessageRepository
+ * 3. Send via MessageSendingService
  * 4. Update status to SENT or FAILED
  * 5. Clean up attachment files on success
  */
@@ -34,7 +32,7 @@ class MessageSendWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val pendingMessageDao: PendingMessageDao,
     private val pendingAttachmentDao: PendingAttachmentDao,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val attachmentPersistenceManager: AttachmentPersistenceManager
 ) : CoroutineWorker(context, workerParams) {
 
@@ -94,9 +92,9 @@ class MessageSendWorker @AssistedInject constructor(
                 MessageDeliveryMode.AUTO
             }
 
-            // Send via repository
+            // Send via MessageSendingService
             // Pass localId as tempGuid to ensure same ID is used across retries
-            val result = messageRepository.sendUnified(
+            val result = messageSendingService.sendUnified(
                 chatGuid = pendingMessage.chatGuid,
                 text = pendingMessage.text ?: "",
                 replyToGuid = pendingMessage.replyToGuid,

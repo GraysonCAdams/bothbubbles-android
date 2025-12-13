@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.message
 
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.MessageUiModel

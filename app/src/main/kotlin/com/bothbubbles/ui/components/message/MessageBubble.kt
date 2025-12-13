@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.message
 
 import android.content.Context
 import androidx.compose.animation.AnimatedContent
@@ -1796,6 +1796,150 @@ fun MessageTypeChip(
             style = MaterialTheme.typography.labelSmall,
             color = color,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+        )
+    }
+}
+
+// ====================
+// Preview Functions
+// ====================
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Incoming Message")
+@Composable
+private fun MessageBubbleIncomingPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Outgoing Message")
+@Composable
+private fun MessageBubbleOutgoingPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessageFromMe,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Long Message")
+@Composable
+private fun MessageBubbleLongPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleLongMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(
+    showBackground = true,
+    name = "Dark Mode",
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES
+)
+@Composable
+private fun MessageBubbleDarkPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper(darkTheme = true) {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "SMS Message")
+@Composable
+private fun MessageBubbleSmsPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleSmsMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Emoji Only")
+@Composable
+private fun MessageBubbleEmojiOnlyPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleEmojiOnlyMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Reply Message")
+@Composable
+private fun MessageBubbleReplyPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleReplyMessage,
+            onLongPress = {},
+            onMediaClick = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Failed Message")
+@Composable
+private fun MessageBubbleFailedPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleFailedMessage,
+            onLongPress = {},
+            onMediaClick = {},
+            onRetry = {}
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group - First")
+@Composable
+private fun MessageBubbleGroupFirstPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessage,
+            onLongPress = {},
+            onMediaClick = {},
+            groupPosition = MessageGroupPosition.FIRST
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group - Middle")
+@Composable
+private fun MessageBubbleGroupMiddlePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessage,
+            onLongPress = {},
+            onMediaClick = {},
+            groupPosition = MessageGroupPosition.MIDDLE
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group - Last")
+@Composable
+private fun MessageBubbleGroupLastPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        MessageBubble(
+            message = com.bothbubbles.ui.preview.PreviewData.sampleMessage,
+            onLongPress = {},
+            onMediaClick = {},
+            groupPosition = MessageGroupPosition.LAST
         )
     }
 }

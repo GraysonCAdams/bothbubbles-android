@@ -433,4 +433,25 @@ interface MessageDao {
             insertMessage(message)
         }
     }
+
+    @Transaction
+    suspend fun insertMessagesAndRecordSync(
+        messages: List<MessageEntity>,
+        chatGuid: String,
+        syncedFromTimestamp: Long,
+        syncedToTimestamp: Long,
+        syncSource: String,
+        syncRangeDao: SyncRangeDao
+    ) {
+        // Insert all messages
+        insertMessages(messages)
+
+        // Record that this range is synced
+        syncRangeDao.recordSyncedRange(
+            chatGuid = chatGuid,
+            startTimestamp = syncedFromTimestamp,
+            endTimestamp = syncedToTimestamp,
+            syncSource = syncSource
+        )
+    }
 }

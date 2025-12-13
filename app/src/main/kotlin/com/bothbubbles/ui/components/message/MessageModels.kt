@@ -1,13 +1,18 @@
 package com.bothbubbles.ui.components.message
 
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.ui.components.ReactionUiModel
-import com.bothbubbles.ui.components.Tapback
+import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.Tapback
+import com.bothbubbles.ui.util.StableList
+import com.bothbubbles.ui.util.toStable
 
 /**
  * Result of analyzing text for emoji-only content.
  * Public so it can be pre-computed in ViewModel and cached in MessageUiModel.
  */
+@Immutable
 data class EmojiAnalysis(
     val isEmojiOnly: Boolean,
     val emojiCount: Int
@@ -32,6 +37,7 @@ enum class MessageGroupPosition {
  * Preview data for the message being replied to.
  * Shown as a quote box above reply messages.
  */
+@Immutable
 data class ReplyPreviewData(
     val originalGuid: String,
     val previewText: String?,        // Truncated to ~50 chars
@@ -45,14 +51,16 @@ data class ReplyPreviewData(
  * Represents a thread of messages: the original message and all replies to it.
  * Used for the thread overlay view.
  */
+@Stable
 data class ThreadChain(
     val originMessage: MessageUiModel?,      // The root message being replied to (null if deleted/not found)
-    val replies: List<MessageUiModel>        // All replies in chronological order
+    val replies: StableList<MessageUiModel>        // All replies in chronological order
 )
 
 /**
  * UI model for a message bubble
  */
+@Stable
 data class MessageUiModel(
     val guid: String,
     val text: String?,
@@ -65,11 +73,11 @@ data class MessageUiModel(
     val isRead: Boolean,
     val hasError: Boolean,
     val isReaction: Boolean,
-    val attachments: List<AttachmentUiModel>,
+    val attachments: StableList<AttachmentUiModel>,
     val senderName: String?,
     val senderAvatarPath: String? = null,
     val messageSource: String,
-    val reactions: List<ReactionUiModel> = emptyList(),
+    val reactions: StableList<ReactionUiModel> = emptyList<ReactionUiModel>().toStable(),
     val myReactions: Set<Tapback> = emptySet(),
     val expressiveSendStyleId: String? = null,
     val effectPlayed: Boolean = false,
@@ -95,6 +103,7 @@ data class MessageUiModel(
                 messageSource == MessageSource.SERVER_SMS.name
 }
 
+@Stable
 data class AttachmentUiModel(
     val guid: String,
     val mimeType: String?,

@@ -23,7 +23,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
-import com.bothbubbles.ui.components.ConversationAvatar
+import com.bothbubbles.ui.components.common.ConversationAvatar
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

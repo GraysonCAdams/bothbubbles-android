@@ -2,9 +2,9 @@ package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.ui.chat.ChatSendMode
@@ -46,9 +46,9 @@ import javax.inject.Inject
  * ```
  */
 class ChatSendDelegate @Inject constructor(
-    private val messageRepository: MessageRepository,
     private val pendingMessageRepository: PendingMessageRepository,
     private val chatRepository: ChatRepository,
+    private val messageSendingService: MessageSendingService,
     private val socketService: SocketService,
     private val soundManager: SoundManager
 ) {
@@ -222,7 +222,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun retryMessage(messageGuid: String) {
         scope.launch {
-            messageRepository.retryMessage(messageGuid)
+            messageSendingService.retryMessage(messageGuid)
         }
     }
 
@@ -231,7 +231,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun retryMessageAsSms(messageGuid: String) {
         scope.launch {
-            messageRepository.retryAsSms(messageGuid).fold(
+            messageSendingService.retryAsSms(messageGuid).fold(
                 onSuccess = { /* Message was successfully sent via SMS */ },
                 onFailure = { e ->
                     _sendError.value = e.message
@@ -246,7 +246,7 @@ class ChatSendDelegate @Inject constructor(
     fun forwardMessage(messageGuid: String, targetChatGuid: String) {
         scope.launch {
             _isForwarding.value = true
-            messageRepository.forwardMessage(messageGuid, targetChatGuid).fold(
+            messageSendingService.forwardMessage(messageGuid, targetChatGuid).fold(
                 onSuccess = {
                     _isForwarding.value = false
                     _forwardSuccess.value = true
@@ -264,7 +264,7 @@ class ChatSendDelegate @Inject constructor(
      * Check if a failed message can be retried as SMS.
      */
     suspend fun canRetryAsSms(messageGuid: String): Boolean {
-        return messageRepository.canRetryAsSms(messageGuid)
+        return messageSendingService.canRetryAsSms(messageGuid)
     }
 
     /**

@@ -111,6 +111,22 @@ Large ViewModels use delegate pattern for decomposition:
 - `ChatSendDelegate` - Send, retry, forward operations
 - See `ui/chat/delegates/README.md` for the pattern
 
+#### 4. Service Interfaces (Testability)
+Key services implement interfaces for dependency inversion and testability:
+- `MessageSender` ← `MessageSendingService` - Message sending operations
+- `SocketConnection` ← `SocketService` - Socket.IO connection management
+- `IncomingMessageProcessor` ← `IncomingMessageHandler` - Incoming message handling
+- `Notifier` ← `NotificationService` - Notification operations
+
+Bindings are in `di/ServiceModule.kt`. Test fakes available in `src/test/kotlin/com/bothbubbles/fakes/`.
+
+#### 5. Error Handling (AppError Framework)
+Consistent error handling using sealed classes:
+- `AppError` - Base sealed class with `NetworkError`, `DatabaseError`, `ValidationError`, `ServerError`
+- `safeCall {}` - Wrapper for operations that can fail
+- `Result<T>.handle()` - Extension for handling success/failure
+- See `util/error/` for the complete framework
+
 ## Project Structure
 
 ```
@@ -131,13 +147,18 @@ app/src/main/kotlin/com/bothbubbles/
 │   ├── foreground/               # Foreground services (SocketForegroundService)
 │   ├── receiver/                 # Broadcast receivers (BootReceiver)
 │   ├── messaging/                # Message sending and handling
-│   │   ├── MessageSendingService.kt      # Send operations
-│   │   ├── IncomingMessageHandler.kt     # Incoming message handling
+│   │   ├── MessageSender.kt              # Interface for send operations
+│   │   ├── MessageSendingService.kt      # Implementation of MessageSender
+│   │   ├── IncomingMessageProcessor.kt   # Interface for incoming handling
+│   │   ├── IncomingMessageHandler.kt     # Implementation
 │   │   ├── ChatFallbackTracker.kt        # iMessage <-> SMS fallback
 │   │   └── MessageSendWorker.kt          # WorkManager job
 │   ├── notifications/            # Notification handling
+│   │   ├── Notifier.kt                   # Interface
+│   │   └── NotificationService.kt        # Implementation
 │   ├── socket/                   # Socket.IO connection and events
-│   │   ├── SocketService.kt              # Connection management
+│   │   ├── SocketConnection.kt           # Interface for socket operations
+│   │   ├── SocketService.kt              # Implementation of SocketConnection
 │   │   ├── SocketEventHandler.kt         # Event routing
 │   │   └── handlers/                     # Decomposed event handlers
 │   │       ├── MessageEventHandler.kt
@@ -154,12 +175,13 @@ app/src/main/kotlin/com/bothbubbles/
 │   │   ├── delegates/            # ViewModel delegates (pattern)
 │   │   └── paging/               # Message pagination
 │   ├── conversations/            # Conversation list
-│   ├── components/               # Shared UI components
-│   │   ├── common/               # Generic components
-│   │   ├── message/              # Message-related
-│   │   ├── attachment/           # Attachment-related
-│   │   ├── dialogs/              # Modal dialogs
-│   │   └── input/                # Input components
+│   ├── components/               # Shared UI components (organized)
+│   │   ├── common/               # Avatar, LinkPreview, Shimmer, ErrorView
+│   │   ├── message/              # MessageBubble, ReactionChip, TypingIndicator
+│   │   ├── attachment/           # AttachmentPreview, ImageViewer, VideoPlayer
+│   │   ├── conversation/         # ConversationTile, SwipeableConversationTile
+│   │   ├── dialogs/              # ConfirmationDialog, InfoDialog, BottomSheet
+│   │   └── input/                # SearchBar, TextInput, AttachmentPicker
 │   ├── navigation/               # Type-safe navigation
 │   ├── settings/                 # Settings screens (organized by feature)
 │   │   ├── server/

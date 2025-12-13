@@ -4,11 +4,10 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.navigation.Screen
@@ -83,8 +82,7 @@ data class ConversationDetailsUiState(
 class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
-    private val chatDao: ChatDao,
-    private val attachmentDao: AttachmentDao,
+    private val attachmentRepository: AttachmentRepository,
     private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
 
@@ -98,10 +96,10 @@ class ConversationDetailsViewModel @Inject constructor(
 
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
-        chatDao.observeParticipantsForChat(chatGuid),
-        attachmentDao.observeImageCountForChat(chatGuid),
-        attachmentDao.observeOtherMediaCountForChat(chatGuid),
-        attachmentDao.observeRecentImagesForChat(chatGuid, 5),
+        chatRepository.observeParticipantsForChat(chatGuid),
+        attachmentRepository.observeImageCountForChat(chatGuid),
+        attachmentRepository.observeOtherMediaCountForChat(chatGuid),
+        attachmentRepository.observeRecentImagesForChat(chatGuid, 5),
         _isContactStarred
     ) { values ->
         val chat = values[0] as ChatEntity?
@@ -129,7 +127,7 @@ class ConversationDetailsViewModel @Inject constructor(
     init {
         // Check starred status when participants are loaded
         viewModelScope.launch {
-            chatDao.observeParticipantsForChat(chatGuid).collect { participants ->
+            chatRepository.observeParticipantsForChat(chatGuid).collect { participants ->
                 val address = participants.firstOrNull()?.address
                 if (address != null) {
                     _isContactStarred.value = androidContactsService.isContactStarred(address)

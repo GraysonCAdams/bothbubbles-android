@@ -1,6 +1,8 @@
 package com.bothbubbles.data.local.db.dao
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
+import androidx.room.Embedded
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -213,6 +215,18 @@ interface ChatDao {
         WHERE chr.chat_guid IN (:chatGuids)
     """)
     suspend fun getParticipantsForChats(chatGuids: List<String>): List<HandleEntity>
+
+    /**
+     * PERF: Batch fetch participants with their chat guids for grouping.
+     * Unlike getParticipantsForChats, this preserves the chat->participant mapping
+     * so callers can group participants by chat without N+1 queries.
+     */
+    @Query("""
+        SELECT h.*, chr.chat_guid as chatGuid FROM handles h
+        INNER JOIN chat_handle_cross_ref chr ON h.id = chr.handle_id
+        WHERE chr.chat_guid IN (:chatGuids)
+    """)
+    suspend fun getParticipantsWithChatGuids(chatGuids: List<String>): List<HandleWithChatGuid>
 
     @Query("""
         SELECT h.* FROM handles h
@@ -512,4 +526,13 @@ data class ChatFallbackProjection(
     val guid: String,
     val reason: String?,
     val updatedAt: Long?
+)
+
+/**
+ * Handle with its associated chat GUID for grouping participants by chat.
+ * Used for batch loading participants for multiple chats without N+1 queries.
+ */
+data class HandleWithChatGuid(
+    @Embedded val handle: HandleEntity,
+    @ColumnInfo(name = "chatGuid") val chatGuid: String
 )

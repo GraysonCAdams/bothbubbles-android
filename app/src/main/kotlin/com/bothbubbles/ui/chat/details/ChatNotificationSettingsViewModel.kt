@@ -4,13 +4,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
@@ -91,8 +89,7 @@ data class ChatNotificationSettingsUiState(
 @HiltViewModel
 class ChatNotificationSettingsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val chatRepository: ChatRepository,
-    private val chatDao: ChatDao
+    private val chatRepository: ChatRepository
 ) : ViewModel() {
 
     private val route: Screen.ChatNotificationSettings = savedStateHandle.toRoute()
@@ -100,7 +97,7 @@ class ChatNotificationSettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<ChatNotificationSettingsUiState> = combine(
         chatRepository.observeChat(chatGuid),
-        chatDao.observeParticipantsForChat(chatGuid)
+        chatRepository.observeParticipantsForChat(chatGuid)
     ) { chat, participants ->
         ChatNotificationSettingsUiState(
             chat = chat,

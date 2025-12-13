@@ -109,7 +109,7 @@ class SocketService @Inject constructor(
     private val developerEventLog: Lazy<DeveloperEventLog>,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
-) {
+) : SocketConnection {
     companion object {
         private const val TAG = "SocketService"
 
@@ -144,13 +144,13 @@ class SocketService @Inject constructor(
     private var retryJob: kotlinx.coroutines.Job? = null
 
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
-    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val _retryAttempt = MutableStateFlow(0)
-    val retryAttempt: StateFlow<Int> = _retryAttempt.asStateFlow()
+    override val retryAttempt: StateFlow<Int> = _retryAttempt.asStateFlow()
 
     private val _events = MutableSharedFlow<SocketEvent>(extraBufferCapacity = 100)
-    val events: SharedFlow<SocketEvent> = _events.asSharedFlow()
+    override val events: SharedFlow<SocketEvent> = _events.asSharedFlow()
 
     private val messageAdapter by lazy {
         moshi.adapter(MessageDto::class.java)
@@ -159,7 +159,7 @@ class SocketService @Inject constructor(
     /**
      * Check if server is configured (has address and password)
      */
-    suspend fun isServerConfigured(): Boolean {
+    override suspend fun isServerConfigured(): Boolean {
         val serverAddress = settingsDataStore.serverAddress.first()
         val password = settingsDataStore.serverPassword.first()
         return serverAddress.isNotBlank() && password.isNotBlank()
@@ -171,7 +171,7 @@ class SocketService @Inject constructor(
     /**
      * Connect to the BlueBubbles server
      */
-    fun connect() {
+    override fun connect() {
         Log.i(TAG, "connect() called - attempting to connect to server")
 
         if (socket?.connected() == true) {
@@ -297,7 +297,7 @@ class SocketService @Inject constructor(
     /**
      * Disconnect from the server
      */
-    fun disconnect() {
+    override fun disconnect() {
         socket?.disconnect()
         socket?.off()
         socket = null
@@ -308,7 +308,7 @@ class SocketService @Inject constructor(
     /**
      * Reconnect to the server
      */
-    fun reconnect() {
+    override fun reconnect() {
         resetRetryState()
         disconnect()
         connect()
@@ -317,7 +317,7 @@ class SocketService @Inject constructor(
     /**
      * Force an immediate retry (for user-triggered retry)
      */
-    fun retryNow() {
+    override fun retryNow() {
         resetRetryState()
         connect()
     }
@@ -325,7 +325,7 @@ class SocketService @Inject constructor(
     /**
      * Check if currently connected
      */
-    fun isConnected(): Boolean = socket?.connected() == true
+    override fun isConnected(): Boolean = socket?.connected() == true
 
     // ===== Typing Indicators (Outbound) =====
 
@@ -334,7 +334,7 @@ class SocketService @Inject constructor(
      * This notifies the other party that we are typing.
      * Requires Private API to be enabled on the server.
      */
-    fun sendStartedTyping(chatGuid: String) {
+    override fun sendStartedTyping(chatGuid: String) {
         if (!isConnected()) {
             Log.d(TAG, "Cannot send typing indicator: not connected")
             return
@@ -353,7 +353,7 @@ class SocketService @Inject constructor(
      * This notifies the other party that we stopped typing.
      * Requires Private API to be enabled on the server.
      */
-    fun sendStoppedTyping(chatGuid: String) {
+    override fun sendStoppedTyping(chatGuid: String) {
         if (!isConnected()) {
             Log.d(TAG, "Cannot send typing indicator: not connected")
             return
@@ -745,7 +745,7 @@ class SocketService @Inject constructor(
      * This tells the server which chat is currently active, allowing it to
      * optimize notifications (e.g., skip push for active chat).
      */
-    fun sendOpenChat(chatGuid: String) {
+    override fun sendOpenChat(chatGuid: String) {
         if (!isConnected()) {
             Log.d(TAG, "Cannot send open-chat: not connected")
             return
@@ -763,7 +763,7 @@ class SocketService @Inject constructor(
      * Notify server that user closed the conversation.
      * Call this when navigating away from the chat screen.
      */
-    fun sendCloseChat(chatGuid: String) {
+    override fun sendCloseChat(chatGuid: String) {
         if (!isConnected()) {
             Log.d(TAG, "Cannot send close-chat: not connected")
             return

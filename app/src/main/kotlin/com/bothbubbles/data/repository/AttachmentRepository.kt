@@ -7,18 +7,25 @@ import android.provider.OpenableColumns
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
+import com.bothbubbles.data.local.db.entity.TransferState
+import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.services.media.ThumbnailManager
 import com.bothbubbles.util.GifProcessor
+import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.retryWithBackoff
 import com.radzivon.bartoshyk.avif.coder.HeifCoder
-import com.bothbubbles.data.remote.api.BothBubblesApi
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.io.FileOutputStream
+import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,7 +35,8 @@ class AttachmentRepository @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val api: BothBubblesApi,
     private val okHttpClient: OkHttpClient,
-    private val thumbnailManager: ThumbnailManager
+    private val thumbnailManager: ThumbnailManager,
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "AttachmentRepository"
@@ -46,148 +54,270 @@ class AttachmentRepository @Inject constructor(
     suspend fun getAttachment(guid: String): AttachmentEntity? =
         attachmentDao.getAttachmentByGuid(guid)
 
+    suspend fun getAttachmentByGuid(guid: String): AttachmentEntity? =
+        attachmentDao.getAttachmentByGuid(guid)
+
     suspend fun getAttachmentsForMessage(messageGuid: String): List<AttachmentEntity> =
         attachmentDao.getAttachmentsForMessage(messageGuid)
+
+    /**
+     * Batch fetch attachments for multiple messages.
+     */
+    suspend fun getAttachmentsForMessages(messageGuids: List<String>): List<AttachmentEntity> =
+        attachmentDao.getAttachmentsForMessages(messageGuids)
+
+    /**
+     * Get all attachments for a chat (images, videos, files).
+     */
+    fun getAttachmentsForChat(chatGuid: String): Flow<List<AttachmentEntity>> =
+        attachmentDao.getAttachmentsForChat(chatGuid)
+
+    /**
+     * Get images only for a chat.
+     */
+    fun getImagesForChat(chatGuid: String): Flow<List<AttachmentEntity>> =
+        attachmentDao.getImagesForChat(chatGuid)
+
+    /**
+     * Get videos only for a chat.
+     */
+    fun getVideosForChat(chatGuid: String): Flow<List<AttachmentEntity>> =
+        attachmentDao.getVideosForChat(chatGuid)
+
+    /**
+     * Get cached (downloaded) media for a chat.
+     */
+    suspend fun getCachedMediaForChat(chatGuid: String): List<AttachmentEntity> =
+        attachmentDao.getCachedMediaForChat(chatGuid)
+
+    /**
+     * Observe image count for a chat.
+     */
+    fun observeImageCountForChat(chatGuid: String): Flow<Int> =
+        attachmentDao.observeImageCountForChat(chatGuid)
+
+    /**
+     * Observe other media count (videos, audio, documents) for a chat.
+     */
+    fun observeOtherMediaCountForChat(chatGuid: String): Flow<Int> =
+        attachmentDao.observeOtherMediaCountForChat(chatGuid)
+
+    /**
+     * Observe recent images for a chat (for preview).
+     */
+    fun observeRecentImagesForChat(chatGuid: String, limit: Int = 5): Flow<List<AttachmentEntity>> =
+        attachmentDao.observeRecentImagesForChat(chatGuid, limit)
+
+    // ===== Sync Operations =====
+
+    /**
+     * Sync attachments from a MessageDto to the local database.
+     * Used during message sync to ensure attachments are tracked locally.
+     *
+     * @param messageDto The message DTO containing attachment information
+     * @param tempMessageGuid Optional temp GUID to clean up temp attachments from
+     */
+    suspend fun syncAttachmentsFromDto(messageDto: MessageDto, tempMessageGuid: String? = null) {
+        // Delete any temp attachments that were created for immediate display
+        tempMessageGuid?.let { tempGuid ->
+            attachmentDao.deleteAttachmentsForMessage(tempGuid)
+        }
+
+        if (messageDto.attachments.isNullOrEmpty()) return
+
+        val serverAddress = settingsDataStore.serverAddress.first()
+
+        messageDto.attachments.forEach { attachmentDto ->
+            // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
+            val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
+
+            // Determine transfer state based on direction:
+            // - Outbound (isOutgoing=true): Already uploaded, mark as UPLOADED
+            // - Inbound: Needs download, mark as PENDING for auto-download
+            val transferState = if (attachmentDto.isOutgoing) {
+                TransferState.UPLOADED.name
+            } else {
+                TransferState.PENDING.name
+            }
+
+            val attachment = AttachmentEntity(
+                guid = attachmentDto.guid,
+                messageGuid = messageDto.guid,
+                originalRowId = attachmentDto.originalRowId,
+                uti = attachmentDto.uti,
+                mimeType = attachmentDto.mimeType,
+                transferName = attachmentDto.transferName,
+                totalBytes = attachmentDto.totalBytes,
+                isOutgoing = attachmentDto.isOutgoing,
+                hideAttachment = attachmentDto.hideAttachment,
+                width = attachmentDto.width,
+                height = attachmentDto.height,
+                hasLivePhoto = attachmentDto.hasLivePhoto,
+                isSticker = attachmentDto.isSticker,
+                webUrl = webUrl,
+                transferState = transferState,
+                transferProgress = if (attachmentDto.isOutgoing) 1f else 0f
+            )
+            attachmentDao.insertAttachment(attachment)
+        }
+    }
 
     // ===== Download Operations =====
 
     /**
-     * Download an attachment from the server
+     * Download an attachment from the server.
+     * Retries with exponential backoff on transient network errors.
      */
     suspend fun downloadAttachment(
         attachmentGuid: String,
         onProgress: ((Float) -> Unit)? = null
     ): Result<File> = withContext(Dispatchers.IO) {
         runCatching {
-            val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
-                ?: throw Exception("Attachment not found")
-
-            // Check if already downloaded
-            attachment.localPath?.let { path ->
-                val existingFile = File(path)
-                if (existingFile.exists()) {
-                    return@runCatching existingFile
-                }
+            retryWithBackoff(
+                times = NetworkConfig.ATTACHMENT_RETRY_ATTEMPTS,
+                initialDelayMs = NetworkConfig.ATTACHMENT_INITIAL_DELAY_MS,
+                maxDelayMs = NetworkConfig.ATTACHMENT_MAX_DELAY_MS
+            ) {
+                downloadAttachmentInternal(attachmentGuid, onProgress)
             }
+        }
+    }
 
-            // Get download URL from webUrl or throw
-            val baseDownloadUrl = attachment.webUrl
-                ?: throw Exception("No download URL available")
+    /**
+     * Internal download logic, called by downloadAttachment with retry wrapper.
+     */
+    private suspend fun downloadAttachmentInternal(
+        attachmentGuid: String,
+        onProgress: ((Float) -> Unit)? = null
+    ): File {
+        val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
+            ?: throw Exception("Attachment not found")
 
-            // Create file with proper extension
-            val extension = getExtensionFromMimeType(attachment.mimeType)
-            val fileName = "${attachmentGuid}${extension}"
-            val outputFile = File(attachmentsDir, fileName)
-
-            // For stickers, try with original=true first to get HEIC with transparency
-            // Fall back to regular download if server returns error
-            val downloadUrl = if (attachment.isSticker && !baseDownloadUrl.contains("original=true")) {
-                val separator = if (baseDownloadUrl.contains("?")) "&" else "?"
-                "${baseDownloadUrl}${separator}original=true"
-            } else {
-                baseDownloadUrl
+        // Check if already downloaded
+        attachment.localPath?.let { path ->
+            val existingFile = File(path)
+            if (existingFile.exists()) {
+                return existingFile
             }
+        }
 
-            var succeeded = false
-            var lastError: Exception? = null
+        // Get download URL from webUrl or throw
+        val baseDownloadUrl = attachment.webUrl
+            ?: throw Exception("No download URL available")
 
-            Log.d(TAG, "Downloading attachment ${attachmentGuid}, isSticker=${attachment.isSticker}")
+        // Create file with proper extension
+        val extension = getExtensionFromMimeType(attachment.mimeType)
+        val fileName = "${attachmentGuid}${extension}"
+        val outputFile = File(attachmentsDir, fileName)
 
-            // Try download (with original=true for stickers first)
+        // For stickers, try with original=true first to get HEIC with transparency
+        // Fall back to regular download if server returns error
+        val downloadUrl = if (attachment.isSticker && !baseDownloadUrl.contains("original=true")) {
+            val separator = if (baseDownloadUrl.contains("?")) "&" else "?"
+            "${baseDownloadUrl}${separator}original=true"
+        } else {
+            baseDownloadUrl
+        }
+
+        var succeeded = false
+        var lastError: Exception? = null
+
+        Log.d(TAG, "Downloading attachment ${attachmentGuid}, isSticker=${attachment.isSticker}")
+
+        // Try download (with original=true for stickers first)
+        try {
+            Log.d(TAG, "Attempting download from: $downloadUrl")
+            downloadFile(downloadUrl, outputFile, onProgress)
+            succeeded = true
+            Log.d(TAG, "Download succeeded, file size: ${outputFile.length()} bytes")
+        } catch (e: Exception) {
+            lastError = e
+            Log.w(TAG, "Download failed with original=true, will retry without: ${e.message}")
+        }
+
+        // If sticker download failed with original=true, retry without it
+        if (!succeeded && attachment.isSticker && downloadUrl != baseDownloadUrl) {
             try {
-                Log.d(TAG, "Attempting download from: $downloadUrl")
-                downloadFile(downloadUrl, outputFile, onProgress)
+                Log.d(TAG, "Retrying without original=true: $baseDownloadUrl")
+                downloadFile(baseDownloadUrl, outputFile, onProgress)
                 succeeded = true
-                Log.d(TAG, "Download succeeded, file size: ${outputFile.length()} bytes")
+                Log.d(TAG, "Fallback download succeeded, file size: ${outputFile.length()} bytes")
             } catch (e: Exception) {
                 lastError = e
-                Log.w(TAG, "Download failed with original=true, will retry without: ${e.message}")
+                Log.e(TAG, "Fallback download also failed: ${e.message}")
             }
+        }
 
-            // If sticker download failed with original=true, retry without it
-            if (!succeeded && attachment.isSticker && downloadUrl != baseDownloadUrl) {
-                try {
-                    Log.d(TAG, "Retrying without original=true: $baseDownloadUrl")
-                    downloadFile(baseDownloadUrl, outputFile, onProgress)
-                    succeeded = true
-                    Log.d(TAG, "Fallback download succeeded, file size: ${outputFile.length()} bytes")
-                } catch (e: Exception) {
-                    lastError = e
-                    Log.e(TAG, "Fallback download also failed: ${e.message}")
-                }
-            }
+        if (!succeeded) {
+            throw lastError ?: Exception("Download failed")
+        }
 
-            if (!succeeded) {
-                throw lastError ?: Exception("Download failed")
-            }
-
-            // Convert HEIC/HEIF to PNG for stickers (Android's HEIC support is unreliable)
-            val isHeic = isHeicFile(outputFile)
-            Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic")
-            var finalFile = if (attachment.isSticker && isHeic) {
-                Log.d(TAG, "Converting HEIC sticker to PNG...")
-                val converted = convertHeicToPng(outputFile, attachmentGuid)
-                // Check if conversion actually succeeded (PNG file exists and is larger than 0)
-                if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
-                    converted
-                } else {
-                    // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
-                    // Fall back to downloading JPEG version (no transparency but at least it displays)
-                    Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
-                    outputFile.delete()
-                    downloadFile(baseDownloadUrl, outputFile, onProgress)
-                    Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
-                    outputFile
-                }
+        // Convert HEIC/HEIF to PNG for stickers (Android's HEIC support is unreliable)
+        val isHeic = isHeicFile(outputFile)
+        Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic")
+        var finalFile = if (attachment.isSticker && isHeic) {
+            Log.d(TAG, "Converting HEIC sticker to PNG...")
+            val converted = convertHeicToPng(outputFile, attachmentGuid)
+            // Check if conversion actually succeeded (PNG file exists and is larger than 0)
+            if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
+                converted
             } else {
+                // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
+                // Fall back to downloading JPEG version (no transparency but at least it displays)
+                Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
+                outputFile.delete()
+                downloadFile(baseDownloadUrl, outputFile, onProgress)
+                Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
                 outputFile
             }
-
-            // Fix GIFs with zero-delay frames (causes them to play too fast)
-            if (attachment.mimeType?.startsWith("image/gif") == true && finalFile.exists()) {
-                try {
-                    val originalBytes = finalFile.readBytes()
-                    val fixedBytes = GifProcessor.fixSpeedyGif(originalBytes)
-                    if (fixedBytes !== originalBytes) {
-                        finalFile.writeBytes(fixedBytes)
-                        Log.d(TAG, "Applied GIF speed fix to ${attachment.guid}")
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Failed to apply GIF speed fix", e)
-                }
-            }
-
-            // Generate thumbnail for images and videos (skip GIFs - they're already small)
-            var thumbnailPath: String? = null
-            if (finalFile.exists() && !attachment.isSticker) {
-                thumbnailPath = when {
-                    attachment.isImage && attachment.mimeType != "image/gif" -> {
-                        thumbnailManager.generateImageThumbnail(
-                            sourcePath = finalFile.absolutePath,
-                            attachmentGuid = attachmentGuid
-                        )
-                    }
-                    attachment.isVideo -> {
-                        thumbnailManager.generateVideoThumbnail(
-                            sourcePath = finalFile.absolutePath,
-                            attachmentGuid = attachmentGuid
-                        )
-                    }
-                    else -> null
-                }
-                if (thumbnailPath != null) {
-                    Log.d(TAG, "Generated thumbnail for $attachmentGuid at $thumbnailPath")
-                }
-            }
-
-            // Update database with file path and thumbnail
-            attachmentDao.updateLocalPath(attachmentGuid, finalFile.absolutePath)
-            if (thumbnailPath != null) {
-                attachmentDao.updateThumbnailPath(attachmentGuid, thumbnailPath)
-            }
-
-            finalFile
+        } else {
+            outputFile
         }
+
+        // Fix GIFs with zero-delay frames (causes them to play too fast)
+        if (attachment.mimeType?.startsWith("image/gif") == true && finalFile.exists()) {
+            try {
+                val originalBytes = finalFile.readBytes()
+                val fixedBytes = GifProcessor.fixSpeedyGif(originalBytes)
+                if (fixedBytes !== originalBytes) {
+                    finalFile.writeBytes(fixedBytes)
+                    Log.d(TAG, "Applied GIF speed fix to ${attachment.guid}")
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "Failed to apply GIF speed fix", e)
+            }
+        }
+
+        // Generate thumbnail for images and videos (skip GIFs - they're already small)
+        var thumbnailPath: String? = null
+        if (finalFile.exists() && !attachment.isSticker) {
+            thumbnailPath = when {
+                attachment.isImage && attachment.mimeType != "image/gif" -> {
+                    thumbnailManager.generateImageThumbnail(
+                        sourcePath = finalFile.absolutePath,
+                        attachmentGuid = attachmentGuid
+                    )
+                }
+                attachment.isVideo -> {
+                    thumbnailManager.generateVideoThumbnail(
+                        sourcePath = finalFile.absolutePath,
+                        attachmentGuid = attachmentGuid
+                    )
+                }
+                else -> null
+            }
+            if (thumbnailPath != null) {
+                Log.d(TAG, "Generated thumbnail for $attachmentGuid at $thumbnailPath")
+            }
+        }
+
+        // Update database with file path and thumbnail
+        attachmentDao.updateLocalPath(attachmentGuid, finalFile.absolutePath)
+        if (thumbnailPath != null) {
+            attachmentDao.updateThumbnailPath(attachmentGuid, thumbnailPath)
+        }
+
+        return finalFile
     }
 
     /**
@@ -204,7 +334,7 @@ class AttachmentRepository @Inject constructor(
 
         okHttpClient.newCall(request).execute().use { downloadResponse ->
             if (!downloadResponse.isSuccessful) {
-                throw Exception("Download failed: ${downloadResponse.code}")
+                throw IOException("Download failed: ${downloadResponse.code}")
             }
 
             val body = downloadResponse.body

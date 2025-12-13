@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.input
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween

@@ -6,8 +6,13 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -17,8 +22,8 @@ import javax.inject.Inject
  * OkHttp interceptor that dynamically sets the base URL from settings
  * and adds authentication and custom headers to all requests.
  *
- * IMPORTANT: Uses cached values instead of runBlocking to avoid blocking
- * OkHttp's network threads, which would cause socket timeouts.
+ * Uses cached values with initialization tracking to avoid race conditions
+ * on app startup while not blocking OkHttp's network threads unnecessarily.
  */
 class AuthInterceptor @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
@@ -26,26 +31,33 @@ class AuthInterceptor @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : Interceptor {
 
-    // Cached settings values - updated reactively from DataStore
-    // Using @Volatile for thread-safe reads from OkHttp network threads
-    @Volatile private var cachedServerAddress: String = ""
-    @Volatile private var cachedAuthKey: String = ""
-    @Volatile private var cachedCustomHeaders: Map<String, String> = emptyMap()
+    private data class CachedCredentials(
+        val serverAddress: String = "",
+        val authKey: String = "",
+        val customHeaders: Map<String, String> = emptyMap()
+    )
+
+    private val _credentials = MutableStateFlow(CachedCredentials())
+    private val _initialized = MutableStateFlow(false)
 
     init {
-        // Collect settings updates in background - these run on IO dispatcher
-        // and update the cached values that intercept() reads
-        settingsDataStore.serverAddress
-            .onEach { cachedServerAddress = it }
-            .launchIn(applicationScope)
-
-        settingsDataStore.guidAuthKey
-            .onEach { cachedAuthKey = it }
-            .launchIn(applicationScope)
-
-        settingsDataStore.customHeaders
-            .onEach { cachedCustomHeaders = it }
-            .launchIn(applicationScope)
+        // Combine all settings flows and update cache atomically
+        combine(
+            settingsDataStore.serverAddress,
+            settingsDataStore.guidAuthKey,
+            settingsDataStore.customHeaders
+        ) { address, authKey, headers ->
+            CachedCredentials(
+                serverAddress = address,
+                authKey = authKey,
+                customHeaders = headers
+            )
+        }
+        .onEach { credentials ->
+            _credentials.value = credentials
+            _initialized.value = true
+        }
+        .launchIn(applicationScope)
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {
@@ -58,10 +70,11 @@ class AuthInterceptor @Inject constructor(
             return chain.proceed(originalRequest)
         }
 
-        // Read cached values (non-blocking)
-        val serverAddress = cachedServerAddress
-        val authKey = cachedAuthKey
-        val customHeaders = cachedCustomHeaders
+        // Get credentials, waiting for initialization if needed
+        val credentials = getCredentialsBlocking()
+        val serverAddress = credentials.serverAddress
+        val authKey = credentials.authKey
+        val customHeaders = credentials.customHeaders
 
         // Build the actual URL by replacing the placeholder base URL with the real server address
         val baseUrl = serverAddress.toHttpUrlOrNull()
@@ -108,8 +121,41 @@ class AuthInterceptor @Inject constructor(
         }
 
         val finalRequest = requestBuilder.build()
-        Log.d("AuthInterceptor", "DEBUG: Request URL = ${finalRequest.url}")
-        Log.d("AuthInterceptor", "DEBUG: Request method = ${finalRequest.method}")
+        Log.d(TAG, "Request URL = ${finalRequest.url}")
+        Log.d(TAG, "Request method = ${finalRequest.method}")
         return chain.proceed(finalRequest)
+    }
+
+    /**
+     * Get credentials, waiting for initialization if needed.
+     * Uses bounded timeout to prevent indefinite blocking.
+     *
+     * This runBlocking is acceptable because:
+     * 1. We're already on OkHttp's background thread pool
+     * 2. We need synchronous response for the interceptor
+     * 3. We have bounded timeout (3 seconds max)
+     * 4. DataStore guarantees first emission (stored value or default)
+     */
+    private fun getCredentialsBlocking(): CachedCredentials {
+        // Fast path: already initialized
+        if (_initialized.value) {
+            return _credentials.value
+        }
+
+        // Slow path: wait for initialization with timeout
+        return runBlocking {
+            withTimeoutOrNull(INIT_TIMEOUT_MS) {
+                _initialized.first { it }
+                _credentials.value
+            } ?: run {
+                Log.w(TAG, "Credentials initialization timed out")
+                _credentials.value
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "AuthInterceptor"
+        private const val INIT_TIMEOUT_MS = 3000L
     }
 }

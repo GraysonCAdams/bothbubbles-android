@@ -5,16 +5,14 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
 import android.provider.BlockedNumberContract
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
-import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -27,6 +25,8 @@ import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.data.repository.ScheduledMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
@@ -42,6 +42,7 @@ import com.bothbubbles.services.media.AttachmentPreloader
 import com.bothbubbles.services.media.ValidationError
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.smartreply.SmartReplyService
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.MessageDto
@@ -58,13 +59,15 @@ import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.EmojiAnalysis
 import com.bothbubbles.ui.components.message.MessageUiModel
-import com.bothbubbles.ui.components.ReactionUiModel
+import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
-import com.bothbubbles.ui.components.SuggestionItem
-import com.bothbubbles.ui.components.Tapback
+import com.bothbubbles.ui.components.input.SuggestionItem
+import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.ThreadChain
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.ui.effects.MessageEffect
+import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.paging.MessagePagingController
 import com.bothbubbles.ui.chat.paging.PagingConfig
 import com.bothbubbles.ui.chat.paging.RoomMessageDataSource
@@ -72,6 +75,12 @@ import com.bothbubbles.ui.chat.paging.SparseMessageList
 import com.bothbubbles.ui.chat.paging.SyncTrigger
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
+import com.bothbubbles.util.error.AppError
+import com.bothbubbles.util.error.AppError
+import com.bothbubbles.ui.util.StableList
+import com.bothbubbles.ui.util.toStable
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.Immutable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -97,26 +106,28 @@ class ChatViewModel @Inject constructor(
     private val soundManager: SoundManager,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
-    private val attachmentDao: AttachmentDao,
     private val attachmentRepository: AttachmentRepository,
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
     private val androidContactsService: AndroidContactsService,
     private val vCardService: VCardService,
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val scheduledMessageDao: ScheduledMessageDao,
+    private val scheduledMessageRepository: ScheduledMessageRepository,
     private val workManager: WorkManager,
-    private val handleDao: HandleDao,
+    private val handleRepository: HandleRepository,
     private val activeConversationManager: ActiveConversationManager,
     private val api: BothBubblesApi,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val attachmentPreloader: AttachmentPreloader,
     private val pendingMessageRepository: PendingMessageRepository,
-    private val messageDao: MessageDao,
     private val iMessageAvailabilityService: IMessageAvailabilityService,
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val chatStateCache: ChatStateCache,
-    private val appLifecycleTracker: AppLifecycleTracker
+    private val appLifecycleTracker: AppLifecycleTracker,
+    // Delegates for decomposition
+    private val sendDelegate: ChatSendDelegate,
+    private val attachmentDelegate: ChatAttachmentDelegate,
+    private val messageSendingService: MessageSendingService
 ) : ViewModel() {
 
     companion object {
@@ -156,6 +167,15 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    // Error state for UI display (consolidated into uiState.appError, this is for backward compatibility)
+    private val _appError = MutableStateFlow<AppError?>(null)
+    val appError: StateFlow<AppError?> = _appError.asStateFlow()
+
+    fun clearAppError() {
+        _appError.value = null
+        _uiState.update { it.copy(appError = null) }
+    }
 
     // Track when we're fetching older messages from the BlueBubbles server
     // Used to show "Loading more messages..." indicator at top of message list
@@ -205,11 +225,10 @@ class ChatViewModel @Inject constructor(
     private val pagingController: MessagePagingController by lazy {
         val dataSource = RoomMessageDataSource(
             chatGuids = mergedChatGuids,
-            messageDao = messageDao,
-            attachmentDao = attachmentDao,
-            handleDao = handleDao,
-            chatRepository = chatRepository,
             messageRepository = messageRepository,
+            attachmentRepository = attachmentRepository,
+            handleRepository = handleRepository,
+            chatRepository = chatRepository,
             messageCache = messageCache,
             syncTrigger = syncTriggerImpl
         )
@@ -352,6 +371,47 @@ class ChatViewModel @Inject constructor(
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
 
     init {
+        // Initialize delegates
+        sendDelegate.initialize(chatGuid, viewModelScope)
+        attachmentDelegate.initialize(chatGuid, viewModelScope, mergedChatGuids)
+
+        // Observe delegate state flows and forward to UI state
+        viewModelScope.launch {
+            sendDelegate.replyingToGuid.collect { guid ->
+                _uiState.update { it.copy(replyingToGuid = guid) }
+            }
+        }
+        viewModelScope.launch {
+            sendDelegate.isForwarding.collect { forwarding ->
+                _uiState.update { it.copy(isForwarding = forwarding) }
+            }
+        }
+        viewModelScope.launch {
+            sendDelegate.forwardSuccess.collect { success ->
+                if (success) {
+                    _uiState.update { it.copy(forwardSuccess = true) }
+                }
+            }
+        }
+        viewModelScope.launch {
+            sendDelegate.sendError.collect { error ->
+                if (error != null) {
+                    _uiState.update { it.copy(error = error) }
+                }
+            }
+        }
+        // Forward attachment delegate's download progress to ViewModel state
+        viewModelScope.launch {
+            attachmentDelegate.downloadProgress.collect { progress ->
+                _attachmentDownloadProgress.value = progress
+            }
+        }
+        viewModelScope.launch {
+            attachmentDelegate.refreshTrigger.collect { trigger ->
+                _attachmentRefreshTrigger.value = trigger
+            }
+        }
+
         // Check LRU cache for previously viewed chat state (instant restore)
         val cachedState = chatStateCache.get(chatGuid)
         if (cachedState != null) {
@@ -452,12 +512,12 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Observe upload progress from MessageRepository for determinate progress bar.
+     * Observe upload progress from MessageSendingService for determinate progress bar.
      * Updates the first pending message with attachments and recalculates aggregate progress.
      */
     private fun observeUploadProgress() {
         viewModelScope.launch {
-            messageRepository.uploadProgress.collect { progress ->
+            messageSendingService.uploadProgress.collect { progress ->
                 if (progress != null) {
                     // Calculate individual message progress (0.0 to 1.0)
                     val attachmentBase = progress.attachmentIndex.toFloat() / progress.totalAttachments
@@ -472,7 +532,7 @@ class ChatViewModel @Inject constructor(
                             pendingList[attachmentIndex] = pendingList[attachmentIndex].copy(progress = messageProgress)
                         }
                         state.copy(
-                            pendingMessages = pendingList,
+                            pendingMessages = pendingList.toStable(),
                             sendProgress = calculateAggregateProgress(pendingList)
                         )
                     }
@@ -488,26 +548,7 @@ class ChatViewModel @Inject constructor(
      * Uses the download queue for prioritized, concurrent downloads.
      */
     private fun downloadPendingAttachments() {
-        viewModelScope.launch {
-            // Enqueue all pending attachments for this chat with ACTIVE_CHAT priority
-            if (isMergedChat) {
-                mergedChatGuids.forEach { guid ->
-                    attachmentDownloadQueue.enqueueAllForChat(guid, AttachmentDownloadQueue.Priority.ACTIVE_CHAT)
-                }
-            } else {
-                attachmentDownloadQueue.enqueueAllForChat(chatGuid, AttachmentDownloadQueue.Priority.ACTIVE_CHAT)
-            }
-        }
-
-        // Observe download completions to trigger UI refresh
-        viewModelScope.launch {
-            attachmentDownloadQueue.downloadCompletions.collect { attachmentGuid ->
-                // Remove from progress map if it was being tracked
-                _attachmentDownloadProgress.update { it - attachmentGuid }
-                // Trigger message refresh so UI shows the downloaded attachment
-                _attachmentRefreshTrigger.value++
-            }
-        }
+        attachmentDelegate.downloadPendingAttachments()
     }
 
     /**
@@ -516,27 +557,21 @@ class ChatViewModel @Inject constructor(
      * Uses IMMEDIATE priority to jump ahead of background downloads.
      */
     fun downloadAttachment(attachmentGuid: String) {
-        // Mark as downloading
-        _attachmentDownloadProgress.update { it + (attachmentGuid to 0f) }
-
-        // Enqueue with IMMEDIATE priority - will be processed ahead of other downloads
-        attachmentDownloadQueue.enqueue(attachmentGuid, chatGuid, AttachmentDownloadQueue.Priority.IMMEDIATE)
-
-        // Progress and completion are tracked via the queue's SharedFlow in downloadPendingAttachments()
+        attachmentDelegate.downloadAttachment(attachmentGuid)
     }
 
     /**
      * Check if an attachment is currently downloading.
      */
     fun isDownloading(attachmentGuid: String): Boolean {
-        return attachmentGuid in _attachmentDownloadProgress.value
+        return attachmentDelegate.isDownloading(attachmentGuid)
     }
 
     /**
      * Get download progress for an attachment (0.0 to 1.0).
      */
     fun getDownloadProgress(attachmentGuid: String): Float {
-        return _attachmentDownloadProgress.value[attachmentGuid] ?: 0f
+        return attachmentDelegate.getDownloadProgress(attachmentGuid)
     }
 
     /**
@@ -565,7 +600,7 @@ class ChatViewModel @Inject constructor(
                 .collect { pending ->
                     _uiState.update { state ->
                         state.copy(
-                            queuedMessages = pending.map { it.toQueuedUiModel() }
+                            queuedMessages = pending.map { it.toQueuedUiModel() }.toStable()
                         )
                     }
                 }
@@ -1300,7 +1335,7 @@ class ChatViewModel @Inject constructor(
             val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
             // Batch load attachments for all thread messages
-            val allAttachments = attachmentDao.getAttachmentsForMessages(
+            val allAttachments = attachmentRepository.getAttachmentsForMessages(
                 threadMessages.map { it.guid }
             ).groupBy { it.messageGuid }
 
@@ -1399,8 +1434,8 @@ class ChatViewModel @Inject constructor(
                             chatTitle = chatTitle,
                             isGroup = it.isGroup,
                             avatarPath = participants.firstOrNull()?.cachedAvatarPath,
-                            participantNames = participants.map { p -> p.displayName },
-                            participantAvatarPaths = participants.map { p -> p.cachedAvatarPath },
+                            participantNames = participants.map { p -> p.displayName }.toStable(),
+                            participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
                             isArchived = it.isArchived,
                             isStarred = it.isStarred,
                             participantPhone = it.chatIdentifier,
@@ -1455,7 +1490,7 @@ class ChatViewModel @Inject constructor(
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
-                            messages = messageModels,
+                            messages = messageModels.toStable(),
                             canLoadMore = messageModels.size < pagingController.totalCount.value
                         )
                     }
@@ -1735,7 +1770,7 @@ class ChatViewModel @Inject constructor(
         val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
 
         // Batch load all attachments in a single query
-        val allAttachments = attachmentDao.getAttachmentsForMessages(
+        val allAttachments = attachmentRepository.getAttachmentsForMessages(
             regularMessages.map { it.guid }
         ).groupBy { it.messageGuid }
 
@@ -1754,7 +1789,7 @@ class ChatViewModel @Inject constructor(
         _uiState.update { state ->
             state.copy(
                 isLoading = false,
-                messages = messageModels
+                messages = messageModels.toStable()
             )
         }
     }
@@ -1853,6 +1888,9 @@ class ChatViewModel @Inject constructor(
 
         // Notify server we're leaving this chat
         socketService.sendCloseChat(chatGuid)
+
+        // Clear active chat for attachment download queue
+        attachmentDelegate.onChatLeave()
 
         typingDebounceJob?.cancel()
         if (isCurrentlyTyping) {
@@ -2091,77 +2129,32 @@ class ChatViewModel @Inject constructor(
     fun sendMessage(effectId: String? = null) {
         val text = _draftText.value.trim()
         val attachments = _pendingAttachments.value
-        val replyToGuid = _uiState.value.replyingToGuid
 
         if (text.isBlank() && attachments.isEmpty()) return
 
-        // Stop typing indicator immediately when sending
-        typingDebounceJob?.cancel()
-        if (isCurrentlyTyping) {
-            isCurrentlyTyping = false
-            socketService.sendStoppedTyping(chatGuid)
-        }
-
-        viewModelScope.launch {
-            val sendId = PerformanceProfiler.start("Message.send", "${text.take(20)}...")
-            val isLocalSms = _uiState.value.isLocalSmsChat
-
-            // Clear UI state immediately for responsive feel
-            _draftText.value = ""
-            _pendingAttachments.value = emptyList()
-            _uiState.update { state ->
-                state.copy(
-                    replyingToGuid = null,
-                    attachmentCount = 0
-                )
-            }
-            // Clear draft from database
-            draftSaveJob?.cancel()
-            chatRepository.updateDraftText(chatGuid, null)
-
-            // Determine delivery mode based on chat type and current send mode
-            val currentSendMode = _uiState.value.currentSendMode
-            val deliveryMode = when {
-                // Local SMS chats always use local delivery
-                isLocalSms -> if (attachments.isNotEmpty()) MessageDeliveryMode.LOCAL_MMS else MessageDeliveryMode.LOCAL_SMS
-                // If user has selected SMS mode, use local SMS from Android
-                currentSendMode == ChatSendMode.SMS -> if (attachments.isNotEmpty()) MessageDeliveryMode.LOCAL_MMS else MessageDeliveryMode.LOCAL_SMS
-                // iMessage mode uses server
-                currentSendMode == ChatSendMode.IMESSAGE -> MessageDeliveryMode.IMESSAGE
-                // Fallback to auto
-                else -> MessageDeliveryMode.AUTO
-            }
-
-            // Queue message for offline-first delivery via WorkManager
-            // Message is persisted to database immediately and sent when network is available
-            pendingMessageRepository.queueMessage(
-                chatGuid = chatGuid,
-                text = text,
-                replyToGuid = replyToGuid,
-                effectId = effectId,
-                attachments = attachments,
-                deliveryMode = deliveryMode
-            ).fold(
-                onSuccess = { localId ->
-                    Log.d(TAG, "Message queued successfully: $localId")
-                    PerformanceProfiler.end(sendId, "queued")
-
-                    // Play sound for SMS delivery (optimistic - actual send happens via WorkManager)
-                    // For iMessage, sound plays when delivery is confirmed via socket event
-                    val isSmsSend = isLocalSms || currentSendMode == ChatSendMode.SMS
-                    if (isSmsSend) {
-                        soundManager.playSendSound()
-                    }
-                },
-                onFailure = { e ->
-                    Log.e(TAG, "Failed to queue message", e)
-                    _uiState.update { state ->
-                        state.copy(error = "Failed to queue message: ${e.message}")
-                    }
-                    PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
+        // Delegate to ChatSendDelegate for the actual send operation
+        sendDelegate.sendMessage(
+            text = text,
+            attachments = attachments,
+            effectId = effectId,
+            currentSendMode = _uiState.value.currentSendMode,
+            isLocalSmsChat = _uiState.value.isLocalSmsChat,
+            onClearInput = {
+                // Clear UI state immediately for responsive feel
+                _draftText.value = ""
+                _pendingAttachments.value = emptyList()
+                _uiState.update { state ->
+                    state.copy(attachmentCount = 0)
                 }
-            )
-        }
+            },
+            onDraftCleared = {
+                // Clear draft from database
+                draftSaveJob?.cancel()
+                viewModelScope.launch {
+                    chatRepository.updateDraftText(chatGuid, null)
+                }
+            }
+        )
     }
 
     /**
@@ -2185,54 +2178,39 @@ class ChatViewModel @Inject constructor(
 
         if (text.isBlank() && attachments.isEmpty()) return
 
-        viewModelScope.launch {
-            val isLocalSms = deliveryMode == MessageDeliveryMode.LOCAL_SMS ||
-                            deliveryMode == MessageDeliveryMode.LOCAL_MMS
-
-            // Clear UI state immediately
-            _draftText.value = ""
-            _pendingAttachments.value = emptyList()
-            _uiState.update { it.copy(attachmentCount = 0) }
-
-            // Clear draft from database
-            draftSaveJob?.cancel()
-            chatRepository.updateDraftText(chatGuid, null)
-
-            // Queue message for offline-first delivery
-            pendingMessageRepository.queueMessage(
-                chatGuid = chatGuid,
-                text = text,
-                attachments = attachments,
-                deliveryMode = deliveryMode
-            ).fold(
-                onSuccess = { localId ->
-                    Log.d(TAG, "Message queued via $deliveryMode: $localId")
-                    if (isLocalSms) {
-                        soundManager.playSendSound()
-                    }
-                },
-                onFailure = { e ->
-                    Log.e(TAG, "Failed to queue message via $deliveryMode", e)
-                    _uiState.update { state ->
-                        state.copy(error = "Failed to queue message: ${e.message}")
-                    }
+        // Delegate to ChatSendDelegate
+        sendDelegate.sendMessageVia(
+            text = text,
+            attachments = attachments,
+            deliveryMode = deliveryMode,
+            onClearInput = {
+                // Clear UI state immediately
+                _draftText.value = ""
+                _pendingAttachments.value = emptyList()
+                _uiState.update { it.copy(attachmentCount = 0) }
+            },
+            onDraftCleared = {
+                // Clear draft from database
+                draftSaveJob?.cancel()
+                viewModelScope.launch {
+                    chatRepository.updateDraftText(chatGuid, null)
                 }
-            )
-        }
+            }
+        )
     }
 
     /**
      * Set the message to reply to (for swipe-to-reply)
      */
     fun setReplyTo(messageGuid: String) {
-        _uiState.update { it.copy(replyingToGuid = messageGuid) }
+        sendDelegate.setReplyTo(messageGuid)
     }
 
     /**
      * Clear the reply state
      */
     fun clearReply() {
-        _uiState.update { it.copy(replyingToGuid = null) }
+        sendDelegate.clearReply()
     }
 
     /**
@@ -2253,13 +2231,13 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             if (isRemoving) {
-                messageRepository.removeReaction(
+                messageSendingService.removeReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
                     reaction = tapback.apiName
                 )
             } else {
-                messageRepository.sendReaction(
+                messageSendingService.sendReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
                     reaction = tapback.apiName
@@ -2269,43 +2247,21 @@ class ChatViewModel @Inject constructor(
     }
 
     fun retryMessage(messageGuid: String) {
-        viewModelScope.launch {
-            messageRepository.retryMessage(messageGuid)
-        }
+        sendDelegate.retryMessage(messageGuid)
     }
 
     /**
      * Retry a failed iMessage as SMS/MMS
      */
     fun retryMessageAsSms(messageGuid: String) {
-        viewModelScope.launch {
-            messageRepository.retryAsSms(messageGuid).fold(
-                onSuccess = {
-                    // Message was successfully sent via SMS
-                },
-                onFailure = { e ->
-                    _uiState.update { it.copy(error = e.message) }
-                }
-            )
-        }
+        sendDelegate.retryMessageAsSms(messageGuid)
     }
 
     /**
      * Forward a message to another conversation.
      */
     fun forwardMessage(messageGuid: String, targetChatGuid: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isForwarding = true) }
-            messageRepository.forwardMessage(messageGuid, targetChatGuid).fold(
-                onSuccess = {
-                    _uiState.update { it.copy(isForwarding = false, forwardSuccess = true) }
-                    soundManager.playSendSound()
-                },
-                onFailure = { e ->
-                    _uiState.update { it.copy(isForwarding = false, error = "Failed to forward: ${e.message}") }
-                }
-            )
-        }
+        sendDelegate.forwardMessage(messageGuid, targetChatGuid)
     }
 
     /**
@@ -2320,6 +2276,7 @@ class ChatViewModel @Inject constructor(
      * Clear the forward success flag.
      */
     fun clearForwardSuccess() {
+        sendDelegate.clearForwardSuccess()
         _uiState.update { it.copy(forwardSuccess = false) }
     }
 
@@ -2327,7 +2284,7 @@ class ChatViewModel @Inject constructor(
      * Check if a failed message can be retried as SMS
      */
     suspend fun canRetryAsSms(messageGuid: String): Boolean {
-        return messageRepository.canRetryAsSms(messageGuid)
+        return sendDelegate.canRetryAsSms(messageGuid)
     }
 
     fun loadMoreMessages() {
@@ -2354,7 +2311,7 @@ class ChatViewModel @Inject constructor(
                 chatGuid = chatGuid,
                 before = oldestMessage.dateCreated,
                 limit = 50
-            ).fold(
+            ).handle(
                 onSuccess = { messages ->
                     val elapsed = System.currentTimeMillis() - startTime
                     Log.d("ChatScroll", "[VM] loadMoreMessages SUCCESS: synced ${messages.size} messages in ${elapsed}ms")
@@ -2371,29 +2328,36 @@ class ChatViewModel @Inject constructor(
                     }
                     Log.d("ChatScroll", "[VM] loadMoreMessages COMPLETE: canLoadMore=${messages.size == 50}")
                 },
-                onFailure = { error ->
+                onError = { appError ->
                     val elapsed = System.currentTimeMillis() - startTime
-                    Log.e("ChatScroll", "[VM] loadMoreMessages FAILED after ${elapsed}ms: ${error.message}")
-                    _uiState.update { it.copy(isLoadingMore = false) }
+                    Log.e("ChatScroll", "[VM] loadMoreMessages FAILED after ${elapsed}ms: ${appError.technicalMessage}")
+                    _uiState.update { it.copy(isLoadingMore = false, appError = appError) }
                 }
             )
         }
     }
 
     fun clearError() {
-        _uiState.update { it.copy(error = null) }
+        _uiState.update { it.copy(error = null, appError = null) }
+    }
+
+    /**
+     * Clear only the structured AppError (for retry dismissal).
+     */
+    fun clearAppError() {
+        _uiState.update { it.copy(appError = null) }
     }
 
     // ===== Menu Actions =====
 
     fun archiveChat() {
         viewModelScope.launch {
-            chatRepository.setArchived(chatGuid, true).fold(
+            chatRepository.setArchived(chatGuid, true).handle(
                 onSuccess = {
                     _uiState.update { it.copy(isArchived = true) }
                 },
-                onFailure = { e ->
-                    _uiState.update { it.copy(error = e.message) }
+                onError = { appError ->
+                    _uiState.update { it.copy(appError = appError) }
                 }
             )
         }
@@ -2401,12 +2365,12 @@ class ChatViewModel @Inject constructor(
 
     fun unarchiveChat() {
         viewModelScope.launch {
-            chatRepository.setArchived(chatGuid, false).fold(
+            chatRepository.setArchived(chatGuid, false).handle(
                 onSuccess = {
                     _uiState.update { it.copy(isArchived = false) }
                 },
-                onFailure = { e ->
-                    _uiState.update { it.copy(error = e.message) }
+                onError = { appError ->
+                    _uiState.update { it.copy(appError = appError) }
                 }
             )
         }
@@ -2415,12 +2379,12 @@ class ChatViewModel @Inject constructor(
     fun toggleStarred() {
         val currentStarred = _uiState.value.isStarred
         viewModelScope.launch {
-            chatRepository.setStarred(chatGuid, !currentStarred).fold(
+            chatRepository.setStarred(chatGuid, !currentStarred).handle(
                 onSuccess = {
                     _uiState.update { it.copy(isStarred = !currentStarred) }
                 },
-                onFailure = { e ->
-                    _uiState.update { it.copy(error = e.message) }
+                onError = { appError ->
+                    _uiState.update { it.copy(appError = appError) }
                 }
             )
         }
@@ -2428,12 +2392,12 @@ class ChatViewModel @Inject constructor(
 
     fun deleteChat() {
         viewModelScope.launch {
-            chatRepository.deleteChat(chatGuid).fold(
+            chatRepository.deleteChat(chatGuid).handle(
                 onSuccess = {
                     _uiState.update { it.copy(chatDeleted = true) }
                 },
-                onFailure = { e ->
-                    _uiState.update { it.copy(error = e.message) }
+                onError = { appError ->
+                    _uiState.update { it.copy(appError = appError) }
                 }
             )
         }
@@ -2914,7 +2878,7 @@ class ChatViewModel @Inject constructor(
             )
 
             // Insert into database
-            val id = scheduledMessageDao.insert(scheduledMessage)
+            val id = scheduledMessageRepository.insert(scheduledMessage)
 
             // Calculate delay
             val delay = sendAt - System.currentTimeMillis()
@@ -2930,7 +2894,7 @@ class ChatViewModel @Inject constructor(
             workManager.enqueue(workRequest)
 
             // Save the work request ID for potential cancellation
-            scheduledMessageDao.updateWorkRequestId(id, workRequest.id.toString())
+            scheduledMessageRepository.updateWorkRequestId(id, workRequest.id.toString())
         }
     }
 }
@@ -2945,6 +2909,7 @@ private data class ParticipantMaps(
 /**
  * Tracks a pending outgoing message for progress bar display.
  */
+@Immutable
 data class PendingMessage(
     val tempGuid: String,
     val progress: Float,  // 0.0 to 1.0 (individual message progress)
@@ -2955,6 +2920,7 @@ data class PendingMessage(
 /**
  * UI model for queued messages (persisted pending messages from the offline queue).
  */
+@Stable
 data class QueuedMessageUiModel(
     val localId: String,
     val text: String?,
@@ -2964,24 +2930,26 @@ data class QueuedMessageUiModel(
     val createdAt: Long
 )
 
+@Stable
 data class ChatUiState(
     val chatTitle: String = "",
     val isGroup: Boolean = false,
     val avatarPath: String? = null,
-    val participantNames: List<String> = emptyList(),
-    val participantAvatarPaths: List<String?> = emptyList(),
+    val participantNames: StableList<String> = emptyList<String>().toStable(),
+    val participantAvatarPaths: StableList<String?> = emptyList<String?>().toStable(),
     val isLoading: Boolean = true,
     val isLoadingMore: Boolean = false,
     val isSyncingMessages: Boolean = false,
     val isSending: Boolean = false,
     val isSendingWithAttachments: Boolean = false, // True if current send includes attachments
     val sendProgress: Float = 0f, // 0.0 to 1.0 progress for uploads
-    val pendingMessages: List<PendingMessage> = emptyList(), // Track multiple pending sends (in-memory)
-    val queuedMessages: List<QueuedMessageUiModel> = emptyList(), // Persisted pending messages from offline queue
+    val pendingMessages: StableList<PendingMessage> = emptyList<PendingMessage>().toStable(), // Track multiple pending sends (in-memory)
+    val queuedMessages: StableList<QueuedMessageUiModel> = emptyList<QueuedMessageUiModel>().toStable(), // Persisted pending messages from offline queue
     val canLoadMore: Boolean = true,
-    val messages: List<MessageUiModel> = emptyList(),
+    val messages: StableList<MessageUiModel> = emptyList<MessageUiModel>().toStable(),
     val isTyping: Boolean = false,
     val error: String? = null,
+    val appError: AppError? = null, // Structured error for UI display with retry support
     val isLocalSmsChat: Boolean = false,
     val smsInputBlocked: Boolean = false, // True if SMS chat but not default SMS app
     val isIMessageChat: Boolean = false,
@@ -3034,6 +3002,7 @@ data class ChatUiState(
 /**
  * Warning or error for pending attachments.
  */
+@Immutable
 data class AttachmentWarning(
     val message: String,
     val isError: Boolean, // true = cannot send, false = can send with warning

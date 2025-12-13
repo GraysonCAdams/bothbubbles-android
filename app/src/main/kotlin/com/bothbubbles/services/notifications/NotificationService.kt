@@ -50,7 +50,7 @@ class NotificationService @Inject constructor(
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
-) {
+) : Notifier {
     companion object {
         private const val TAG = "NotificationService"
         const val CHANNEL_MESSAGES = "messages"
@@ -287,7 +287,7 @@ class NotificationService @Inject constructor(
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      */
-    fun showMessageNotification(
+    override fun showMessageNotification(
         chatGuid: String,
         chatTitle: String,
         messageText: String,
@@ -502,21 +502,21 @@ class NotificationService @Inject constructor(
     /**
      * Cancel notification for a chat
      */
-    fun cancelNotification(chatGuid: String) {
+    override fun cancelNotification(chatGuid: String) {
         notificationManager.cancel(chatGuid.hashCode())
     }
 
     /**
      * Cancel all message notifications
      */
-    fun cancelAllNotifications() {
+    override fun cancelAllNotifications() {
         notificationManager.cancelAll()
     }
 
     /**
      * Show foreground service notification
      */
-    fun createServiceNotification(): android.app.Notification {
+    override fun createServiceNotification(): android.app.Notification {
         return NotificationCompat.Builder(context, CHANNEL_SERVICE)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(context.getString(R.string.app_name))
@@ -529,7 +529,7 @@ class NotificationService @Inject constructor(
     /**
      * Show notification when BlueBubbles initial sync completes
      */
-    fun showBlueBubblesSyncCompleteNotification(messageCount: Int) {
+    override fun showBlueBubblesSyncCompleteNotification(messageCount: Int) {
         if (!hasNotificationPermission()) return
 
         // Create intent to open the app
@@ -558,7 +558,7 @@ class NotificationService @Inject constructor(
     /**
      * Show notification when SMS import completes
      */
-    fun showSmsImportCompleteNotification() {
+    override fun showSmsImportCompleteNotification() {
         if (!hasNotificationPermission()) return
 
         // Create intent to open the app
@@ -588,7 +588,7 @@ class NotificationService @Inject constructor(
      * Show notification when a BlueBubbles server update is available.
      * Tapping opens the app's server settings where they can see more info.
      */
-    fun showServerUpdateNotification(version: String) {
+    override fun showServerUpdateNotification(version: String) {
         if (!hasNotificationPermission()) return
 
         // Create intent to open server settings
@@ -620,7 +620,7 @@ class NotificationService @Inject constructor(
      * This is important to notify users when their iCloud account is logged out,
      * which would prevent iMessage from working.
      */
-    fun showICloudAccountNotification(active: Boolean, alias: String?) {
+    override fun showICloudAccountNotification(active: Boolean, alias: String?) {
         if (!hasNotificationPermission()) return
 
         // Only show notification when account becomes inactive
@@ -661,7 +661,7 @@ class NotificationService @Inject constructor(
     /**
      * Show incoming FaceTime call notification with full-screen intent
      */
-    fun showFaceTimeCallNotification(
+    override fun showFaceTimeCallNotification(
         callUuid: String,
         callerName: String,
         callerAddress: String?
@@ -737,7 +737,7 @@ class NotificationService @Inject constructor(
     /**
      * Dismiss FaceTime call notification
      */
-    fun dismissFaceTimeCallNotification(callUuid: String) {
+    override fun dismissFaceTimeCallNotification(callUuid: String) {
         val notificationId = FACETIME_NOTIFICATION_ID_PREFIX + callUuid.hashCode()
         notificationManager.cancel(notificationId)
     }
@@ -762,7 +762,7 @@ class NotificationService @Inject constructor(
      *
      * @param count The number to show on the app icon badge
      */
-    fun updateAppBadge(count: Int) {
+    override fun updateAppBadge(count: Int) {
         // On Android 8+, badges are tied to notification channels
         // We use a silent notification with setNumber to update the badge
         // This won't show a visible notification but will update the badge count

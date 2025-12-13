@@ -19,7 +19,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
-import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -44,7 +44,7 @@ class ComposeMessageScreen(
     carContext: CarContext,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
-    private val messageRepository: MessageRepository,
+    private val messageSendingService: MessageSendingService,
     private val onMessageSent: () -> Unit
 ) : Screen(carContext) {
 
@@ -78,9 +78,14 @@ class ComposeMessageScreen(
                     .sortedByDescending { it.lastMessageDate ?: 0L }
                     .take(MAX_RECENT_CONTACTS)
 
+                // PERF: Batch fetch all participants in a single query
+                val chatGuids = chats.map { it.guid }
+                val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+                    .groupBy({ it.chatGuid }, { it.handle })
+
                 val contacts = chats.mapNotNull { chat ->
                     // Get the primary participant (non-self) for each chat
-                    val participants = chatDao.getParticipantsForChat(chat.guid)
+                    val participants = participantsByChat[chat.guid] ?: emptyList()
                     val primaryParticipant = participants.firstOrNull()
 
                     if (primaryParticipant != null) {
@@ -236,7 +241,7 @@ class ComposeMessageScreen(
                         VoiceReplyScreen(
                             carContext = carContext,
                             chat = chat,
-                            messageRepository = messageRepository,
+                            messageSendingService = messageSendingService,
                             onMessageSent = {
                                 onMessageSent()
                                 screenManager.popToRoot()

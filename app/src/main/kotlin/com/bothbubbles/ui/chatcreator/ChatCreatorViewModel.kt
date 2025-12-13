@@ -3,33 +3,29 @@ package com.bothbubbles.ui.chatcreator
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.CreateChatRequest
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.*
 import javax.inject.Inject
 
 @HiltViewModel
 class ChatCreatorViewModel @Inject constructor(
-    private val handleDao: HandleDao,
-    private val chatDao: ChatDao,
+    private val handleRepository: HandleRepository,
+    private val chatRepository: ChatRepository,
     private val api: BothBubblesApi,
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
@@ -126,7 +122,7 @@ class ChatCreatorViewModel @Inject constructor(
 
             // Build a lookup map for iMessage availability from cached handles
             val handleServiceMap = mutableMapOf<String, String>()
-            handleDao.getAllHandlesOnce().forEach { handle ->
+            handleRepository.getAllHandlesOnce().forEach { handle ->
                 val normalized = normalizeAddress(handle.address)
                 // Prefer iMessage when we know it's available
                 if (handle.isIMessage || !handleServiceMap.containsKey(normalized)) {
@@ -135,7 +131,7 @@ class ChatCreatorViewModel @Inject constructor(
             }
 
             // Get recent addresses from handle cross-references
-            val recentHandles = handleDao.getRecentContacts().first()
+            val recentHandles = handleRepository.getRecentContacts().first()
             val recentAddresses = recentHandles.map { normalizeAddress(it.address) }.toSet()
 
             // Convert phone contacts to ContactUiModel entries
@@ -191,9 +187,9 @@ class ChatCreatorViewModel @Inject constructor(
             combine(
                 _searchQuery.flatMapLatest { query ->
                     if (query.isNotBlank()) {
-                        chatDao.searchGroupChats(query)
+                        chatRepository.searchGroupChats(query)
                     } else {
-                        chatDao.getRecentGroupChats()
+                        chatRepository.getRecentGroupChats()
                     }
                 },
                 _searchQuery
@@ -328,7 +324,7 @@ class ChatCreatorViewModel @Inject constructor(
                     val chatGuid = "sms;-;$normalizedAddress"
 
                     // Try to find or create the chat in the local database
-                    val existingChat = chatDao.getChatByGuid(chatGuid)
+                    val existingChat = chatRepository.getChatByGuid(chatGuid)
                     if (existingChat == null) {
                         // Create a minimal chat entry for local SMS
                         val newChat = ChatEntity(
@@ -343,7 +339,7 @@ class ChatCreatorViewModel @Inject constructor(
                             lastMessageDate = System.currentTimeMillis(),
                             lastMessageText = null
                         )
-                        chatDao.insertChat(newChat)
+                        chatRepository.insertChat(newChat)
                     }
 
                     Log.d(TAG, "SMS chat created/found: $chatGuid")
@@ -565,8 +561,8 @@ class ChatCreatorViewModel @Inject constructor(
                 // Check cached handle for last known service, then add recipient
                 viewModelScope.launch {
                     // Try exact match first, then normalized format
-                    val cachedHandle = handleDao.getHandleByAddressAny(query)
-                        ?: handleDao.getHandleByAddressAny(
+                    val cachedHandle = handleRepository.getHandleByAddressAny(query)
+                        ?: handleRepository.getHandleByAddressAny(
                             PhoneAndCodeParsingUtils.normalizePhoneNumber(query)
                         )
                     val service = cachedHandle?.service ?: "SMS"

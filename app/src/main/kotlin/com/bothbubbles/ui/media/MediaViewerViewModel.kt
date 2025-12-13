@@ -4,7 +4,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.ui.navigation.Screen
@@ -20,7 +19,6 @@ import javax.inject.Inject
 @HiltViewModel
 class MediaViewerViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
-    private val attachmentDao: AttachmentDao,
     private val attachmentRepository: AttachmentRepository
 ) : ViewModel() {
 
@@ -40,7 +38,7 @@ class MediaViewerViewModel @Inject constructor(
             _uiState.update { it.copy(isLoading = true) }
 
             // Load all cached media for this chat
-            val mediaList = attachmentDao.getCachedMediaForChat(chatGuid)
+            val mediaList = attachmentRepository.getCachedMediaForChat(chatGuid)
 
             // Find the index of the initially selected attachment
             val initialIndex = mediaList.indexOfFirst { it.guid == attachmentGuid }.coerceAtLeast(0)
@@ -48,7 +46,7 @@ class MediaViewerViewModel @Inject constructor(
 
             if (currentAttachment == null) {
                 // Fall back to loading just the single attachment if not in cached list
-                val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
+                val attachment = attachmentRepository.getAttachmentByGuid(attachmentGuid)
                 if (attachment == null) {
                     _uiState.update {
                         it.copy(
@@ -107,7 +105,7 @@ class MediaViewerViewModel @Inject constructor(
             }.fold(
                 onSuccess = { file ->
                     // Refresh attachment from DB to get updated localPath
-                    val updatedAttachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
+                    val updatedAttachment = attachmentRepository.getAttachmentByGuid(attachmentGuid)
                     _uiState.update {
                         it.copy(
                             isDownloading = false,

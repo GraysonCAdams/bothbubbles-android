@@ -322,12 +322,19 @@ class SmsRepository @Inject constructor(
     /**
      * Find an existing iMessage chat for a given phone number.
      * Searches through non-group iMessage chats and matches by participant phone.
+     * PERF: Uses batch query to fetch all participants in a single database call.
      */
     private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
         val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
+        if (nonGroupChats.isEmpty()) return null
+
+        // PERF: Batch fetch all participants for all chats in a single query
+        val chatGuids = nonGroupChats.map { it.guid }
+        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+            .groupBy({ it.chatGuid }, { it.handle })
 
         for (chat in nonGroupChats) {
-            val participants = chatDao.getParticipantsForChat(chat.guid)
+            val participants = participantsByChat[chat.guid] ?: emptyList()
             for (participant in participants) {
                 val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
                 if (phonesMatch(normalized, normalizedPhone)) {

@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.input
 
 import android.Manifest
 import android.content.Context

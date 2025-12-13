@@ -158,8 +158,9 @@ class BackgroundSyncWorker @AssistedInject constructor(
                         totalNewMessages += newMessages.size
 
                         // Show notifications for new messages from others if app is not in foreground
-                        if (!appLifecycleTracker.isAppInForeground) {
-                            showNotificationsForMessages(chat, newMessages)
+                        // Only notify for messages newer than what we had before (not old catch-up messages)
+                        if (!appLifecycleTracker.isAppInForeground && afterTimestamp != null) {
+                            showNotificationsForMessages(chat, newMessages, afterTimestamp)
                         }
                     }
                 }
@@ -174,11 +175,13 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
     /**
      * Show notifications for messages found during background sync.
-     * Only shows notifications for messages not from me.
+     * Only shows notifications for messages not from me AND newer than our previous newest message.
+     * @param previousNewestTimestamp The timestamp of our newest message before this sync
      */
     private suspend fun showNotificationsForMessages(
         chat: com.bothbubbles.data.local.db.entity.ChatEntity,
-        messages: List<com.bothbubbles.data.local.db.entity.MessageEntity>
+        messages: List<com.bothbubbles.data.local.db.entity.MessageEntity>,
+        previousNewestTimestamp: Long
     ) {
         // Check notification settings for this chat
         if (chat.notificationsEnabled == false) {
@@ -190,8 +193,13 @@ class BackgroundSyncWorker @AssistedInject constructor(
             return
         }
 
-        // Filter to only messages from others (not from me)
-        val messagesFromOthers = messages.filter { !it.isFromMe && it.text?.isNotBlank() == true }
+        // Filter to only messages from others that are newer than what we had
+        // This prevents notifications for old messages we're just now catching up on
+        val messagesFromOthers = messages.filter {
+            !it.isFromMe &&
+            it.text?.isNotBlank() == true &&
+            it.dateCreated > previousNewestTimestamp
+        }
         if (messagesFromOthers.isEmpty()) return
 
         val isGroup = chat.isGroup

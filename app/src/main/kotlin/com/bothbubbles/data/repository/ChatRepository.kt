@@ -16,6 +16,11 @@ import com.bothbubbles.data.remote.api.dto.ChatQueryRequest
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.retryWithBackoff
+import com.bothbubbles.util.retryWithRateLimitAwareness
+import com.bothbubbles.util.error.NetworkError
+import com.bothbubbles.util.error.safeCall
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -37,6 +42,8 @@ class ChatRepository @Inject constructor(
 
     fun observeAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
 
+    fun getAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
+
     fun observeActiveChats(): Flow<List<ChatEntity>> = chatDao.getActiveChats()
 
     fun observeArchivedChats(): Flow<List<ChatEntity>> = chatDao.getArchivedChats()
@@ -47,6 +54,10 @@ class ChatRepository @Inject constructor(
 
     suspend fun getChat(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
 
+    suspend fun getChatByGuid(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
+
+    suspend fun getChatsByGuids(guids: List<String>): List<ChatEntity> = chatDao.getChatsByGuids(guids)
+
     suspend fun getChatCount(): Int = chatDao.getChatCount()
 
     fun observeArchivedChatCount(): Flow<Int> = chatDao.getArchivedChatCount()
@@ -54,6 +65,51 @@ class ChatRepository @Inject constructor(
     fun observeStarredChatCount(): Flow<Int> = chatDao.getStarredChatCount()
 
     fun observeUnreadChatCount(): Flow<Int> = chatDao.getUnreadChatCount()
+
+    // ===== Group/Non-Group Chat Queries =====
+
+    suspend fun getGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity> =
+        chatDao.getGroupChatsPaginated(limit, offset)
+
+    suspend fun getNonGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity> =
+        chatDao.getNonGroupChatsPaginated(limit, offset)
+
+    suspend fun getGroupChatCount(): Int = chatDao.getGroupChatCount()
+
+    suspend fun getNonGroupChatCount(): Int = chatDao.getNonGroupChatCount()
+
+    fun observeGroupChatCount(): Flow<Int> = chatDao.observeGroupChatCount()
+
+    fun observeNonGroupChatCount(): Flow<Int> = chatDao.observeNonGroupChatCount()
+
+    fun searchGroupChats(query: String): Flow<List<ChatEntity>> = chatDao.searchGroupChats(query)
+
+    fun getRecentGroupChats(): Flow<List<ChatEntity>> = chatDao.getRecentGroupChats()
+
+    suspend fun getParticipantsForChat(chatGuid: String): List<HandleEntity> =
+        chatDao.getParticipantsForChat(chatGuid)
+
+    // ===== Local Mutation Operations =====
+
+    suspend fun insertChat(chat: ChatEntity) {
+        chatDao.insertChat(chat)
+    }
+
+    suspend fun updateDisplayName(chatGuid: String, displayName: String?) {
+        chatDao.updateDisplayName(chatGuid, displayName)
+    }
+
+    suspend fun updateCustomAvatarPath(chatGuid: String, path: String?) {
+        chatDao.updateCustomAvatarPath(chatGuid, path)
+    }
+
+    suspend fun deleteAllChats() {
+        chatDao.deleteAllChats()
+    }
+
+    suspend fun deleteAllChatHandleCrossRefs() {
+        chatDao.deleteAllChatHandleCrossRefs()
+    }
 
     fun observeParticipantsForChat(chatGuid: String): Flow<List<HandleEntity>> =
         chatDao.observeParticipantsForChat(chatGuid)
@@ -76,12 +132,22 @@ class ChatRepository @Inject constructor(
     /**
      * Get participants from multiple chats (one-shot query for merged/unified conversations).
      * Combines and deduplicates participants from all specified chats.
+     * PERF: Uses batch DAO query instead of N+1 pattern.
      */
     suspend fun getParticipantsForChats(chatGuids: List<String>): List<HandleEntity> {
         if (chatGuids.isEmpty()) return emptyList()
-        return chatGuids.flatMap { guid ->
-            chatDao.getParticipantsForChat(guid)
-        }.distinctBy { it.id }
+        return chatDao.getParticipantsForChats(chatGuids)
+    }
+
+    /**
+     * Get participants for multiple chats, grouped by chat GUID.
+     * PERF: Fetches all participants in a single query and groups them.
+     * @return Map of chat GUID to list of participants for that chat.
+     */
+    suspend fun getParticipantsGroupedByChat(chatGuids: List<String>): Map<String, List<HandleEntity>> {
+        if (chatGuids.isEmpty()) return emptyMap()
+        return chatDao.getParticipantsWithChatGuids(chatGuids)
+            .groupBy({ it.chatGuid }, { it.handle })
     }
 
     /**
@@ -109,57 +175,89 @@ class ChatRepository @Inject constructor(
     // ===== Remote Operations =====
 
     /**
-     * Fetch all chats from server and sync to local database
+     * Fetch all chats from server and sync to local database.
+     * Uses transactional operations to ensure data consistency.
+     * Retries with exponential backoff on transient network errors.
      */
     suspend fun syncChats(
         limit: Int = 100,
         offset: Int = 0
-    ): Result<List<ChatEntity>> = runCatching {
-        val response = api.queryChats(
-            ChatQueryRequest(
-                with = listOf("participants", "lastmessage"),
-                limit = limit,
-                offset = offset,
-                sort = "lastmessage"
-            )
-        )
+    ): Result<List<ChatEntity>> = safeCall {
+        retryWithBackoff(
+            times = NetworkConfig.SYNC_RETRY_ATTEMPTS,
+            initialDelayMs = NetworkConfig.SYNC_INITIAL_DELAY_MS,
+            maxDelayMs = NetworkConfig.SYNC_MAX_DELAY_MS
+        ) {
+            val response = retryWithRateLimitAwareness {
+                api.queryChats(
+                    ChatQueryRequest(
+                        with = listOf("participants", "lastmessage"),
+                        limit = limit,
+                        offset = offset,
+                        sort = "lastmessage"
+                    )
+                )
+            }
 
-        val body = response.body()
-        if (!response.isSuccessful || body == null) {
-            throw Exception(body?.message ?: "Failed to fetch chats")
+            val body = response.body()
+            if (!response.isSuccessful || body == null) {
+                throw NetworkError.ServerError(response.code(), body?.message)
+            }
+
+            val chatDtos = body.data.orEmpty()
+            val chats = chatDtos.map { it.toEntity() }
+
+            // Prepare all participant data
+            val participantData = chatDtos.zip(chats).map { (chatDto, chat) ->
+                val handleIds = upsertHandlesForChat(chatDto)
+                chat to handleIds
+            }
+
+            // Single transactional call
+            chatDao.syncChatsWithParticipants(participantData)
+
+            // Post-sync linking
+            chatDtos.forEach { chatDto ->
+                val participants = chatDto.participants
+                if (participants != null && participants.size == 1) {
+                    val participant = participants.first()
+                    val normalizedPhone = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
+                    linkChatToUnifiedGroup(chatDto.guid, normalizedPhone, chatDto.displayName)
+                }
+            }
+
+            chats
         }
-
-        val chats = body.data.orEmpty().map { it.toEntity() }
-
-        // Batch insert all chats (more efficient than individual inserts)
-        chatDao.insertChats(chats)
-
-        // Sync participants (handles) for each chat
-        body.data.orEmpty().forEach { chatDto ->
-            syncChatParticipants(chatDto)
-        }
-
-        chats
     }
 
     /**
-     * Fetch a single chat from server
+     * Fetch a single chat from server.
+     * Uses transactional sync to ensure chat + participants are saved atomically.
+     * Retries with exponential backoff on transient network errors.
      */
-    suspend fun fetchChat(guid: String): Result<ChatEntity> = runCatching {
-        val response = api.getChat(guid)
+    suspend fun fetchChat(guid: String): Result<ChatEntity> = safeCall {
+        retryWithBackoff(
+            times = NetworkConfig.DEFAULT_RETRY_ATTEMPTS,
+            initialDelayMs = NetworkConfig.DEFAULT_INITIAL_DELAY_MS,
+            maxDelayMs = NetworkConfig.DEFAULT_MAX_DELAY_MS
+        ) {
+            val response = retryWithRateLimitAwareness {
+                api.getChat(guid)
+            }
 
-        val body = response.body()
-        if (!response.isSuccessful || body == null) {
-            throw Exception(body?.message ?: "Failed to fetch chat")
+            val body = response.body()
+            if (!response.isSuccessful || body == null) {
+                throw NetworkError.ServerError(response.code(), body?.message)
+            }
+
+            val chatDto = body.data ?: throw NetworkError.ServerError(404, "Chat not found")
+            val chat = chatDto.toEntity()
+
+            // Atomically sync chat with participants
+            syncChatParticipants(chatDto, chat)
+
+            chat
         }
-
-        val chatDto = body.data ?: throw Exception("Chat not found")
-        val chat = chatDto.toEntity()
-
-        chatDao.insertChat(chat)
-        syncChatParticipants(chatDto)
-
-        chat
     }
 
     /**
@@ -380,8 +478,11 @@ class ChatRepository @Inject constructor(
         return updatedCount
     }
 
-    private suspend fun syncChatParticipants(chatDto: ChatDto) {
-        chatDto.participants?.forEach { handleDto ->
+    /**
+     * Upsert handles for a chat and return their IDs.
+     */
+    private suspend fun upsertHandlesForChat(chatDto: ChatDto): List<Long> {
+        return chatDto.participants?.map { handleDto ->
             // Strip service suffixes (e.g., "(filtered)", "(smsft)") before contact lookup
             val cleanAddress = PhoneNumberFormatter.stripServiceSuffix(handleDto.address)
 
@@ -402,17 +503,24 @@ class ChatRepository @Inject constructor(
                 cachedAvatarPath = contactPhotoUri
             )
             // Use upsert to get existing handle ID (insertHandle with REPLACE breaks cross-refs)
-            val handleId = handleDao.upsertHandle(handle)
+            handleDao.upsertHandle(handle)
+        } ?: emptyList()
+    }
 
-            // Create cross-reference using the handle ID
-            val crossRef = ChatHandleCrossRef(
-                chatGuid = chatDto.guid,
-                handleId = handleId
-            )
-            chatDao.insertChatHandleCrossRef(crossRef)
-        }
+    /**
+     * Sync a chat's participants atomically.
+     * This ensures all participants are updated together or not at all,
+     * preventing partial state if the app crashes during sync.
+     */
+    private suspend fun syncChatParticipants(chatDto: ChatDto, chat: ChatEntity) {
+        // Step 1: Upsert all handles and collect their IDs (handles exist independently)
+        val handleIds = upsertHandlesForChat(chatDto)
 
-        // For single-contact iMessage chats, link to unified group
+        // Step 2: Atomically sync chat with participants (transactional)
+        chatDao.syncChatWithParticipants(chat, handleIds)
+
+        // Step 3: For single-contact iMessage chats, link to unified group
+        // (This has its own transaction handling in UnifiedChatGroupDao)
         val participants = chatDto.participants
         if (participants != null && participants.size == 1) {
             val participant = participants.first()

@@ -7,11 +7,11 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
-import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.CreateChatRequest
 import com.bothbubbles.data.remote.api.dto.UpdateChatRequest
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -29,7 +29,7 @@ import javax.inject.Inject
 class GroupSetupViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     @ApplicationContext private val context: Context,
-    private val chatDao: ChatDao,
+    private val chatRepository: ChatRepository,
     private val api: BothBubblesApi
 ) : ViewModel() {
 
@@ -96,7 +96,7 @@ class GroupSetupViewModel @Inject constructor(
                         // Create local MMS group chat
                         val chatGuid = "mms;-;${addresses.sorted().joinToString(",")}"
 
-                        val existingChat = chatDao.getChatByGuid(chatGuid)
+                        val existingChat = chatRepository.getChatByGuid(chatGuid)
                         if (existingChat == null) {
                             // Save custom photo if provided
                             val customAvatarPath = groupPhotoUri?.let { uri ->
@@ -116,15 +116,15 @@ class GroupSetupViewModel @Inject constructor(
                                 lastMessageText = null,
                                 customAvatarPath = customAvatarPath
                             )
-                            chatDao.insertChat(newChat)
+                            chatRepository.insertChat(newChat)
                         } else if (groupName != null || groupPhotoUri != null) {
                             // Update existing chat with name/photo
                             val customAvatarPath = groupPhotoUri?.let { uri ->
                                 saveGroupPhoto(chatGuid, uri)
                             }
-                            chatDao.updateDisplayName(chatGuid, groupName)
+                            chatRepository.updateDisplayName(chatGuid, groupName)
                             customAvatarPath?.let {
-                                chatDao.updateCustomAvatarPath(chatGuid, it)
+                                chatRepository.updateCustomAvatarPath(chatGuid, it)
                             }
                         }
 
@@ -162,7 +162,7 @@ class GroupSetupViewModel @Inject constructor(
                             if (groupPhotoUri != null) {
                                 val customAvatarPath = saveGroupPhoto(chatGuid, groupPhotoUri)
                                 customAvatarPath?.let {
-                                    chatDao.updateCustomAvatarPath(chatGuid, it)
+                                    chatRepository.updateCustomAvatarPath(chatGuid, it)
                                 }
                             }
 

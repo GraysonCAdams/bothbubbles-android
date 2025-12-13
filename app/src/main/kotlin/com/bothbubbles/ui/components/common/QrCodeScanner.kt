@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.common
 
 import android.Manifest
 import android.util.Log

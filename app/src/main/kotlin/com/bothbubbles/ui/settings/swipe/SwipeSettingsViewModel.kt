@@ -3,7 +3,7 @@ package com.bothbubbles.ui.settings.swipe
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.ui.components.SwipeActionType
+import com.bothbubbles.ui.components.conversation.SwipeActionType
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

@@ -33,15 +33,15 @@ Handles all message sending operations:
 - Reply state management
 - Typing indicator coordination
 
-## Planned Delegates (TODO)
-
 ### `ChatAttachmentDelegate`
-Should handle:
-- Attachment download with progress tracking
-- Upload progress observation
+Handles attachment download operations:
+- Download progress tracking
+- Queue downloads with priority (IMMEDIATE, ACTIVE_CHAT)
 - Auto-download management
-- Attachment validation
-- File picker interactions
+- Download completion notifications
+- Active chat prioritization
+
+## Planned Delegates (TODO)
 
 ### `ChatInputDelegate`
 Should handle:

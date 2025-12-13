@@ -1,4 +1,4 @@
-package com.bothbubbles.ui.components
+package com.bothbubbles.ui.components.common
 
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -388,5 +388,123 @@ fun getMessageSourceType(messageSource: String?): MessageSourceType {
         "IMESSAGE" -> MessageSourceType.IMESSAGE
         "SERVER_SMS", "LOCAL_SMS", "LOCAL_MMS" -> MessageSourceType.SMS
         else -> MessageSourceType.NONE
+    }
+}
+
+// ====================
+// Preview Functions
+// ====================
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar - Text")
+@Composable
+private fun AvatarTextPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        Avatar(
+            name = "John Appleseed",
+            avatarPath = null,
+            size = 56.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar - Small")
+@Composable
+private fun AvatarSmallPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        Avatar(
+            name = "Jane Doe",
+            avatarPath = null,
+            size = 32.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar - Large")
+@Composable
+private fun AvatarLargePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        Avatar(
+            name = "Bob Smith",
+            avatarPath = null,
+            size = 80.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group Avatar - 2 Members")
+@Composable
+private fun GroupAvatarTwoPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        GroupAvatar(
+            members = listOf("Alice", "Bob"),
+            avatarPaths = listOf(null, null),
+            size = 56.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group Avatar - 3 Members")
+@Composable
+private fun GroupAvatarThreePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        GroupAvatar(
+            members = listOf("Alice", "Bob", "Charlie"),
+            avatarPaths = listOf(null, null, null),
+            size = 56.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Group Avatar - 4+ Members")
+@Composable
+private fun GroupAvatarFourPlusPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        GroupAvatar(
+            members = listOf("Alice", "Bob", "Charlie", "Diana"),
+            avatarPaths = listOf(null, null, null, null),
+            size = 56.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar with iMessage Badge")
+@Composable
+private fun AvatarWithIMessageBadgePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        AvatarWithMessageType(
+            messageSourceType = MessageSourceType.IMESSAGE,
+            size = 56.dp
+        ) {
+            Avatar(name = "John Appleseed", avatarPath = null, size = 56.dp)
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar with SMS Badge")
+@Composable
+private fun AvatarWithSmsBadgePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        AvatarWithMessageType(
+            messageSourceType = MessageSourceType.SMS,
+            size = 56.dp
+        ) {
+            Avatar(name = "Jane Doe", avatarPath = null, size = 56.dp)
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(
+    showBackground = true,
+    name = "Avatar - Dark Mode",
+    uiMode = android.content.res.Configuration.UI_MODE_NIGHT_YES
+)
+@Composable
+private fun AvatarDarkModePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper(darkTheme = true) {
+        Avatar(
+            name = "John Appleseed",
+            avatarPath = null,
+            size = 56.dp
+        )
     }
 }

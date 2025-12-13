@@ -1,19 +1,18 @@
 package com.bothbubbles.ui.chat.paging
 
 import android.util.Log
-import com.bothbubbles.data.local.db.dao.AttachmentDao
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.ui.chat.MessageCache
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
-import com.bothbubbles.ui.components.normalizeAddress
-import com.bothbubbles.ui.components.resolveSenderName
-import com.bothbubbles.ui.components.toUiModel
+import com.bothbubbles.ui.components.message.normalizeAddress
+import com.bothbubbles.ui.components.message.resolveSenderName
+import com.bothbubbles.ui.components.message.toUiModel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 
@@ -26,11 +25,10 @@ import kotlinx.coroutines.flow.first
  */
 class RoomMessageDataSource(
     private val chatGuids: List<String>,
-    private val messageDao: MessageDao,
-    private val attachmentDao: AttachmentDao,
-    private val handleDao: HandleDao,
-    private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val attachmentRepository: AttachmentRepository,
+    private val handleRepository: HandleRepository,
+    private val chatRepository: ChatRepository,
     private val messageCache: MessageCache,
     private val syncTrigger: SyncTrigger?
 ) : MessageDataSource {
@@ -46,18 +44,18 @@ class RoomMessageDataSource(
     private var addressToAvatarPath: Map<String, String?> = emptyMap()
 
     override suspend fun size(): Int {
-        return messageDao.getMessageCountForChats(chatGuids)
+        return messageRepository.getMessageCountForChats(chatGuids)
     }
 
     override fun observeSize(): Flow<Int> {
-        return messageDao.observeMessageCountForChats(chatGuids)
+        return messageRepository.observeMessageCountForChats(chatGuids)
     }
 
     override suspend fun load(start: Int, count: Int): List<MessageUiModel> {
         Log.d(TAG, "Loading messages: start=$start, count=$count")
 
         // Fetch messages by position
-        val entities = messageDao.getMessagesByPosition(chatGuids, count, start)
+        val entities = messageRepository.getMessagesByPosition(chatGuids, count, start)
         Log.d(TAG, "Loaded ${entities.size} entities from Room")
 
         // If we got fewer than expected, might need to sync from server
@@ -84,7 +82,7 @@ class RoomMessageDataSource(
     }
 
     override suspend fun loadByKey(guid: String): MessageUiModel? {
-        val entity = messageDao.getMessageByGuid(guid) ?: return null
+        val entity = messageRepository.getMessageByGuid(guid) ?: return null
 
         // Ensure participant data is loaded
         ensureParticipantsLoaded()
@@ -94,19 +92,19 @@ class RoomMessageDataSource(
     }
 
     override suspend fun getKey(position: Int): String? {
-        val entities = messageDao.getMessagesByPosition(chatGuids, 1, position)
+        val entities = messageRepository.getMessagesByPosition(chatGuids, 1, position)
         return entities.firstOrNull()?.guid
     }
 
     override suspend fun getMessagePosition(guid: String): Int {
         // First check if the message exists
-        val message = messageDao.getMessageByGuid(guid) ?: return -1
+        val message = messageRepository.getMessageByGuid(guid) ?: return -1
 
         // Verify the message belongs to our chat(s)
         if (message.chatGuid !in chatGuids) return -1
 
-        // Get position using the DAO query (counts messages newer than target)
-        return messageDao.getMessagePosition(chatGuids, guid)
+        // Get position using the repository query (counts messages newer than target)
+        return messageRepository.getMessagePosition(chatGuids, guid)
     }
 
     /**
@@ -146,7 +144,7 @@ class RoomMessageDataSource(
         // Fetch reactions separately for these messages
         val messageGuids = entities.map { it.guid }
         val iMessageReactions = if (messageGuids.isNotEmpty()) {
-            messageDao.getReactionsForMessages(messageGuids)
+            messageRepository.getReactionsForMessages(messageGuids)
         } else {
             emptyList()
         }
@@ -155,7 +153,7 @@ class RoomMessageDataSource(
         val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
 
         // Batch load all attachments in a single query
-        val allAttachments = attachmentDao.getAttachmentsForMessages(messageGuids)
+        val allAttachments = attachmentRepository.getAttachmentsForMessages(messageGuids)
             .groupBy { it.messageGuid }
 
         // Build reply preview data
@@ -169,7 +167,7 @@ class RoomMessageDataSource(
             .distinct()
 
         if (missingHandleIds.isNotEmpty()) {
-            val handles = handleDao.getHandlesByIds(missingHandleIds)
+            val handles = handleRepository.getHandlesByIds(missingHandleIds)
             handles.forEach { handle ->
                 val normalizedAddress = normalizeAddress(handle.address)
                 val matchingName = addressToName[normalizedAddress]
