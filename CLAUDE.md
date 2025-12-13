@@ -142,6 +142,13 @@ app/src/main/kotlin/com/bothbubbles/
 │   └── repository/                # Repository implementations
 │
 ├── di/                            # Hilt dependency injection modules
+│   ├── AppModule.kt              # Application utilities (WorkManager, ImageLoader)
+│   ├── DatabaseModule.kt         # Room database and all DAOs
+│   ├── NetworkModule.kt          # Retrofit, OkHttp, Moshi, BothBubblesApi
+│   ├── CoroutinesModule.kt       # Dispatchers and @ApplicationScope
+│   ├── ServiceModule.kt          # Service interface bindings (testability)
+│   ├── SmsModule.kt              # SMS/MMS dependencies (mostly auto-wired)
+│   └── FcmModule.kt              # FCM/Firebase dependencies
 │
 ├── services/                      # Services layer
 │   ├── foreground/               # Foreground services (SocketForegroundService)
