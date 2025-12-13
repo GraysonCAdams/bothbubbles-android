@@ -162,6 +162,7 @@ fun ChatScreen(
     onDetailsClick: () -> Unit,
     onMediaClick: (String) -> Unit,
     onCameraClick: () -> Unit = {},
+    onEditAttachmentClick: (Uri) -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
     editedAttachmentUri: Uri? = null,
@@ -281,7 +282,6 @@ fun ChatScreen(
     }
 
     // Menu and dialog state
-    var showOverflowMenu by remember { mutableStateOf(false) }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }
     var showVideoCallDialog by remember { mutableStateOf(false) }
@@ -578,105 +578,39 @@ fun ChatScreen(
         containerColor = Color.Transparent,
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                navigationIcon = {
-                    IconButton(onClick = {
-                        // Clear saved state when user explicitly navigates back
-                        viewModel.onNavigateBack()
-                        onBackClick()
-                    }) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
-                        )
-                    }
+            ChatTopBar(
+                chatTitle = uiState.chatTitle,
+                avatarPath = uiState.avatarPath,
+                isGroup = uiState.isGroup,
+                participantNames = uiState.participantNames,
+                participantAvatarPaths = uiState.participantAvatarPaths,
+                isSnoozed = uiState.isSnoozed,
+                isArchived = uiState.isArchived,
+                isStarred = uiState.isStarred,
+                showSubjectField = uiState.showSubjectField,
+                isLocalSmsChat = uiState.isLocalSmsChat,
+                onBackClick = {
+                    // Clear saved state when user explicitly navigates back
+                    viewModel.onNavigateBack()
+                    onBackClick()
                 },
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.clickable(onClick = onDetailsClick)
-                    ) {
-                        if (uiState.isGroup && uiState.participantNames.size > 1) {
-                            GroupAvatar(
-                                names = uiState.participantNames.ifEmpty { listOf(uiState.chatTitle) },
-                                avatarPaths = uiState.participantAvatarPaths,
-                                size = 40.dp
-                            )
-                        } else {
-                            Avatar(
-                                name = uiState.chatTitle,
-                                avatarPath = uiState.avatarPath,
-                                size = 40.dp
-                            )
+                onDetailsClick = onDetailsClick,
+                onVideoCallClick = { showVideoCallDialog = true },
+                onMenuAction = { action ->
+                    when (action) {
+                        ChatMenuAction.ADD_PEOPLE -> {
+                            context.startActivity(viewModel.getAddToContactsIntent())
                         }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(4.dp)
-                            ) {
-                                Text(
-                                    text = if (PhoneNumberFormatter.isPhoneNumber(uiState.chatTitle)) {
-                                        PhoneNumberFormatter.format(uiState.chatTitle)
-                                    } else {
-                                        uiState.chatTitle
-                                    },
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    style = MaterialTheme.typography.titleMedium
-                                )
-                                if (uiState.isSnoozed) {
-                                    Icon(
-                                        Icons.Outlined.Snooze,
-                                        contentDescription = "Snoozed",
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
+                        ChatMenuAction.DETAILS -> onDetailsClick()
+                        ChatMenuAction.STARRED -> viewModel.toggleStarred()
+                        ChatMenuAction.SEARCH -> viewModel.activateSearch()
+                        ChatMenuAction.ARCHIVE -> viewModel.archiveChat()
+                        ChatMenuAction.UNARCHIVE -> viewModel.unarchiveChat()
+                        ChatMenuAction.DELETE -> showDeleteDialog = true
+                        ChatMenuAction.BLOCK_AND_REPORT -> showBlockDialog = true
+                        ChatMenuAction.HELP_AND_FEEDBACK -> {
+                            context.startActivity(viewModel.getHelpIntent())
                         }
-                    }
-                },
-                actions = {
-                    // Video call button
-                    IconButton(onClick = { showVideoCallDialog = true }) {
-                        Icon(Icons.Outlined.Videocam, contentDescription = "Video call")
-                    }
-
-                    // Overflow menu button
-                    Box {
-                        IconButton(onClick = { showOverflowMenu = true }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
-                        }
-
-                        ChatOverflowMenu(
-                            expanded = showOverflowMenu,
-                            onDismissRequest = { showOverflowMenu = false },
-                            menuState = ChatMenuState(
-                                isGroupChat = uiState.isGroup,
-                                isArchived = uiState.isArchived,
-                                isStarred = uiState.isStarred,
-                                showSubjectField = uiState.showSubjectField,
-                                isSmsChat = uiState.isLocalSmsChat
-                            ),
-                            onAction = { action ->
-                                when (action) {
-                                    ChatMenuAction.ADD_PEOPLE -> {
-                                        context.startActivity(viewModel.getAddToContactsIntent())
-                                    }
-                                    ChatMenuAction.DETAILS -> onDetailsClick()
-                                    ChatMenuAction.STARRED -> viewModel.toggleStarred()
-                                    ChatMenuAction.SEARCH -> viewModel.activateSearch()
-                                    ChatMenuAction.ARCHIVE -> viewModel.archiveChat()
-                                    ChatMenuAction.UNARCHIVE -> viewModel.unarchiveChat()
-                                    ChatMenuAction.DELETE -> showDeleteDialog = true
-                                    ChatMenuAction.BLOCK_AND_REPORT -> showBlockDialog = true
-                                    ChatMenuAction.HELP_AND_FEEDBACK -> {
-                                        context.startActivity(viewModel.getHelpIntent())
-                                    }
-                                }
-                            }
-                        )
                     }
                 }
             )
@@ -1012,8 +946,7 @@ fun ChatScreen(
                     currentImageQuality = uiState.attachmentQuality,
                     onQualityClick = { showQualitySheet = true },
                     onEditAttachment = { uri ->
-                        navController.navigate(Screen.AttachmentEdit(uri.toString()))
-                    }
+                        onEditAttachmentClick(uri)
                     },
                     onRevealAnimationComplete = {
                         viewModel.markRevealAnimationShown()
@@ -1674,141 +1607,20 @@ fun ChatScreen(
 
     // Retry bottom sheet for failed messages
     selectedMessageForRetry?.let { failedMessage ->
-        ModalBottomSheet(
-            onDismissRequest = { selectedMessageForRetry = null },
-            containerColor = MaterialTheme.colorScheme.surfaceContainerLow
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 32.dp)
-            ) {
-                // Header
-                Text(
-                    text = "Message Not Delivered",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.error,
-                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Retry as iMessage option (if contact supports it)
-                if (uiState.contactIMessageAvailable == true) {
-                    Surface(
-                        onClick = {
-                            viewModel.retryMessage(failedMessage.guid)
-                            selectedMessageForRetry = null
-                        },
-                        color = Color.Transparent,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Surface(
-                                color = Color(0xFF007AFF).copy(alpha = 0.1f),
-                                shape = CircleShape,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = null,
-                                        tint = Color(0xFF007AFF),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            Column {
-                                Text(
-                                    text = "Try Again as iMessage",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Send via BlueBubbles server",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Retry as SMS option
-                if (canRetrySmsForMessage) {
-                    Surface(
-                        onClick = {
-                            viewModel.retryMessageAsSms(failedMessage.guid)
-                            selectedMessageForRetry = null
-                        },
-                        color = Color.Transparent,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 24.dp, vertical = 16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            Surface(
-                                color = Color(0xFF34C759).copy(alpha = 0.1f),
-                                shape = CircleShape,
-                                modifier = Modifier.size(40.dp)
-                            ) {
-                                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                                    Icon(
-                                        Icons.Default.Sms,
-                                        contentDescription = null,
-                                        tint = Color(0xFF34C759),
-                                        modifier = Modifier.size(20.dp)
-                                    )
-                                }
-                            }
-                            Column {
-                                Text(
-                                    text = "Send as Text Message",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = "Send via your phone's SMS",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Cancel option
-                HorizontalDivider(
-                    color = MaterialTheme.colorScheme.outlineVariant,
-                    modifier = Modifier.padding(vertical = 8.dp)
-                )
-
-                Surface(
-                    onClick = { selectedMessageForRetry = null },
-                    color = Color.Transparent,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "Cancel",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 24.dp, vertical = 16.dp)
-                    )
-                }
-            }
-        }
+        RetryMessageBottomSheet(
+            messageGuid = failedMessage.guid,
+            canRetryAsSms = canRetrySmsForMessage,
+            contactIMessageAvailable = uiState.contactIMessageAvailable == true,
+            onRetryAsIMessage = {
+                viewModel.retryMessage(failedMessage.guid)
+                selectedMessageForRetry = null
+            },
+            onRetryAsSms = {
+                viewModel.retryMessageAsSms(failedMessage.guid)
+                selectedMessageForRetry = null
+            },
+            onDismiss = { selectedMessageForRetry = null }
+        )
     }
 
     // Quality Selection Sheet
@@ -1838,7 +1650,7 @@ fun ChatScreen(
         BlockAndReportDialog(
             chatDisplayName = uiState.chatTitle,
             isSmsChat = uiState.isLocalSmsChat,
-            onConfirm = { options ->
+            onConfirm = { options: BlockOptions ->
                 // Handle block contact
                 if (options.blockContact) {
                     if (viewModel.blockContact(context)) {
@@ -1867,33 +1679,20 @@ fun ChatScreen(
     }
 
     if (showSmsBlockedDialog) {
-        AlertDialog(
-            onDismissRequest = { showSmsBlockedDialog = false },
-            title = { Text("Cannot Send SMS") },
-            text = {
-                Text("BothBubbles must be set as the default SMS app to send SMS messages.\n\nGo to Settings → Apps → Default apps → SMS app and select BothBubbles.")
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    showSmsBlockedDialog = false
-                    // Open default apps settings
-                    try {
-                        val intent = Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
-                        context.startActivity(intent)
-                    } catch (_: Exception) {
-                        // Fallback to general settings
-                        val intent = Intent(android.provider.Settings.ACTION_SETTINGS)
-                        context.startActivity(intent)
-                    }
-                }) {
-                    Text("Open Settings")
+        SmsBlockedDialog(
+            onOpenSettings = {
+                showSmsBlockedDialog = false
+                // Open default apps settings
+                try {
+                    val intent = Intent(android.provider.Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+                    context.startActivity(intent)
+                } catch (_: Exception) {
+                    // Fallback to general settings
+                    val intent = Intent(android.provider.Settings.ACTION_SETTINGS)
+                    context.startActivity(intent)
                 }
             },
-            dismissButton = {
-                TextButton(onClick = { showSmsBlockedDialog = false }) {
-                    Text("Cancel")
-                }
-            }
+            onDismiss = { showSmsBlockedDialog = false }
         )
     }
 
@@ -1901,11 +1700,13 @@ fun ChatScreen(
         VideoCallMethodDialog(
             onGoogleMeet = {
                 context.startActivity(viewModel.getGoogleMeetIntent())
+                showVideoCallDialog = false
             },
             onWhatsApp = {
                 viewModel.getWhatsAppCallIntent()?.let { intent ->
                     context.startActivity(intent)
                 }
+                showVideoCallDialog = false
             },
             onDismiss = { showVideoCallDialog = false },
             isWhatsAppAvailable = isWhatsAppAvailable

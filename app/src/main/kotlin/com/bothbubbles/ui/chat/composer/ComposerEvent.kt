@@ -81,6 +81,16 @@ sealed interface ComposerEvent {
     data object ClearAllAttachments : ComposerEvent
 
     /**
+     * User tapped the quality indicator to change image quality.
+     */
+    data object OpenQualitySheet : ComposerEvent
+
+    /**
+     * User tapped edit on an attachment to edit it.
+     */
+    data class EditAttachment(val attachment: AttachmentItem) : ComposerEvent
+
+    /**
      * User dismissed the attachment warning.
      */
     data object DismissAttachmentWarning : ComposerEvent

@@ -293,6 +293,11 @@ fun BothBubblesNavHost(
                 onCameraClick = {
                     navController.navigate(Screen.Camera(route.chatGuid))
                 },
+                onEditAttachmentClick = { uri ->
+                    // Store original URI to update after edit
+                    backStackEntry.savedStateHandle["original_attachment_uri"] = uri.toString()
+                    navController.navigate(Screen.AttachmentEdit(uri.toString()))
+                },
                 capturedPhotoUri = capturedPhotoUri.value?.toUri(),
                 onCapturedPhotoHandled = {
                     backStackEntry.savedStateHandle.remove<String>("captured_photo_uri")

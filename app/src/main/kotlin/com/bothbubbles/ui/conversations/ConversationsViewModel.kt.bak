@@ -5,9 +5,12 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.text.format.DateFormat
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
@@ -49,6 +52,8 @@ import kotlinx.coroutines.withContext
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
 import java.io.File
+import java.text.SimpleDateFormat
+import java.util.*
 import javax.inject.Inject
 
 private const val PAGE_SIZE = 25
@@ -826,7 +831,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get group event text
         val groupEventText = if (messageType == MessageType.GROUP_EVENT && latestMessage != null) {
-            formatGroupEvent(latestMessage, group.primaryChatGuid, handleRepository)
+            formatGroupEvent(latestMessage, group.primaryChatGuid)
         } else null
 
         // Determine message status
@@ -860,7 +865,7 @@ class ConversationsViewModel @Inject constructor(
             displayName = displayName,
             avatarPath = primaryParticipant?.cachedAvatarPath,
             lastMessageText = messageText,
-            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L, application),
+            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L),
             lastMessageTimestamp = latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L,
             unreadCount = totalUnread.takeIf { it > 0 } ?: group.unreadCount,
             isPinned = anyPinned,
@@ -1040,7 +1045,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get group event text
         val groupEventText = if (messageType == MessageType.GROUP_EVENT && latestMessage != null) {
-            formatGroupEvent(latestMessage, group.primaryChatGuid, handleRepository)
+            formatGroupEvent(latestMessage, group.primaryChatGuid)
         } else null
 
         // Determine message status
@@ -1076,7 +1081,7 @@ class ConversationsViewModel @Inject constructor(
             displayName = displayName,
             avatarPath = primaryParticipant?.cachedAvatarPath,
             lastMessageText = messageText,
-            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L, application),
+            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L),
             lastMessageTimestamp = latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L,
             unreadCount = totalUnread.takeIf { it > 0 } ?: group.unreadCount,
             isPinned = anyPinned,
@@ -1281,7 +1286,23 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
-    // normalizeGuid moved to ConversationFormatters.kt
+    /**
+     * Normalize a chat GUID for comparison by stripping formatting from phone numbers.
+     * Handles cases where server sends "+1234567890" but local has "+1-234-567-890".
+     */
+    private fun normalizeGuid(guid: String): String {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return guid.lowercase()
+        val prefix = parts[0].lowercase()
+        val address = if (parts[1].contains("@")) {
+            // Email address - just lowercase
+            parts[1].lowercase()
+        } else {
+            // Phone number - strip non-digits except leading +
+            parts[1].replace(Regex("[^0-9+]"), "")
+        }
+        return "$prefix;-;$address"
+    }
 
     private fun observeSyncState() {
         viewModelScope.launch {
@@ -1459,7 +1480,7 @@ class ConversationsViewModel @Inject constructor(
                                     chatDisplayName = resolvedDisplayName,
                                     messageText = messageText,
                                     timestamp = message.dateCreated,
-                                    formattedTime = formatRelativeTime(message.dateCreated, application),
+                                    formattedTime = formatRelativeTime(message.dateCreated),
                                     isFromMe = message.isFromMe,
                                     avatarPath = primaryParticipant?.cachedAvatarPath,
                                     isGroup = chat.isGroup,
@@ -2039,7 +2060,7 @@ class ConversationsViewModel @Inject constructor(
 
         // Get group event text if this is a group event
         val groupEventText = if (messageType == MessageType.GROUP_EVENT && lastMessage != null) {
-            formatGroupEvent(lastMessage, guid, handleRepository)
+            formatGroupEvent(lastMessage, guid)
         } else null
 
         // Determine message status for outgoing messages
@@ -2111,7 +2132,7 @@ class ConversationsViewModel @Inject constructor(
             displayName = resolvedDisplayName,
             avatarPath = avatarPath,
             lastMessageText = messageText,
-            lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L, application),
+            lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L),
             lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,
             unreadCount = unreadCount,
             isPinned = isPinned,
@@ -2149,10 +2170,233 @@ class ConversationsViewModel @Inject constructor(
         )
     }
 
-    // Utility functions (formatRelativeTime, extractFirstName, isVoiceMessage, etc.)
-    // moved to ConversationFormatters.kt
+    private fun formatRelativeTime(timestamp: Long): String {
+        if (timestamp == 0L) return ""
 
-    // mergeConversations and mergeChatGroup functions moved to ConversationMappers.kt
+        val now = System.currentTimeMillis()
+        val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
+        val today = Calendar.getInstance()
+
+        val isSameYear = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+
+        // Check if within the last 24 hours (show time instead of day name)
+        val hoursDiff = (now - timestamp) / (1000 * 60 * 60)
+        val isWithin24Hours = hoursDiff < 24
+
+        // Check if within the last 7 days
+        val daysDiff = (now - timestamp) / (1000 * 60 * 60 * 24)
+
+        // Get system time format (12h or 24h)
+        val is24Hour = DateFormat.is24HourFormat(application)
+        val timePattern = if (is24Hour) "HH:mm" else "h:mm a"
+
+        return when {
+            isWithin24Hours -> SimpleDateFormat(timePattern, Locale.getDefault()).format(Date(timestamp))
+            daysDiff < 7 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
+            isSameYear -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
+            else -> SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(timestamp))
+        }
+    }
+
+    /**
+     * Extract the first name from a full name, excluding emojis and non-letter characters.
+     * If the name starts with emojis, finds the first word that contains letters.
+     */
+    private fun extractFirstName(fullName: String): String {
+        // Split by whitespace and find the first word that has letters
+        val words = fullName.trim().split(Regex("\\s+"))
+        for (word in words) {
+            // Filter to only letters/digits
+            val cleaned = word.filter { it.isLetterOrDigit() }
+            // Check if it has at least one letter (not just digits/emojis)
+            if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
+                return cleaned
+            }
+        }
+        // Fallback to the first word cleaned of non-alphanumeric characters
+        return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
+    }
+
+    /**
+     * Check if audio attachment is a voice message (by UTI or filename pattern)
+     */
+    private fun isVoiceMessage(attachment: AttachmentEntity): Boolean {
+        val uti = attachment.uti?.lowercase() ?: ""
+        val name = attachment.transferName?.lowercase() ?: ""
+        return uti.contains("voice") ||
+               name.startsWith("audio message") ||
+               name.endsWith(".caf") // Voice memos are often .caf format
+    }
+
+    /**
+     * Check if mime type represents a document file
+     */
+    private fun isDocumentType(mimeType: String?): Boolean {
+        val type = mimeType?.lowercase() ?: return false
+        return type.startsWith("application/pdf") ||
+               type.contains("document") ||
+               type.contains("spreadsheet") ||
+               type.contains("presentation") ||
+               type.startsWith("application/msword") ||
+               type.startsWith("application/vnd.ms-") ||
+               type.startsWith("application/vnd.openxmlformats")
+    }
+
+    /**
+     * Get friendly document type name from mime type and extension
+     */
+    private fun getDocumentTypeName(mimeType: String?, extension: String?): String {
+        return when {
+            mimeType?.contains("pdf") == true -> "PDF"
+            mimeType?.contains("word") == true || extension == "doc" || extension == "docx" -> "Document"
+            mimeType?.contains("excel") == true || mimeType?.contains("spreadsheet") == true -> "Spreadsheet"
+            mimeType?.contains("powerpoint") == true || mimeType?.contains("presentation") == true -> "Presentation"
+            else -> "File"
+        }
+    }
+
+    /**
+     * Check if text contains location coordinates or map links
+     */
+    private fun String.containsLocation(): Boolean {
+        return contains("maps.apple.com") ||
+               contains("maps.google.com") ||
+               contains("goo.gl/maps") ||
+               matches(Regex(".*-?\\d+\\.\\d+,\\s*-?\\d+\\.\\d+.*"))
+    }
+
+    /**
+     * Parse tapback/reaction type to human-readable verb
+     */
+    private fun parseTapbackType(associatedMessageType: String?): TapbackInfo {
+        val type = associatedMessageType?.lowercase() ?: ""
+        return when {
+            type.contains("love") -> TapbackInfo("Loved", "❤️")
+            type.contains("like") -> TapbackInfo("Liked", "👍")
+            type.contains("dislike") -> TapbackInfo("Disliked", "👎")
+            type.contains("laugh") -> TapbackInfo("Laughed at", "😂")
+            type.contains("emphasize") || type.contains("!!") -> TapbackInfo("Emphasized", "‼️")
+            type.contains("question") || type.contains("?") -> TapbackInfo("Questioned", "❓")
+            else -> TapbackInfo("Reacted to", "")
+        }
+    }
+
+    /**
+     * Format group event message based on itemType and groupActionType
+     */
+    private suspend fun formatGroupEvent(message: MessageEntity, chatGuid: String): String {
+        return when (message.itemType) {
+            1 -> { // Participant change
+                val participantName = message.handleId?.let { handleId ->
+                    handleRepository.getHandleById(handleId)?.displayName
+                } ?: "Someone"
+                val firstName = extractFirstName(participantName)
+                when (message.groupActionType) {
+                    0 -> "$firstName joined the group"
+                    1 -> "$firstName left the group"
+                    else -> "Group membership changed"
+                }
+            }
+            2 -> message.groupTitle?.let { "Name changed to \"$it\"" } ?: "Group name changed"
+            3 -> "Group photo changed"
+            else -> "Group updated"
+        }
+    }
+
+    /**
+     * Data class for tapback information
+     */
+    private data class TapbackInfo(val verb: String, val emoji: String)
+
+    /**
+     * Merge 1:1 conversations with the same contact into a single entry.
+     * Groups chats by their contactKey (normalized phone number) and combines:
+     * - Uses the most recent message
+     * - Sums up unread counts
+     * - Combines all chat GUIDs for navigation
+     * - Prefers saved contact names over inferred names
+     *
+     * Group chats are never merged.
+     */
+    private fun mergeConversations(conversations: List<ConversationUiModel>): List<ConversationUiModel> {
+        // Separate group chats (never merge) from 1:1 chats
+        val (groupChats, oneOnOneChats) = conversations.partition { it.isGroup }
+
+        // Group 1:1 chats by contact key
+        val grouped = oneOnOneChats.groupBy { it.contactKey }
+
+        val mergedChats = grouped.map { (contactKey, chats) ->
+            if (chats.size == 1 || contactKey.isEmpty()) {
+                // Single chat or no valid contact key - no merging needed
+                chats.first()
+            } else {
+                // Multiple chats to merge
+                mergeChatGroup(chats)
+            }
+        }
+
+        // Combine merged 1:1 chats with group chats
+        return (mergedChats + groupChats)
+            .sortedWith(
+                compareByDescending<ConversationUiModel> { it.isPinned }
+                    .thenBy { it.pinIndex }
+                    .thenByDescending { it.lastMessageTimestamp }
+            )
+    }
+
+    /**
+     * Merge multiple 1:1 chats (same contact) into a single conversation entry.
+     */
+    private fun mergeChatGroup(chats: List<ConversationUiModel>): ConversationUiModel {
+        // Sort by most recent message
+        val sortedByRecent = chats.sortedByDescending { it.lastMessageTimestamp }
+        val primary = sortedByRecent.first()
+
+        // Combine all chat GUIDs
+        val allGuids = chats.map { it.guid }
+
+        // Sum unread counts
+        val totalUnread = chats.sumOf { it.unreadCount }
+
+        // Any typing indicator from any chat
+        val anyTyping = chats.any { it.isTyping }
+
+        // Any pinned - use lowest pinIndex from pinned chats
+        val anyPinned = chats.any { it.isPinned }
+        val minPinIndex = chats.filter { it.isPinned }.minOfOrNull { it.pinIndex } ?: Int.MAX_VALUE
+
+        // All muted
+        val allMuted = chats.all { it.isMuted }
+
+        // Prefer saved contact name over inferred name
+        val preferredChat = chats.find { it.hasContact } ?: primary
+        val displayName = preferredChat.displayName
+        val hasInferredName = preferredChat.hasInferredName
+        val inferredName = preferredChat.inferredName
+        val avatarPath = preferredChat.avatarPath ?: chats.firstNotNullOfOrNull { it.avatarPath }
+
+        // Check for any draft
+        val chatWithDraft = chats.find { it.hasDraft }
+        val hasDraft = chatWithDraft != null
+        val draftText = chatWithDraft?.draftText
+
+        return primary.copy(
+            guid = primary.guid, // Primary guid for navigation (will use mergedChatGuids in chat)
+            displayName = displayName,
+            avatarPath = avatarPath,
+            unreadCount = totalUnread,
+            isPinned = anyPinned,
+            pinIndex = minPinIndex,
+            isMuted = allMuted,
+            isTyping = anyTyping,
+            hasDraft = hasDraft,
+            draftText = draftText,
+            hasInferredName = hasInferredName,
+            inferredName = inferredName,
+            mergedChatGuids = allGuids,
+            isMerged = true
+        )
+    }
 }
 
 // UI state, models, and enums moved to ConversationsUiState.kt

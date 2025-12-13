@@ -7,5 +7,8 @@ import android.net.Uri
  */
 data class PendingAttachmentInput(
     val uri: Uri,
-    val caption: String? = null
+    val caption: String? = null,
+    val mimeType: String? = null,
+    val name: String? = null,
+    val size: Long? = null
 )

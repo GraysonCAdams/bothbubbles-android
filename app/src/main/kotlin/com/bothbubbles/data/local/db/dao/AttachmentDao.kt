@@ -12,8 +12,8 @@ import kotlinx.coroutines.flow.Flow
  * Data class for attachment with message date, used for gallery grouping.
  */
 data class AttachmentWithDate(
-    val attachment: AttachmentEntity,
-    val dateCreated: Long
+    @androidx.room.Embedded val attachment: AttachmentEntity,
+    @androidx.room.ColumnInfo(name = "dateCreated") val dateCreated: Long
 )
 
 @Dao

@@ -12,6 +12,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
@@ -51,8 +52,6 @@ class PendingMessageRepository @Inject constructor(
     }
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
-
-import com.bothbubbles.data.model.PendingAttachmentInput
 
     /**
      * Queue a message for sending.

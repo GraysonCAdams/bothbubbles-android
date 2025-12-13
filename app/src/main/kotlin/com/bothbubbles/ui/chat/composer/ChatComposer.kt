@@ -97,8 +97,9 @@ fun ChatComposer(
                 AttachmentThumbnailRow(
                     attachments = state.attachments,
                     onRemove = { onEvent(ComposerEvent.RemoveAttachment(it)) },
+                    onEdit = { onEvent(ComposerEvent.EditAttachment(it)) },
                     onClearAll = { onEvent(ComposerEvent.ClearAllAttachments) },
-                    onQualityClick = { /* TODO: onEvent(ComposerEvent.OpenQualitySheet) */ },
+                    onQualityClick = { onEvent(ComposerEvent.OpenQualitySheet) },
                     currentQuality = state.currentImageQuality.name.lowercase()
                         .replaceFirstChar { it.uppercase() }
                 )

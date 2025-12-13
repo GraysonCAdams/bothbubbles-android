@@ -138,31 +138,7 @@ import com.bothbubbles.ui.theme.KumbhSansFamily
 private val iMessageBlue = Color(0xFF007AFF)
 private val smsGreen = Color(0xFF34C759)
 
-// Screen state for animated transitions
-private enum class ConversationScreenState {
-    LOADING, EMPTY, CONTENT
-}
 
-// Conversation list filter options (shown in top bar dropdown)
-enum class ConversationFilter(val label: String, val icon: ImageVector) {
-    ALL("All", Icons.Outlined.Inbox),
-    UNREAD("Unread", Icons.Outlined.MarkChatUnread),
-    SPAM("Spam", Icons.Outlined.Report),
-    UNKNOWN_SENDERS("Unknown Senders", Icons.Outlined.PersonSearch),
-    KNOWN_SENDERS("Known Senders", Icons.Outlined.Person)
-}
-
-// Search filter options
-enum class SearchFilter(val label: String, val icon: ImageVector) {
-    UNREAD("Unread", Icons.Outlined.MarkChatUnread),
-    KNOWN("Known", Icons.Outlined.Person),
-    UNKNOWN("Unknown", Icons.Outlined.Block),
-    STARRED("Starred", Icons.Outlined.Star),
-    IMAGES("Images", Icons.Outlined.Image),
-    VIDEOS("Videos", Icons.Outlined.VideoLibrary),
-    PLACES("Places", Icons.Outlined.Place),
-    LINKS("Links", Icons.Outlined.Link)
-}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable

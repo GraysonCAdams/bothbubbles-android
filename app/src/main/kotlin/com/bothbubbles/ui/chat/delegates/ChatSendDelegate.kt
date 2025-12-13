@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
@@ -90,8 +91,6 @@ class ChatSendDelegate @Inject constructor(
         this.chatGuid = chatGuid
         this.scope = scope
     }
-
-import com.bothbubbles.data.model.PendingAttachmentInput
 
     /**
      * Send a message with optional attachments.
