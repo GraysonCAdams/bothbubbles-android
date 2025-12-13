@@ -44,6 +44,9 @@ sealed class SettingsPanelPage {
     /** Message effects settings */
     data object Effects : SettingsPanelPage()
 
+    /** Image quality settings */
+    data object ImageQuality : SettingsPanelPage()
+
     /** Quick reply templates */
     data object Templates : SettingsPanelPage()
 

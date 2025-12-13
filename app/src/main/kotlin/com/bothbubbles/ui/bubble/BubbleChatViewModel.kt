@@ -9,6 +9,7 @@ import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.util.StableList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -85,10 +86,10 @@ class BubbleChatViewModel @Inject constructor(
                                 hasError = msg.error != 0,
                                 isDelivered = msg.dateDelivered != null,
                                 isRead = msg.dateRead != null,
-                                attachments = emptyList(), // Simplified for bubble
+                                attachments = StableList(emptyList()), // Simplified for bubble
                                 senderName = null,
                                 messageSource = if (msg.isFromMe) "me" else "them",
-                                reactions = emptyList(),
+                                reactions = StableList(emptyList()),
                                 myReactions = emptySet(),
                                 isReaction = false,
                                 expressiveSendStyleId = null

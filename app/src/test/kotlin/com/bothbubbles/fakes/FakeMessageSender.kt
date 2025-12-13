@@ -2,6 +2,7 @@ package com.bothbubbles.fakes
 
 import android.net.Uri
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.messaging.UploadProgress
@@ -71,7 +72,7 @@ class FakeMessageSender : MessageSender {
         replyToGuid: String?,
         effectId: String?,
         subject: String?,
-        attachments: List<Uri>,
+        attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
         subscriptionId: Int,
         tempGuid: String?
@@ -194,7 +195,7 @@ class FakeMessageSender : MessageSender {
         val replyToGuid: String?,
         val effectId: String?,
         val subject: String?,
-        val attachments: List<Uri>,
+        val attachments: List<PendingAttachmentInput>,
         val deliveryMode: MessageDeliveryMode,
         val subscriptionId: Int,
         val tempGuid: String?

@@ -6,9 +6,10 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import com.bothbubbles.util.error.AttachmentErrorState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,7 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
-import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.PriorityBlockingQueue
 import javax.inject.Inject
@@ -43,6 +43,15 @@ class AttachmentDownloadQueue @Inject constructor(
     companion object {
         private const val TAG = "AttachmentDownloadQueue"
         private const val MAX_CONCURRENT_DOWNLOADS = 2
+
+        /** Maximum number of retry attempts before permanent failure */
+        const val MAX_RETRY_COUNT = 3
+
+        /** Initial delay for exponential backoff (1 second) */
+        private const val INITIAL_BACKOFF_MS = 1000L
+
+        /** Maximum delay for exponential backoff (30 seconds) */
+        private const val MAX_BACKOFF_MS = 30_000L
     }
 
     /**
@@ -82,10 +91,15 @@ class AttachmentDownloadQueue @Inject constructor(
         val bytesDownloaded: Long,
         val totalBytes: Long,
         val isComplete: Boolean = false,
-        val error: String? = null
+        val error: String? = null,
+        val errorType: String? = null,
+        val isRetryable: Boolean = true
     ) {
         val progress: Float
             get() = if (totalBytes > 0) bytesDownloaded.toFloat() / totalBytes else 0f
+
+        val hasFailed: Boolean
+            get() = isComplete && error != null
     }
 
     private val semaphore = Semaphore(MAX_CONCURRENT_DOWNLOADS)
@@ -277,7 +291,42 @@ class AttachmentDownloadQueue @Inject constructor(
     private suspend fun downloadAttachment(request: DownloadRequest) {
         Log.d(TAG, "Starting download: ${request.attachmentGuid}")
 
+        // Get current attachment to check retry count
+        val attachment = attachmentDao.getAttachmentByGuid(request.attachmentGuid)
+        val currentRetryCount = attachment?.retryCount ?: 0
+
+        // Check if max retries exceeded
+        if (currentRetryCount >= MAX_RETRY_COUNT) {
+            Log.w(TAG, "Max retries exceeded for ${request.attachmentGuid}, skipping")
+            val errorState = AttachmentErrorState.MaxRetriesExceeded
+            attachmentDao.markTransferFailedWithError(
+                guid = request.attachmentGuid,
+                errorType = errorState.type,
+                errorMessage = errorState.userMessage
+            )
+            updateProgress(
+                attachmentGuid = request.attachmentGuid,
+                bytesDownloaded = 0,
+                totalBytes = 0,
+                isComplete = true,
+                error = errorState.userMessage,
+                errorType = errorState.type,
+                isRetryable = false
+            )
+            return
+        }
+
+        // Apply exponential backoff if this is a retry
+        if (currentRetryCount > 0) {
+            val backoffMs = calculateBackoff(currentRetryCount)
+            Log.d(TAG, "Retry #$currentRetryCount for ${request.attachmentGuid}, waiting ${backoffMs}ms")
+            delay(backoffMs)
+        }
+
         updateProgress(request.attachmentGuid, 0, 0, false)
+
+        // Update transfer state to DOWNLOADING
+        attachmentDao.updateTransferState(request.attachmentGuid, "DOWNLOADING")
 
         try {
             val result = attachmentRepository.downloadAttachment(
@@ -297,20 +346,48 @@ class AttachmentDownloadQueue @Inject constructor(
                     Log.d(TAG, "Download complete: ${request.attachmentGuid}")
                 },
                 onFailure = { error ->
-                    updateProgress(
-                        request.attachmentGuid, 0, 0, true,
-                        error = error.message ?: "Download failed"
-                    )
-                    Log.e(TAG, "Download failed: ${request.attachmentGuid}", error)
+                    handleDownloadError(request.attachmentGuid, error)
                 }
             )
         } catch (e: Exception) {
-            updateProgress(
-                request.attachmentGuid, 0, 0, true,
-                error = e.message ?: "Download failed"
-            )
-            Log.e(TAG, "Download exception: ${request.attachmentGuid}", e)
+            handleDownloadError(request.attachmentGuid, e)
         }
+    }
+
+    /**
+     * Handle download errors by categorizing them and updating the database.
+     */
+    private suspend fun handleDownloadError(attachmentGuid: String, error: Throwable) {
+        val errorState = AttachmentErrorState.fromException(error)
+
+        Log.e(TAG, "Download failed: $attachmentGuid - ${errorState.type}: ${errorState.userMessage}", error)
+
+        // Update database with error details
+        attachmentDao.markTransferFailedWithError(
+            guid = attachmentGuid,
+            errorType = errorState.type,
+            errorMessage = errorState.userMessage
+        )
+
+        // Update progress state for UI
+        updateProgress(
+            attachmentGuid = attachmentGuid,
+            bytesDownloaded = 0,
+            totalBytes = 0,
+            isComplete = true,
+            error = errorState.userMessage,
+            errorType = errorState.type,
+            isRetryable = errorState.isRetryable
+        )
+    }
+
+    /**
+     * Calculate exponential backoff delay for retries.
+     * Formula: min(INITIAL_BACKOFF * 2^retryCount, MAX_BACKOFF)
+     */
+    private fun calculateBackoff(retryCount: Int): Long {
+        val exponentialDelay = INITIAL_BACKOFF_MS * (1L shl retryCount.coerceAtMost(5))
+        return exponentialDelay.coerceAtMost(MAX_BACKOFF_MS)
     }
 
     private fun updateProgress(
@@ -318,14 +395,18 @@ class AttachmentDownloadQueue @Inject constructor(
         bytesDownloaded: Long,
         totalBytes: Long,
         isComplete: Boolean,
-        error: String? = null
+        error: String? = null,
+        errorType: String? = null,
+        isRetryable: Boolean = true
     ) {
         val progress = DownloadProgress(
             attachmentGuid = attachmentGuid,
             bytesDownloaded = bytesDownloaded,
             totalBytes = totalBytes,
             isComplete = isComplete,
-            error = error
+            error = error,
+            errorType = errorType,
+            isRetryable = isRetryable
         )
 
         _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
@@ -359,6 +440,57 @@ class AttachmentDownloadQueue @Inject constructor(
 
         if (toReprioritize.isNotEmpty()) {
             Log.d(TAG, "Reprioritized ${toReprioritize.size} downloads for active chat $chatGuid")
+        }
+    }
+
+    /**
+     * Retry a failed download.
+     * Clears the error state in the database and re-enqueues with immediate priority.
+     *
+     * @param attachmentGuid GUID of the failed attachment
+     * @param chatGuid GUID of the chat (for prioritization)
+     * @param resetRetryCount If true, resets the retry counter (for manual user retries)
+     */
+    suspend fun retryDownload(
+        attachmentGuid: String,
+        chatGuid: String,
+        resetRetryCount: Boolean = true
+    ) {
+        Log.d(TAG, "Retrying download: $attachmentGuid, resetRetryCount=$resetRetryCount")
+
+        // Clear error state in database
+        attachmentDao.clearErrorForRetry(attachmentGuid)
+
+        // Reset retry count if this is a manual user retry
+        if (resetRetryCount) {
+            // Get attachment and update with reset retry count
+            val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
+            if (attachment != null) {
+                attachmentDao.updateAttachment(attachment.copy(retryCount = 0))
+            }
+        }
+
+        // Clear from progress state
+        _downloadProgress.value = _downloadProgress.value.toMutableMap().apply {
+            remove(attachmentGuid)
+        }
+
+        // Remove from queued guids if present (allows re-enqueue)
+        queuedGuids.remove(attachmentGuid)
+
+        // Enqueue with immediate priority
+        enqueue(attachmentGuid, chatGuid, Priority.IMMEDIATE)
+    }
+
+    /**
+     * Retry all failed downloads for a chat.
+     */
+    suspend fun retryAllFailedForChat(chatGuid: String) {
+        val failedAttachments = attachmentDao.getFailedAttachmentsForChat(chatGuid)
+        Log.d(TAG, "Retrying ${failedAttachments.size} failed downloads for chat $chatGuid")
+
+        failedAttachments.forEach { attachment ->
+            retryDownload(attachment.guid, chatGuid, resetRetryCount = true)
         }
     }
 }

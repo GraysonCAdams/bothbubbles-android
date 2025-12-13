@@ -2,13 +2,14 @@ package com.bothbubbles.util.error
 
 /**
  * Base sealed class for all application errors.
+ * Extends Throwable so errors can be thrown and caught in Result types.
  * Provides structured error information for logging, display, and recovery.
  */
 sealed class AppError(
-    open val message: String,
-    open val cause: Throwable? = null,
+    override val message: String,
+    override val cause: Throwable? = null,
     open val isRetryable: Boolean = false
-) {
+) : Throwable(message, cause) {
     /**
      * User-friendly message suitable for display in UI.
      * Override in subclasses for specific messages.

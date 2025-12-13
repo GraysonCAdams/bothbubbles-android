@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.ProgressRequestBody
 import com.bothbubbles.data.remote.api.dto.EditMessageRequest
@@ -21,6 +22,8 @@ import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.data.remote.api.dto.SendMessageRequest
 import com.bothbubbles.data.remote.api.dto.SendReactionRequest
 import com.bothbubbles.data.remote.api.dto.UnsendMessageRequest
+import com.bothbubbles.data.model.AttachmentQuality
+import com.bothbubbles.services.media.ImageCompressor
 import com.bothbubbles.services.media.VideoCompressor
 import com.bothbubbles.services.sms.MmsSendService
 import com.bothbubbles.services.sms.SmsPermissionHelper
@@ -98,7 +101,8 @@ class MessageSendingService @Inject constructor(
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val videoCompressor: VideoCompressor
+    private val videoCompressor: VideoCompressor,
+    private val imageCompressor: ImageCompressor
 ) : MessageSender {
     companion object {
         private const val TAG = "MessageSendingService"
@@ -125,13 +129,13 @@ class MessageSendingService @Inject constructor(
     override suspend fun sendUnified(
         chatGuid: String,
         text: String,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        subject: String? = null,
-        attachments: List<Uri> = emptyList(),
-        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
-        subscriptionId: Int = -1,
-        tempGuid: String? = null // Stable ID for retry idempotency
+        replyToGuid: String?,
+        effectId: String?,
+        subject: String?,
+        attachments: List<PendingAttachmentInput>,
+        deliveryMode: MessageDeliveryMode,
+        subscriptionId: Int,
+        tempGuid: String? // Stable ID for retry idempotency
     ): Result<MessageEntity> {
         // Determine actual delivery mode
         val actualMode = when (deliveryMode) {
@@ -146,7 +150,16 @@ class MessageSendingService @Inject constructor(
             }
             MessageDeliveryMode.LOCAL_MMS -> {
                 ensureCarrierReady(requireMms = true)?.let { return Result.failure(it) }
-                sendLocalMms(chatGuid, text, attachments, subject, subscriptionId)
+
+                // Concatenate captions for MMS
+                var messageText = text
+                val captions = attachments.mapNotNull { it.caption }.filter { it.isNotBlank() }
+                if (captions.isNotEmpty()) {
+                     if (messageText.isNotBlank()) messageText += "\n"
+                     messageText += captions.joinToString("\n")
+                }
+
+                sendLocalMms(chatGuid, messageText, attachments.map { it.uri }, subject, subscriptionId)
             }
             else -> {
                 // iMessage mode - handle attachments via BlueBubbles API
@@ -166,10 +179,10 @@ class MessageSendingService @Inject constructor(
     override suspend fun sendMessage(
         chatGuid: String,
         text: String,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        subject: String? = null,
-        providedTempGuid: String? = null // Stable ID for retry idempotency
+        replyToGuid: String?,
+        effectId: String?,
+        subject: String?,
+        providedTempGuid: String? // Stable ID for retry idempotency
     ): Result<MessageEntity> = safeCall {
         // Use provided tempGuid if available (for retries), otherwise generate new one
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
@@ -281,7 +294,7 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         reaction: String, // e.g., "love", "like", "dislike", "laugh", "emphasize", "question"
-        partIndex: Int = 0
+        partIndex: Int
     ): Result<MessageEntity> = safeCall {
         val response = api.sendReaction(
             SendReactionRequest(
@@ -314,7 +327,7 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         reaction: String,
-        partIndex: Int = 0
+        partIndex: Int
     ): Result<Unit> = safeCall {
         // In iMessage, sending the same reaction again removes it
         val removeReaction = "-$reaction" // Prefix with - to remove
@@ -336,7 +349,7 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         newText: String,
-        partIndex: Int = 0
+        partIndex: Int
     ): Result<MessageEntity> = safeCall {
         val response = api.editMessage(
             guid = messageGuid,
@@ -363,7 +376,7 @@ class MessageSendingService @Inject constructor(
     override suspend fun unsendMessage(
         chatGuid: String,
         messageGuid: String,
-        partIndex: Int = 0
+        partIndex: Int
     ): Result<Unit> = safeCall {
         api.unsendMessage(
             guid = messageGuid,
@@ -510,7 +523,7 @@ class MessageSendingService @Inject constructor(
     private suspend fun sendIMessageWithAttachments(
         chatGuid: String,
         text: String,
-        attachments: List<Uri>,
+        attachments: List<PendingAttachmentInput>,
         replyToGuid: String? = null,
         effectId: String? = null,
         subject: String? = null,
@@ -543,7 +556,8 @@ class MessageSendingService @Inject constructor(
             messageDao.insertMessage(tempMessage)
 
             // Create temporary attachment records for immediate display
-            attachments.forEachIndexed { index, uri ->
+            attachments.forEachIndexed { index, input ->
+                val uri = input.uri
                 val tempAttGuid = tempAttachmentGuids[index]
 
                 val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
@@ -573,10 +587,15 @@ class MessageSendingService @Inject constructor(
 
         var lastResponse: MessageDto? = null
 
+        // Get default image quality from settings
+        val defaultQualityStr = settingsDataStore.defaultImageQuality.first()
+        val defaultImageQuality = AttachmentQuality.fromString(defaultQualityStr)
+
         // Upload each attachment with progress tracking
         // On retry, skip attachments that were already successfully uploaded
         val totalAttachments = attachments.size
-        attachments.forEachIndexed { index, uri ->
+        attachments.forEachIndexed { index, input ->
+            val uri = input.uri
             val tempAttGuid = tempAttachmentGuids[index]
 
             // Check if this attachment was already uploaded (retry case)
@@ -591,14 +610,18 @@ class MessageSendingService @Inject constructor(
                 tempGuid = tempAttGuid,
                 uri = uri,
                 attachmentIndex = index,
-                totalAttachments = totalAttachments
+                totalAttachments = totalAttachments,
+                imageQuality = defaultImageQuality
             )
             if (attachmentResult.isFailure) {
                 // Mark message and attachment as failed
+                val error = attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
+                val errorState = com.bothbubbles.util.error.AttachmentErrorState.fromException(error)
+                
                 messageDao.updateErrorStatus(tempGuid, 1)
-                attachmentDao.markTransferFailed(tempAttGuid)
+                attachmentDao.markTransferFailedWithError(tempAttGuid, errorState.type, errorState.userMessage)
                 _uploadProgress.value = null
-                throw attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
+                throw error
             }
 
             // Mark this attachment as uploaded
@@ -609,12 +632,19 @@ class MessageSendingService @Inject constructor(
         // Reset progress after all attachments uploaded
         _uploadProgress.value = null
 
-        // Send text message if present
-        if (text.isNotBlank()) {
+        // Send text message if present (including captions)
+        var messageText = text
+        val captions = attachments.mapNotNull { it.caption }.filter { it.isNotBlank() }
+        if (captions.isNotEmpty()) {
+             if (messageText.isNotBlank()) messageText += "\n"
+             messageText += captions.joinToString("\n")
+        }
+
+        if (messageText.isNotBlank()) {
             val response = api.sendMessage(
                 SendMessageRequest(
                     chatGuid = chatGuid,
-                    message = text,
+                    message = messageText,
                     tempGuid = tempGuid,
                     selectedMessageGuid = replyToGuid,
                     effectId = effectId,
@@ -654,13 +684,15 @@ class MessageSendingService @Inject constructor(
     /**
      * Upload a single attachment to BlueBubbles server with progress tracking.
      * Videos are compressed before upload if compression is enabled.
+     * Images are compressed according to the quality setting.
      */
     private suspend fun uploadAttachment(
         chatGuid: String,
         tempGuid: String,
         uri: Uri,
         attachmentIndex: Int = 0,
-        totalAttachments: Int = 1
+        totalAttachments: Int = 1,
+        imageQuality: AttachmentQuality = AttachmentQuality.DEFAULT
     ): Result<MessageDto> = safeCall {
         val contentResolver = context.contentResolver
 
@@ -672,12 +704,50 @@ class MessageSendingService @Inject constructor(
 
         // Check if this is a video that should be compressed
         val isVideo = mimeType.startsWith("video/")
-        val shouldCompress = isVideo && settingsDataStore.compressVideosBeforeUpload.first()
+        val shouldCompressVideo = isVideo && settingsDataStore.compressVideosBeforeUpload.first()
+
+        // Check if this is an image that should be compressed
+        val isImage = imageCompressor.isCompressible(mimeType)
+        val shouldCompressImage = isImage && imageQuality != AttachmentQuality.AUTO && imageQuality != AttachmentQuality.ORIGINAL
 
         val bytes: ByteArray
         var compressedPath: String? = null
 
-        if (shouldCompress) {
+        if (shouldCompressImage) {
+            // Compress image before upload
+            Log.d(TAG, "Compressing image with quality: ${imageQuality.name}")
+
+            val compressionResult = imageCompressor.compress(uri, imageQuality) { progress ->
+                // Report compression progress (0-30% of total upload progress)
+                _uploadProgress.value = UploadProgress(
+                    fileName = fileName,
+                    bytesUploaded = (progress * 30).toLong(),
+                    totalBytes = 100,
+                    attachmentIndex = attachmentIndex,
+                    totalAttachments = totalAttachments
+                )
+            }
+
+            if (compressionResult != null) {
+                compressedPath = compressionResult.path
+                val compressedFile = File(compressedPath)
+                bytes = compressedFile.readBytes()
+
+                // Update MIME type and filename for JPEG output
+                if (compressionResult.path.endsWith(".jpg")) {
+                    mimeType = "image/jpeg"
+                    fileName = fileName.substringBeforeLast('.') + ".jpg"
+                }
+
+                Log.d(TAG, "Image compressed: ${compressionResult.originalSizeBytes / 1024}KB -> ${compressionResult.compressedSizeBytes / 1024}KB (${(compressionResult.compressionRatio * 100).toInt()}% saved)")
+            } else {
+                // Compression failed or skipped, use original
+                Log.w(TAG, "Image compression skipped/failed, using original")
+                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                    ?: throw MessageError.UnsupportedAttachment("unknown")
+            }
+        } else if (shouldCompressVideo) {
+            // Compress video before upload
             // Get compression quality from settings
             val qualityStr = settingsDataStore.videoCompressionQuality.first()
             val quality = when (qualityStr) {

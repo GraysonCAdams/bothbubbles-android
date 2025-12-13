@@ -436,7 +436,7 @@ private fun AvatarLargePreview() {
 private fun GroupAvatarTwoPreview() {
     com.bothbubbles.ui.preview.PreviewWrapper {
         GroupAvatar(
-            members = listOf("Alice", "Bob"),
+            names = listOf("Alice", "Bob"),
             avatarPaths = listOf(null, null),
             size = 56.dp
         )
@@ -448,7 +448,7 @@ private fun GroupAvatarTwoPreview() {
 private fun GroupAvatarThreePreview() {
     com.bothbubbles.ui.preview.PreviewWrapper {
         GroupAvatar(
-            members = listOf("Alice", "Bob", "Charlie"),
+            names = listOf("Alice", "Bob", "Charlie"),
             avatarPaths = listOf(null, null, null),
             size = 56.dp
         )
@@ -460,7 +460,7 @@ private fun GroupAvatarThreePreview() {
 private fun GroupAvatarFourPlusPreview() {
     com.bothbubbles.ui.preview.PreviewWrapper {
         GroupAvatar(
-            members = listOf("Alice", "Bob", "Charlie", "Diana"),
+            names = listOf("Alice", "Bob", "Charlie", "Diana"),
             avatarPaths = listOf(null, null, null, null),
             size = 56.dp
         )

@@ -87,7 +87,12 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import com.bothbubbles.R
+import com.bothbubbles.data.model.AttachmentQuality
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.ui.chat.AttachmentWarning
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.SendButtonAnimationPhase
@@ -128,10 +133,16 @@ fun ChatInputArea(
     smsInputBlocked: Boolean,
     onSmsInputBlockedClick: () -> Unit,
     hasAttachments: Boolean,
-    attachments: List<Uri>,
+    attachments: List<PendingAttachmentInput>,
     onRemoveAttachment: (Uri) -> Unit,
     onClearAllAttachments: () -> Unit,
+    onEditAttachment: (Uri) -> Unit = {},
+    onReorderAttachments: (List<PendingAttachmentInput>) -> Unit = {},
     isPickerExpanded: Boolean,
+    // Image quality props
+    hasCompressibleImages: Boolean = false,
+    currentImageQuality: AttachmentQuality = AttachmentQuality.STANDARD,
+    onQualityClick: () -> Unit = {},
     // Attachment warning props
     attachmentWarning: AttachmentWarning? = null,
     onDismissWarning: () -> Unit = {},
@@ -159,6 +170,7 @@ fun ChatInputArea(
     tutorialState: TutorialState = TutorialState.NOT_SHOWN,
     onModeToggle: (ChatSendMode) -> Boolean = { false },
     onRevealAnimationComplete: () -> Unit = {},
+    onSendButtonBoundsChanged: (Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     // MMS mode is for local SMS chats when attachments or long text is present
@@ -195,11 +207,24 @@ fun ChatInputArea(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "${attachments.size} attachment${if (attachments.size > 1) "s" else ""}",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = inputColors.inputText.copy(alpha = 0.7f)
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                text = "${attachments.size} attachment${if (attachments.size > 1) "s" else ""}",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = inputColors.inputText.copy(alpha = 0.7f)
+                            )
+
+                            // Quality indicator button - shown only when there are image attachments
+                            if (hasCompressibleImages) {
+                                QualityIndicator(
+                                    currentQuality = currentImageQuality,
+                                    onClick = onQualityClick
+                                )
+                            }
+                        }
 
                         if (attachments.size > 1) {
                             TextButton(
@@ -215,17 +240,46 @@ fun ChatInputArea(
                         }
                     }
 
-                    LazyRow(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 12.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        items(attachments) { uri ->
-                            AttachmentPreview(
-                                uri = uri,
-                                onRemove = { onRemoveAttachment(uri) }
-                            )
+                    ReorderableAttachmentStrip(
+                        attachments = attachments,
+                        onRemove = onRemoveAttachment,
+                        onEdit = onEditAttachment,
+                        onReorder = onReorderAttachments,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    
+                    // Quality indicator (only if compressible images present)
+                    if (hasCompressibleImages) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 4.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
+                            Surface(
+                                onClick = onQualityClick,
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.secondaryContainer,
+                                modifier = Modifier.height(32.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Image,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp),
+                                        tint = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                    Text(
+                                        text = currentImageQuality.displayName,
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSecondaryContainer
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -543,24 +597,30 @@ fun ChatInputArea(
                             if (showSend) {
                                 // Use toggle button in normal mode when toggle is available
                                 if (mode == InputMode.NORMAL && canToggleSendMode) {
-                                    SendModeToggleButton(
-                                        onClick = onSendClick,
-                                        onLongPress = onSendLongPress,
-                                        currentMode = currentSendMode,
-                                        canToggle = canToggleSendMode,
-                                        onModeToggle = onModeToggle,
-                                        isSending = isSending,
-                                        isMmsMode = isMmsMode,
-                                        showRevealAnimation = showSendModeRevealAnimation,
-                                        tutorialActive = tutorialState == TutorialState.STEP_1_SWIPE_UP ||
-                                                tutorialState == TutorialState.STEP_2_SWIPE_BACK,
-                                        onAnimationConfigChange = { config ->
-                                            // Mark animation as complete when it finishes
-                                            if (config.phase == SendButtonAnimationPhase.IDLE) {
-                                                onRevealAnimationComplete()
-                                            }
+                                    Box(
+                                        modifier = Modifier.onGloballyPositioned { coordinates ->
+                                            onSendButtonBoundsChanged(coordinates.boundsInRoot())
                                         }
-                                    )
+                                    ) {
+                                        SendModeToggleButton(
+                                            onClick = onSendClick,
+                                            onLongPress = onSendLongPress,
+                                            currentMode = currentSendMode,
+                                            canToggle = canToggleSendMode,
+                                            onModeToggle = onModeToggle,
+                                            isSending = isSending,
+                                            isMmsMode = isMmsMode,
+                                            showRevealAnimation = showSendModeRevealAnimation,
+                                            tutorialActive = tutorialState == TutorialState.STEP_1_SWIPE_UP ||
+                                                    tutorialState == TutorialState.STEP_2_SWIPE_BACK,
+                                            onAnimationConfigChange = { config ->
+                                                // Mark animation as complete when it finishes
+                                                if (config.phase == SendButtonAnimationPhase.IDLE) {
+                                                    onRevealAnimationComplete()
+                                                }
+                                            }
+                                        )
+                                    }
                                 } else {
                                     // Fall back to regular send button for preview or when toggle not available
                                     SendButton(

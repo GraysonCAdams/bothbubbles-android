@@ -1,0 +1,324 @@
+package com.bothbubbles.ui.chat.composer.panels
+
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.EmojiEmotions
+import androidx.compose.material.icons.outlined.Favorite
+import androidx.compose.material.icons.outlined.Flight
+import androidx.compose.material.icons.outlined.Lightbulb
+import androidx.compose.material.icons.outlined.Pets
+import androidx.compose.material.icons.outlined.Restaurant
+import androidx.compose.material.icons.outlined.SportsBasketball
+import androidx.compose.material.icons.outlined.Tag
+import androidx.compose.material.icons.outlined.ThumbUp
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
+
+/**
+ * Emoji category with icon and emojis.
+ */
+private data class EmojiCategory(
+    val id: String,
+    val icon: ImageVector,
+    val emojis: List<String>
+)
+
+/**
+ * Emoji keyboard panel that replaces the system keyboard.
+ *
+ * Following Google Messages design, this panel:
+ * - Slides up from the bottom with spring animation
+ * - Shows category tabs at the top
+ * - Displays emojis in a scrollable grid
+ * - Matches the height of a typical keyboard
+ *
+ * @param visible Whether the panel is visible
+ * @param onEmojiSelected Callback when an emoji is selected
+ * @param onDismiss Callback when panel should be dismissed
+ * @param modifier Modifier for the panel
+ */
+@Composable
+fun EmojiKeyboardPanel(
+    visible: Boolean,
+    onEmojiSelected: (String) -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var selectedCategory by remember { mutableStateOf("smileys") }
+
+    // Emoji categories with common emojis
+    val emojiCategories = remember {
+        listOf(
+            EmojiCategory(
+                id = "smileys",
+                icon = Icons.Outlined.EmojiEmotions,
+                emojis = listOf(
+                    "😀", "😃", "😄", "😁", "😆", "😅", "🤣", "😂",
+                    "🙂", "🙃", "😉", "😊", "😇", "🥰", "😍", "🤩",
+                    "😘", "😗", "😚", "😙", "🥲", "😋", "😛", "😜",
+                    "🤪", "😝", "🤑", "🤗", "🤭", "🤫", "🤔", "🤐",
+                    "🤨", "😐", "😑", "😶", "😏", "😒", "🙄", "😬",
+                    "🤥", "😌", "😔", "😪", "🤤", "😴", "😷", "🤒",
+                    "🤕", "🤢", "🤮", "🤧", "🥵", "🥶", "🥴", "😵",
+                    "🤯", "🤠", "🥳", "🥸", "😎", "🤓", "🧐", "😕"
+                )
+            ),
+            EmojiCategory(
+                id = "gestures",
+                icon = Icons.Outlined.ThumbUp,
+                emojis = listOf(
+                    "👍", "👎", "👊", "✊", "🤛", "🤜", "👏", "🙌",
+                    "👐", "🤲", "🤝", "🙏", "✍️", "💅", "🤳", "💪",
+                    "🦾", "🦿", "🦵", "🦶", "👂", "🦻", "👃", "🧠",
+                    "👀", "👁️", "👅", "👄", "💋", "🩸", "👋", "🤚",
+                    "🖐️", "✋", "🖖", "👌", "🤌", "🤏", "✌️", "🤞",
+                    "🤟", "🤘", "🤙", "👈", "👉", "👆", "🖕", "👇",
+                    "☝️", "👍", "👎", "✊", "👊", "🤛", "🤜", "👏"
+                )
+            ),
+            EmojiCategory(
+                id = "hearts",
+                icon = Icons.Outlined.Favorite,
+                emojis = listOf(
+                    "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+                    "🤎", "💔", "❣️", "💕", "💞", "💓", "💗", "💖",
+                    "💘", "💝", "💟", "❤️‍🔥", "❤️‍🩹", "💌", "💋", "😍",
+                    "🥰", "😘", "😻", "💑", "👩‍❤️‍👨", "👨‍❤️‍👨", "👩‍❤️‍👩", "💏"
+                )
+            ),
+            EmojiCategory(
+                id = "nature",
+                icon = Icons.Outlined.Pets,
+                emojis = listOf(
+                    "🐶", "🐱", "🐭", "🐹", "🐰", "🦊", "🐻", "🐼",
+                    "🐻‍❄️", "🐨", "🐯", "🦁", "🐮", "🐷", "🐸", "🐵",
+                    "🐔", "🐧", "🐦", "🐤", "🦆", "🦅", "🦉", "🦇",
+                    "🐺", "🐗", "🐴", "🦄", "🐝", "🐛", "🦋", "🐌",
+                    "🌸", "💐", "🌷", "🌹", "🥀", "🌺", "🌻", "🌼",
+                    "🌱", "🌲", "🌳", "🌴", "🌵", "🌾", "🌿", "☘️"
+                )
+            ),
+            EmojiCategory(
+                id = "food",
+                icon = Icons.Outlined.Restaurant,
+                emojis = listOf(
+                    "🍎", "🍐", "🍊", "🍋", "🍌", "🍉", "🍇", "🍓",
+                    "🫐", "🍈", "🍒", "🍑", "🥭", "🍍", "🥥", "🥝",
+                    "🍅", "🍆", "🥑", "🥦", "🥬", "🥒", "🌶️", "🫑",
+                    "🍕", "🍔", "🍟", "🌭", "🥪", "🌮", "🌯", "🥙",
+                    "🧆", "🥚", "🍳", "🥘", "🍲", "🫕", "🥣", "🥗",
+                    "🍿", "🧈", "🧂", "🥫", "🍝", "🍜", "🍛", "🍣"
+                )
+            ),
+            EmojiCategory(
+                id = "activities",
+                icon = Icons.Outlined.SportsBasketball,
+                emojis = listOf(
+                    "⚽", "🏀", "🏈", "⚾", "🥎", "🎾", "🏐", "🏉",
+                    "🥏", "🎱", "🪀", "🏓", "🏸", "🏒", "🏑", "🥍",
+                    "🏏", "🪃", "🥅", "⛳", "🪁", "🏹", "🎣", "🤿",
+                    "🥊", "🥋", "🎽", "🛹", "🛼", "🛷", "⛸️", "🥌",
+                    "🎿", "⛷️", "🏂", "🪂", "🏋️", "🤼", "🤸", "🤺",
+                    "🎮", "🕹️", "🎲", "🧩", "🎭", "🎨", "🎬", "🎤"
+                )
+            ),
+            EmojiCategory(
+                id = "travel",
+                icon = Icons.Outlined.Flight,
+                emojis = listOf(
+                    "🚗", "🚕", "🚙", "🚌", "🚎", "🏎️", "🚓", "🚑",
+                    "🚒", "🚐", "🛻", "🚚", "🚛", "🚜", "🛵", "🏍️",
+                    "🛺", "🚲", "🛴", "🚏", "🛤️", "🛣️", "⛽", "🚨",
+                    "✈️", "🛫", "🛬", "🛩️", "💺", "🚁", "🚀", "🛸",
+                    "🚢", "⛵", "🛥️", "🚤", "⛴️", "🛳️", "🚂", "🚃",
+                    "🏠", "🏡", "🏢", "🏣", "🏤", "🏥", "🏦", "🏨"
+                )
+            ),
+            EmojiCategory(
+                id = "objects",
+                icon = Icons.Outlined.Lightbulb,
+                emojis = listOf(
+                    "⌚", "📱", "📲", "💻", "⌨️", "🖥️", "🖨️", "🖱️",
+                    "🖲️", "💽", "💾", "💿", "📀", "🧮", "🎥", "🎞️",
+                    "📽️", "🎬", "📺", "📷", "📸", "📹", "📼", "🔍",
+                    "🔎", "🕯️", "💡", "🔦", "🏮", "🪔", "📔", "📕",
+                    "📖", "📗", "📘", "📙", "📚", "📓", "📒", "📃",
+                    "🎁", "🎀", "🎊", "🎉", "🎎", "🎏", "🎐", "🧧"
+                )
+            ),
+            EmojiCategory(
+                id = "symbols",
+                icon = Icons.Outlined.Tag,
+                emojis = listOf(
+                    "❤️", "🧡", "💛", "💚", "💙", "💜", "🖤", "🤍",
+                    "💯", "💢", "💥", "💫", "💦", "💨", "🕳️", "💣",
+                    "💬", "👁️‍🗨️", "🗨️", "🗯️", "💭", "💤", "✅", "❌",
+                    "❓", "❔", "❕", "❗", "⭕", "🔴", "🟠", "🟡",
+                    "🟢", "🔵", "🟣", "⚫", "⚪", "🟤", "🔶", "🔷",
+                    "🔸", "🔹", "🔺", "🔻", "💠", "🔘", "🔳", "🔲"
+                )
+            )
+        )
+    }
+
+    val currentEmojis = remember(selectedCategory) {
+        emojiCategories.find { it.id == selectedCategory }?.emojis ?: emptyList()
+    }
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = slideInVertically(
+            initialOffsetY = { it },
+            animationSpec = spring(
+                dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
+                stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
+            )
+        ) + fadeIn(tween(ComposerMotionTokens.Duration.FAST)),
+        exit = slideOutVertically(
+            targetOffsetY = { it },
+            animationSpec = tween(ComposerMotionTokens.Duration.NORMAL)
+        ) + fadeOut(tween(ComposerMotionTokens.Duration.FAST)),
+        modifier = modifier
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+            tonalElevation = 8.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp)
+            ) {
+                // Drag handle
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(32.dp)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Category tabs
+                LazyRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(emojiCategories) { category ->
+                        val isSelected = category.id == selectedCategory
+                        IconButton(
+                            onClick = { selectedCategory = category.id },
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Icon(
+                                imageVector = category.icon,
+                                contentDescription = category.id,
+                                tint = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                                modifier = Modifier.size(24.dp)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+
+                // Emoji grid
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(8),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(ComposerMotionTokens.Dimension.PanelHeight)
+                        .padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(currentEmojis) { emoji ->
+                        EmojiItem(
+                            emoji = emoji,
+                            onClick = { onEmojiSelected(emoji) }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+/**
+ * Individual emoji item in the grid.
+ */
+@Composable
+private fun EmojiItem(
+    emoji: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        contentAlignment = Alignment.Center,
+        modifier = modifier
+            .size(40.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+    ) {
+        Text(
+            text = emoji,
+            fontSize = 24.sp,
+            textAlign = TextAlign.Center
+        )
+    }
+}

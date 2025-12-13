@@ -122,6 +122,7 @@ import com.bothbubbles.ui.components.common.SmsStatusBanner
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.common.GroupAvatar
+import com.bothbubbles.ui.components.common.SnoozeDuration
 import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
@@ -3307,6 +3308,7 @@ private fun SettingsPanel(
         SettingsPanelPage.Notifications -> "Notifications"
         SettingsPanelPage.Swipe -> "Swipe actions"
         SettingsPanelPage.Effects -> "Message effects"
+        SettingsPanelPage.ImageQuality -> "Image quality"
         SettingsPanelPage.Templates -> "Quick reply templates"
         SettingsPanelPage.AutoResponder -> "Auto-responder"
         SettingsPanelPage.About -> "About"
@@ -3427,6 +3429,10 @@ private fun SettingsPanel(
                                 isForward.value = true
                                 navigator.navigateTo(SettingsPanelPage.Effects)
                             },
+                            onImageQualityClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.ImageQuality)
+                            },
                             onTemplatesClick = {
                                 isForward.value = true
                                 navigator.navigateTo(SettingsPanelPage.Templates)
@@ -3487,6 +3493,9 @@ private fun SettingsPanel(
                     }
                     SettingsPanelPage.Effects -> {
                         EffectsSettingsContent()
+                    }
+                    SettingsPanelPage.ImageQuality -> {
+                        com.bothbubbles.ui.settings.attachments.ImageQualitySettingsContent()
                     }
                     SettingsPanelPage.Templates -> {
                         QuickReplyTemplatesContent()

@@ -75,7 +75,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         SyncRangeEntity::class,
         AutoRespondedSenderEntity::class
     ],
-    version = 31,
+    version = 34,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -778,6 +778,63 @@ abstract class BothBubblesDatabase : RoomDatabase() {
         }
 
         /**
+         * Migration from version 31 to 32: Add attachment error tracking columns.
+         * These columns enable clear error states with retry functionality for
+         * attachment downloads and uploads.
+         *
+         * New columns:
+         * - error_type: Type of error (maps to AttachmentErrorState sealed class)
+         * - error_message: User-friendly error description
+         * - retry_count: Number of retry attempts for exponential backoff
+         */
+        val MIGRATION_31_32 = object : Migration(31, 32) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add error_type column for categorizing failures
+                db.execSQL("ALTER TABLE attachments ADD COLUMN error_type TEXT DEFAULT NULL")
+
+                // Add error_message column for user-friendly messages
+                db.execSQL("ALTER TABLE attachments ADD COLUMN error_message TEXT DEFAULT NULL")
+
+                // Add retry_count column for exponential backoff tracking
+                db.execSQL("ALTER TABLE attachments ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0")
+
+                // Create index on error_type for querying failed attachments
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_attachments_error_type ON attachments(error_type)")
+            }
+        }
+
+        /**
+         * Migration from version 32 to 33: Add error tracking to pending attachments.
+         * This allows surfacing specific upload errors in the UI for pending messages.
+         */
+        val MIGRATION_32_33 = object : Migration(32, 33) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add error_type column to pending_attachments
+                db.execSQL("ALTER TABLE pending_attachments ADD COLUMN error_type TEXT DEFAULT NULL")
+
+                // Add error_message column to pending_attachments
+                db.execSQL("ALTER TABLE pending_attachments ADD COLUMN error_message TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
+         * Migration from version 33 to 34: Add quality and caption to pending attachments.
+         *
+         * New columns:
+         * - quality: Image compression quality setting (AUTO, STANDARD, HIGH, ORIGINAL)
+         * - caption: Optional text caption to display with the attachment
+         */
+        val MIGRATION_33_34 = object : Migration(33, 34) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // Add quality column with default STANDARD
+                db.execSQL("ALTER TABLE pending_attachments ADD COLUMN quality TEXT NOT NULL DEFAULT 'STANDARD'")
+
+                // Add caption column (nullable)
+                db.execSQL("ALTER TABLE pending_attachments ADD COLUMN caption TEXT DEFAULT NULL")
+            }
+        }
+
+        /**
          * List of all migrations for use with databaseBuilder.
          *
          * IMPORTANT: Always add new migrations to this array!
@@ -813,7 +870,10 @@ abstract class BothBubblesDatabase : RoomDatabase() {
             MIGRATION_27_28,
             MIGRATION_28_29,
             MIGRATION_29_30,
-            MIGRATION_30_31
+            MIGRATION_30_31,
+            MIGRATION_31_32,
+            MIGRATION_32_33,
+            MIGRATION_33_34
         )
     }
 }

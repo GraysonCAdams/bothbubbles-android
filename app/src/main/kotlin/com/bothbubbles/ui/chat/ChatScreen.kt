@@ -72,6 +72,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
@@ -97,6 +98,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.R
 import com.bothbubbles.services.contacts.VCardService
@@ -107,11 +109,13 @@ import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
 import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
+import com.bothbubbles.ui.chat.components.QualitySelectionSheet
 import com.bothbubbles.ui.chat.components.ReplyPreview
 import com.bothbubbles.ui.chat.components.SaveContactBanner
 import com.bothbubbles.ui.chat.components.SendingIndicatorBar
 import com.bothbubbles.ui.chat.components.SendModeToggleButton
-import com.bothbubbles.ui.chat.components.SendModeTutorialOverlay
+import com.bothbubbles.ui.chat.composer.tutorial.ComposerTutorial
+import com.bothbubbles.ui.chat.composer.tutorial.toComposerTutorialState
 import com.bothbubbles.ui.chat.components.SmsFallbackBanner
 import com.bothbubbles.ui.chat.calculateGroupPosition
 import com.bothbubbles.ui.chat.formatTimeSeparator
@@ -135,8 +139,8 @@ import com.bothbubbles.ui.components.message.TapbackMenu
 import com.bothbubbles.ui.components.message.TypingIndicator
 import com.bothbubbles.ui.components.dialogs.VCardOptionsDialog
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
+import com.bothbubbles.ui.components.common.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.MessageListSkeleton
-import com.bothbubbles.ui.components.message.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.staggeredEntrance
 import com.bothbubbles.ui.effects.EffectPickerSheet
 import com.bothbubbles.ui.effects.MessageEffect
@@ -160,6 +164,10 @@ fun ChatScreen(
     onCameraClick: () -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
+    editedAttachmentUri: Uri? = null,
+    editedAttachmentCaption: String? = null,
+    originalAttachmentUri: Uri? = null,
+    onEditedAttachmentHandled: () -> Unit = {},
     sharedText: String? = null,
     sharedUris: List<Uri> = emptyList(),
     onSharedContentHandled: () -> Unit = {},
@@ -291,6 +299,9 @@ fun ChatScreen(
     // Effect picker state
     var showEffectPicker by remember { mutableStateOf(false) }
 
+    // Quality selection sheet state
+    var showQualitySheet by remember { mutableStateOf(false) }
+
     // Effect settings from ViewModel
     val autoPlayEffects by viewModel.autoPlayEffects.collectAsStateWithLifecycle()
     val replayEffectsOnScroll by viewModel.replayEffectsOnScroll.collectAsStateWithLifecycle()
@@ -362,7 +373,7 @@ fun ChatScreen(
     val forwardableChats by viewModel.getForwardableChats().collectAsStateWithLifecycle(initialValue = emptyList())
 
     // Track pending attachments locally for UI
-    var pendingAttachments by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    val pendingAttachments by viewModel.pendingAttachments.collectAsStateWithLifecycle()
 
     // Voice memo recording state
     var isRecording by remember { mutableStateOf(false) }
@@ -377,6 +388,9 @@ fun ChatScreen(
     var isPlayingVoiceMemo by remember { mutableStateOf(false) }
     var playbackPosition by remember { mutableLongStateOf(0L) }
     var playbackDuration by remember { mutableLongStateOf(0L) }
+
+    // Send button bounds for tutorial spotlight
+    var sendButtonBounds by remember { mutableStateOf(Rect.Zero) }
 
     // Audio amplitude history for waveform visualization (stores last 20 amplitude values)
     var amplitudeHistory by remember { mutableStateOf(List(20) { 0f }) }
@@ -490,7 +504,6 @@ fun ChatScreen(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         uris.forEach { uri ->
-            pendingAttachments = pendingAttachments + uri
             viewModel.addAttachment(uri)
         }
     }
@@ -513,9 +526,20 @@ fun ChatScreen(
     // Handle captured photo from in-app camera
     LaunchedEffect(capturedPhotoUri) {
         capturedPhotoUri?.let { uri ->
-            pendingAttachments = pendingAttachments + uri
             viewModel.addAttachment(uri)
             onCapturedPhotoHandled()
+        }
+    }
+
+    // Handle edited attachment
+    LaunchedEffect(editedAttachmentUri) {
+        if (editedAttachmentUri != null) {
+            viewModel.onAttachmentEdited(
+                originalUri = originalAttachmentUri ?: editedAttachmentUri,
+                editedUri = editedAttachmentUri,
+                caption = editedAttachmentCaption
+            )
+            onEditedAttachmentHandled()
         }
     }
 
@@ -524,7 +548,6 @@ fun ChatScreen(
         // Add shared URIs as attachments
         if (sharedUris.isNotEmpty()) {
             sharedUris.forEach { uri ->
-                pendingAttachments = pendingAttachments + uri
                 viewModel.addAttachment(uri)
             }
         }
@@ -665,7 +688,6 @@ fun ChatScreen(
                     visible = showAttachmentPicker,
                     onDismiss = { showAttachmentPicker = false },
                     onAttachmentSelected = { uri ->
-                        pendingAttachments = pendingAttachments + uri
                         viewModel.addAttachment(uri)
                     },
                     onLocationSelected = { lat, lng ->
@@ -746,7 +768,6 @@ fun ChatScreen(
                     onTextChange = viewModel::updateDraft,
                     onSendClick = {
                         viewModel.sendMessage()
-                        pendingAttachments = emptyList()
                         showAttachmentPicker = false
                         // Scroll to bottom after sending - use instant scroll to avoid jank
                         scrollScope.launch {
@@ -816,12 +837,13 @@ fun ChatScreen(
                     hasAttachments = pendingAttachments.isNotEmpty(),
                     attachments = pendingAttachments,
                     onRemoveAttachment = { uri ->
-                        pendingAttachments = pendingAttachments - uri
                         viewModel.removeAttachment(uri)
                     },
                     onClearAllAttachments = {
-                        pendingAttachments = emptyList()
                         viewModel.clearAttachments()
+                    },
+                    onReorderAttachments = { reorderedList ->
+                        viewModel.reorderAttachments(reorderedList)
                     },
                     isPickerExpanded = showAttachmentPicker,
                     // Attachment warning props
@@ -829,7 +851,6 @@ fun ChatScreen(
                     onDismissWarning = { viewModel.dismissAttachmentWarning() },
                     onRemoveWarningAttachment = {
                         uiState.attachmentWarning?.affectedUri?.let { uri ->
-                            pendingAttachments = pendingAttachments - uri
                             viewModel.removeAttachment(uri)
                         }
                     },
@@ -862,10 +883,8 @@ fun ChatScreen(
                         isRecording = false
                         recordingFile?.let { file ->
                             val uri = Uri.fromFile(file)
-                            pendingAttachments = pendingAttachments + uri
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
-                            pendingAttachments = emptyList()
                             scrollScope.launch { listState.scrollToItem(0) }
                         }
                         recordingFile = null
@@ -961,10 +980,8 @@ fun ChatScreen(
                         isPreviewingVoiceMemo = false
                         recordingFile?.let { file ->
                             val uri = Uri.fromFile(file)
-                            pendingAttachments = pendingAttachments + uri
                             viewModel.addAttachment(uri)
                             viewModel.sendMessage()
-                            pendingAttachments = emptyList()
                             scrollScope.launch { listState.scrollToItem(0) }
                         }
                         recordingFile = null
@@ -990,8 +1007,19 @@ fun ChatScreen(
                         }
                         success
                     },
+                    // Quality selection props
+                    hasCompressibleImages = uiState.pendingMessages.any { it.hasAttachments } || pendingAttachments.isNotEmpty(),
+                    currentImageQuality = uiState.attachmentQuality,
+                    onQualityClick = { showQualitySheet = true },
+                    onEditAttachment = { uri ->
+                        navController.navigate(Screen.AttachmentEdit(uri.toString()))
+                    }
+                    },
                     onRevealAnimationComplete = {
                         viewModel.markRevealAnimationShown()
+                    },
+                    onSendButtonBoundsChanged = { bounds ->
+                        sendButtonBounds = bounds
                     }
                 )
             }
@@ -1636,7 +1664,6 @@ fun ChatScreen(
                     // Send message with effect
                     // Screen effect will trigger automatically when the message appears in the list
                     viewModel.sendMessage(effect.appleId)
-                    pendingAttachments = emptyList()
                     showAttachmentPicker = false
                     scrollScope.launch { listState.scrollToItem(0) }
                 }
@@ -1784,6 +1811,17 @@ fun ChatScreen(
         }
     }
 
+    // Quality Selection Sheet
+    QualitySelectionSheet(
+        visible = showQualitySheet,
+        currentQuality = uiState.attachmentQuality,
+        onQualitySelected = { quality ->
+            viewModel.setAttachmentQuality(quality)
+            showQualitySheet = false
+        },
+        onDismiss = { showQualitySheet = false }
+    )
+
     // Confirmation dialogs
     if (showDeleteDialog) {
         DeleteConversationDialog(
@@ -1888,7 +1926,7 @@ fun ChatScreen(
 
             // Clear the draft and attachments
             viewModel.updateDraft("")
-            pendingAttachments = emptyList()
+            viewModel.clearAttachments()
 
             // Show confirmation with disclaimer
             val dateFormat = java.text.SimpleDateFormat("MMM dd, h:mm a", java.util.Locale.getDefault())
@@ -1955,10 +1993,15 @@ fun ChatScreen(
     }
 
     // Tutorial overlay - full screen overlay on top of everything
-    SendModeTutorialOverlay(
-        tutorialState = uiState.tutorialState,
-        onTutorialProgress = { newState ->
-            viewModel.updateTutorialState(newState)
+    ComposerTutorial(
+        tutorialState = uiState.tutorialState.toComposerTutorialState(),
+        sendButtonBounds = sendButtonBounds,
+        onStepComplete = { step ->
+            // The tutorial progresses based on actual swipe gestures, not step completion
+            // This callback is for logging/analytics if needed
+        },
+        onDismiss = {
+            viewModel.updateTutorialState(TutorialState.COMPLETED)
         }
     )
 }

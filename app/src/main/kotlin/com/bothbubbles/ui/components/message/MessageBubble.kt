@@ -52,6 +52,17 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.ui.components.attachment.AttachmentContent
+import com.bothbubbles.ui.components.attachment.BorderlessMediaContent
+import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.components.common.BorderlessLinkPreview
+import com.bothbubbles.ui.components.common.buildAnnotatedStringWithClickables
+import com.bothbubbles.ui.components.common.buildSearchHighlightedText
+import com.bothbubbles.ui.components.common.copyToClipboard
+import com.bothbubbles.ui.components.common.openAddContactIntent
+import com.bothbubbles.ui.components.common.openCalendarIntent
+import com.bothbubbles.ui.components.common.openDialerIntent
+import com.bothbubbles.ui.components.common.openSmsIntent
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.EmojiAnalysis
 import com.bothbubbles.ui.components.message.MessageGroupPosition
@@ -1296,12 +1307,14 @@ private fun SimpleBubbleContent(
                             }
 
                             if (annotatedText != null) {
+                                // Create local val for use in lambda (Kotlin doesn't smart-cast captured variables)
+                                val clickableText = annotatedText
                                 ClickableText(
-                                    text = annotatedText,
+                                    text = clickableText,
                                     style = textStyle.copy(color = textColor),
                                     onClick = { offset ->
                                         // Check for date clicks
-                                        annotatedText.getStringAnnotations(
+                                        clickableText.getStringAnnotations(
                                             tag = "DATE",
                                             start = offset,
                                             end = offset
@@ -1319,7 +1332,7 @@ private fun SimpleBubbleContent(
                                         }
 
                                         // Check for phone number clicks - show context menu
-                                        annotatedText.getStringAnnotations(
+                                        clickableText.getStringAnnotations(
                                             tag = "PHONE",
                                             start = offset,
                                             end = offset
@@ -1334,7 +1347,7 @@ private fun SimpleBubbleContent(
                                         }
 
                                         // Check for code clicks - copy to clipboard
-                                        annotatedText.getStringAnnotations(
+                                        clickableText.getStringAnnotations(
                                             tag = "CODE",
                                             start = offset,
                                             end = offset

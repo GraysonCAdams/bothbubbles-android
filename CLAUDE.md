@@ -95,24 +95,32 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradle
 ### Key Architecture Patterns
 
 #### 1. Repository Pattern
+
 Repositories abstract data sources and provide clean APIs to the UI layer:
+
 - `MessageRepository` - Message CRUD and sync operations
 - `ChatRepository` - Chat/conversation management
 - `AttachmentRepository` - Attachment download/upload
 
 #### 2. Service Layer Delegation
+
 Complex services are decomposed into focused handlers:
+
 - `SocketEventHandler` delegates to `MessageEventHandler`, `ChatEventHandler`, `SystemEventHandler`
 - `MessageSendingService` handles all send operations (extracted from MessageRepository)
 - `IncomingMessageHandler` handles incoming message processing
 
 #### 3. ViewModel Delegates (Pattern Established)
+
 Large ViewModels use delegate pattern for decomposition:
+
 - `ChatSendDelegate` - Send, retry, forward operations
 - See `ui/chat/delegates/README.md` for the pattern
 
 #### 4. Service Interfaces (Testability)
+
 Key services implement interfaces for dependency inversion and testability:
+
 - `MessageSender` ← `MessageSendingService` - Message sending operations
 - `SocketConnection` ← `SocketService` - Socket.IO connection management
 - `IncomingMessageProcessor` ← `IncomingMessageHandler` - Incoming message handling
@@ -121,7 +129,9 @@ Key services implement interfaces for dependency inversion and testability:
 Bindings are in `di/ServiceModule.kt`. Test fakes available in `src/test/kotlin/com/bothbubbles/fakes/`.
 
 #### 5. Error Handling (AppError Framework)
+
 Consistent error handling using sealed classes:
+
 - `AppError` - Base sealed class with `NetworkError`, `DatabaseError`, `ValidationError`, `ServerError`
 - `safeCall {}` - Wrapper for operations that can fail
 - `Result<T>.handle()` - Extension for handling success/failure
@@ -215,6 +225,7 @@ app/src/main/kotlin/com/bothbubbles/
 ## Coding Conventions
 
 ### General
+
 - Use Kotlin idioms and best practices
 - Follow Material Design 3 guidelines for UI
 - Use StateFlow for UI state management
@@ -222,12 +233,14 @@ app/src/main/kotlin/com/bothbubbles/
 - Use Result types for operations that can fail
 
 ### Architecture
+
 - **Data layer should NOT depend on Services layer** (except through abstraction interfaces)
 - Services layer can depend on Data layer
 - UI layer can depend on both Data and Services layers
 - Keep ViewModels focused; use delegates for complex ViewModels
 
 ### File Organization
+
 - One primary class per file
 - Keep files under 500 lines when possible
 - Extract related functionality into separate handlers/delegates
@@ -236,6 +249,7 @@ app/src/main/kotlin/com/bothbubbles/
 ## Message Flow
 
 ### Sending a Message
+
 ```
 User Input → ChatViewModel → PendingMessageRepository
   → WorkManager (MessageSendWorker)
@@ -246,6 +260,7 @@ User Input → ChatViewModel → PendingMessageRepository
 ```
 
 ### Receiving a Message
+
 ```
 SocketEvent.NewMessage → SocketEventHandler
   → MessageEventHandler.handleNewMessage()
@@ -266,26 +281,31 @@ SocketEvent.NewMessage → SocketEventHandler
 The app uses multiple layers to ensure messages are never missed, as BlueBubbles server push can be unreliable:
 
 ### 1. Primary: Socket.IO Push
+
 - Real-time message delivery via persistent socket connection
 - Handled by `SocketEventHandler` → `MessageEventHandler`
 
 ### 2. Secondary: FCM Push
+
 - Firebase Cloud Messaging as backup when socket disconnects
 - Handled by `FcmMessageHandler`
 - Triggers socket reconnect after showing notification
 
 ### 3. Fallback: Adaptive Polling (ChatViewModel)
+
 - Polls every 2 seconds when socket has been quiet for >5 seconds
 - Only active while viewing a chat
 - Catches messages missed by push mechanisms
 - Key constants: `POLL_INTERVAL_MS = 2000L`, `SOCKET_QUIET_THRESHOLD_MS = 5000L`
 
 ### 4. Fallback: Foreground Resume Sync (ChatViewModel)
+
 - Syncs when app returns from background
 - Fetches up to 25 recent messages for active chat
 - Uses `AppLifecycleTracker.foregroundState` StateFlow
 
 ### 5. Fallback: Background Sync Worker
+
 - `BackgroundSyncWorker` runs every 15 minutes (Android minimum)
 - Syncs up to 10 recent chats, 20 messages each
 - Shows notifications if app is backgrounded and new messages found
@@ -293,6 +313,7 @@ The app uses multiple layers to ensure messages are never missed, as BlueBubbles
 - Respects chat notification settings (muted/snoozed)
 
 ### Key Files
+
 - `services/sync/BackgroundSyncWorker.kt` - Background periodic sync
 - `services/AppLifecycleTracker.kt` - App foreground/background state
 - `ui/chat/ChatViewModel.kt` - Adaptive polling and foreground resume sync
@@ -306,20 +327,38 @@ The app uses multiple layers to ensure messages are never missed, as BlueBubbles
 ## Common Tasks
 
 ### Adding a New Settings Screen
+
 1. Create `ui/settings/{feature}/{Feature}Screen.kt`
 2. Add route to `Screen.kt`
 3. Add composable to `NavHost.kt`
 4. Add navigation from `SettingsScreen.kt`
 
 ### Adding a Socket Event Handler
+
 1. Add event type to `SocketEvent.kt`
 2. Add parsing in `SocketService.kt`
 3. Add handler method in appropriate handler (`MessageEventHandler`, `ChatEventHandler`, or `SystemEventHandler`)
 4. Wire up in `SocketEventHandler.handleEvent()`
 
 ### Extracting from Large ViewModels
+
 1. Create delegate class in `ui/{feature}/delegates/`
 2. Add dependencies via constructor injection
 3. Add `initialize(context, scope)` method
 4. Move related state and methods
 5. See `ChatSendDelegate.kt` for example
+
+## UI Guidelines
+
+### Material Design 3
+
+- Use `androidx.compose.material3` components for all new UI.
+- Use `MaterialTheme.colorScheme` for colors (e.g., `primary`, `surfaceVariant`).
+- Use `MaterialTheme.typography` for text styles.
+
+### System Integration
+
+- **Keyboard**: Use `WindowInsets.ime` and `Modifier.imePadding()` for keyboard handling.
+- **Haptics**: Use `LocalHapticFeedback.current` for tactile feedback.
+- **Media**: Prefer `ActivityResultContracts.PickVisualMedia` (Photo Picker) over custom galleries.
+- **Icons**: Use `androidx.compose.material.icons` whenever possible.

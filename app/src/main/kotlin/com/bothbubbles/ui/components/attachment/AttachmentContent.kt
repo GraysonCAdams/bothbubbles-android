@@ -75,6 +75,8 @@ import com.bothbubbles.util.rememberBlurhashBitmap
  * @param isDownloading Whether this attachment is currently being downloaded
  * @param downloadProgress Download progress (0.0 to 1.0) when isDownloading is true
  * @param uploadProgress Upload progress (0.0 to 1.0) for outbound attachments being uploaded
+ * @param onRetryClick Optional callback for retrying failed downloads
+ * @param isRetrying Whether a retry is currently in progress
  */
 @Composable
 fun AttachmentContent(
@@ -85,13 +87,18 @@ fun AttachmentContent(
     onDownloadClick: ((String) -> Unit)? = null,
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
-    uploadProgress: Float = 0f
+    uploadProgress: Float = 0f,
+    onRetryClick: ((String) -> Unit)? = null,
+    isRetrying: Boolean = false
 ) {
+    // Show error overlay for failed attachments with error details
+    val showError = attachment.hasError && !isDownloading && !isRetrying
+
     // Show placeholder for inbound attachments that need download
     // This provides blurhash preview while downloading, regardless of auto/manual mode
     // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
-    val showPlaceholder = attachment.needsDownload || attachment.isDownloading ||
-        (attachment.isSticker && attachment.localPath == null)
+    val showPlaceholder = !showError && (attachment.needsDownload || attachment.isDownloading ||
+        (attachment.isSticker && attachment.localPath == null))
 
     // Determine effective downloading state
     val effectiveIsDownloading = isDownloading || attachment.isDownloading ||
@@ -101,54 +108,68 @@ fun AttachmentContent(
     val isUploading = attachment.isUploading
     val effectiveUploadProgress = if (isUploading) uploadProgress.coerceIn(0f, 1f) else 0f
 
-    when {
-        showPlaceholder -> AttachmentPlaceholder(
-            attachment = attachment,
-            isFromMe = isFromMe,
-            onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
-            isDownloading = effectiveIsDownloading,
-            downloadProgress = downloadProgress,
-            modifier = modifier
-        )
-        attachment.isGif -> GifAttachment(
-            attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
-            modifier = modifier,
-            isUploading = isUploading,
-            uploadProgress = effectiveUploadProgress
-        )
-        attachment.isImage -> ImageAttachment(
-            attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
-            modifier = modifier,
-            isUploading = isUploading,
-            uploadProgress = effectiveUploadProgress
-        )
-        attachment.isVideo -> InlineVideoAttachment(
-            attachment = attachment,
-            onFullscreenClick = { onMediaClick(attachment.guid) },
-            modifier = modifier,
-            isUploading = isUploading,
-            uploadProgress = effectiveUploadProgress
-        )
-        attachment.isAudio -> AudioAttachment(
-            attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
-            isFromMe = isFromMe,
-            modifier = modifier
-        )
-        attachment.isVCard -> VCardAttachment(
-            attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
-            isFromMe = isFromMe,
-            modifier = modifier
-        )
-        else -> FileAttachment(
-            attachment = attachment,
-            onClick = { onMediaClick(attachment.guid) },
-            isFromMe = isFromMe,
-            modifier = modifier
-        )
+    Column(modifier = modifier) {
+        when {
+            showError -> AttachmentErrorOverlay(
+                attachment = attachment,
+                onRetryClick = { onRetryClick?.invoke(attachment.guid) },
+                isRetrying = isRetrying
+            )
+            showPlaceholder -> AttachmentPlaceholder(
+                attachment = attachment,
+                isFromMe = isFromMe,
+                onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
+                isDownloading = effectiveIsDownloading,
+                downloadProgress = downloadProgress
+            )
+            attachment.isGif -> GifAttachment(
+                attachment = attachment,
+                onClick = { onMediaClick(attachment.guid) },
+                isUploading = isUploading,
+                uploadProgress = effectiveUploadProgress
+            )
+            attachment.isImage -> ImageAttachment(
+                attachment = attachment,
+                onClick = { onMediaClick(attachment.guid) },
+                isUploading = isUploading,
+                uploadProgress = effectiveUploadProgress
+            )
+            attachment.isVideo -> InlineVideoAttachment(
+                attachment = attachment,
+                onFullscreenClick = { onMediaClick(attachment.guid) },
+                isUploading = isUploading,
+                uploadProgress = effectiveUploadProgress
+            )
+            attachment.isAudio -> AudioAttachment(
+                attachment = attachment,
+                onClick = { onMediaClick(attachment.guid) },
+                isFromMe = isFromMe
+            )
+            attachment.isVCard -> VCardAttachment(
+                attachment = attachment,
+                onClick = { onMediaClick(attachment.guid) },
+                isFromMe = isFromMe
+            )
+            else -> FileAttachment(
+                attachment = attachment,
+                onClick = { onMediaClick(attachment.guid) },
+                isFromMe = isFromMe
+            )
+        }
+
+        // Caption display (if present)
+        attachment.caption?.let { captionText ->
+            Text(
+                text = captionText,
+                style = MaterialTheme.typography.bodySmall,
+                color = if (isFromMe) {
+                    MaterialTheme.colorScheme.onPrimaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+            )
+        }
     }
 }
 
@@ -1286,6 +1307,8 @@ private fun getFileIcon(extension: String?) = when (extension?.lowercase()) {
  * @param onDownloadClick Optional callback for manual download mode
  * @param isDownloading Whether this attachment is currently being downloaded
  * @param downloadProgress Download progress (0.0 to 1.0)
+ * @param onRetryClick Optional callback for retrying failed downloads
+ * @param isRetrying Whether a retry is currently in progress
  */
 @Composable
 fun BorderlessMediaContent(
@@ -1298,11 +1321,16 @@ fun BorderlessMediaContent(
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
     isPlacedSticker: Boolean = false,
-    messageGuid: String = ""
+    messageGuid: String = "",
+    onRetryClick: ((String) -> Unit)? = null,
+    isRetrying: Boolean = false
 ) {
+    // Show error overlay for failed attachments with error details
+    val showError = attachment.hasError && !isDownloading && !isRetrying
+
     // Show placeholder if manual download mode and attachment needs download
     // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
-    val showPlaceholder = attachment.needsDownload && (onDownloadClick != null || attachment.isSticker)
+    val showPlaceholder = !showError && attachment.needsDownload && (onDownloadClick != null || attachment.isSticker)
 
     // For stickers in auto-download mode, show as "downloading" even if not actively downloading yet
     val effectiveIsDownloading = isDownloading || (attachment.isSticker && attachment.needsDownload && onDownloadClick == null)
@@ -1311,6 +1339,12 @@ fun BorderlessMediaContent(
     val effectiveMaxWidth = if (isPlacedSticker) 140.dp else maxWidth
 
     when {
+        showError -> AttachmentErrorOverlay(
+            attachment = attachment,
+            onRetryClick = { onRetryClick?.invoke(attachment.guid) },
+            isRetrying = isRetrying,
+            modifier = modifier
+        )
         showPlaceholder -> BorderlessAttachmentPlaceholder(
             attachment = attachment,
             onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },

@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.AttachmentWithDate
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -107,6 +108,18 @@ class AttachmentRepository @Inject constructor(
      */
     fun observeRecentImagesForChat(chatGuid: String, limit: Int = 5): Flow<List<AttachmentEntity>> =
         attachmentDao.observeRecentImagesForChat(chatGuid, limit)
+
+    /**
+     * Get media (images/videos) with dates for gallery display with grouping.
+     */
+    fun getMediaWithDatesForChat(chatGuid: String): Flow<List<AttachmentWithDate>> =
+        attachmentDao.getMediaWithDatesForChat(chatGuid)
+
+    /**
+     * Get media with dates for multiple chats (merged conversations).
+     */
+    fun getMediaWithDatesForChats(chatGuids: List<String>): Flow<List<AttachmentWithDate>> =
+        attachmentDao.getMediaWithDatesForChats(chatGuids)
 
     // ===== Sync Operations =====
 

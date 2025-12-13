@@ -38,6 +38,7 @@ fun SettingsScreen(
     onNotificationsClick: () -> Unit = {},
     onSwipeSettingsClick: () -> Unit = {},
     onEffectsSettingsClick: () -> Unit = {},
+    onImageQualityClick: () -> Unit = {},
     onTemplatesClick: () -> Unit = {},
     onAutoResponderClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
@@ -79,6 +80,7 @@ fun SettingsScreen(
             onNotificationsClick = onNotificationsClick,
             onSwipeSettingsClick = onSwipeSettingsClick,
             onEffectsSettingsClick = onEffectsSettingsClick,
+            onImageQualityClick = onImageQualityClick,
             onTemplatesClick = onTemplatesClick,
             onAutoResponderClick = onAutoResponderClick,
             onAboutClick = onAboutClick,
@@ -110,6 +112,7 @@ fun SettingsContent(
     onNotificationsClick: () -> Unit,
     onSwipeSettingsClick: () -> Unit,
     onEffectsSettingsClick: () -> Unit,
+    onImageQualityClick: () -> Unit,
     onTemplatesClick: () -> Unit,
     onAutoResponderClick: () -> Unit,
     onAboutClick: () -> Unit,
@@ -342,6 +345,16 @@ fun SettingsContent(
                     title = "Message effects",
                     subtitle = "Animations for screen and bubble effects",
                     onClick = onEffectsSettingsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Image quality
+                SettingsMenuItem(
+                    icon = Icons.Default.HighQuality,
+                    title = "Image quality",
+                    subtitle = "Compression settings for photo attachments",
+                    onClick = onImageQualityClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

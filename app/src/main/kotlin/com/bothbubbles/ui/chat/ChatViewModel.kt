@@ -23,6 +23,8 @@ import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
+import com.bothbubbles.data.model.AttachmentQuality
+import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
@@ -76,11 +78,9 @@ import com.bothbubbles.ui.chat.paging.SyncTrigger
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import com.bothbubbles.util.error.AppError
-import com.bothbubbles.util.error.AppError
+import com.bothbubbles.util.error.handle
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
-import androidx.compose.runtime.Stable
-import androidx.compose.runtime.Immutable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -267,7 +267,8 @@ class ChatViewModel @Inject constructor(
     private val _draftText = MutableStateFlow("")
     val draftText: StateFlow<String> = _draftText.asStateFlow()
 
-    private val _pendingAttachments = MutableStateFlow<List<Uri>>(emptyList())
+    private val _pendingAttachments = MutableStateFlow<List<PendingAttachmentInput>>(emptyList())
+    val pendingAttachments: StateFlow<List<PendingAttachmentInput>> = _pendingAttachments.asStateFlow()
 
     // Attachment download progress tracking
     // Maps attachment GUID to download progress (0.0 to 1.0, or null if not downloading)
@@ -277,6 +278,10 @@ class ChatViewModel @Inject constructor(
     // Whether to use auto-download mode (true) or manual download mode (false)
     private val _autoDownloadEnabled = MutableStateFlow(true)
     val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
+
+    // Attachment Quality Settings
+    private val _attachmentQuality = MutableStateFlow(AttachmentQuality.STANDARD)
+    private val _rememberQuality = MutableStateFlow(false)
 
     // Smart reply suggestions (ML Kit + user templates, max 3)
     private val _mlSuggestions = MutableStateFlow<List<String>>(emptyList())
@@ -445,6 +450,7 @@ class ChatViewModel @Inject constructor(
         observeConnectionState()
         observeSmartReplies()
         observeAutoDownloadSetting()
+        observeQualitySettings()
         observeUploadProgress()
         saveCurrentChatState()
         observeQueuedMessages()
@@ -507,6 +513,44 @@ class ChatViewModel @Inject constructor(
                     // Auto-download pending attachments for this chat
                     downloadPendingAttachments()
                 }
+            }
+        }
+    }
+
+    /**
+     * Observe attachment quality settings.
+     */
+    private fun observeQualitySettings() {
+        viewModelScope.launch {
+            settingsDataStore.defaultImageQuality.collect { qualityName ->
+                val quality = try {
+                    AttachmentQuality.valueOf(qualityName)
+                } catch (e: IllegalArgumentException) {
+                    AttachmentQuality.STANDARD
+                }
+                _attachmentQuality.value = quality
+                _uiState.update { it.copy(attachmentQuality = quality) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.rememberLastQuality.collect { remember ->
+                _rememberQuality.value = remember
+                _uiState.update { it.copy(rememberQuality = remember) }
+            }
+        }
+    }
+
+    /**
+     * Update the attachment quality for the current session.
+     * If "remember last quality" is enabled, this also updates the global default.
+     */
+    fun setAttachmentQuality(quality: AttachmentQuality) {
+        _attachmentQuality.value = quality
+        _uiState.update { it.copy(attachmentQuality = quality) }
+
+        if (_rememberQuality.value) {
+            viewModelScope.launch {
+                settingsDataStore.setDefaultImageQuality(quality.name)
             }
         }
     }
@@ -1361,7 +1405,7 @@ class ChatViewModel @Inject constructor(
                         addressToName = addressToName,
                         addressToAvatarPath = addressToAvatarPath
                     )
-                }
+                }.toStable()
             )
         }
     }
@@ -2051,7 +2095,7 @@ class ChatViewModel @Inject constructor(
             )
 
             // Update UI based on validation result
-            _pendingAttachments.update { it + uri }
+            _pendingAttachments.update { it + PendingAttachmentInput(uri) }
 
             val warning = when {
                 !validation.isValid -> AttachmentWarning(
@@ -2101,7 +2145,7 @@ class ChatViewModel @Inject constructor(
     }
 
     fun removeAttachment(uri: Uri) {
-        _pendingAttachments.update { it - uri }
+        _pendingAttachments.update { list -> list.filter { it.uri != uri } }
         // Clear warning if removing the attachment that caused the issue
         val currentWarning = _uiState.value.attachmentWarning
         val clearWarning = currentWarning?.affectedUri == uri
@@ -2110,6 +2154,25 @@ class ChatViewModel @Inject constructor(
                 attachmentCount = _pendingAttachments.value.size,
                 attachmentWarning = if (clearWarning) null else currentWarning
             )
+        }
+    }
+
+    /**
+     * Reorder attachments based on drag-and-drop result.
+     */
+    fun reorderAttachments(reorderedList: List<PendingAttachmentInput>) {
+        _pendingAttachments.update { reorderedList }
+    }
+
+    fun onAttachmentEdited(originalUri: Uri, editedUri: Uri, caption: String? = null) {
+        _pendingAttachments.update { list ->
+            list.map { input ->
+                if (input.uri == originalUri) {
+                    input.copy(uri = editedUri, caption = caption)
+                } else {
+                    input
+                }
+            }
         }
     }
 
@@ -2339,13 +2402,6 @@ class ChatViewModel @Inject constructor(
 
     fun clearError() {
         _uiState.update { it.copy(error = null, appError = null) }
-    }
-
-    /**
-     * Clear only the structured AppError (for retry dismissal).
-     */
-    fun clearAppError() {
-        _uiState.update { it.copy(appError = null) }
     }
 
     // ===== Menu Actions =====
@@ -2615,12 +2671,12 @@ class ChatViewModel @Inject constructor(
             isRead = dateRead != null,
             hasError = error != 0,
             isReaction = associatedMessageType?.contains("reaction") == true,
-            attachments = attachmentUiModels,
+            attachments = attachmentUiModels.toStable(),
             // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
             senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
             senderAvatarPath = resolveSenderAvatarPath(senderAddress, addressToAvatarPath),
             messageSource = messageSource,
-            reactions = allReactions,
+            reactions = allReactions.toStable(),
             myReactions = myReactions,
             expressiveSendStyleId = expressiveSendStyleId,
             effectPlayed = datePlayed != null,
@@ -2978,6 +3034,9 @@ data class ChatUiState(
     // Spam detection
     val isSpam: Boolean = false,
     val isReportedToCarrier: Boolean = false,
+    // Attachment Quality
+    val attachmentQuality: AttachmentQuality = AttachmentQuality.STANDARD,
+    val rememberQuality: Boolean = false,
     // Message forwarding
     val isForwarding: Boolean = false,
     val forwardSuccess: Boolean = false,

@@ -32,6 +32,7 @@ class MessageSendWorker @AssistedInject constructor(
     @Assisted workerParams: WorkerParameters,
     private val pendingMessageDao: PendingMessageDao,
     private val pendingAttachmentDao: PendingAttachmentDao,
+    private val attachmentDao: com.bothbubbles.data.local.db.dao.AttachmentDao,
     private val messageSendingService: MessageSendingService,
     private val attachmentPersistenceManager: AttachmentPersistenceManager
 ) : CoroutineWorker(context, workerParams) {
@@ -127,6 +128,29 @@ class MessageSendWorker @AssistedInject constructor(
 
     private suspend fun handleFailure(pendingMessageId: Long, error: Throwable?): Result {
         val errorMessage = error?.message ?: "Unknown error"
+
+        // Sync attachment errors from AttachmentEntity to PendingAttachmentEntity
+        try {
+            val pendingMessage = pendingMessageDao.getById(pendingMessageId)
+            if (pendingMessage != null) {
+                val tempGuid = pendingMessage.localId
+                val attachments = attachmentDao.getAttachmentsForMessage(tempGuid)
+                val pendingAttachments = pendingAttachmentDao.getForMessage(pendingMessageId)
+
+                pendingAttachments.forEach { pendingAtt ->
+                    val matchingAtt = attachments.find { it.guid == pendingAtt.localId }
+                    if (matchingAtt != null && matchingAtt.errorType != null) {
+                        pendingAttachmentDao.updateError(
+                            pendingAtt.id,
+                            matchingAtt.errorType,
+                            matchingAtt.errorMessage
+                        )
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to sync attachment errors", e)
+        }
 
         return if (runAttemptCount < MAX_RETRY_COUNT) {
             // Retry with backoff - mark as PENDING to allow retry

@@ -10,8 +10,10 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import android.text.format.DateFormat
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -643,15 +645,8 @@ class ConversationsViewModel @Inject constructor(
 
         // OPTIMIZATION: Batch fetch all participants in a single query
         val batchParticipantsId = PerformanceProfiler.start("DB.batchGetParticipants")
-        val participantsWithChatGuids = if (allGroupChatGuids.isNotEmpty()) {
-            chatRepository.getParticipantsWithChatGuids(allGroupChatGuids)
-        } else {
-            emptyList()
-        }
-        val participantsByChatMap = participantsWithChatGuids
-            .groupBy { it.chatGuid }
-            .mapValues { entry -> entry.value.map { it.handle } }
-        PerformanceProfiler.end(batchParticipantsId, "${participantsWithChatGuids.size} participants")
+        val participantsByChatMap = chatRepository.getParticipantsGroupedByChat(allGroupChatGuids)
+        PerformanceProfiler.end(batchParticipantsId, "${participantsByChatMap.values.sumOf { it.size }} participants")
 
         // Process unified chat groups with pre-fetched data
         // NOTE: Participants are fetched per-group to avoid cross-contamination of contact names
@@ -724,6 +719,7 @@ class ConversationsViewModel @Inject constructor(
         val msgId = PerformanceProfiler.start("DB.getLatestMessages", "1 batch query")
         val latestMessages = messageRepository.getLatestMessagesForChats(chatGuids)
         val latestMessage = latestMessages.maxByOrNull { it.dateCreated }
+        val latestTimestamp = latestMessage?.dateCreated ?: 0L
         PerformanceProfiler.end(msgId, "found: ${latestMessage != null}")
 
         // Use the primary chat for display info
@@ -1826,7 +1822,7 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             // Optimistically remove from list immediately for instant feedback
             _uiState.update { state ->
-                val updatedConversations = state.conversations.filter { it.guid != chatGuid }
+                val updatedConversations = state.conversations.filter { it.guid != chatGuid }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 
@@ -1839,7 +1835,7 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             // Optimistically remove from list immediately for instant feedback
             _uiState.update { state ->
-                val updatedConversations = state.conversations.filter { it.guid != chatGuid }
+                val updatedConversations = state.conversations.filter { it.guid != chatGuid }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 
@@ -1855,7 +1851,7 @@ class ConversationsViewModel @Inject constructor(
                 val updatedConversations = state.conversations.map { conv ->
                     if (conv.guid == chatGuid) conv.copy(unreadCount = 0)
                     else conv
-                }
+                }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 
@@ -1871,7 +1867,7 @@ class ConversationsViewModel @Inject constructor(
                 val updatedConversations = state.conversations.map { conv ->
                     if (conv.guid in chatGuids) conv.copy(unreadCount = 1)
                     else conv
-                }
+                }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 
@@ -1889,7 +1885,7 @@ class ConversationsViewModel @Inject constructor(
                 val updatedConversations = state.conversations.map { conv ->
                     if (conv.guid in chatGuids) conv.copy(unreadCount = 0)
                     else conv
-                }
+                }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 
@@ -1904,7 +1900,7 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             // Optimistically remove from list immediately for instant feedback
             _uiState.update { state ->
-                val updatedConversations = state.conversations.filter { it.guid !in chatGuids }
+                val updatedConversations = state.conversations.filter { it.guid !in chatGuids }.toStable()
                 state.copy(conversations = updatedConversations)
             }
 

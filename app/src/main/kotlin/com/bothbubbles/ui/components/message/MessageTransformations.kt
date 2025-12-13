@@ -7,6 +7,7 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.ui.util.toStable
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -79,7 +80,10 @@ fun MessageEntity.toUiModel(
                 thumbnailPath = attachment.thumbnailPath,
                 transferState = attachment.transferState,
                 transferProgress = attachment.transferProgress,
-                isOutgoing = attachment.isOutgoing
+                isOutgoing = attachment.isOutgoing,
+                errorType = attachment.errorType,
+                errorMessage = attachment.errorMessage,
+                retryCount = attachment.retryCount
             )
         }
 
@@ -95,12 +99,12 @@ fun MessageEntity.toUiModel(
         isRead = dateRead != null,
         hasError = error != 0,
         isReaction = associatedMessageType?.contains("reaction") == true,
-        attachments = attachmentUiModels,
+        attachments = attachmentUiModels.toStable(),
         // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
         senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
         senderAvatarPath = resolveSenderAvatarPath(senderAddress, addressToAvatarPath),
         messageSource = messageSource,
-        reactions = allReactions,
+        reactions = allReactions.toStable(),
         myReactions = myReactions,
         expressiveSendStyleId = expressiveSendStyleId,
         effectPlayed = datePlayed != null,

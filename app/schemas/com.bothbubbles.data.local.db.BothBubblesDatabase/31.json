@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 31,
-    "identityHash": "dd2638684bee9ec94cdc3df4c9bd4399",
+    "identityHash": "7e2bd3b55da929eef9218ecce3587594",
     "entities": [
       {
         "tableName": "chats",
@@ -839,7 +839,7 @@
       },
       {
         "tableName": "attachments",
-        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `message_guid` TEXT NOT NULL, `original_row_id` INTEGER, `uti` TEXT, `mime_type` TEXT, `is_outgoing` INTEGER NOT NULL, `transfer_name` TEXT, `total_bytes` INTEGER, `height` INTEGER, `width` INTEGER, `web_url` TEXT, `has_live_photo` INTEGER NOT NULL, `hide_attachment` INTEGER NOT NULL, `is_sticker` INTEGER NOT NULL, `local_path` TEXT, `blurhash` TEXT, `thumbnail_path` TEXT, `metadata` TEXT, `transfer_state` TEXT NOT NULL, `transfer_progress` REAL NOT NULL, FOREIGN KEY(`message_guid`) REFERENCES `messages`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `guid` TEXT NOT NULL, `message_guid` TEXT NOT NULL, `original_row_id` INTEGER, `uti` TEXT, `mime_type` TEXT, `is_outgoing` INTEGER NOT NULL, `transfer_name` TEXT, `total_bytes` INTEGER, `height` INTEGER, `width` INTEGER, `web_url` TEXT, `has_live_photo` INTEGER NOT NULL, `hide_attachment` INTEGER NOT NULL, `is_sticker` INTEGER NOT NULL, `local_path` TEXT, `blurhash` TEXT, `thumbnail_path` TEXT, `metadata` TEXT, `transfer_state` TEXT NOT NULL, `transfer_progress` REAL NOT NULL, `error_type` TEXT, `error_message` TEXT, `retry_count` INTEGER NOT NULL, FOREIGN KEY(`message_guid`) REFERENCES `messages`(`guid`) ON UPDATE NO ACTION ON DELETE CASCADE )",
         "fields": [
           {
             "fieldPath": "id",
@@ -965,6 +965,24 @@
             "fieldPath": "transferProgress",
             "columnName": "transfer_progress",
             "affinity": "REAL",
+            "notNull": true
+          },
+          {
+            "fieldPath": "errorType",
+            "columnName": "error_type",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "errorMessage",
+            "columnName": "error_message",
+            "affinity": "TEXT",
+            "notNull": false
+          },
+          {
+            "fieldPath": "retryCount",
+            "columnName": "retry_count",
+            "affinity": "INTEGER",
             "notNull": true
           }
         ],
@@ -2116,7 +2134,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'dd2638684bee9ec94cdc3df4c9bd4399')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '7e2bd3b55da929eef9218ecce3587594')"
     ]
   }
 }

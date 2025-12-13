@@ -445,7 +445,7 @@ private fun MessageBubbleSkeletonOutgoingPreview() {
 @Composable
 private fun EmptyConversationsPreview() {
     com.bothbubbles.ui.preview.PreviewWrapper {
-        EmptyConversations()
+        EmptyConversationsState(onNewMessage = {})
     }
 }
 
@@ -453,7 +453,7 @@ private fun EmptyConversationsPreview() {
 @Composable
 private fun EmptySearchResultsPreview() {
     com.bothbubbles.ui.preview.PreviewWrapper {
-        EmptySearchResults()
+        EmptySearchState(query = "test")
     }
 }
 

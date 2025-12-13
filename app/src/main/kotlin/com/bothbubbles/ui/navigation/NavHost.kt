@@ -270,6 +270,17 @@ fun BothBubblesNavHost(
                 .getStateFlow("restore_scroll_offset", 0)
                 .collectAsState()
 
+            // Handle edited attachment
+            val editedAttachmentUri = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("edited_attachment_uri", null)
+                .collectAsState()
+            val editedAttachmentCaption = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("edited_attachment_caption", null)
+                .collectAsState()
+            val originalAttachmentUri = backStackEntry.savedStateHandle
+                .getStateFlow<String?>("original_attachment_uri", null)
+                .collectAsState()
+
             ChatScreen(
                 chatGuid = route.chatGuid,
                 onBackClick = { navController.popBackStack() },
@@ -285,6 +296,14 @@ fun BothBubblesNavHost(
                 capturedPhotoUri = capturedPhotoUri.value?.toUri(),
                 onCapturedPhotoHandled = {
                     backStackEntry.savedStateHandle.remove<String>("captured_photo_uri")
+                },
+                editedAttachmentUri = editedAttachmentUri.value?.toUri(),
+                editedAttachmentCaption = editedAttachmentCaption.value,
+                originalAttachmentUri = originalAttachmentUri.value?.toUri(),
+                onEditedAttachmentHandled = {
+                    backStackEntry.savedStateHandle.remove<String>("edited_attachment_uri")
+                    backStackEntry.savedStateHandle.remove<String>("edited_attachment_caption")
+                    backStackEntry.savedStateHandle.remove<String>("original_attachment_uri")
                 },
                 sharedText = sharedText.value,
                 sharedUris = sharedUris.value?.map { it.toUri() } ?: emptyList(),
@@ -395,6 +414,7 @@ fun BothBubblesNavHost(
                 onNotificationsClick = { navController.navigate(Screen.NotificationSettings(returnToSettings = true)) },
                 onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings(returnToSettings = true)) },
                 onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
+                onImageQualityClick = { navController.navigate(Screen.ImageQualitySettings(returnToSettings = true)) },
                 onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
             )
         }
@@ -552,6 +572,36 @@ fun BothBubblesNavHost(
                 onNavigateBack = {
                     popBackStackReturningToSettings(route.returnToSettings)
                 }
+            )
+        }
+
+        // Image Quality Settings
+        composable<Screen.ImageQualitySettings> { backStackEntry ->
+            val route: Screen.ImageQualitySettings = backStackEntry.toRoute()
+            com.bothbubbles.ui.settings.messages.SendQualityScreen(
+                onBackClick = {
+                    popBackStackReturningToSettings(route.returnToSettings)
+                }
+            )
+        }
+
+        // Attachment Edit
+        composable<Screen.AttachmentEdit> { backStackEntry ->
+            val route: Screen.AttachmentEdit = backStackEntry.toRoute()
+            com.bothbubbles.ui.chat.composer.AttachmentEditScreen(
+                uri = Uri.parse(route.uri),
+                initialCaption = null,
+                onSave = { editedUri, caption ->
+                    navController.previousBackStackEntry?.savedStateHandle?.apply {
+                        set("original_attachment_uri", route.uri)
+                        set("edited_attachment_uri", editedUri.toString())
+                        if (caption != null) {
+                            set("edited_attachment_caption", caption)
+                        }
+                    }
+                    navController.popBackStack()
+                },
+                onCancel = { navController.popBackStack() }
             )
         }
 

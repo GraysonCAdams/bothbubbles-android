@@ -6,6 +6,7 @@ import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
+import com.bothbubbles.util.error.AttachmentErrorState
 
 @Stable
 @Entity(
@@ -95,7 +96,27 @@ data class AttachmentEntity(
      * Used for showing upload/download progress in UI.
      */
     @ColumnInfo(name = "transfer_progress")
-    val transferProgress: Float = 0f
+    val transferProgress: Float = 0f,
+
+    /**
+     * Error type when transfer failed.
+     * Maps to AttachmentErrorState sealed class types.
+     */
+    @ColumnInfo(name = "error_type")
+    val errorType: String? = null,
+
+    /**
+     * User-friendly error message when transfer failed.
+     */
+    @ColumnInfo(name = "error_message")
+    val errorMessage: String? = null,
+
+    /**
+     * Number of retry attempts for this transfer.
+     * Used for exponential backoff in AttachmentDownloadQueue.
+     */
+    @ColumnInfo(name = "retry_count")
+    val retryCount: Int = 0
 ) {
     /**
      * MIME type category (image, video, audio, etc.)
@@ -193,4 +214,24 @@ data class AttachmentEntity(
             totalBytes < 1024 * 1024 * 1024 -> "${totalBytes / (1024 * 1024)} MB"
             else -> "${totalBytes / (1024 * 1024 * 1024)} GB"
         }
+
+    /**
+     * Parsed error state from stored error type and message.
+     * Returns null if no error is stored.
+     */
+    val parsedErrorState: AttachmentErrorState?
+        get() = AttachmentErrorState.fromString(errorType, errorMessage)
+
+    /**
+     * Whether this attachment has exceeded the maximum retry count.
+     */
+    val hasExceededMaxRetries: Boolean
+        get() = retryCount >= MAX_RETRY_COUNT
+
+    companion object {
+        /**
+         * Maximum number of retry attempts before marking as permanently failed.
+         */
+        const val MAX_RETRY_COUNT = 3
+    }
 }

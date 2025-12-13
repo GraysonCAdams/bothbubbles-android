@@ -82,8 +82,35 @@ data class PendingAttachmentEntity(
     val uploadProgress: Float = 0f,
 
     /**
+     * Error type if upload failed
+     */
+    @ColumnInfo(name = "error_type")
+    val errorType: String? = null,
+
+    /**
+     * User-friendly error message
+     */
+    @ColumnInfo(name = "error_message")
+    val errorMessage: String? = null,
+
+    /**
      * Order index for maintaining attachment order
      */
     @ColumnInfo(name = "order_index")
-    val orderIndex: Int = 0
+    val orderIndex: Int = 0,
+
+    /**
+     * Image quality setting for compression.
+     * Values: "AUTO", "STANDARD", "HIGH", "ORIGINAL"
+     * Default is STANDARD for good balance of quality and file size.
+     */
+    @ColumnInfo(name = "quality")
+    val quality: String = "STANDARD",
+
+    /**
+     * Optional caption text to display with the attachment.
+     * Shown below the attachment in the message bubble.
+     */
+    @ColumnInfo(name = "caption")
+    val caption: String? = null
 )

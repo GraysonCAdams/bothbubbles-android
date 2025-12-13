@@ -119,7 +119,13 @@ data class AttachmentUiModel(
     // Transfer state fields for snappy rendering
     val transferState: String = "DOWNLOADED",
     val transferProgress: Float = 0f,
-    val isOutgoing: Boolean = false
+    val isOutgoing: Boolean = false,
+    // Error state fields for clear error display with retry
+    val errorType: String? = null,
+    val errorMessage: String? = null,
+    val retryCount: Int = 0,
+    // Caption text displayed below the attachment
+    val caption: String? = null
 ) {
     /** True if the attachment needs to be downloaded (inbound, no local file available) */
     val needsDownload: Boolean
@@ -140,6 +146,17 @@ data class AttachmentUiModel(
     /** True if transfer has failed */
     val hasFailed: Boolean
         get() = transferState == "FAILED"
+
+    /** True if the error is retryable (user can tap to retry) */
+    val isRetryable: Boolean
+        get() = when (errorType) {
+            "FILE_TOO_LARGE", "FORMAT_UNSUPPORTED" -> false
+            else -> hasFailed
+        }
+
+    /** True if this attachment has an error that should be displayed */
+    val hasError: Boolean
+        get() = hasFailed && errorType != null
 
     /** True if this attachment can be displayed (has local path or is outgoing with local file) */
     val canDisplay: Boolean

@@ -764,6 +764,36 @@ class SettingsDataStore @Inject constructor(
         }
     }
 
+    /**
+     * Default image quality for attachment uploads.
+     * Values: "AUTO", "STANDARD", "HIGH", "ORIGINAL"
+     * Default: "STANDARD" (good balance of quality and file size)
+     */
+    val defaultImageQuality: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.DEFAULT_IMAGE_QUALITY] ?: "STANDARD"
+    }
+
+    suspend fun setDefaultImageQuality(quality: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DEFAULT_IMAGE_QUALITY] = quality
+        }
+    }
+
+    /**
+     * Whether to remember the last-used quality setting per session.
+     * When true: if user changes quality for one message, that quality is used for subsequent messages.
+     * When false: always use the default quality setting.
+     */
+    val rememberLastQuality: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REMEMBER_LAST_QUALITY] ?: false
+    }
+
+    suspend fun setRememberLastQuality(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REMEMBER_LAST_QUALITY] = enabled
+        }
+    }
+
     // ===== Video Compression =====
 
     /**
@@ -1149,6 +1179,8 @@ class SettingsDataStore @Inject constructor(
 
         // Attachment Settings
         val AUTO_DOWNLOAD_ATTACHMENTS = booleanPreferencesKey("auto_download_attachments")
+        val DEFAULT_IMAGE_QUALITY = stringPreferencesKey("default_image_quality")
+        val REMEMBER_LAST_QUALITY = booleanPreferencesKey("remember_last_quality")
 
         // Video Compression
         val VIDEO_COMPRESSION_QUALITY = stringPreferencesKey("video_compression_quality")

@@ -100,7 +100,7 @@ class IncomingMessageHandler @Inject constructor(
      * Sync attachments for an incoming message to local database.
      * Incoming attachments are marked as PENDING for auto-download.
      */
-    override suspend fun syncIncomingAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
+    override suspend fun syncIncomingAttachments(messageDto: MessageDto, tempMessageGuid: String?) {
         // Delete any temp attachments that were created for immediate display
         tempMessageGuid?.let { tempGuid ->
             attachmentDao.deleteAttachmentsForMessage(tempGuid)

@@ -52,6 +52,8 @@ class PendingMessageRepository @Inject constructor(
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
 
+import com.bothbubbles.data.model.PendingAttachmentInput
+
     /**
      * Queue a message for sending.
      *
@@ -66,7 +68,7 @@ class PendingMessageRepository @Inject constructor(
         subject: String? = null,
         replyToGuid: String? = null,
         effectId: String? = null,
-        attachments: List<Uri> = emptyList(),
+        attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO
     ): Result<String> = runCatching {
         val localId = "pending-${UUID.randomUUID()}"
@@ -88,7 +90,8 @@ class PendingMessageRepository @Inject constructor(
 
         // 2. Persist attachments if any
         if (attachments.isNotEmpty()) {
-            val persistedAttachments = attachments.mapIndexedNotNull { index, uri ->
+            val persistedAttachments = attachments.mapIndexedNotNull { index, input ->
+                val uri = input.uri
                 val attachmentLocalId = "$localId-att-$index"
                 attachmentPersistenceManager.persistAttachment(uri, attachmentLocalId)
                     .onFailure { e ->
@@ -104,7 +107,8 @@ class PendingMessageRepository @Inject constructor(
                             fileName = result.fileName,
                             mimeType = result.mimeType,
                             fileSize = result.fileSize,
-                            orderIndex = index
+                            orderIndex = index,
+                            caption = input.caption
                         )
                     }
             }

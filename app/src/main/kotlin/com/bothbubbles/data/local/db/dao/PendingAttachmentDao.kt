@@ -35,6 +35,12 @@ interface PendingAttachmentDao {
     suspend fun updateProgress(id: Long, progress: Float)
 
     /**
+     * Update error state for an attachment.
+     */
+    @Query("UPDATE pending_attachments SET error_type = :errorType, error_message = :errorMessage WHERE id = :id")
+    suspend fun updateError(id: Long, errorType: String?, errorMessage: String?)
+
+    /**
      * Delete all attachments for a message.
      * Note: This is also handled by CASCADE delete on foreign key.
      */

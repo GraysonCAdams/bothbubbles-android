@@ -8,6 +8,14 @@ import androidx.room.Update
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Data class for attachment with message date, used for gallery grouping.
+ */
+data class AttachmentWithDate(
+    val attachment: AttachmentEntity,
+    val dateCreated: Long
+)
+
 @Dao
 interface AttachmentDao {
 
@@ -48,6 +56,32 @@ interface AttachmentDao {
         ORDER BY m.date_created DESC
     """)
     fun getVideosForChat(chatGuid: String): Flow<List<AttachmentEntity>>
+
+    /**
+     * Get media attachments (images and videos) with their message dates for gallery grouping.
+     */
+    @Query("""
+        SELECT a.*, m.date_created as dateCreated FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid
+          AND (a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%')
+          AND a.hide_attachment = 0
+        ORDER BY m.date_created DESC
+    """)
+    fun getMediaWithDatesForChat(chatGuid: String): Flow<List<AttachmentWithDate>>
+
+    /**
+     * Get media attachments for multiple chats (merged conversations) with dates.
+     */
+    @Query("""
+        SELECT a.*, m.date_created as dateCreated FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid IN (:chatGuids)
+          AND (a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%')
+          AND a.hide_attachment = 0
+        ORDER BY m.date_created DESC
+    """)
+    fun getMediaWithDatesForChats(chatGuids: List<String>): Flow<List<AttachmentWithDate>>
 
     @Query("""
         SELECT a.* FROM attachments a
@@ -153,6 +187,55 @@ interface AttachmentDao {
      */
     @Query("UPDATE attachments SET transfer_state = 'FAILED', transfer_progress = 0 WHERE guid = :guid")
     suspend fun markTransferFailed(guid: String)
+
+    /**
+     * Mark an attachment as failed with error details.
+     */
+    @Query("""
+        UPDATE attachments SET
+            transfer_state = 'FAILED',
+            transfer_progress = 0,
+            error_type = :errorType,
+            error_message = :errorMessage,
+            retry_count = retry_count + 1
+        WHERE guid = :guid
+    """)
+    suspend fun markTransferFailedWithError(guid: String, errorType: String, errorMessage: String)
+
+    /**
+     * Clear error state and reset for retry.
+     */
+    @Query("""
+        UPDATE attachments SET
+            transfer_state = 'PENDING',
+            error_type = NULL,
+            error_message = NULL
+        WHERE guid = :guid
+    """)
+    suspend fun clearErrorForRetry(guid: String)
+
+    /**
+     * Get all failed attachments.
+     */
+    @Query("SELECT * FROM attachments WHERE transfer_state = 'FAILED'")
+    suspend fun getFailedAttachments(): List<AttachmentEntity>
+
+    /**
+     * Get failed attachments for a chat.
+     */
+    @Query("""
+        SELECT a.* FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid = :chatGuid AND a.transfer_state = 'FAILED'
+        ORDER BY m.date_created DESC
+    """)
+    suspend fun getFailedAttachmentsForChat(chatGuid: String): List<AttachmentEntity>
+
+    /**
+     * Get retryable failed attachments (retry_count < max).
+     */
+    @Query("SELECT * FROM attachments WHERE transfer_state = 'FAILED' AND retry_count < :maxRetries")
+    suspend fun getRetryableFailedAttachments(maxRetries: Int): List<AttachmentEntity>
 
     /**
      * Mark an attachment as downloaded and set its local path.

@@ -293,12 +293,12 @@ class NotificationService @Inject constructor(
         messageText: String,
         messageGuid: String,
         senderName: String?,
-        senderAddress: String? = null,
-        isGroup: Boolean = false,
-        avatarUri: String? = null,
-        linkPreviewTitle: String? = null,
-        linkPreviewDomain: String? = null,
-        participantNames: List<String> = emptyList()
+        senderAddress: String?,
+        isGroup: Boolean,
+        avatarUri: String?,
+        linkPreviewTitle: String?,
+        linkPreviewDomain: String?,
+        participantNames: List<String>
     ) {
         if (!hasNotificationPermission()) return
 

@@ -91,12 +91,14 @@ class ChatSendDelegate @Inject constructor(
         this.scope = scope
     }
 
+import com.bothbubbles.data.model.PendingAttachmentInput
+
     /**
-     * Send a message with optional attachments and effects.
+     * Send a message with optional attachments.
      *
-     * @param text The message text (can be empty if attachments present)
-     * @param attachments List of attachment URIs
-     * @param effectId Optional iMessage effect (bubble or screen effect)
+     * @param text Message text
+     * @param attachments List of attachments to send
+     * @param effectId Optional effect ID (e.g. "invisible ink")
      * @param currentSendMode Current send mode (iMessage or SMS)
      * @param isLocalSmsChat True if this is a local SMS/MMS chat
      * @param onClearInput Callback to clear input UI state
@@ -104,7 +106,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun sendMessage(
         text: String,
-        attachments: List<android.net.Uri>,
+        attachments: List<PendingAttachmentInput>,
         effectId: String? = null,
         currentSendMode: ChatSendMode,
         isLocalSmsChat: Boolean,

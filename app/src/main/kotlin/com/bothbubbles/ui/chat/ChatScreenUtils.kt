@@ -26,6 +26,7 @@ internal data class AttachmentInfo(
     val sizeBytes: Long,
     val formattedSize: String,
     val isVideo: Boolean,
+    val isImage: Boolean,
     val durationMs: Long? = null,
     val durationFormatted: String? = null
 )
@@ -36,12 +37,14 @@ internal data class AttachmentInfo(
 internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
     var sizeBytes = 0L
     var isVideo = false
+    var isImage = false
     var durationMs: Long? = null
 
     try {
         // Get MIME type
         val mimeType = context.contentResolver.getType(uri)
         isVideo = mimeType?.startsWith("video/") == true
+        isImage = mimeType?.startsWith("image/") == true
 
         // Get file size
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -73,6 +76,7 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
         sizeBytes = sizeBytes,
         formattedSize = formatFileSize(sizeBytes),
         isVideo = isVideo,
+        isImage = isImage,
         durationMs = durationMs,
         durationFormatted = durationMs?.let { formatDuration(it) }
     )

@@ -2,6 +2,7 @@ package com.bothbubbles.services.messaging
 
 import android.net.Uri
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.model.PendingAttachmentInput
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -31,7 +32,7 @@ interface MessageSender {
         replyToGuid: String? = null,
         effectId: String? = null,
         subject: String? = null,
-        attachments: List<Uri> = emptyList(),
+        attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
         subscriptionId: Int = -1,
         tempGuid: String? = null

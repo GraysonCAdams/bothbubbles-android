@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -34,13 +36,16 @@ import coil.request.ImageRequest
 import com.bothbubbles.ui.chat.getAttachmentInfo
 
 /**
- * Attachment preview thumbnail with remove button, file size, and video duration.
+ * Attachment preview thumbnail with remove button, edit button, file size, and video duration.
  */
 @Composable
 fun AttachmentPreview(
     uri: Uri,
     onRemove: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    caption: String? = null,
+    onEdit: (() -> Unit)? = null,
+    onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
@@ -53,6 +58,13 @@ fun AttachmentPreview(
         modifier = modifier
             .size(80.dp)
             .clip(RoundedCornerShape(12.dp))
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
     ) {
         AsyncImage(
             model = ImageRequest.Builder(context)
@@ -80,9 +92,9 @@ fun AttachmentPreview(
                 )
         )
 
-        // File size at bottom left
+        // File size at bottom left, or caption indicator
         Text(
-            text = fileInfo.formattedSize,
+            text = if (caption != null) "\uD83D\uDCAC" else fileInfo.formattedSize,
             style = MaterialTheme.typography.labelSmall,
             color = Color.White,
             modifier = Modifier
@@ -113,7 +125,29 @@ fun AttachmentPreview(
             }
         }
 
-        // Remove button overlay
+        // Edit button overlay (top left) - only show for images
+        if (onEdit != null && fileInfo.isImage) {
+            IconButton(
+                onClick = onEdit,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(4.dp)
+                    .size(24.dp)
+                    .background(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        shape = CircleShape
+                    )
+            ) {
+                Icon(
+                    Icons.Default.Edit,
+                    contentDescription = "Edit attachment",
+                    tint = Color.White,
+                    modifier = Modifier.size(14.dp)
+                )
+            }
+        }
+
+        // Remove button overlay (top right)
         IconButton(
             onClick = onRemove,
             modifier = Modifier

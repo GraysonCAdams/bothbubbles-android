@@ -46,6 +46,9 @@ sealed interface Screen {
     ) : Screen
 
     @Serializable
+    data class AttachmentEdit(val uri: String) : Screen
+
+    @Serializable
     data class ChatDetails(val chatGuid: String) : Screen
 
     @Serializable
@@ -101,6 +104,9 @@ sealed interface Screen {
 
     @Serializable
     data class AutoResponderSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
+    data class ImageQualitySettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
     data class MediaViewer(
