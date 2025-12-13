@@ -1,15 +1,9 @@
 package com.bothbubbles.services.socket
 
-import android.util.Log
-import com.bothbubbles.BuildConfig
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.sound.SoundManager
 import com.squareup.moshi.Moshi
-import io.socket.client.IO
-import io.socket.client.Socket
-import io.socket.emitter.Emitter
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
@@ -20,17 +14,10 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
-import org.json.JSONObject
 import dagger.Lazy
-import java.net.URI
-import java.net.URLEncoder
 import javax.inject.Inject
 import javax.inject.Singleton
-import javax.net.ssl.SSLContext
-import javax.net.ssl.X509TrustManager
 
 /**
  * Socket.IO connection states
@@ -100,6 +87,10 @@ enum class FaceTimeCallStatus {
     UNKNOWN
 }
 
+/**
+ * Main Socket.IO service that implements the SocketConnection interface.
+ * Delegates to specialized components for connection management, event parsing, and event emission.
+ */
 @Singleton
 class SocketService @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
@@ -110,39 +101,8 @@ class SocketService @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : SocketConnection {
-    companion object {
-        private const val TAG = "SocketService"
 
-        // Socket.IO event names from BlueBubbles server
-        private const val EVENT_NEW_MESSAGE = "new-message"
-        private const val EVENT_MESSAGE_UPDATED = "updated-message"
-        private const val EVENT_MESSAGE_DELETED = "message-deleted"
-        private const val EVENT_MESSAGE_SEND_ERROR = "message-send-error"
-        private const val EVENT_TYPING_INDICATOR = "typing-indicator"
-        private const val EVENT_CHAT_READ = "chat-read-status-changed"
-        private const val EVENT_PARTICIPANT_ADDED = "participant-added"
-        private const val EVENT_PARTICIPANT_REMOVED = "participant-removed"
-        private const val EVENT_PARTICIPANT_LEFT = "participant-left"
-        private const val EVENT_GROUP_NAME_CHANGED = "group-name-change"
-        private const val EVENT_GROUP_ICON_CHANGED = "group-icon-changed"
-        private const val EVENT_GROUP_ICON_REMOVED = "group-icon-removed"
-        private const val EVENT_SERVER_UPDATE = "server-update"
-        private const val EVENT_INCOMING_FACETIME = "incoming-facetime"
-        private const val EVENT_FACETIME_CALL = "ft-call-status-changed"
-        private const val EVENT_ICLOUD_ACCOUNT = "icloud-account"
-
-        // Server-side scheduled message events
-        private const val EVENT_SCHEDULED_MESSAGE_CREATED = "scheduled-message-created"
-        private const val EVENT_SCHEDULED_MESSAGE_SENT = "scheduled-message-sent"
-        private const val EVENT_SCHEDULED_MESSAGE_ERROR = "scheduled-message-error"
-        private const val EVENT_SCHEDULED_MESSAGE_DELETED = "scheduled-message-deleted"
-
-    }
-
-    private var socket: Socket? = null
-    private var retryCount = 0
-    private var retryJob: kotlinx.coroutines.Job? = null
-
+    // State flows
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
@@ -152,180 +112,51 @@ class SocketService @Inject constructor(
     private val _events = MutableSharedFlow<SocketEvent>(extraBufferCapacity = 100)
     override val events: SharedFlow<SocketEvent> = _events.asSharedFlow()
 
-    private val messageAdapter by lazy {
-        moshi.adapter(MessageDto::class.java)
-    }
+    // Delegated components
+    private val eventParser = SocketEventParser(
+        moshi = moshi,
+        events = _events,
+        soundManager = soundManager,
+        developerEventLog = developerEventLog
+    )
 
-    /**
-     * Check if server is configured (has address and password)
-     */
-    override suspend fun isServerConfigured(): Boolean {
-        val serverAddress = settingsDataStore.serverAddress.first()
-        val password = settingsDataStore.serverPassword.first()
-        return serverAddress.isNotBlank() && password.isNotBlank()
-    }
+    private val socketConnection = SocketIOConnection(
+        settingsDataStore = settingsDataStore,
+        okHttpClient = okHttpClient,
+        developerEventLog = developerEventLog,
+        eventParser = eventParser,
+        connectionState = _connectionState,
+        retryAttempt = _retryAttempt,
+        events = _events,
+        coroutineScope = applicationScope,
+        ioDispatcher = ioDispatcher
+    )
 
-    // Track if we're currently connecting to prevent duplicate attempts
-    private var isConnecting = false
+    private val eventEmitter = SocketEventEmitter(
+        getSocket = { socketConnection.getSocket() },
+        isConnected = { socketConnection.isConnected() }
+    )
 
-    /**
-     * Connect to the BlueBubbles server
-     */
-    override fun connect() {
-        Log.i(TAG, "connect() called - attempting to connect to server")
+    // ===== SocketConnection Interface Implementation =====
+    // All methods delegate to specialized components
 
-        if (socket?.connected() == true) {
-            Log.d(TAG, "Already connected")
-            return
-        }
+    override suspend fun isServerConfigured(): Boolean =
+        socketConnection.isServerConfigured()
 
-        // Prevent duplicate connection attempts
-        if (isConnecting) {
-            Log.d(TAG, "Connection already in progress, skipping duplicate attempt")
-            return
-        }
+    override fun connect() =
+        socketConnection.connect()
 
-        // Cancel any pending retry
-        retryJob?.cancel()
+    override fun disconnect() =
+        socketConnection.disconnect()
 
-        applicationScope.launch(ioDispatcher) {
-            try {
-                isConnecting = true
-                _connectionState.value = ConnectionState.CONNECTING
+    override fun reconnect() =
+        socketConnection.reconnect()
 
-                val serverAddress = settingsDataStore.serverAddress.first()
-                val password = settingsDataStore.serverPassword.first()
+    override fun retryNow() =
+        socketConnection.retryNow()
 
-                if (serverAddress.isBlank() || password.isBlank()) {
-                    Log.e(TAG, "Server address or password not configured")
-                    _connectionState.value = ConnectionState.NOT_CONFIGURED
-                    return@launch
-                }
-
-                // Log sanitized server address (hide credentials/full URL for security)
-                val uri = URI.create(serverAddress)
-                Log.i(TAG, "Connecting to server: ${uri.scheme}://${uri.host}:${uri.port}")
-                Log.d(TAG, "Password length: ${password.length}, first 4 chars: ${password.take(4)}...")
-
-                // URL-encode the password for use in query string
-                val encodedPassword = URLEncoder.encode(password, "UTF-8")
-
-                val options = IO.Options().apply {
-                    forceNew = true
-                    // Use Socket.IO's built-in reconnection with exponential backoff
-                    reconnection = true
-                    reconnectionAttempts = Int.MAX_VALUE
-                    reconnectionDelay = 5000        // Start at 5 seconds
-                    reconnectionDelayMax = 60000    // Cap at 60 seconds
-                    randomizationFactor = 0.5       // Add jitter to prevent thundering herd
-                    timeout = 20000
-                    // Pass authentication via query string (like official BlueBubbles app)
-                    query = "guid=$encodedPassword"
-                    transports = arrayOf("websocket", "polling")
-                    // Use our OkHttpClient which trusts self-signed certificates
-                    // Note: AuthInterceptor may add guid again - we need to fix that
-                    callFactory = okHttpClient
-                    webSocketFactory = okHttpClient
-                }
-
-                Log.d(TAG, "Creating socket with options: transports=${options.transports?.joinToString()}, timeout=${options.timeout}")
-
-                socket = IO.socket(URI.create(serverAddress), options).apply {
-                    on(Socket.EVENT_CONNECT, onConnect)
-                    on(Socket.EVENT_DISCONNECT, onDisconnect)
-                    on(Socket.EVENT_CONNECT_ERROR, onConnectError)
-
-                    // Debug: Log ALL incoming events to see what the server sends (only in debug builds)
-                    if (BuildConfig.DEBUG) {
-                        onAnyIncoming { args: Array<Any?> ->
-                            val eventName = args.getOrNull(0)?.toString() ?: "unknown"
-                            Log.i(TAG, ">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
-                            args.drop(1).forEachIndexed { index: Int, arg: Any? ->
-                                val preview = arg?.toString()?.take(200) ?: "null"
-                                Log.d(TAG, "    arg[$index]: $preview")
-                            }
-                        }
-                    }
-
-                    // BlueBubbles events
-                    on(EVENT_NEW_MESSAGE, onNewMessage)
-                    on(EVENT_MESSAGE_UPDATED, onMessageUpdated)
-                    on(EVENT_MESSAGE_DELETED, onMessageDeleted)
-                    on(EVENT_MESSAGE_SEND_ERROR, onMessageSendError)
-                    on(EVENT_TYPING_INDICATOR, onTypingIndicator)
-                    on(EVENT_CHAT_READ, onChatRead)
-                    on(EVENT_PARTICIPANT_ADDED, onParticipantAdded)
-                    on(EVENT_PARTICIPANT_REMOVED, onParticipantRemoved)
-                    on(EVENT_PARTICIPANT_LEFT, onParticipantLeft)
-                    on(EVENT_GROUP_NAME_CHANGED, onGroupNameChanged)
-                    on(EVENT_GROUP_ICON_CHANGED, onGroupIconChanged)
-                    on(EVENT_GROUP_ICON_REMOVED, onGroupIconRemoved)
-                    on(EVENT_SERVER_UPDATE, onServerUpdate)
-                    on(EVENT_INCOMING_FACETIME, onIncomingFaceTime)
-                    on(EVENT_FACETIME_CALL, onFaceTimeCall)
-                    on(EVENT_ICLOUD_ACCOUNT, onICloudAccountStatus)
-
-                    // Server-side scheduled message events
-                    on(EVENT_SCHEDULED_MESSAGE_CREATED, onScheduledMessageCreated)
-                    on(EVENT_SCHEDULED_MESSAGE_SENT, onScheduledMessageSent)
-                    on(EVENT_SCHEDULED_MESSAGE_ERROR, onScheduledMessageError)
-                    on(EVENT_SCHEDULED_MESSAGE_DELETED, onScheduledMessageDeleted)
-
-                    Log.i(TAG, "Socket created, calling connect()...")
-                    connect()
-                    Log.d(TAG, "Socket.connect() called, waiting for connection events...")
-                }
-                // Note: isConnecting will be reset by onConnect or onConnectError handlers
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to connect", e)
-                isConnecting = false
-                _connectionState.value = ConnectionState.ERROR
-                _events.tryEmit(SocketEvent.Error(e.message ?: "Connection failed"))
-                // Socket.IO handles reconnection automatically with exponential backoff
-            }
-        }
-    }
-
-    /**
-     * Reset retry state (called on successful connection)
-     */
-    private fun resetRetryState() {
-        retryCount = 0
-        _retryAttempt.value = 0
-    }
-
-    /**
-     * Disconnect from the server
-     */
-    override fun disconnect() {
-        socket?.disconnect()
-        socket?.off()
-        socket = null
-        _connectionState.value = ConnectionState.DISCONNECTED
-        resetRetryState()
-    }
-
-    /**
-     * Reconnect to the server
-     */
-    override fun reconnect() {
-        resetRetryState()
-        disconnect()
-        connect()
-    }
-
-    /**
-     * Force an immediate retry (for user-triggered retry)
-     */
-    override fun retryNow() {
-        resetRetryState()
-        connect()
-    }
-
-    /**
-     * Check if currently connected
-     */
-    override fun isConnected(): Boolean = socket?.connected() == true
+    override fun isConnected(): Boolean =
+        socketConnection.isConnected()
 
     // ===== Typing Indicators (Outbound) =====
 

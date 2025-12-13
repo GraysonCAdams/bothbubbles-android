@@ -1,6 +1,8 @@
 package com.bothbubbles.ui.components.common
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,11 +13,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material3.Card
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,16 +38,22 @@ import coil.request.ImageRequest
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 
 /**
- * Link preview card shown inside message bubbles.
- * Displays title, description, and thumbnail image from URL metadata.
- * Tap to open URL, long-press to copy URL to clipboard.
+ * Borderless link preview components.
+ * Used when rendering link previews outside message bubbles as standalone elements.
+ * These render without Card containers, using only subtle rounded corners.
+ */
+
+/**
+ * Borderless link preview card - renders without Card container.
+ * Uses only subtle rounded corners for visual polish.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun LinkPreviewCard(
+fun BorderlessLinkPreviewCard(
     preview: LinkPreviewEntity,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
+    maxWidth: androidx.compose.ui.unit.Dp = 300.dp,
     onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -57,81 +66,88 @@ fun LinkPreviewCard(
         copyUrlToClipboard(context, preview.url)
     }
 
-    // Use theme-aware colors for both sent and received messages
-    // This ensures proper contrast in both light and dark modes
-    val cardColors = linkPreviewCardColors(LinkPreviewSurfaceLevel.Highest)
-
     val textColor = MaterialTheme.colorScheme.onSurface
     val secondaryTextColor = MaterialTheme.colorScheme.onSurfaceVariant
 
-    Card(
+    // No Card container - just a Column with rounded corners
+    Column(
         modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 4.dp)
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = handleClick,
                 onLongClick = handleLongClick
-            ),
-        colors = cardColors,
-        shape = RoundedCornerShape(12.dp)
+            )
     ) {
-        Column {
-            // Thumbnail image (if available)
-            preview.imageUrl?.let { imageUrl ->
-                val imageRequest = remember(imageUrl) {
-                    ImageRequest.Builder(context)
-                        .data(imageUrl)
-                        .crossfade(true)
-                        .build()
-                }
-                Box(
+        // Thumbnail image (if available)
+        preview.imageUrl?.let { imageUrl ->
+            val imageRequest = remember(imageUrl) {
+                ImageRequest.Builder(context)
+                    .data(imageUrl)
+                    .crossfade(true)
+                    .build()
+            }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                AsyncImage(
+                    model = imageRequest,
+                    contentDescription = "Link preview image",
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(140.dp)
-                        .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    AsyncImage(
-                        model = imageRequest,
-                        contentDescription = "Link preview image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp),
-                        contentScale = ContentScale.Crop,
-                        onState = { state ->
-                            // Could handle loading/error states here
-                        }
-                    )
-
-                    // Play button overlay for video content
-                    if (preview.isVideo) {
-                        Surface(
-                            shape = CircleShape,
-                            color = videoOverlayColor,
-                            modifier = Modifier.size(48.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = "Video",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(32.dp)
-                                )
+                        .clip(
+                            if (preview.title.isNullOrBlank() && preview.description.isNullOrBlank()) {
+                                RoundedCornerShape(12.dp)
+                            } else {
+                                RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
                             }
+                        ),
+                    contentScale = ContentScale.Crop
+                )
+
+                // Play button overlay for video content
+                if (preview.isVideo) {
+                    Surface(
+                        shape = CircleShape,
+                        color = videoOverlayColor,
+                        modifier = Modifier.size(48.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "Video",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp)
+                            )
                         }
                     }
                 }
             }
+        }
 
-            // Text content
+        // Text content (with subtle background for readability)
+        if (!preview.title.isNullOrBlank() || !preview.description.isNullOrBlank()) {
             Column(
-                modifier = Modifier.padding(10.dp)
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    .clip(
+                        if (preview.imageUrl == null) {
+                            RoundedCornerShape(12.dp)
+                        } else {
+                            RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
+                        }
+                    )
+                    .padding(10.dp)
             ) {
                 // Site name / domain
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Favicon
                     preview.faviconUrl?.let { faviconUrl ->
                         val faviconRequest = remember(faviconUrl) {
                             ImageRequest.Builder(context)
@@ -184,5 +200,44 @@ fun LinkPreviewCard(
                 }
             }
         }
+    }
+}
+
+/**
+ * Borderless minimal link preview (when no metadata available)
+ */
+@Composable
+fun BorderlessLinkPreviewMinimal(
+    url: String,
+    domain: String,
+    modifier: Modifier = Modifier,
+    maxWidth: androidx.compose.ui.unit.Dp = 300.dp
+) {
+    val context = LocalContext.current
+    val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    Row(
+        modifier = modifier
+            .widthIn(max = maxWidth)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .clickable {
+                openUrl(context, url)
+            }
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Default.Link,
+            contentDescription = null,
+            modifier = Modifier.size(16.dp),
+            tint = textColor
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = domain,
+            style = MaterialTheme.typography.bodySmall,
+            color = textColor
+        )
     }
 }

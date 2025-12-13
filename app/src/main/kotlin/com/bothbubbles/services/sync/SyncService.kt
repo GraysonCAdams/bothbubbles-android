@@ -3,17 +3,11 @@ package com.bothbubbles.services.sync
 import android.database.sqlite.SQLiteException
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
-import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoffResult
 import kotlinx.coroutines.CoroutineDispatcher
@@ -26,56 +20,18 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/**
- * Sync state with detailed progress information
- */
-sealed class SyncState {
-    data object Idle : SyncState()
-
-    data class Syncing(
-        val progress: Float,
-        val stage: String,
-        val totalChats: Int = 0,
-        val processedChats: Int = 0,
-        val syncedMessages: Int = 0,
-        val currentChatName: String? = null,
-        val isInitialSync: Boolean = false,
-        // Separate progress tracking for iMessage and SMS
-        val iMessageProgress: Float = 0f,
-        val iMessageComplete: Boolean = false,
-        val smsProgress: Float = 0f,
-        val smsComplete: Boolean = false,
-        val smsCurrent: Int = 0,
-        val smsTotal: Int = 0
-    ) : SyncState()
-
-    data object Completed : SyncState()
-
-    data class Error(
-        val message: String,
-        val isCorrupted: Boolean = false,
-        val canRetry: Boolean = true
-    ) : SyncState()
-}
-
 @Singleton
 class SyncService @Inject constructor(
-    private val chatRepository: ChatRepository,
-    private val messageRepository: MessageRepository,
-    private val smsRepository: SmsRepository,
     private val chatDao: ChatDao,
-    private val handleDao: HandleDao,
-    private val messageDao: MessageDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val messageRepository: MessageRepository,
     private val settingsDataStore: SettingsDataStore,
-    private val categorizationRepository: CategorizationRepository,
-    private val syncRangeTracker: SyncRangeTracker,
+    private val chatSyncHelper: ChatSyncHelper,
+    private val messageSyncHelper: MessageSyncHelper,
+    private val syncOperations: SyncOperations,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -83,11 +39,7 @@ class SyncService @Inject constructor(
         private const val TAG = "SyncService"
         private const val CHAT_PAGE_SIZE = 50
         private const val MESSAGE_PAGE_SIZE = 25
-        private const val MESSAGE_SYNC_CONCURRENCY = 3
     }
-
-    /** Lightweight data for queuing chats for message sync */
-    private data class ChatSyncTask(val guid: String, val displayName: String?)
 
     private val _syncState = MutableStateFlow<SyncState>(SyncState.Idle)
     val syncState: StateFlow<SyncState> = _syncState.asStateFlow()
@@ -144,27 +96,18 @@ class SyncService @Inject constructor(
         // Get already synced chats (for resume scenario)
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
 
-        // Atomic counters for thread-safe progress tracking
-        val totalChatsFound = AtomicInteger(0)
-        val processedChats = AtomicInteger(0)
-        val syncedMessages = AtomicInteger(0)
-
-        // SMS progress tracking (only used when SMS import runs concurrently)
-        val smsCurrentThread = AtomicInteger(0)
-        val smsTotalThreads = AtomicInteger(0)
-        val smsComplete = AtomicInteger(0) // 0 = in progress, 1 = complete
+        // Initialize progress tracker
+        val progressTracker = SyncProgressTracker()
 
         // Helper to update progress - tracks iMessage and SMS separately
         fun updateProgress(iMessageProgressPercent: Int, stage: String, chatName: String? = null) {
             val imProgress = iMessageProgressPercent / 100f
             val imComplete = iMessageProgressPercent >= 100
-            val smsProgressPct = if (smsTotalThreads.get() > 0) {
-                smsCurrentThread.get().toFloat() / smsTotalThreads.get()
-            } else 0f
-            val smsIsDone = smsComplete.get() == 1
+            val smsProgressPct = progressTracker.calculateSmsProgress()
+            val smsIsDone = progressTracker.smsComplete.get() == 1
 
             // Overall progress: if SMS is running, average both; otherwise just iMessage
-            val overallProgress = if (shouldImportSms && smsTotalThreads.get() > 0) {
+            val overallProgress = if (shouldImportSms && progressTracker.smsTotalThreads.get() > 0) {
                 (imProgress + smsProgressPct) / 2
             } else {
                 imProgress
@@ -173,25 +116,22 @@ class SyncService @Inject constructor(
             _syncState.value = SyncState.Syncing(
                 progress = overallProgress,
                 stage = stage,
-                totalChats = totalChatsFound.get(),
-                processedChats = processedChats.get(),
-                syncedMessages = syncedMessages.get(),
+                totalChats = progressTracker.totalChatsFound.get(),
+                processedChats = progressTracker.processedChats.get(),
+                syncedMessages = progressTracker.syncedMessages.get(),
                 currentChatName = chatName,
                 isInitialSync = true,
                 iMessageProgress = imProgress,
                 iMessageComplete = imComplete,
                 smsProgress = smsProgressPct,
                 smsComplete = smsIsDone,
-                smsCurrent = smsCurrentThread.get(),
-                smsTotal = smsTotalThreads.get()
+                smsCurrent = progressTracker.smsCurrentThread.get(),
+                smsTotal = progressTracker.smsTotalThreads.get()
             )
         }
 
         // Channel to queue chats for message syncing as they're fetched
-        val chatQueue = Channel<ChatSyncTask>(Channel.UNLIMITED)
-
-        // Semaphore to limit concurrent message sync operations
-        val syncSemaphore = Semaphore(MESSAGE_SYNC_CONCURRENCY)
+        val chatQueue = Channel<ChatSyncHelper.ChatSyncTask>(Channel.UNLIMITED)
 
         coroutineScope {
             // Optional: Run SMS import concurrently if enabled
@@ -200,12 +140,12 @@ class SyncService @Inject constructor(
                     Log.i(TAG, "Starting concurrent SMS import")
                     smsRepository.importAllThreads(
                         onProgress = { current, total ->
-                            smsCurrentThread.set(current)
-                            smsTotalThreads.set(total)
+                            progressTracker.smsCurrentThread.set(current)
+                            progressTracker.smsTotalThreads.set(total)
                         }
                     ).fold(
                         onSuccess = { count ->
-                            smsComplete.set(1)
+                            progressTracker.smsComplete.set(1)
                             settingsDataStore.setHasCompletedInitialSmsImport(true)
                             Log.i(TAG, "Concurrent SMS import completed: $count threads")
                         },
@@ -219,88 +159,39 @@ class SyncService @Inject constructor(
 
             // Producer: Fetch chats page by page and queue them for message syncing
             val chatFetcher = async {
-                var offset = 0
-
-                if (onProgress == null) {
-                    updateProgress(5, "Fetching conversations...")
-                } else {
-                    onProgress(5, 0, 0, 0)
-                }
-
-                do {
-                    val result = chatRepository.syncChats(
-                        limit = CHAT_PAGE_SIZE,
-                        offset = offset
-                    )
-
-                    val chats = result.getOrThrow()
-                    totalChatsFound.addAndGet(chats.size)
-                    offset += CHAT_PAGE_SIZE
-
-                    // Queue each chat for message syncing
-                    chats.forEach { chat ->
-                        if (chat.guid !in alreadySynced) {
-                            chatQueue.send(ChatSyncTask(chat.guid, chat.displayName))
+                chatSyncHelper.fetchAndQueueChats(
+                    alreadySynced = alreadySynced,
+                    progressTracker = progressTracker,
+                    chatQueue = chatQueue,
+                    onProgress = { progress ->
+                        if (onProgress == null) {
+                            updateProgress(progress, "Fetching conversations...")
                         } else {
-                            // Already synced from previous run
-                            processedChats.incrementAndGet()
+                            onProgress(progress, 0, 0, 0)
                         }
                     }
-
-                    // Update progress - chat fetching is ~20% of total work
-                    val fetchProgressPercent = minOf(20, 5 + (15 * offset / maxOf(totalChatsFound.get(), 100)))
-                    if (onProgress == null) {
-                        updateProgress(fetchProgressPercent, "Fetching conversations...")
-                    } else {
-                        onProgress(fetchProgressPercent, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
-                    }
-                } while (result.getOrNull()?.size == CHAT_PAGE_SIZE)
-
-                chatQueue.close()
-                Log.i(TAG, "Chat fetching complete: ${totalChatsFound.get()} chats found")
+                )
             }
 
             // Consumer: Sync messages for chats as they arrive, with limited concurrency
             val messageSyncer = async {
-                val syncJobs = mutableListOf<kotlinx.coroutines.Deferred<Unit>>()
-
-                for (task in chatQueue) {
-                    val job = async {
-                        syncSemaphore.withPermit {
-                            try {
-                                val result = messageRepository.syncMessagesForChat(
-                                    chatGuid = task.guid,
-                                    limit = messagesPerChat,
-                                    syncSource = SyncSource.INITIAL
-                                )
-                                syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
-                                settingsDataStore.markChatSynced(task.guid)
-                            } catch (e: Exception) {
-                                Log.e(TAG, "Failed to sync messages for chat ${task.guid}", e)
-                                // Mark as synced to avoid retry loop
-                                settingsDataStore.markChatSynced(task.guid)
-                            }
-
-                            val processed = processedChats.incrementAndGet()
-                            val total = totalChatsFound.get()
-
-                            // Update progress - message syncing is ~80% of total work (20% to 90%)
-                            val messageProgressPercent = if (total > 0) {
-                                20 + (70 * processed / total)
-                            } else 20
-
-                            if (onProgress == null) {
-                                updateProgress(messageProgressPercent, "Syncing messages...", task.displayName)
-                            } else {
-                                onProgress(messageProgressPercent, processed, total, syncedMessages.get())
-                            }
+                messageSyncHelper.syncMessagesForQueuedChats(
+                    chatQueue = chatQueue,
+                    messagesPerChat = messagesPerChat,
+                    syncSource = SyncSource.INITIAL,
+                    progressTracker = progressTracker,
+                    onProgress = { progress, processed, total, synced ->
+                        if (onProgress == null) {
+                            updateProgress(
+                                progress,
+                                "Syncing messages...",
+                                null // Chat name is tracked internally
+                            )
+                        } else {
+                            onProgress(progress, processed, total, synced)
                         }
                     }
-                    syncJobs.add(job)
-                }
-
-                // Wait for all message sync jobs to complete
-                syncJobs.forEach { it.await() }
+                )
             }
 
             // Wait for iMessage sync (both producer and consumer) to complete
@@ -311,7 +202,7 @@ class SyncService @Inject constructor(
             smsJob?.await()
         }
 
-        Log.i(TAG, "Synced messages for ${processedChats.get()}/${totalChatsFound.get()} chats (${syncedMessages.get()} messages)")
+        Log.i(TAG, "Synced messages for ${progressTracker.processedChats.get()}/${progressTracker.totalChatsFound.get()} chats (${progressTracker.syncedMessages.get()} messages)")
 
         // Update last sync time
         val syncTime = System.currentTimeMillis()
@@ -322,18 +213,13 @@ class SyncService @Inject constructor(
         settingsDataStore.setInitialSyncComplete(true)
 
         // Run retroactive categorization after sync completes (only if enabled)
-        val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
-        if (categorizationEnabled) {
-            Log.i(TAG, "Starting retroactive categorization after sync...")
-            val categorized = categorizationRepository.categorizeAllChats()
-            Log.i(TAG, "Retroactive categorization complete: $categorized chats")
-        }
+        syncOperations.runCategorizationIfEnabled()
 
         // Only update internal state if no external progress handler
         if (onProgress == null) {
             _syncState.value = SyncState.Completed
         } else {
-            onProgress(100, processedChats.get(), totalChatsFound.get(), syncedMessages.get())
+            onProgress(100, progressTracker.processedChats.get(), progressTracker.totalChatsFound.get(), progressTracker.syncedMessages.get())
         }
         Log.i(TAG, "Initial sync completed")
         Unit
@@ -342,15 +228,7 @@ class SyncService @Inject constructor(
         // Only update internal state on error if no external handler
         // (caller should handle errors from Result)
         if (onProgress == null) {
-            val isCorrupted = e is SQLiteException ||
-                e.message?.contains("database", ignoreCase = true) == true &&
-                (e.message?.contains("corrupt", ignoreCase = true) == true ||
-                 e.message?.contains("malformed", ignoreCase = true) == true)
-            _syncState.value = SyncState.Error(
-                message = if (isCorrupted) "Database corruption detected" else (e.message ?: "Sync failed"),
-                isCorrupted = isCorrupted,
-                canRetry = !isCorrupted
-            )
+            _syncState.value = createErrorState(e)
         }
     }
 
@@ -378,57 +256,34 @@ class SyncService @Inject constructor(
         Log.i(TAG, "Resuming sync: ${remainingChats.size} chats remaining (${alreadySynced.size} already synced)")
 
         val totalChats = allChats.size
-        val processedChats = AtomicInteger(alreadySynced.size)
-        val syncedMessages = AtomicInteger(0)
+        val progressTracker = SyncProgressTracker().apply {
+            processedChats.set(alreadySynced.size)
+        }
 
         _syncState.value = SyncState.Syncing(
-            progress = 0.2f + (0.7f * (processedChats.get().toFloat() / totalChats)),
+            progress = 0.2f + (0.7f * (progressTracker.processedChats.get().toFloat() / totalChats)),
             stage = "Resuming sync...",
             totalChats = totalChats,
-            processedChats = processedChats.get(),
+            processedChats = progressTracker.processedChats.get(),
             syncedMessages = 0,
             isInitialSync = true
         )
 
-        // Semaphore to limit concurrent message sync operations
-        val syncSemaphore = Semaphore(MESSAGE_SYNC_CONCURRENCY)
-
-        coroutineScope {
-            val syncJobs = remainingChats.map { chat ->
-                async {
-                    syncSemaphore.withPermit {
-                        try {
-                            val result = messageRepository.syncMessagesForChat(
-                                chatGuid = chat.guid,
-                                limit = messagesPerChat,
-                                syncSource = SyncSource.INITIAL
-                            )
-                            syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
-                            settingsDataStore.markChatSynced(chat.guid)
-                        } catch (e: Exception) {
-                            Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
-                            settingsDataStore.markChatSynced(chat.guid)
-                        }
-
-                        val processed = processedChats.incrementAndGet()
-                        _syncState.value = SyncState.Syncing(
-                            progress = 0.2f + (0.7f * (processed.toFloat() / totalChats)),
-                            stage = "Syncing messages...",
-                            totalChats = totalChats,
-                            processedChats = processed,
-                            syncedMessages = syncedMessages.get(),
-                            currentChatName = chat.displayName,
-                            isInitialSync = true
-                        )
-                    }
-                }
-            }
-
-            // Wait for all sync jobs to complete
-            syncJobs.forEach { it.await() }
+        // Convert to ChatInfo list
+        val chatInfoList = remainingChats.map { chat ->
+            MessageSyncHelper.ChatInfo(chat.guid, chat.displayName)
         }
 
-        Log.i(TAG, "Resume sync completed: ${syncedMessages.get()} messages synced")
+        messageSyncHelper.syncMessagesForChats(
+            chats = chatInfoList,
+            messagesPerChat = messagesPerChat,
+            syncSource = SyncSource.INITIAL,
+            progressTracker = progressTracker,
+            totalChats = totalChats,
+            onProgressUpdate = { state -> _syncState.value = state }
+        )
+
+        Log.i(TAG, "Resume sync completed: ${progressTracker.syncedMessages.get()} messages synced")
 
         val syncTime = System.currentTimeMillis()
         settingsDataStore.setLastSyncTime(syncTime)
@@ -437,25 +292,12 @@ class SyncService @Inject constructor(
         settingsDataStore.setInitialSyncComplete(true)
 
         // Run retroactive categorization after resume sync completes (only if enabled)
-        val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
-        if (categorizationEnabled) {
-            Log.i(TAG, "Starting retroactive categorization after resume sync...")
-            val categorized = categorizationRepository.categorizeAllChats()
-            Log.i(TAG, "Retroactive categorization complete: $categorized chats")
-        }
+        syncOperations.runCategorizationIfEnabled()
 
         _syncState.value = SyncState.Completed
     }.onFailure { e ->
         Log.e(TAG, "Resume sync failed", e)
-        val isCorrupted = e is SQLiteException ||
-            e.message?.contains("database", ignoreCase = true) == true &&
-            (e.message?.contains("corrupt", ignoreCase = true) == true ||
-             e.message?.contains("malformed", ignoreCase = true) == true)
-        _syncState.value = SyncState.Error(
-            message = if (isCorrupted) "Database corruption detected" else (e.message ?: "Sync failed"),
-            isCorrupted = isCorrupted,
-            canRetry = !isCorrupted
-        )
+        _syncState.value = createErrorState(e)
     }
 
     /**
@@ -498,41 +340,16 @@ class SyncService @Inject constructor(
      * Downloads only new messages since last sync using a single API call.
      * Runs silently in the background without updating UI progress state.
      */
-    suspend fun performIncrementalSync(): Result<Unit> = runCatching {
+    suspend fun performIncrementalSync(): Result<Unit> {
         val lastSync = settingsDataStore.lastSyncTime.first()
         if (lastSync == 0L) {
             // No previous sync, perform initial
-            performInitialSync().getOrThrow()
-            return@runCatching
+            return performInitialSync()
         }
 
-        Log.i(TAG, "Starting incremental sync from $lastSync")
-
-        // Sync chats first to get any new conversations
-        chatRepository.syncChats(
-            limit = CHAT_PAGE_SIZE,
-            offset = 0
-        )
-
-        // Fetch all new messages globally in a single API call
-        val newMessageCount = messageRepository.syncMessagesGlobally(
-            after = lastSync,
-            limit = 1000
-        ).getOrElse { e ->
-            Log.e(TAG, "Global message sync failed", e)
-            0
+        return syncOperations.performIncrementalSync { time ->
+            _lastSyncTime.value = time
         }
-
-        // Update last sync time
-        val syncTime = System.currentTimeMillis()
-        settingsDataStore.setLastSyncTime(syncTime)
-        _lastSyncTime.value = syncTime
-
-        Log.i(TAG, "Incremental sync completed: $newMessageCount new messages")
-        Unit
-    }.onFailure { e ->
-        Log.e(TAG, "Incremental sync failed", e)
-        // Don't update syncState for background incremental sync failures
     }
 
     /**
@@ -624,24 +441,21 @@ class SyncService @Inject constructor(
             isInitialSync = true
         )
 
-        // Track progress from both sources (0-100 each)
-        val iMessageProgress = AtomicInteger(0)
-        val smsProgress = AtomicInteger(0)
-        val smsCurrentThread = AtomicInteger(0)
-        val smsTotalThreads = AtomicInteger(0)
+        // Initialize progress tracker
+        val progressTracker = SyncProgressTracker()
 
         // Helper to update progress display - tracks iMessage and SMS separately
         fun updateProgress() {
-            val imPct = iMessageProgress.get()
-            val smsPct = smsProgress.get()
+            val imPct = progressTracker.iMessageProgress.get()
+            val smsPct = progressTracker.smsProgress.get()
             val imComplete = imPct >= 100
             val smsIsDone = smsPct >= 100
-            val smsTotal = smsTotalThreads.get()
-            val smsCurrent = smsCurrentThread.get()
+            val smsTotal = progressTracker.smsTotalThreads.get()
+            val smsCurrent = progressTracker.smsCurrentThread.get()
             val smsProgressFloat = if (smsTotal > 0) smsCurrent.toFloat() / smsTotal else 0f
 
             // Combined progress: 10% base + 85% for actual work (split between iMessage and SMS)
-            val combinedProgress = 0.1f + (0.85f * (imPct + smsPct) / 200f)
+            val combinedProgress = progressTracker.calculateUnifiedResyncProgress()
             _syncState.value = SyncState.Syncing(
                 progress = combinedProgress,
                 stage = "Importing messages...",
@@ -662,11 +476,11 @@ class SyncService @Inject constructor(
                 Log.i(TAG, "Starting concurrent iMessage sync")
                 performInitialSync(
                     onProgress = { progress, _, _, _ ->
-                        iMessageProgress.set(progress)
+                        progressTracker.iMessageProgress.set(progress)
                         updateProgress()
                     }
                 ).getOrThrow()
-                iMessageProgress.set(100)
+                progressTracker.iMessageProgress.set(100)
                 updateProgress()
                 Log.i(TAG, "Concurrent iMessage sync completed")
             }
@@ -676,13 +490,13 @@ class SyncService @Inject constructor(
                 Log.i(TAG, "Starting concurrent SMS import")
                 smsRepository.importAllThreads(
                     onProgress = { current, total ->
-                        smsCurrentThread.set(current)
-                        smsTotalThreads.set(total)
-                        smsProgress.set((current * 100) / maxOf(total, 1))
+                        progressTracker.smsCurrentThread.set(current)
+                        progressTracker.smsTotalThreads.set(total)
+                        progressTracker.smsProgress.set((current * 100) / maxOf(total, 1))
                         updateProgress()
                     }
                 )
-                smsProgress.set(100)
+                progressTracker.smsProgress.set(100)
                 updateProgress()
                 Log.i(TAG, "Concurrent SMS import completed")
             }
@@ -766,5 +580,20 @@ class SyncService @Inject constructor(
      */
     fun resetState() {
         _syncState.value = SyncState.Idle
+    }
+
+    /**
+     * Helper to create error state from exception.
+     */
+    private fun createErrorState(e: Throwable): SyncState.Error {
+        val isCorrupted = e is SQLiteException ||
+            e.message?.contains("database", ignoreCase = true) == true &&
+            (e.message?.contains("corrupt", ignoreCase = true) == true ||
+             e.message?.contains("malformed", ignoreCase = true) == true)
+        return SyncState.Error(
+            message = if (isCorrupted) "Database corruption detected" else (e.message ?: "Sync failed"),
+            isCorrupted = isCorrupted,
+            canRetry = !isCorrupted
+        )
     }
 }
