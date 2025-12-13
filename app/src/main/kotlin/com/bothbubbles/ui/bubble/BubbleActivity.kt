@@ -6,7 +6,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -25,7 +25,7 @@ import dagger.hilt.android.AndroidEntryPoint
 class BubbleActivity : ComponentActivity() {
 
     companion object {
-        const val EXTRA_CHAT_GUID = NotificationService.EXTRA_CHAT_GUID
+        const val EXTRA_CHAT_GUID = NotificationChannelManager.EXTRA_CHAT_GUID
         const val EXTRA_CHAT_TITLE = "chat_title"
 
         /**

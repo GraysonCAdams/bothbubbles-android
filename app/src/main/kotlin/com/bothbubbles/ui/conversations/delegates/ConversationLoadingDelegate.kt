@@ -34,6 +34,8 @@ class ConversationLoadingDelegate @Inject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
+    private val attachmentRepository: AttachmentRepository,
+    private val linkPreviewRepository: LinkPreviewRepository,
     private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
     private val unifiedGroupMappingDelegate: UnifiedGroupMappingDelegate
 ) {
@@ -345,8 +347,8 @@ class ConversationLoadingDelegate @Inject constructor(
             typingChats = typingChats,
             messageRepository = messageRepository,
             chatRepository = chatRepository,
-            attachmentRepository = null, // Not needed for this delegate
-            linkPreviewRepository = null, // Not needed for this delegate
+            attachmentRepository = attachmentRepository,
+            linkPreviewRepository = linkPreviewRepository,
             application = application
         )
     }

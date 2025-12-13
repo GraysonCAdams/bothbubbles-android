@@ -11,7 +11,7 @@ import androidx.core.app.NotificationCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.di.ApplicationScope
@@ -161,7 +161,7 @@ class SocketForegroundService : Service() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        return NotificationCompat.Builder(this, NotificationService.CHANNEL_SERVICE)
+        return NotificationCompat.Builder(this, NotificationChannelManager.CHANNEL_SERVICE)
             .setContentTitle(getString(R.string.app_name))
             .setContentText(statusText)
             .setSmallIcon(android.R.drawable.sym_action_chat)

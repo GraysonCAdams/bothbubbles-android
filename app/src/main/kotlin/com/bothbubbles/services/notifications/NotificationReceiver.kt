@@ -63,11 +63,11 @@ class NotificationReceiver : BroadcastReceiver() {
         entryPoint.applicationScope().launch(Dispatchers.IO) {
             try {
                 when (intent.action) {
-                    NotificationService.ACTION_REPLY -> handleReply(intent)
-                    NotificationService.ACTION_MARK_READ -> handleMarkRead(intent)
-                    NotificationService.ACTION_COPY_CODE -> handleCopyCode(context, intent)
-                    NotificationService.ACTION_ANSWER_FACETIME -> handleAnswerFaceTime(context, intent)
-                    NotificationService.ACTION_DECLINE_FACETIME -> handleDeclineFaceTime(intent)
+                    NotificationChannelManager.ACTION_REPLY -> handleReply(intent)
+                    NotificationChannelManager.ACTION_MARK_READ -> handleMarkRead(intent)
+                    NotificationChannelManager.ACTION_COPY_CODE -> handleCopyCode(context, intent)
+                    NotificationChannelManager.ACTION_ANSWER_FACETIME -> handleAnswerFaceTime(context, intent)
+                    NotificationChannelManager.ACTION_DECLINE_FACETIME -> handleDeclineFaceTime(intent)
                 }
             } finally {
                 pendingResult.finish()
@@ -76,9 +76,9 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleReply(intent: Intent) {
-        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
+        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return
         val replyText = RemoteInput.getResultsFromIntent(intent)
-            ?.getCharSequence(NotificationService.EXTRA_REPLY_TEXT)
+            ?.getCharSequence(NotificationChannelManager.EXTRA_REPLY_TEXT)
             ?.toString() ?: return
 
         try {
@@ -95,7 +95,7 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleMarkRead(intent: Intent) {
-        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
+        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return
 
         try {
             chatRepository.markChatAsRead(chatGuid)
@@ -106,8 +106,8 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleCopyCode(context: Context, intent: Intent) {
-        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return
-        val code = intent.getStringExtra(NotificationService.EXTRA_CODE_TO_COPY) ?: return
+        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return
+        val code = intent.getStringExtra(NotificationChannelManager.EXTRA_CODE_TO_COPY) ?: return
 
         // Copy code to clipboard
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
@@ -120,7 +120,7 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleAnswerFaceTime(context: Context, intent: Intent) {
-        val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
+        val callUuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CALL_UUID) ?: return
 
         faceTimeRepository.answerCall(callUuid).fold(
             onSuccess = { link ->
@@ -144,7 +144,7 @@ class NotificationReceiver : BroadcastReceiver() {
     }
 
     private suspend fun handleDeclineFaceTime(intent: Intent) {
-        val callUuid = intent.getStringExtra(NotificationService.EXTRA_CALL_UUID) ?: return
+        val callUuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CALL_UUID) ?: return
 
         faceTimeRepository.declineCall(callUuid)
         notificationService.dismissFaceTimeCallNotification(callUuid)

@@ -14,7 +14,7 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
-import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -207,7 +207,7 @@ class ShortcutService @Inject constructor(
         // Create intent for direct share - includes chatGuid to skip picker
         val intent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_SEND
-            putExtra(NotificationService.EXTRA_CHAT_GUID, conversation.chatGuid)
+            putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, conversation.chatGuid)
             // Type is required for share intents
             type = "text/plain"
         }

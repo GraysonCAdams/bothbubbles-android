@@ -695,264 +695,44 @@ fun ChatScreen(
                 }
 
                 // Unified input area with animated content transitions
-                ChatInputArea(
-                    mode = inputMode,
-                    // Normal mode props
-                    text = draftText,
-                    onTextChange = viewModel::updateDraft,
-                    onSendClick = {
-                        viewModel.sendMessage()
-                        showAttachmentPicker = false
-                        // Scroll to bottom after sending - use instant scroll to avoid jank
-                        scrollScope.launch {
-                            listState.scrollToItem(0)
-                        }
-                    },
-                    onSendLongPress = {
-                        if (!uiState.isLocalSmsChat) {
-                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                            showEffectPicker = true
-                        }
-                    },
-                    onAttachClick = {
-                        showAttachmentPicker = !showAttachmentPicker
-                    },
-                    onEmojiClick = {
-                        showEmojiPicker = !showEmojiPicker
-                    },
-                    onImageClick = {
-                        imagePickerLauncher.launch("image/*")
-                    },
-                    onVoiceMemoClick = {
-                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    },
-                    onVoiceMemoPressStart = {
-                        if (context.checkSelfPermission(Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
-                            startVoiceMemoRecording(
-                                context = context,
-                                enableNoiseCancellation = isNoiseCancellationEnabled,
-                                onRecorderCreated = { recorder, file ->
-                                    mediaRecorder = recorder
-                                    recordingFile = file
-                                    isRecording = true
-                                    mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                                },
-                                onError = { error ->
-                                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                                }
-                            )
-                        }
-                    },
-                    onVoiceMemoPressEnd = {
-                        if (isRecording) {
-                            try {
-                                mediaRecorder?.stop()
-                                mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                            } catch (_: Exception) { }
-                            mediaRecorder?.release()
-                            mediaRecorder = null
-                            isRecording = false
-                            recordingFile?.let { file ->
-                                if (file.exists() && file.length() > 0) {
-                                    isPreviewingVoiceMemo = true
-                                    playbackDuration = recordingDuration
-                                } else {
-                                    file.delete()
-                                    recordingFile = null
+                val composerState by viewModel.composerState.collectAsStateWithLifecycle()
+
+                ChatComposer(
+                    state = composerState,
+                    onEvent = { event ->
+                        when (event) {
+                            is ComposerEvent.OpenCamera -> {
+                                // TODO: Launch camera
+                            }
+                            is ComposerEvent.SendLongPress -> {
+                                if (!uiState.isLocalSmsChat) {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    showEffectPicker = true
                                 }
                             }
-                        }
-                    },
-                    isSending = uiState.isSending,
-                    isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
-                    currentSendMode = uiState.currentSendMode,
-                    smsInputBlocked = uiState.smsInputBlocked,
-                    onSmsInputBlockedClick = { showSmsBlockedDialog = true },
-                    hasAttachments = pendingAttachments.isNotEmpty(),
-                    attachments = pendingAttachments,
-                    onRemoveAttachment = { uri ->
-                        viewModel.removeAttachment(uri)
-                    },
-                    onClearAllAttachments = {
-                        viewModel.clearAttachments()
-                    },
-                    onReorderAttachments = { reorderedList ->
-                        viewModel.reorderAttachments(reorderedList)
-                    },
-                    isPickerExpanded = showAttachmentPicker,
-                    // Attachment warning props
-                    attachmentWarning = uiState.attachmentWarning,
-                    onDismissWarning = { viewModel.dismissAttachmentWarning() },
-                    onRemoveWarningAttachment = {
-                        uiState.attachmentWarning?.affectedUri?.let { uri ->
-                            viewModel.removeAttachment(uri)
-                        }
-                    },
-                    // Recording mode props
-                    recordingDuration = recordingDuration,
-                    amplitudeHistory = amplitudeHistory,
-                    onRecordingCancel = {
-                        try {
-                            mediaRecorder?.stop()
-                            mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                        } catch (_: Exception) { }
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        isRecording = false
-                        recordingFile?.let { file ->
-                            if (file.exists() && file.length() > 0) {
-                                isPreviewingVoiceMemo = true
-                                playbackDuration = recordingDuration
-                            } else {
-                                file.delete()
-                                recordingFile = null
+                            is ComposerEvent.OpenQualitySheet -> {
+                                showQualitySheet = true
                             }
-                        }
-                    },
-                    onRecordingSend = {
-                        mediaRecorder?.stop()
-                        mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        isRecording = false
-                        recordingFile?.let { file ->
-                            val uri = Uri.fromFile(file)
-                            viewModel.addAttachment(uri)
-                            viewModel.sendMessage()
-                            scrollScope.launch { listState.scrollToItem(0) }
-                        }
-                        recordingFile = null
-                    },
-                    isNoiseCancellationEnabled = isNoiseCancellationEnabled,
-                    onNoiseCancellationToggle = {
-                        isNoiseCancellationEnabled = !isNoiseCancellationEnabled
-                    },
-                    onRecordingStop = {
-                        // Stop recording and go to preview mode
-                        try {
-                            mediaRecorder?.stop()
-                            mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                        } catch (_: Exception) { }
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        isRecording = false
-                        recordingFile?.let { file ->
-                            if (file.exists() && file.length() > 0) {
-                                isPreviewingVoiceMemo = true
-                                playbackDuration = recordingDuration
-                            } else {
-                                file.delete()
-                                recordingFile = null
+                            is ComposerEvent.EditAttachment -> {
+                                onEditAttachmentClick(event.attachment.uri)
                             }
+                            else -> viewModel.onComposerEvent(event)
                         }
                     },
-                    onRecordingRestart = {
-                        // Cancel current recording and start fresh
-                        try {
-                            mediaRecorder?.stop()
-                        } catch (_: Exception) { }
-                        mediaRecorder?.release()
-                        mediaRecorder = null
-                        recordingFile?.delete()
-                        recordingFile = null
-                        recordingDuration = 0L
-                        // Start new recording immediately
-                        startVoiceMemoRecording(
-                            context = context,
-                            enableNoiseCancellation = isNoiseCancellationEnabled,
-                            onRecorderCreated = { recorder, file ->
-                                mediaRecorder = recorder
-                                recordingFile = file
-                                isRecording = true
-                                mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                            },
-                            onError = { error ->
-                                isRecording = false
-                                Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                            }
-                        )
+                    onMediaSelected = { uris ->
+                        viewModel.addAttachments(uris)
                     },
-                    // Preview mode props
-                    previewDuration = playbackDuration,
-                    playbackPosition = playbackPosition,
-                    isPlaying = isPlayingVoiceMemo,
-                    onPlayPause = {
-                        if (isPlayingVoiceMemo) {
-                            mediaPlayer?.pause()
-                            isPlayingVoiceMemo = false
-                        } else {
-                            if (mediaPlayer == null) {
-                                recordingFile?.let { file ->
-                                    mediaPlayer = MediaPlayer().apply {
-                                        setDataSource(file.absolutePath)
-                                        prepare()
-                                        start()
-                                    }
-                                    playbackDuration = mediaPlayer?.duration?.toLong() ?: recordingDuration
-                                }
-                            } else {
-                                mediaPlayer?.start()
-                            }
-                            isPlayingVoiceMemo = true
-                        }
+                    onCameraClick = {
+                        // TODO: Launch camera
                     },
-                    onReRecord = {
-                        mediaPlayer?.release()
-                        mediaPlayer = null
-                        isPlayingVoiceMemo = false
-                        playbackPosition = 0L
-                        recordingFile?.delete()
-                        recordingFile = null
-                        isPreviewingVoiceMemo = false
-                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    onFileClick = {
+                        // TODO: Launch file picker
                     },
-                    onPreviewSend = {
-                        mediaPlayer?.release()
-                        mediaPlayer = null
-                        isPlayingVoiceMemo = false
-                        playbackPosition = 0L
-                        isPreviewingVoiceMemo = false
-                        recordingFile?.let { file ->
-                            val uri = Uri.fromFile(file)
-                            viewModel.addAttachment(uri)
-                            viewModel.sendMessage()
-                            scrollScope.launch { listState.scrollToItem(0) }
-                        }
-                        recordingFile = null
+                    onLocationClick = {
+                        // TODO: Launch location picker
                     },
-                    onPreviewCancel = {
-                        mediaPlayer?.release()
-                        mediaPlayer = null
-                        isPlayingVoiceMemo = false
-                        playbackPosition = 0L
-                        isPreviewingVoiceMemo = false
-                        recordingFile?.delete()
-                        recordingFile = null
-                    },
-                    // Send mode toggle props
-                    canToggleSendMode = uiState.canToggleSendMode,
-                    showSendModeRevealAnimation = uiState.showSendModeRevealAnimation,
-                    tutorialState = uiState.tutorialState,
-                    onModeToggle = { newMode ->
-                        val success = viewModel.setSendMode(newMode, persist = true)
-                        if (success) {
-                            // Progress tutorial if active
-                            viewModel.onTutorialToggleSuccess()
-                        }
-                        success
-                    },
-                    // Quality selection props
-                    hasCompressibleImages = uiState.pendingMessages.any { it.hasAttachments } || pendingAttachments.isNotEmpty(),
-                    currentImageQuality = uiState.attachmentQuality,
-                    onQualityClick = { showQualitySheet = true },
-                    onEditAttachment = { uri ->
-                        onEditAttachmentClick(uri)
-                    },
-                    onRevealAnimationComplete = {
-                        viewModel.markRevealAnimationShown()
-                    },
-                    onSendButtonBoundsChanged = { bounds ->
-                        sendButtonBounds = bounds
+                    onContactClick = {
+                        // TODO: Launch contact picker
                     }
                 )
             }

@@ -604,4 +604,34 @@ class AttachmentRepository @Inject constructor(
             else -> ""
         }
     }
+
+    /**
+     * Get MIME type for a URI
+     */
+    suspend fun getMimeType(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.getType(uri)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Get display name for a URI
+     */
+    suspend fun getFileName(uri: Uri): String? = withContext(Dispatchers.IO) {
+        try {
+            context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    if (nameIndex >= 0) {
+                        return@withContext cursor.getString(nameIndex)
+                    }
+                }
+            }
+            null
+        } catch (e: Exception) {
+            null
+        }
+    }
 }

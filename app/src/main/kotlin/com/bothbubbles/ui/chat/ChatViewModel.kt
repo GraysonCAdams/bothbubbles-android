@@ -27,6 +27,15 @@ import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.ui.chat.composer.ComposerState
+import com.bothbubbles.ui.chat.composer.ComposerEvent
+import com.bothbubbles.ui.chat.composer.AttachmentItem
+import com.bothbubbles.ui.chat.composer.ComposerInputMode
+import com.bothbubbles.ui.chat.composer.ComposerPanel
+import com.bothbubbles.ui.chat.composer.ComposerTutorialState
+import com.bothbubbles.ui.chat.composer.RecordingState
+import com.bothbubbles.ui.chat.composer.MessagePreview
+import com.bothbubbles.ui.chat.composer.ComposerAttachmentWarning
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.ScheduledMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
@@ -167,6 +176,81 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    private val _activePanel = MutableStateFlow(ComposerPanel.None)
+
+    // Composer State
+    val composerState: StateFlow<ComposerState> = combine(
+        _uiState,
+        _draftText,
+        _pendingAttachments,
+        _attachmentQuality,
+        _activePanel
+    ) { ui, text, attachments, quality, panel ->
+        ComposerState(
+            text = text,
+            attachments = attachments.map { 
+                AttachmentItem(
+                    id = it.uri.toString(),
+                    uri = it.uri,
+                    mimeType = it.mimeType,
+                    displayName = it.name,
+                    sizeBytes = it.size,
+                    quality = quality,
+                    caption = it.caption
+                )
+            },
+            attachmentWarning = ui.attachmentWarning?.let { warning ->
+                ComposerAttachmentWarning(
+                    message = warning.message,
+                    isError = warning.isError,
+                    suggestCompression = warning.suggestCompression,
+                    affectedUri = warning.affectedUri
+                )
+            },
+            replyToMessage = ui.replyToMessage?.let { MessagePreview.fromMessageUiModel(it) },
+            sendMode = ui.currentSendMode,
+            isSending = ui.isSending,
+            smsInputBlocked = ui.smsInputBlocked,
+            isLocalSmsChat = ui.isLocalSmsChat || ui.isInSmsFallbackMode,
+            currentImageQuality = quality,
+            activePanel = panel
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ComposerState())
+
+    fun onComposerEvent(event: ComposerEvent) {
+        when (event) {
+            is ComposerEvent.TextChanged -> {
+                _draftText.value = event.text
+                sendDelegate.onTypingStarted()
+            }
+            is ComposerEvent.AddAttachments -> {
+                addAttachments(event.uris)
+            }
+            is ComposerEvent.RemoveAttachment -> {
+                removeAttachment(event.attachment.uri)
+            }
+            is ComposerEvent.ClearAllAttachments -> {
+                clearAttachments()
+            }
+            is ComposerEvent.Send -> {
+                sendMessage()
+            }
+            is ComposerEvent.ToggleSendMode -> {
+                _uiState.update { it.copy(currentSendMode = event.newMode) }
+            }
+            is ComposerEvent.DismissReply -> {
+                clearReply()
+            }
+            is ComposerEvent.ToggleMediaPicker -> {
+                _activePanel.update { if (it == ComposerPanel.MediaPicker) ComposerPanel.None else ComposerPanel.MediaPicker }
+            }
+            else -> {
+                // Handle other events or ignore
+            }
+        }
+    }
+
 
     // Error state for UI display (consolidated into uiState.appError, this is for backward compatibility)
     private val _appError = MutableStateFlow<AppError?>(null)
@@ -2056,6 +2140,10 @@ class ChatViewModel @Inject constructor(
     }
 
     fun addAttachment(uri: Uri) {
+        addAttachments(listOf(uri))
+    }
+
+    fun addAttachments(uris: List<Uri>) {
         viewModelScope.launch {
             val currentAttachments = _pendingAttachments.value
             val currentSendMode = _uiState.value.currentSendMode
@@ -2069,54 +2157,82 @@ class ChatViewModel @Inject constructor(
                 else -> MessageDeliveryMode.AUTO
             }
 
-            // Get file size for new attachment
-            val newFileSize = try {
-                attachmentRepository.getAttachmentSize(uri) ?: 0L
-            } catch (e: Exception) {
-                Log.w(TAG, "Could not determine attachment size", e)
-                0L
-            }
-
             // Calculate existing total size
             val existingTotalSize = currentAttachments.sumOf { existingUri ->
-                try {
-                    attachmentRepository.getAttachmentSize(existingUri) ?: 0L
+                existingUri.size ?: 0L
+            }
+
+            val newAttachments = mutableListOf<PendingAttachmentInput>()
+            var currentTotalSize = existingTotalSize
+            var currentCount = currentAttachments.size
+            var lastWarning: AttachmentWarning? = null
+
+            for (uri in uris) {
+                // Get file size for new attachment
+                val newFileSize = try {
+                    attachmentRepository.getAttachmentSize(uri) ?: 0L
                 } catch (e: Exception) {
+                    Log.w(TAG, "Could not determine attachment size", e)
                     0L
                 }
+                
+                // Get mime type and name
+                val mimeType = try {
+                    attachmentRepository.getMimeType(uri)
+                } catch (e: Exception) {
+                    null
+                }
+                
+                val name = try {
+                    attachmentRepository.getFileName(uri)
+                } catch (e: Exception) {
+                    null
+                }
+
+                // Validate
+                val validation = attachmentLimitsProvider.validateAttachment(
+                    sizeBytes = newFileSize,
+                    deliveryMode = deliveryMode,
+                    existingTotalSize = currentTotalSize,
+                    existingCount = currentCount
+                )
+
+                val warning = when {
+                    !validation.isValid -> AttachmentWarning(
+                        message = validation.message ?: "Attachment too large",
+                        isError = true,
+                        suggestCompression = validation.suggestCompression,
+                        affectedUri = uri
+                    )
+                    validation.warning != null -> AttachmentWarning(
+                        message = validation.warning,
+                        isError = false,
+                        suggestCompression = false,
+                        affectedUri = uri
+                    )
+                    else -> null
+                }
+
+                if (warning != null && warning.isError) {
+                    lastWarning = warning
+                    continue // Skip adding this one if it's an error
+                } else if (warning != null) {
+                    lastWarning = warning
+                }
+
+                newAttachments.add(PendingAttachmentInput(uri, mimeType = mimeType, name = name, size = newFileSize))
+                currentTotalSize += newFileSize
+                currentCount++
             }
 
-            // Validate
-            val validation = attachmentLimitsProvider.validateAttachment(
-                sizeBytes = newFileSize,
-                deliveryMode = deliveryMode,
-                existingTotalSize = existingTotalSize,
-                existingCount = currentAttachments.size
-            )
-
-            // Update UI based on validation result
-            _pendingAttachments.update { it + PendingAttachmentInput(uri) }
-
-            val warning = when {
-                !validation.isValid -> AttachmentWarning(
-                    message = validation.message ?: "Attachment too large",
-                    isError = true,
-                    suggestCompression = validation.suggestCompression,
-                    affectedUri = uri
-                )
-                validation.warning != null -> AttachmentWarning(
-                    message = validation.warning,
-                    isError = false,
-                    suggestCompression = false,
-                    affectedUri = uri
-                )
-                else -> null
+            if (newAttachments.isNotEmpty()) {
+                _pendingAttachments.update { it + newAttachments }
             }
-
+            
             _uiState.update {
                 it.copy(
                     attachmentCount = _pendingAttachments.value.size,
-                    attachmentWarning = warning
+                    attachmentWarning = lastWarning
                 )
             }
         }

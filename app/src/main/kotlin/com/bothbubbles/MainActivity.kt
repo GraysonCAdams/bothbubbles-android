@@ -29,6 +29,7 @@ import com.bothbubbles.ui.navigation.NotificationDeepLinkData
 import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.ui.navigation.ShareIntentData
 import com.bothbubbles.ui.navigation.StateRestorationData
+import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
@@ -154,7 +155,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 // Check if this is a direct share from a sharing shortcut
-                val directShareChatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID)
+                val directShareChatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
 
                 when {
                     mimeType.startsWith("text/") -> {
@@ -187,7 +188,7 @@ class MainActivity : ComponentActivity() {
             }
             Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = getParcelableArrayListExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
-                val directShareChatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID)
+                val directShareChatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
                 if (!uris.isNullOrEmpty() || directShareChatGuid != null) {
                     ShareIntentData(
                         sharedUris = uris ?: emptyList(),
@@ -230,8 +231,8 @@ class MainActivity : ComponentActivity() {
     private fun parseNotificationDeepLink(intent: Intent?): NotificationDeepLinkData? {
         if (intent == null) return null
 
-        val chatGuid = intent.getStringExtra(NotificationService.EXTRA_CHAT_GUID) ?: return null
-        val messageGuid = intent.getStringExtra(NotificationService.EXTRA_MESSAGE_GUID)
+        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return null
+        val messageGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_MESSAGE_GUID)
 
         return NotificationDeepLinkData(
             chatGuid = chatGuid,
