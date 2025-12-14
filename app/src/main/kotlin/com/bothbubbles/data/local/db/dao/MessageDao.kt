@@ -337,6 +337,36 @@ interface MessageDao {
     fun getMessagesWithUrlsForChat(chatGuid: String): Flow<List<MessageEntity>>
 
     /**
+     * Get messages that contain URLs for a specific chat with pagination.
+     * Uses pattern matching for http/https links and www prefixes.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid
+        AND date_deleted IS NULL
+        AND (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%www.%')
+        ORDER BY date_created DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getMessagesWithUrlsForChatPaged(
+        chatGuid: String,
+        limit: Int,
+        offset: Int
+    ): List<MessageEntity>
+
+    /**
+     * Count messages that contain URLs for a specific chat.
+     * Used for pagination to know total available.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid = :chatGuid
+        AND date_deleted IS NULL
+        AND (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%www.%')
+    """)
+    suspend fun countMessagesWithUrlsForChat(chatGuid: String): Int
+
+    /**
      * Find a matching message by content and timestamp within a tolerance window.
      * Used to detect duplicate SMS/MMS messages that may have different GUIDs.
      */

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.stringSetPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
@@ -29,11 +30,18 @@ class NotificationPreferences @Inject constructor(
      * Bubble filter mode for chat bubbles.
      * - "all": Show bubbles for all conversations
      * - "favorites": Only show bubbles for starred contacts (Android favorites)
-     * - "selected": Only show bubbles for conversations with bubbleEnabled=true
+     * - "selected": Only show bubbles for conversations in selectedBubbleChats
      * - "none": Disable bubbles entirely
      */
     val bubbleFilterMode: Flow<String> = dataStore.data.map { prefs ->
         prefs[Keys.BUBBLE_FILTER_MODE] ?: "all"
+    }
+
+    /**
+     * Set of chat GUIDs that should show bubbles when bubbleFilterMode is "selected".
+     */
+    val selectedBubbleChats: Flow<Set<String>> = dataStore.data.map { prefs ->
+        prefs[Keys.SELECTED_BUBBLE_CHATS] ?: emptySet()
     }
 
     // ===== FCM Push Notifications =====
@@ -103,6 +111,26 @@ class NotificationPreferences @Inject constructor(
         }
     }
 
+    suspend fun setSelectedBubbleChats(chatGuids: Set<String>) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SELECTED_BUBBLE_CHATS] = chatGuids
+        }
+    }
+
+    suspend fun addSelectedBubbleChat(chatGuid: String) {
+        dataStore.edit { prefs ->
+            val current = prefs[Keys.SELECTED_BUBBLE_CHATS] ?: emptySet()
+            prefs[Keys.SELECTED_BUBBLE_CHATS] = current + chatGuid
+        }
+    }
+
+    suspend fun removeSelectedBubbleChat(chatGuid: String) {
+        dataStore.edit { prefs ->
+            val current = prefs[Keys.SELECTED_BUBBLE_CHATS] ?: emptySet()
+            prefs[Keys.SELECTED_BUBBLE_CHATS] = current - chatGuid
+        }
+    }
+
     suspend fun setNotificationProvider(provider: String) {
         dataStore.edit { prefs ->
             prefs[Keys.NOTIFICATION_PROVIDER] = provider
@@ -159,6 +187,7 @@ class NotificationPreferences @Inject constructor(
         val NOTIFICATIONS_ENABLED = booleanPreferencesKey("notifications_enabled")
         val NOTIFY_ON_CHAT_LIST = booleanPreferencesKey("notify_on_chat_list")
         val BUBBLE_FILTER_MODE = stringPreferencesKey("bubble_filter_mode")
+        val SELECTED_BUBBLE_CHATS = stringSetPreferencesKey("selected_bubble_chats")
 
         // FCM Push Notifications
         val NOTIFICATION_PROVIDER = stringPreferencesKey("notification_provider")

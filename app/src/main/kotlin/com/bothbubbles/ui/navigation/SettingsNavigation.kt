@@ -105,6 +105,19 @@ fun NavGraphBuilder.settingsNavigation(
         com.bothbubbles.ui.settings.notifications.NotificationSettingsScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
+            },
+            onBubbleChatSelectorClick = {
+                navController.navigate(Screen.BubbleChatSelector(returnToSettings = route.returnToSettings))
+            }
+        )
+    }
+
+    // Bubble Chat Selector
+    composable<Screen.BubbleChatSelector> { backStackEntry ->
+        val route: Screen.BubbleChatSelector = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.notifications.BubbleChatSelectorScreen(
+            onNavigateBack = {
+                navController.popBackStack()
             }
         )
     }

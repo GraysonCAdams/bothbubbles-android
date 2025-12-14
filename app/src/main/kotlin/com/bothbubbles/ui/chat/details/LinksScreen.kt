@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -14,6 +15,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import kotlinx.coroutines.flow.collectLatest
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -118,7 +120,23 @@ fun LinksScreen(
                 )
             }
         } else {
+            val listState = rememberLazyListState()
+
+            // Trigger load more when near the end
+            LaunchedEffect(listState, filteredLinks.size, uiState.hasMore) {
+                snapshotFlow {
+                    val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+                    val totalItems = listState.layoutInfo.totalItemsCount
+                    lastVisibleItem >= totalItems - 3 // Load more when 3 items from end
+                }.collect { shouldLoadMore ->
+                    if (shouldLoadMore && uiState.hasMore && searchQuery.isBlank()) {
+                        viewModel.loadMore()
+                    }
+                }
+            }
+
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
@@ -129,6 +147,23 @@ fun LinksScreen(
                         link = link,
                         onClick = { onLinkClick(link.url) }
                     )
+                }
+
+                // Loading more indicator
+                if (uiState.isLoadingMore) {
+                    item {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(24.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
                 }
             }
         }

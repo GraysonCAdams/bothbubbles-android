@@ -14,11 +14,11 @@ import com.bothbubbles.ui.navigation.Screen
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,30 +70,45 @@ class MediaLinksViewModel @Inject constructor(
         "www.google.com/maps"
     )
 
-    // Flow that extracts links from messages
-    private val linksFlow = messageRepository.getMessagesWithUrlsForChat(chatGuid)
-        .map { messages ->
-            messages.flatMap { message -> extractLinksFromMessage(message) }
-        }
+    private val _uiState = MutableStateFlow(MediaLinksUiState())
+    val uiState: StateFlow<MediaLinksUiState> = _uiState.asStateFlow()
 
-    val uiState: StateFlow<MediaLinksUiState> = combine(
-        attachmentRepository.getImagesForChat(chatGuid),
-        attachmentRepository.getVideosForChat(chatGuid),
-        linksFlow,
-        _selectedFilter
-    ) { images, videos, links, filter ->
-        MediaLinksUiState(
-            images = images.take(8), // Preview limit
-            videos = videos.take(4),
-            links = links.take(10), // Preview limit
-            isLoading = false,
-            selectedFilter = filter
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.WhileSubscribed(5000),
-        initialValue = MediaLinksUiState()
-    )
+    init {
+        loadMediaAndLinks()
+    }
+
+    private fun loadMediaAndLinks() {
+        viewModelScope.launch {
+            // Combine images and videos flows with filter
+            combine(
+                attachmentRepository.getImagesForChat(chatGuid),
+                attachmentRepository.getVideosForChat(chatGuid),
+                _selectedFilter
+            ) { images, videos, filter ->
+                Triple(images.take(8), videos.take(4), filter)
+            }.collect { (images, videos, filter) ->
+                // Load links separately with limit (more efficient than loading all)
+                val messages = messageRepository.getMessagesWithUrlsForChatPaged(
+                    chatGuid = chatGuid,
+                    limit = 20,  // Fetch enough to get ~10 non-places links
+                    offset = 0
+                )
+                val links = messages
+                    .flatMap { message -> extractLinksFromMessage(message) }
+                    .take(10)  // Preview limit
+
+                _uiState.update {
+                    it.copy(
+                        images = images,
+                        videos = videos,
+                        links = links,
+                        isLoading = false,
+                        selectedFilter = filter
+                    )
+                }
+            }
+        }
+    }
 
     private suspend fun extractLinksFromMessage(message: MessageEntity): List<LinkPreview> {
         val text = message.text ?: return emptyList()

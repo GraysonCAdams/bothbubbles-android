@@ -2,7 +2,7 @@ package com.bothbubbles.services.linkpreview
 
 import android.content.Context
 import android.util.Log
-import com.bothbubbles.data.local.prefs.FeaturePreferences
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -30,7 +30,7 @@ import javax.inject.Singleton
 @Singleton
 class LinkPreviewService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val featurePreferences: FeaturePreferences
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "LinkPreviewService"
@@ -76,7 +76,7 @@ class LinkPreviewService @Inject constructor(
      */
     suspend fun fetchMetadata(url: String): LinkMetadataResult = withContext(Dispatchers.IO) {
         // Check if link previews are enabled in user settings
-        val enabled = featurePreferences.linkPreviewsEnabled.first()
+        val enabled = settingsDataStore.linkPreviewsEnabled.first()
         if (!enabled) {
             return@withContext LinkMetadataResult.NoPreview
         }

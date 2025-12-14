@@ -34,6 +34,7 @@ import com.bothbubbles.ui.settings.components.SettingsCard
 @Composable
 fun NotificationSettingsScreen(
     onNavigateBack: () -> Unit,
+    onBubbleChatSelectorClick: () -> Unit = {},
     viewModel: NotificationSettingsViewModel = hiltViewModel()
 ) {
     val context = LocalContext.current
@@ -79,6 +80,7 @@ fun NotificationSettingsScreen(
             uiState = uiState,
             hasNotificationPermission = hasNotificationPermission,
             onRequestPermission = { permissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS) },
+            onBubbleChatSelectorClick = onBubbleChatSelectorClick,
             viewModel = viewModel
         )
     }
@@ -90,7 +92,8 @@ fun NotificationSettingsContent(
     viewModel: NotificationSettingsViewModel = hiltViewModel(),
     uiState: NotificationSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     hasNotificationPermission: Boolean = true,
-    onRequestPermission: () -> Unit = {}
+    onRequestPermission: () -> Unit = {},
+    onBubbleChatSelectorClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -215,6 +218,32 @@ fun NotificationSettingsContent(
                         },
                         onDismiss = { showBubbleFilterDialog = false }
                     )
+                }
+
+                // Show "Select conversations" option when mode is "selected"
+                if (uiState.bubbleFilterMode == "selected") {
+                    SettingsCard {
+                        ListItem(
+                            headlineContent = { Text("Select conversations") },
+                            supportingContent = {
+                                Text(
+                                    text = "${uiState.selectedBubbleChatCount} conversations selected",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            leadingContent = {
+                                Icon(Icons.Default.FormatListBulleted, contentDescription = null)
+                            },
+                            trailingContent = {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            },
+                            modifier = Modifier.clickable { onBubbleChatSelectorClick() }
+                        )
+                    }
                 }
 
                 // System notification settings

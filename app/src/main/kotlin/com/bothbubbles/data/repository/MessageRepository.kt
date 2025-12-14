@@ -106,6 +106,22 @@ class MessageRepository @Inject constructor(
         messageDao.getMessagesWithUrlsForChat(chatGuid)
 
     /**
+     * Get messages containing URLs for link gallery with pagination.
+     */
+    suspend fun getMessagesWithUrlsForChatPaged(
+        chatGuid: String,
+        limit: Int,
+        offset: Int
+    ): List<MessageEntity> =
+        messageDao.getMessagesWithUrlsForChatPaged(chatGuid, limit, offset)
+
+    /**
+     * Count messages containing URLs for link gallery.
+     */
+    suspend fun countMessagesWithUrlsForChat(chatGuid: String): Int =
+        messageDao.countMessagesWithUrlsForChat(chatGuid)
+
+    /**
      * Get the latest message for a specific chat.
      */
     suspend fun getLatestMessageForChat(chatGuid: String): MessageEntity? =

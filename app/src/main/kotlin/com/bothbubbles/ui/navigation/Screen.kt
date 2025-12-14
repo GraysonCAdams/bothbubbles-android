@@ -82,6 +82,9 @@ sealed interface Screen {
     data class NotificationProvider(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class BubbleChatSelector(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class About(val returnToSettings: Boolean = false) : Screen
 
     @Serializable

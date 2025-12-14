@@ -25,17 +25,22 @@ class NotificationSettingsViewModel @Inject constructor(
             combine(
                 settingsDataStore.notificationsEnabled,
                 settingsDataStore.notifyOnChatList,
-                settingsDataStore.bubbleFilterMode
-            ) { enabled, notifyOnChatList, bubbleFilterMode ->
-                Triple(enabled, notifyOnChatList, bubbleFilterMode)
-            }.collect { (enabled, notifyOnChatList, bubbleFilterMode) ->
-                _uiState.update {
-                    it.copy(
-                        notificationsEnabled = enabled,
-                        notifyOnChatList = notifyOnChatList,
-                        bubbleFilterMode = bubbleFilterMode
-                    )
-                }
+                settingsDataStore.bubbleFilterMode,
+                settingsDataStore.selectedBubbleChats
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                val enabled = values[0] as? Boolean ?: true
+                val notifyOnChatList = values[1] as? Boolean ?: false
+                val bubbleFilterMode = values[2] as? String ?: "all"
+                val selectedBubbleChats = values[3] as? Set<String> ?: emptySet()
+                NotificationSettingsUiState(
+                    notificationsEnabled = enabled,
+                    notifyOnChatList = notifyOnChatList,
+                    bubbleFilterMode = bubbleFilterMode,
+                    selectedBubbleChatCount = selectedBubbleChats.size
+                )
+            }.collect { state ->
+                _uiState.value = state
             }
         }
     }
@@ -62,5 +67,6 @@ class NotificationSettingsViewModel @Inject constructor(
 data class NotificationSettingsUiState(
     val notificationsEnabled: Boolean = true,
     val notifyOnChatList: Boolean = false,
-    val bubbleFilterMode: String = "all"
+    val bubbleFilterMode: String = "all",
+    val selectedBubbleChatCount: Int = 0
 )

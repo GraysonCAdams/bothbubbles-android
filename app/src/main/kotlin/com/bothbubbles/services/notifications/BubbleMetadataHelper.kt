@@ -43,16 +43,24 @@ class BubbleMetadataHelper @Inject constructor(
     // Cached values to avoid blocking calls
     @Volatile
     private var cachedBubbleFilterMode: String = "all"
+    @Volatile
+    private var cachedSelectedBubbleChats: Set<String> = emptySet()
 
     init {
         // Initialize cached values in background
         applicationScope.launch(ioDispatcher) {
             cachedBubbleFilterMode = settingsDataStore.bubbleFilterMode.first()
+            cachedSelectedBubbleChats = settingsDataStore.selectedBubbleChats.first()
         }
         // Keep cached values updated
         applicationScope.launch(ioDispatcher) {
             settingsDataStore.bubbleFilterMode.collect { mode ->
                 cachedBubbleFilterMode = mode
+            }
+        }
+        applicationScope.launch(ioDispatcher) {
+            settingsDataStore.selectedBubbleChats.collect { chats ->
+                cachedSelectedBubbleChats = chats
             }
         }
     }
@@ -149,9 +157,10 @@ class BubbleMetadataHelper @Inject constructor(
         return when (cachedBubbleFilterMode) {
             "none" -> false
             "all" -> true
-            // For modes requiring async lookup, default to true and let the system handle it
-            // The cache is updated asynchronously when settings change
-            "selected", "favorites" -> true
+            "selected" -> cachedSelectedBubbleChats.contains(chatGuid)
+            // For favorites, we'd need to check Android contacts which requires async lookup
+            // Default to true and let system handle it
+            "favorites" -> true
             else -> true
         }
     }

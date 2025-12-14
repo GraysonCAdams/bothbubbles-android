@@ -68,6 +68,7 @@ class SettingsDataStore @Inject constructor(
     val notificationsEnabled: Flow<Boolean> get() = notificationPrefs.notificationsEnabled
     val notifyOnChatList: Flow<Boolean> get() = notificationPrefs.notifyOnChatList
     val bubbleFilterMode: Flow<String> get() = notificationPrefs.bubbleFilterMode
+    val selectedBubbleChats: Flow<Set<String>> get() = notificationPrefs.selectedBubbleChats
     val notificationProvider: Flow<String> get() = notificationPrefs.notificationProvider
     val fcmToken: Flow<String> get() = notificationPrefs.fcmToken
     val fcmTokenRegistered: Flow<Boolean> get() = notificationPrefs.fcmTokenRegistered
@@ -81,6 +82,9 @@ class SettingsDataStore @Inject constructor(
     suspend fun setNotificationsEnabled(enabled: Boolean) = notificationPrefs.setNotificationsEnabled(enabled)
     suspend fun setNotifyOnChatList(enabled: Boolean) = notificationPrefs.setNotifyOnChatList(enabled)
     suspend fun setBubbleFilterMode(mode: String) = notificationPrefs.setBubbleFilterMode(mode)
+    suspend fun setSelectedBubbleChats(chatGuids: Set<String>) = notificationPrefs.setSelectedBubbleChats(chatGuids)
+    suspend fun addSelectedBubbleChat(chatGuid: String) = notificationPrefs.addSelectedBubbleChat(chatGuid)
+    suspend fun removeSelectedBubbleChat(chatGuid: String) = notificationPrefs.removeSelectedBubbleChat(chatGuid)
     suspend fun setNotificationProvider(provider: String) = notificationPrefs.setNotificationProvider(provider)
     suspend fun setFcmToken(token: String) = notificationPrefs.setFcmToken(token)
     suspend fun setFcmTokenRegistered(registered: Boolean) = notificationPrefs.setFcmTokenRegistered(registered)
