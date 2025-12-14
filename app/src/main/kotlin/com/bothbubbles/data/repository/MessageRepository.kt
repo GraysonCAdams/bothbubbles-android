@@ -39,7 +39,8 @@ class MessageRepository @Inject constructor(
     private val api: BothBubblesApi,
     private val settingsDataStore: SettingsDataStore,
     private val syncRangeTracker: SyncRangeTracker,
-    private val attachmentRepository: AttachmentRepository
+    private val attachmentRepository: AttachmentRepository,
+    private val chatSyncOperations: ChatSyncOperations
 ) {
     companion object {
         private const val TAG = "MessageRepository"
@@ -180,6 +181,16 @@ class MessageRepository @Inject constructor(
             initialDelayMs = NetworkConfig.SYNC_INITIAL_DELAY_MS,
             maxDelayMs = NetworkConfig.SYNC_MAX_DELAY_MS
         ) {
+            // Ensure chat exists before inserting messages (foreign key constraint)
+            // This is a fast indexed lookup - only fetches from server if missing
+            if (chatDao.getChatByGuid(chatGuid) == null) {
+                Log.d(TAG, "Chat $chatGuid missing from local DB, fetching from server first")
+                chatSyncOperations.fetchChat(chatGuid).onFailure { e ->
+                    Log.e(TAG, "Failed to fetch chat $chatGuid: ${e.message}")
+                    throw e
+                }
+            }
+
             val response = retryWithRateLimitAwareness {
                 api.getChatMessages(
                     guid = chatGuid,

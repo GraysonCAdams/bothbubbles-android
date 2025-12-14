@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.socket.SocketService
@@ -18,6 +19,7 @@ import javax.inject.Inject
  */
 class ChatSyncDelegate @Inject constructor(
     private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
     private val socketService: SocketService,
     private val appLifecycleTracker: AppLifecycleTracker
 ) {
@@ -100,6 +102,11 @@ class ChatSyncDelegate @Inject constructor(
             return // Server not reachable
         }
 
+        // Skip if chat doesn't exist yet (foreign key constraint would fail)
+        if (chatRepository.getChat(chatGuid) == null) {
+            return
+        }
+
         val afterTimestamp = newestMessage?.dateCreated
 
         try {
@@ -138,6 +145,11 @@ class ChatSyncDelegate @Inject constructor(
      * Should be called when app returns from background.
      */
     suspend fun performForegroundSync(newestMessage: MessageUiModel?) {
+        // Skip if chat doesn't exist yet (foreign key constraint would fail)
+        if (chatRepository.getChat(chatGuid) == null) {
+            return
+        }
+
         val afterTimestamp = newestMessage?.dateCreated
 
         try {

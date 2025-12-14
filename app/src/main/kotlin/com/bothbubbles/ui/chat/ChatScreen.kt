@@ -744,7 +744,7 @@ fun ChatScreen(
                     onEvent = { event ->
                         when (event) {
                             is ComposerEvent.OpenCamera -> {
-                                // TODO: Launch camera
+                                onCameraClick()
                             }
                             is ComposerEvent.SendLongPress -> {
                                 if (!uiState.isLocalSmsChat) {
@@ -882,7 +882,7 @@ fun ChatScreen(
                         viewModel.addAttachments(uris)
                     },
                     onCameraClick = {
-                        // TODO: Launch camera
+                        onCameraClick()
                     },
                     onFileClick = {
                         // TODO: Launch file picker

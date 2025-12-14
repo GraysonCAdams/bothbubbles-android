@@ -259,6 +259,15 @@ class ChatViewModel @Inject constructor(
             is ComposerEvent.ToggleMediaPicker -> {
                 _activePanel.update { if (it == ComposerPanel.MediaPicker) ComposerPanel.None else ComposerPanel.MediaPicker }
             }
+            is ComposerEvent.ToggleEmojiPicker -> {
+                _activePanel.update { if (it == ComposerPanel.EmojiKeyboard) ComposerPanel.None else ComposerPanel.EmojiKeyboard }
+            }
+            is ComposerEvent.OpenGallery -> {
+                _activePanel.update { ComposerPanel.MediaPicker }
+            }
+            is ComposerEvent.DismissPanel -> {
+                _activePanel.update { ComposerPanel.None }
+            }
             else -> {
                 // Handle other events or ignore
             }
@@ -288,6 +297,8 @@ class ChatViewModel @Inject constructor(
     private val syncTriggerImpl = object : SyncTrigger {
         override suspend fun requestSyncForRange(chatGuids: List<String>, startPosition: Int, count: Int) {
             if (_isLoadingFromServer.value) return // Already loading
+            // Skip if chat doesn't exist yet (foreign key constraint would fail)
+            if (chatRepository.getChat(chatGuid) == null) return
 
             Log.d(TAG, "SyncTrigger: requesting sync for range $startPosition-${startPosition + count}")
             _isLoadingFromServer.value = true
@@ -310,6 +321,8 @@ class ChatViewModel @Inject constructor(
 
         override suspend fun requestSyncForMessage(chatGuids: List<String>, messageGuid: String) {
             Log.d(TAG, "SyncTrigger: requesting sync for message $messageGuid")
+            // Skip if chat doesn't exist yet (foreign key constraint would fail)
+            if (chatRepository.getChat(chatGuid) == null) return
             // For individual message sync, don't show loading indicator
             try {
                 messageRepository.syncMessagesForChat(chatGuid = chatGuid, limit = 10)
@@ -1657,6 +1670,22 @@ class ChatViewModel @Inject constructor(
 
     private fun syncMessagesFromServer() {
         viewModelScope.launch {
+            // Ensure chat exists in local DB before syncing messages
+            // Messages have a foreign key constraint on chat_guid -> chats.guid
+            // If chat doesn't exist, message inserts will fail with SQLiteConstraintException
+            val chatExists = chatRepository.getChat(chatGuid) != null
+            if (!chatExists) {
+                Log.d(TAG, "Chat $chatGuid not in local DB, fetching from server first")
+                chatRepository.fetchChat(chatGuid).onFailure { e ->
+                    Log.e(TAG, "Failed to fetch chat $chatGuid from server", e)
+                    if (_uiState.value.messages.isEmpty()) {
+                        _uiState.update { it.copy(error = "Failed to load chat: ${e.message}") }
+                    }
+                    _uiState.update { it.copy(isSyncingMessages = false) }
+                    return@launch
+                }
+            }
+
             messageRepository.syncMessagesForChat(
                 chatGuid = chatGuid,
                 limit = 50
@@ -1764,6 +1793,11 @@ class ChatViewModel @Inject constructor(
                 val afterTimestamp = newestMessage?.dateCreated
 
                 try {
+                    // Skip if chat doesn't exist yet (wait for initial sync to create it)
+                    if (chatRepository.getChat(chatGuid) == null) {
+                        continue
+                    }
+
                     val result = messageRepository.syncMessagesForChat(
                         chatGuid = chatGuid,
                         limit = 10,
@@ -1799,6 +1833,11 @@ class ChatViewModel @Inject constructor(
                         Log.d(TAG, "App resumed - syncing for missed messages")
                         // Reset socket activity timer so adaptive polling doesn't immediately fire
                         lastSocketMessageTime = System.currentTimeMillis()
+
+                        // Skip if chat doesn't exist yet (wait for initial sync to create it)
+                        if (chatRepository.getChat(chatGuid) == null) {
+                            return@collect
+                        }
 
                         // Sync recent messages to catch any missed while backgrounded
                         val newestMessage = _uiState.value.messages.firstOrNull()
