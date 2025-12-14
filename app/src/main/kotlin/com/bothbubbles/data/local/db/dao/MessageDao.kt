@@ -181,6 +181,44 @@ interface MessageDao {
     """)
     fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>>
 
+    /**
+     * Full-text search for messages within specific chats using FTS5 index.
+     * Uses FTS5 for O(log n) performance on large conversation histories.
+     *
+     * @param query The search query (will be matched against text and subject)
+     * @param chatGuids List of chat GUIDs to search within
+     * @param limit Maximum number of results to return
+     */
+    @SkipQueryVerification // FTS5 virtual table created in migration
+    @Query("""
+        SELECT m.* FROM messages m
+        INNER JOIN message_fts ON message_fts.rowid = m.id
+        WHERE message_fts MATCH :query
+        AND m.chat_guid IN (:chatGuids)
+        AND m.date_deleted IS NULL
+        ORDER BY m.date_created DESC
+        LIMIT :limit
+    """)
+    suspend fun searchMessagesInChatsFts(query: String, chatGuids: List<String>, limit: Int = 100): List<MessageEntity>
+
+    /**
+     * LIKE-based search for messages within specific chats.
+     * Fallback when FTS5 query fails (special characters, etc.).
+     *
+     * @param query The search query
+     * @param chatGuids List of chat GUIDs to search within
+     * @param limit Maximum number of results to return
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND (text LIKE '%' || :query || '%' OR subject LIKE '%' || :query || '%')
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    suspend fun searchMessagesInChatsLike(query: String, chatGuids: List<String>, limit: Int = 100): List<MessageEntity>
+
     @Query("""
         SELECT * FROM messages
         WHERE chat_guid = :chatGuid AND date_deleted IS NULL

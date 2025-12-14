@@ -861,87 +861,78 @@ fun ConversationsScreen(
                     val displayConversations = regularConversations
 
                     // Regular conversations with staggered entrance animation
+                    // Always use SwipeableConversationTile - disable gestures in selection mode for tree stability
                     itemsIndexed(
                         items = displayConversations,
                         key = { _, conv -> conv.guid }
                     ) { index, conversation ->
-                        if (isSelectionMode) {
-                            // In selection mode, use regular tile without swipe
+                        // Memoized swipe config - disable PIN for unsaved contacts that aren't already pinned
+                        val conversationSwipeConfig = remember(
+                            conversation.hasContact,
+                            conversation.isPinned,
+                            uiState.swipeConfig
+                        ) {
+                            if (!conversation.hasContact && !conversation.isPinned) {
+                                uiState.swipeConfig.copy(
+                                    leftAction = if (uiState.swipeConfig.leftAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.leftAction,
+                                    rightAction = if (uiState.swipeConfig.rightAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.rightAction
+                                )
+                            } else {
+                                uiState.swipeConfig
+                            }
+                        }
+
+                        SwipeableConversationTile(
+                            isPinned = conversation.isPinned,
+                            isMuted = conversation.isMuted,
+                            isRead = conversation.unreadCount == 0,
+                            isSnoozed = conversation.isSnoozed,
+                            gesturesEnabled = !isSelectionMode,  // Disable swipes in selection mode
+                            onSwipeAction = { action ->
+                                when (action) {
+                                    SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
+                                        pendingSwipeAction = conversation.guid to action
+                                    }
+                                    else -> viewModel.handleSwipeAction(conversation.guid, action)
+                                }
+                            },
+                            swipeConfig = conversationSwipeConfig,
+                            modifier = Modifier
+                                .staggeredEntrance(index)
+                                .animateItem()
+                        ) { hasRoundedCorners ->
                             GoogleStyleConversationTile(
                                 conversation = conversation,
                                 isSelected = conversation.guid in selectedConversations,
                                 isSelectionMode = isSelectionMode,
+                                hasRoundedCorners = hasRoundedCorners,
                                 onClick = {
-                                    selectedConversations = if (conversation.guid in selectedConversations) {
-                                        selectedConversations - conversation.guid
-                                    } else {
-                                        selectedConversations + conversation.guid
-                                    }
-                                },
-                                onLongClick = {
-                                    selectedConversations = selectedConversations + conversation.guid
-                                },
-                                modifier = Modifier
-                                    .staggeredEntrance(index)
-                                    .animateItem()
-                            )
-                        } else {
-                            // Use swipeable tile when not in selection mode
-                            // Modify swipe config to disable PIN for unsaved contacts that aren't already pinned
-                            // Memoized to avoid recreating on every recomposition
-                            val conversationSwipeConfig = remember(
-                                conversation.hasContact,
-                                conversation.isPinned,
-                                uiState.swipeConfig
-                            ) {
-                                if (!conversation.hasContact && !conversation.isPinned) {
-                                    // Disable PIN action for unsaved contacts
-                                    uiState.swipeConfig.copy(
-                                        leftAction = if (uiState.swipeConfig.leftAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.leftAction,
-                                        rightAction = if (uiState.swipeConfig.rightAction == SwipeActionType.PIN) SwipeActionType.NONE else uiState.swipeConfig.rightAction
-                                    )
-                                } else {
-                                    uiState.swipeConfig
-                                }
-                            }
-                            SwipeableConversationTile(
-                                isPinned = conversation.isPinned,
-                                isMuted = conversation.isMuted,
-                                isRead = conversation.unreadCount == 0,
-                                isSnoozed = conversation.isSnoozed,
-                                onSwipeAction = { action ->
-                                    when (action) {
-                                        SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
-                                            pendingSwipeAction = conversation.guid to action
+                                    if (isSelectionMode) {
+                                        // Toggle selection in selection mode
+                                        selectedConversations = if (conversation.guid in selectedConversations) {
+                                            selectedConversations - conversation.guid
+                                        } else {
+                                            selectedConversations + conversation.guid
                                         }
-                                        else -> viewModel.handleSwipeAction(conversation.guid, action)
+                                    } else {
+                                        onConversationClick(conversation.guid, conversation.mergedChatGuids)
                                     }
                                 },
-                                swipeConfig = conversationSwipeConfig,
-                                modifier = Modifier
-                                    .staggeredEntrance(index)
-                                    .animateItem()
-                            ) { hasRoundedCorners ->
-                                GoogleStyleConversationTile(
-                                    conversation = conversation,
-                                    onClick = { onConversationClick(conversation.guid, conversation.mergedChatGuids) },
-                                    onLongClick = { selectedConversations = selectedConversations + conversation.guid },
-                                    hasRoundedCorners = hasRoundedCorners,
-                                    onAvatarClick = {
-                                        quickActionsContact = ContactInfo(
-                                            chatGuid = conversation.guid,
-                                            displayName = conversation.displayName,
-                                            rawDisplayName = conversation.rawDisplayName,
-                                            avatarPath = conversation.avatarPath,
-                                            address = conversation.address,
-                                            isGroup = conversation.isGroup,
-                                            participantNames = conversation.participantNames,
-                                            hasContact = conversation.hasContact,
-                                            hasInferredName = conversation.hasInferredName
-                                        )
-                                    }
-                                )
-                            }
+                                onLongClick = { selectedConversations = selectedConversations + conversation.guid },
+                                onAvatarClick = {
+                                    quickActionsContact = ContactInfo(
+                                        chatGuid = conversation.guid,
+                                        displayName = conversation.displayName,
+                                        rawDisplayName = conversation.rawDisplayName,
+                                        avatarPath = conversation.avatarPath,
+                                        address = conversation.address,
+                                        isGroup = conversation.isGroup,
+                                        participantNames = conversation.participantNames,
+                                        hasContact = conversation.hasContact,
+                                        hasInferredName = conversation.hasInferredName
+                                    )
+                                }
+                            )
                         }
                     } // End of itemsIndexed
 

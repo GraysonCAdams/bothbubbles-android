@@ -145,6 +145,25 @@ interface AttachmentDao {
     @Query("SELECT SUM(total_bytes) FROM attachments WHERE local_path IS NOT NULL")
     suspend fun getTotalDownloadedSize(): Long?
 
+    /**
+     * Search attachments by filename within specific chats.
+     * Used for finding messages with matching attachment names.
+     *
+     * @param query The search query to match against transfer_name
+     * @param chatGuids List of chat GUIDs to search within
+     * @param limit Maximum number of results to return
+     */
+    @Query("""
+        SELECT a.* FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        WHERE m.chat_guid IN (:chatGuids)
+        AND m.date_deleted IS NULL
+        AND a.transfer_name LIKE '%' || :query || '%'
+        ORDER BY m.date_created DESC
+        LIMIT :limit
+    """)
+    suspend fun searchAttachmentsByName(query: String, chatGuids: List<String>, limit: Int = 50): List<AttachmentEntity>
+
     // ===== Inserts/Updates =====
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

@@ -1,12 +1,19 @@
 package com.bothbubbles.ui.conversations
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -67,28 +74,42 @@ internal fun GoogleStyleConversationTile(
     hasRoundedCorners: Boolean = false,
     onAvatarClick: (() -> Unit)? = null
 ) {
-    // MD3 uses 12.dp ("Large" shape token) for list items
-    val shape = when {
-        isSelectionMode || hasRoundedCorners -> RoundedCornerShape(12.dp)
-        else -> RoundedCornerShape(0.dp)
-    }
-    val needsPadding = isSelectionMode || hasRoundedCorners
+    // Animate corner radius for smooth transition (MD3 uses 12.dp "Large" shape token)
+    val cornerRadius by animateDpAsState(
+        targetValue = if (isSelectionMode || hasRoundedCorners) 12.dp else 0.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "cornerRadius"
+    )
+    val shape = RoundedCornerShape(cornerRadius)
+
+    // Animate vertical padding for smooth height transition
+    val verticalPadding by animateDpAsState(
+        targetValue = if (isSelectionMode || hasRoundedCorners) 4.dp else 0.dp,
+        animationSpec = tween(durationMillis = 200),
+        label = "verticalPadding"
+    )
+
+    // Animate background color for smooth selection transition
+    val backgroundColor by animateColorAsState(
+        targetValue = if (isSelected) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surface
+        },
+        animationSpec = tween(durationMillis = 200),
+        label = "backgroundColor"
+    )
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .then(if (needsPadding) Modifier.padding(vertical = 4.dp) else Modifier)
+            .padding(vertical = verticalPadding)
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
             ),
         shape = shape,
-        // MD3: use secondaryContainer for selected state
-        color = if (isSelected) {
-            MaterialTheme.colorScheme.secondaryContainer
-        } else {
-            MaterialTheme.colorScheme.surface
-        }
+        color = backgroundColor
     ) {
         Row(
             modifier = Modifier
@@ -96,7 +117,7 @@ internal fun GoogleStyleConversationTile(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar with selection checkmark or regular avatar
+            // Avatar with animated crossfade between selection checkmark and regular avatar
             Box(
                 modifier = Modifier
                     .size(56.dp)
@@ -111,57 +132,68 @@ internal fun GoogleStyleConversationTile(
                         }
                     )
             ) {
-                if (isSelected) {
-                    // Show checkmark when selected - use muted color instead of saturated primary
-                    Surface(
-                        color = MaterialTheme.colorScheme.outline,
-                        shape = CircleShape,
-                        modifier = Modifier.size(56.dp)
-                    ) {
-                        Box(
-                            contentAlignment = Alignment.Center,
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            Icon(
-                                Icons.Default.Check,
-                                contentDescription = "Selected",
-                                tint = MaterialTheme.colorScheme.surface,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-                } else {
-                    if (conversation.isGroup) {
-                        GroupAvatar(
-                            names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                            avatarPaths = conversation.participantAvatarPaths,
-                            size = 56.dp
-                        )
-                    } else {
-                        Avatar(
-                            name = conversation.rawDisplayName,
-                            avatarPath = conversation.avatarPath,
-                            size = 56.dp
-                        )
-                    }
-
-                    // Typing indicator badge
-                    if (conversation.isTyping) {
+                AnimatedContent(
+                    targetState = isSelected,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(200)) togetherWith
+                            fadeOut(animationSpec = tween(200))
+                    },
+                    label = "avatarSelection"
+                ) { selected ->
+                    if (selected) {
+                        // Show checkmark when selected - use muted color instead of saturated primary
                         Surface(
-                            color = MaterialTheme.colorScheme.surface,
+                            color = MaterialTheme.colorScheme.outline,
                             shape = CircleShape,
-                            modifier = Modifier
-                                .align(Alignment.BottomEnd)
-                                .size(20.dp)
-                                .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                            modifier = Modifier.size(56.dp)
                         ) {
                             Box(
                                 contentAlignment = Alignment.Center,
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                modifier = Modifier.fillMaxSize()
                             ) {
-                                AnimatedTypingDots()
+                                Icon(
+                                    Icons.Default.Check,
+                                    contentDescription = "Selected",
+                                    tint = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+                    } else {
+                        Box(modifier = Modifier.size(56.dp)) {
+                            if (conversation.isGroup) {
+                                GroupAvatar(
+                                    names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                                    avatarPaths = conversation.participantAvatarPaths,
+                                    size = 56.dp
+                                )
+                            } else {
+                                Avatar(
+                                    name = conversation.rawDisplayName,
+                                    avatarPath = conversation.avatarPath,
+                                    size = 56.dp
+                                )
+                            }
+
+                            // Typing indicator badge
+                            if (conversation.isTyping) {
+                                Surface(
+                                    color = MaterialTheme.colorScheme.surface,
+                                    shape = CircleShape,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(20.dp)
+                                        .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                                    ) {
+                                        AnimatedTypingDots()
+                                    }
+                                }
                             }
                         }
                     }

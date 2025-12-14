@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.common
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.AnnotatedString
@@ -10,6 +11,7 @@ import androidx.compose.ui.text.withStyle
 import com.bothbubbles.util.parsing.DetectedCode
 import com.bothbubbles.util.parsing.DetectedDate
 import com.bothbubbles.util.parsing.DetectedPhoneNumber
+import com.bothbubbles.util.text.TextNormalization
 
 /**
  * Utility functions for building AnnotatedStrings with clickable elements.
@@ -162,36 +164,42 @@ fun buildAnnotatedStringWithClickables(
 }
 
 /**
- * Builds an AnnotatedString with search query matches highlighted.
+ * Builds an AnnotatedString with search query matches highlighted using MD3 dynamic colors.
+ *
+ * @param text The text to search within
+ * @param searchQuery The query to highlight
+ * @param textColor The base text color (unused but kept for API compatibility)
+ * @param isCurrentMatch True for the focused match (uses tertiaryContainer),
+ *                       false for other matches (uses secondaryContainer)
+ * @param detectedDates Optional list of detected dates (currently unused)
  */
 @Composable
 fun buildSearchHighlightedText(
     text: String,
     searchQuery: String,
     textColor: Color,
+    isCurrentMatch: Boolean = false,
     detectedDates: List<DetectedDate> = emptyList()
 ): AnnotatedString {
-    val highlightColor = Color(0xFFFFEB3B) // Yellow highlight
-    // Use dark text on yellow highlight for readability in both light and dark mode
-    val highlightTextColor = Color(0xFF1C1C1C)
+    // MD3 dynamic colors for search highlighting
+    val currentMatchBackground = MaterialTheme.colorScheme.tertiaryContainer
+    val currentMatchText = MaterialTheme.colorScheme.onTertiaryContainer
+    val otherMatchBackground = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.7f)
+    val otherMatchText = MaterialTheme.colorScheme.onSecondaryContainer
+
+    val highlightColor = if (isCurrentMatch) currentMatchBackground else otherMatchBackground
+    val highlightTextColor = if (isCurrentMatch) currentMatchText else otherMatchText
+
+    // Use TextNormalization for diacritic-insensitive matching (e.g., "cafe" matches "café")
+    val matchRanges = TextNormalization.findMatchRanges(text, searchQuery)
 
     return buildAnnotatedString {
         var currentIndex = 0
-        val lowerText = text.lowercase()
-        val lowerQuery = searchQuery.lowercase()
 
-        while (currentIndex < text.length) {
-            val matchIndex = lowerText.indexOf(lowerQuery, currentIndex)
-
-            if (matchIndex == -1) {
-                // No more matches, append remaining text
-                append(text.substring(currentIndex))
-                break
-            }
-
+        for (range in matchRanges) {
             // Append text before the match
-            if (matchIndex > currentIndex) {
-                append(text.substring(currentIndex, matchIndex))
+            if (range.first > currentIndex) {
+                append(text.substring(currentIndex, range.first))
             }
 
             // Append the highlighted match
@@ -201,10 +209,15 @@ fun buildSearchHighlightedText(
                     color = highlightTextColor
                 )
             ) {
-                append(text.substring(matchIndex, matchIndex + searchQuery.length))
+                append(text.substring(range.first, range.last))
             }
 
-            currentIndex = matchIndex + searchQuery.length
+            currentIndex = range.last
+        }
+
+        // Append remaining text after last match
+        if (currentIndex < text.length) {
+            append(text.substring(currentIndex))
         }
     }
 }

@@ -46,6 +46,7 @@ fun SwipeableConversationTile(
     onSwipeAction: (SwipeActionType) -> Unit,
     swipeConfig: SwipeConfig = SwipeConfig(),
     modifier: Modifier = Modifier,
+    gesturesEnabled: Boolean = true,
     content: @Composable (hasRoundedCorners: Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
@@ -67,6 +68,14 @@ fun SwipeableConversationTile(
         isRead,
         isSnoozed
     )
+
+    // When gestures disabled (e.g., selection mode), keep tree structure but skip gesture handling
+    if (!gesturesEnabled) {
+        Box(modifier = modifier.fillMaxWidth()) {
+            content(true)  // Always use rounded corners for consistent layout
+        }
+        return
+    }
 
     if (!swipeConfig.enabled || (leftAction == SwipeActionType.NONE && rightAction == SwipeActionType.NONE)) {
         // No swipe actions, render content without swipe wrapper
