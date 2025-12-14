@@ -110,12 +110,37 @@ Complex services are decomposed into focused handlers:
 - `MessageSendingService` handles all send operations (extracted from MessageRepository)
 - `IncomingMessageHandler` handles incoming message processing
 
-#### 3. ViewModel Delegates (Pattern Established)
+#### 3. ViewModel Delegates (Extensively Used)
 
-Large ViewModels use delegate pattern for decomposition:
+Large ViewModels are decomposed into focused delegates. Each delegate:
+- Is `@Inject` constructor-injected
+- Has an `initialize(context, scope)` method called from ViewModel init
+- Exposes state via `StateFlow` properties
+- Contains related business logic methods
 
-- `ChatSendDelegate` - Send, retry, forward operations
-- See `ui/chat/delegates/README.md` for the pattern
+**ChatViewModel delegates** (`ui/chat/delegates/`):
+- `ChatSendDelegate` - Send, retry, forward operations (uses `PendingAttachmentInput`)
+- `ChatSearchDelegate` - In-chat message search
+- `ChatOperationsDelegate` - Archive, star, delete, spam, block contact
+- `ChatEffectsDelegate` - Message effect playback
+- `ChatThreadDelegate` - Thread overlay
+- `ChatSyncDelegate` - Adaptive polling and resume sync
+- `ChatSendModeManager` - iMessage/SMS mode switching
+
+**ConversationsViewModel delegates** (`ui/conversations/delegates/`):
+- `ConversationLoadingDelegate` - Data loading and pagination
+- `ConversationActionsDelegate` - Pin, mute, snooze, archive, delete
+- `ConversationObserverDelegate` - Database/socket change observers (uses array-form combine for 12 flows)
+- `UnifiedGroupMappingDelegate` - iMessage/SMS conversation merging
+
+**ChatCreatorViewModel delegates** (`ui/chatcreator/delegates/`):
+- `ContactLoadDelegate` - Contact loading and organization
+- `ContactSearchDelegate` - Search and address validation
+- `RecipientSelectionDelegate` - Selected recipients state
+- `ChatCreationDelegate` - Chat creation operations
+
+**SetupViewModel delegates** (`ui/setup/delegates/`):
+- `PermissionsDelegate`, `ServerConnectionDelegate`, `SmsSetupDelegate`, etc.
 
 #### 4. Service Interfaces (Testability)
 
@@ -130,12 +155,60 @@ Bindings are in `di/ServiceModule.kt`. Test fakes available in `src/test/kotlin/
 
 #### 5. Error Handling (AppError Framework)
 
-Consistent error handling using sealed classes:
+Consistent error handling using sealed classes in `util/error/`:
 
-- `AppError` - Base sealed class with `NetworkError`, `DatabaseError`, `ValidationError`, `ServerError`
+- `AppError` - Base sealed class (abstract)
+- `NetworkError` - Sealed class extending AppError (NoConnection, Timeout, ServerError, Unauthorized, Unknown)
+- `DatabaseError` - Sealed class extending AppError (QueryFailed, InsertFailed, MigrationFailed)
+- `MessageError` - Sealed class extending AppError (SendFailed, DeliveryFailed, AttachmentTooLarge)
+- `SmsError` - Sealed class extending AppError (NoDefaultApp, PermissionDenied, CarrierBlocked)
+- `ValidationError` - Sealed class extending AppError (InvalidInput, MissingRequired)
+
+**Important**: These are sibling sealed classes, not nested. Use `ValidationError.InvalidInput(...)`, not `AppError.ValidationError(...)`.
+
 - `safeCall {}` - Wrapper for operations that can fail
 - `Result<T>.handle()` - Extension for handling success/failure
-- See `util/error/` for the complete framework
+
+#### 6. Attachment Types
+
+Use `PendingAttachmentInput` for attachments throughout the send flow:
+
+```kotlin
+data class PendingAttachmentInput(
+    val uri: Uri,
+    val caption: String? = null,
+    val mimeType: String? = null,
+    val name: String? = null,
+    val size: Long? = null
+)
+```
+
+This type is used in `ChatViewModel._pendingAttachments`, `ChatSendDelegate.sendMessage()`, and `PendingMessageRepository.queueMessage()`.
+
+#### 7. Contact/VCard Models
+
+Contact-related models are defined in `services/contacts/VCardModels.kt`:
+
+```kotlin
+data class ContactData(
+    val displayName: String,
+    val givenName: String?,
+    val familyName: String?,
+    // ... phone numbers, emails, addresses, photo
+)
+
+data class FieldOptions(
+    val includePhones: Boolean = true,
+    val includeEmails: Boolean = true,
+    // ... field selection for vCard export
+)
+```
+
+These are top-level classes, not nested in `VCardService`. Import directly:
+```kotlin
+import com.bothbubbles.services.contacts.ContactData
+import com.bothbubbles.services.contacts.FieldOptions
+```
 
 ## Project Structure
 
@@ -362,3 +435,60 @@ The app uses multiple layers to ensure messages are never missed, as BlueBubbles
 - **Haptics**: Use `LocalHapticFeedback.current` for tactile feedback.
 - **Media**: Prefer `ActivityResultContracts.PickVisualMedia` (Photo Picker) over custom galleries.
 - **Icons**: Use `androidx.compose.material.icons` whenever possible.
+
+### Common Compose Import Patterns
+
+**Icons** - Use `Icons.Default.*` (capital D) or explicit `Icons.Filled.*`:
+```kotlin
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Search  // Explicit
+// Then use: Icons.Default.Search or Icons.Filled.Search
+```
+
+**Layout modifiers** - Many modifiers are in specific packages:
+```kotlin
+import androidx.compose.ui.layout.onSizeChanged      // NOT foundation.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.zIndex
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+```
+
+**Animation** - AnimatedContent and transitions:
+```kotlin
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.animateFloatAsState
+```
+
+### Flow Combine for Many Flows
+
+When combining 6+ flows, use array syntax with explicit casts:
+```kotlin
+combine(
+    flow1, flow2, flow3, flow4, flow5, flow6, flow7, flow8
+) { values: Array<Any?> ->
+    @Suppress("UNCHECKED_CAST")
+    val value1 = values[0] as Boolean
+    val value2 = values[1] as String?
+    // ... extract each value with explicit type cast
+}
+```
+
+The standard `combine` with trailing lambda only supports up to 5 flows.
+
+## Settings Panel Architecture
+
+The `SettingsPanel` uses internal navigation with `AnimatedContent` for smooth transitions between settings pages. Each settings page has a `*Content` composable that can be embedded in the panel:
+
+- `ServerSettingsContent()` - Uses hiltViewModel with defaults
+- `ArchivedChatsContent(onChatClick)` - Requires callback
+- `ExportPanelContent()` - Wrapper with dialogs (see SettingsPanel.kt)
+
+When adding new settings to the panel:
+1. Create `{Feature}Content` composable with `viewModel = hiltViewModel()` default
+2. Add to `SettingsPanelPage` enum
+3. Add case in `SettingsPanel` AnimatedContent switch
+4. Add import to SettingsPanel.kt

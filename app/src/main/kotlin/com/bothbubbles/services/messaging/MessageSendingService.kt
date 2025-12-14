@@ -487,29 +487,31 @@ class MessageSendingService @Inject constructor(
         // Get attachments for the original message
         val attachments = attachmentDao.getAttachmentsForMessage(messageGuid)
 
-        // Convert attachment entities to URIs if they have local paths
-        val attachmentUris = attachments.mapNotNull { attachment ->
+        // Convert attachment entities to PendingAttachmentInput if they have local paths
+        val attachmentInputs = attachments.mapNotNull { attachment ->
             attachment.localPath?.let { path ->
                 try {
-                    Uri.parse(path)
+                    PendingAttachmentInput(
+                        uri = Uri.parse(path),
+                        mimeType = attachment.mimeType,
+                        name = attachment.transferName,
+                        size = attachment.totalBytes
+                    )
                 } catch (e: Exception) {
                     null
                 }
-            } ?: attachment.webUrl?.let { url ->
-                // For web URLs, we'll need to download first or just skip for now
-                // In practice, most forwarded messages will have local paths
-                null
             }
+            // Skip web URLs - would need to download first
         }
 
-        Log.d(TAG, "Forwarding message $messageGuid to $targetChatGuid with ${attachmentUris.size} attachments")
+        Log.d(TAG, "Forwarding message $messageGuid to $targetChatGuid with ${attachmentInputs.size} attachments")
 
         // Send the message to the target chat
         sendUnified(
             chatGuid = targetChatGuid,
             text = originalMessage.text ?: "",
             subject = originalMessage.subject,
-            attachments = attachmentUris,
+            attachments = attachmentInputs,
             deliveryMode = MessageDeliveryMode.AUTO
         ).getOrThrow()
     }

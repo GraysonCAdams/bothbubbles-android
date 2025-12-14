@@ -5,6 +5,7 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.PhoneContact
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.GroupChatUiModel
 import com.bothbubbles.util.PhoneNumberFormatter

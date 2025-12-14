@@ -9,6 +9,7 @@ import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
+import com.bothbubbles.data.model.PendingAttachmentInput
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import java.io.File
@@ -74,12 +75,18 @@ class MessageSendWorker @AssistedInject constructor(
         )
 
         return try {
-            // Get persisted attachments and convert to file:// URIs
+            // Get persisted attachments and convert to PendingAttachmentInput
             val attachments = pendingAttachmentDao.getForMessage(pendingMessageId)
-            val attachmentUris = attachments.mapNotNull { attachment ->
+            val attachmentInputs = attachments.mapNotNull { attachment ->
                 val file = File(attachment.persistedPath)
                 if (file.exists()) {
-                    Uri.fromFile(file)
+                    PendingAttachmentInput(
+                        uri = Uri.fromFile(file),
+                        caption = attachment.caption,
+                        mimeType = attachment.mimeType,
+                        name = attachment.fileName,
+                        size = attachment.fileSize
+                    )
                 } else {
                     Log.w(TAG, "Attachment file missing: ${attachment.persistedPath}")
                     null
@@ -101,7 +108,7 @@ class MessageSendWorker @AssistedInject constructor(
                 replyToGuid = pendingMessage.replyToGuid,
                 effectId = pendingMessage.effectId,
                 subject = pendingMessage.subject,
-                attachments = attachmentUris,
+                attachments = attachmentInputs,
                 deliveryMode = deliveryMode,
                 tempGuid = pendingMessage.localId
             )

@@ -1,10 +1,10 @@
-# BlueBubbles
+# BothBubbles
 
 A native Android messaging app that brings iMessage to Android via a BlueBubbles server, with SMS/MMS fallback. Built from the ground up with Kotlin and Jetpack Compose for a true native Material Design 3 experience.
 
 **Note:** iMessage requires a Mac running the [BlueBubbles Server](https://github.com/BlueBubblesApp/BlueBubbles-Server). SMS/MMS works standalone without a server.
 
-## About This Rewrite
+## About
 
 This is a complete native rewrite of BlueBubbles, replacing the original Flutter implementation with pure Kotlin and Jetpack Compose. The goals:
 
@@ -60,39 +60,51 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 ./gradlew test
 ```
 
-## Project Structure
+## Repository Structure
 
 ```
-app/src/main/kotlin/com/bluebubbles/
-├── data/                    # Data layer
-│   ├── local/              # Room database & DataStore prefs
-│   ├── remote/             # Retrofit API
-│   └── repository/         # Repository pattern
-├── di/                      # Hilt dependency injection
-├── services/                # Background services
-│   ├── notifications/      # Notification handling
-│   ├── sms/               # SMS/MMS integration
-│   ├── socket/            # Socket.IO connection
-│   └── sync/              # Data synchronization
-└── ui/                      # Jetpack Compose UI
-    ├── chat/              # Message view
-    ├── components/        # Reusable components
-    ├── conversations/     # Conversation list
-    ├── navigation/        # Navigation setup
-    ├── settings/          # Settings screens
-    └── theme/             # Material Design 3 theming
+├── app/                        # Android application module
+│   └── src/main/kotlin/com/bothbubbles/
+│       ├── data/               # Data layer (Room, DataStore, Retrofit)
+│       ├── di/                 # Hilt dependency injection
+│       ├── services/           # Background services (SMS, Socket, Sync)
+│       └── ui/                 # Jetpack Compose UI
+├── docs/                       # Project documentation and plans
+├── gradle/                     # Gradle wrapper
+└── references/                 # Reference codebases (gitignored)
 ```
+
+## Architecture
+
+The app follows Clean Architecture with MVVM:
+
+```
+UI Layer (Compose)
+    ↓
+ViewModels + Delegates
+    ↓
+Services Layer (Socket, Notifications, Sync)
+    ↓
+Data Layer (Repositories → Room/Retrofit/DataStore)
+```
+
+Key patterns:
+- **Repository Pattern** for data access abstraction
+- **Delegate Pattern** for ViewModel decomposition
+- **Service Interfaces** for testability
+- **StateFlow** for reactive UI state
 
 ## Tech Stack
 
 - **Language**: Kotlin
 - **UI**: Jetpack Compose + Material Design 3
 - **Architecture**: MVVM with ViewModel + StateFlow
-- **DI**: Hilt
+- **DI**: Hilt (Dagger)
 - **Database**: Room
 - **Network**: Retrofit + OkHttp + Moshi
 - **Navigation**: Compose Navigation (type-safe routes)
 - **Real-time**: Socket.IO
+- **Background**: WorkManager
 
 ## Links
 
@@ -104,3 +116,7 @@ app/src/main/kotlin/com/bluebubbles/
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development guidelines.
+
+## License
+
+See [LICENSE](LICENSE) for details.

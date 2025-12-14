@@ -101,6 +101,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.R
+import com.bothbubbles.services.contacts.ContactData
+import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.chat.components.AttachmentPreview
@@ -114,6 +116,8 @@ import com.bothbubbles.ui.chat.components.ReplyPreview
 import com.bothbubbles.ui.chat.components.SaveContactBanner
 import com.bothbubbles.ui.chat.components.SendingIndicatorBar
 import com.bothbubbles.ui.chat.components.SendModeToggleButton
+import com.bothbubbles.ui.chat.composer.ChatComposer
+import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.tutorial.ComposerTutorial
 import com.bothbubbles.ui.chat.composer.tutorial.toComposerTutorialState
 import com.bothbubbles.ui.chat.components.SmsFallbackBanner
@@ -294,7 +298,7 @@ fun ChatScreen(
 
     // vCard options dialog state
     var showVCardOptionsDialog by remember { mutableStateOf(false) }
-    var pendingContactData by remember { mutableStateOf<VCardService.ContactData?>(null) }
+    var pendingContactData by remember { mutableStateOf<ContactData?>(null) }
 
     // Effect picker state
     var showEffectPicker by remember { mutableStateOf(false) }

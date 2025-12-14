@@ -73,6 +73,7 @@ data class ChatUiState(
     val snoozeUntil: Long? = null,
     // Reply state
     val replyingToGuid: String? = null,
+    val replyToMessage: MessageUiModel? = null, // Message being replied to (for composer preview)
     // iMessage availability for send mode
     val currentSendMode: ChatSendMode = ChatSendMode.SMS, // Default to SMS until availability confirmed
     val contactIMessageAvailable: Boolean? = null, // null = unknown/checking, true = iMessage available

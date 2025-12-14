@@ -53,20 +53,12 @@ class MessagePagingController(
     // Messages in this set should not animate when scrolled back into view
     private val seenMessageGuids = mutableSetOf<String>()
 
-    // Current total size (from database)
-    private var totalSize = 0
-
-    // Current visible range for determining what to keep in memory
-    private var visibleStart = 0
-    private var visibleEnd = 0
+    // Internal state
+    private val state = PagingState()
 
     // Mutex for coroutine-safe synchronization of state mutations
     // Using Mutex instead of synchronized because coroutines suspend
     private val stateMutex = Mutex()
-
-    // Generation counter to detect stale loads after position shifts
-    // Incremented on every shiftPositions() call - all in-flight loads become invalid
-    private var generation = 0L
 
     // Loading state
     private val _isLoading = MutableStateFlow(false)
@@ -185,35 +177,11 @@ class MessagePagingController(
     }
 
     /**
-     * Load data around a specific position (used by jumpToMessage).
-     * This is a non-debounced version of loadAroundRange for immediate loading.
-     */
-    private fun loadAroundPosition(position: Int) {
-        val loadStart = maxOf(0, position - config.prefetchDistance)
-        val loadEnd = minOf(position + config.prefetchDistance, totalSize)
-
-        // Find gaps in the range that need loading
-        val gaps = findGaps(loadStart, loadEnd)
-
-        if (gaps.isEmpty()) {
-            Log.d(TAG, "No gaps to load around position $position")
-            return
-        }
-
-        // Load each gap
-        gaps.forEach { gap ->
-            scope.launch {
-                loadRange(gap.first, gap.last + 1)
-            }
-        }
-    }
-
-    /**
      * Get a message by position.
      * Returns null if the position is not loaded or out of bounds.
      */
     fun getMessageAt(position: Int): MessageUiModel? {
-        if (position < 0 || position >= totalSize) return null
+        if (position < 0 || position >= state.totalSize) return null
         return sparseData[position]
     }
 
@@ -221,7 +189,7 @@ class MessagePagingController(
      * Check if a position is loaded.
      */
     fun isPositionLoaded(position: Int): Boolean {
-        if (position < 0 || position >= totalSize) return false
+        if (position < 0 || position >= state.totalSize) return false
         return loadStatus.get(position)
     }
 
@@ -284,7 +252,7 @@ class MessagePagingController(
         scope.launch {
             stateMutex.withLock {
                 // Increment generation to invalidate any in-flight loads
-                generation++
+                state.generation++
                 activeLoadJobs.clear()
                 loadStatus.clear()
                 sparseData.clear()
@@ -292,13 +260,13 @@ class MessagePagingController(
             }
 
             // Get fresh size
-            totalSize = dataSource.size()
-            _totalCount.value = totalSize
+            state.totalSize = dataSource.size()
+            _totalCount.value = state.totalSize
 
             // Reload visible range
-            if (totalSize > 0) {
-                val loadEnd = minOf(visibleEnd + config.prefetchDistance, totalSize)
-                loadRange(visibleStart, loadEnd)
+            if (state.totalSize > 0) {
+                val loadEnd = minOf(state.visibleEnd + config.prefetchDistance, state.totalSize)
+                loadRange(state.visibleStart, loadEnd)
             }
         }
     }
@@ -311,17 +279,17 @@ class MessagePagingController(
 
         try {
             // Get total size
-            totalSize = dataSource.size()
-            _totalCount.value = totalSize
-            Log.d(TAG, "Initial size: $totalSize")
+            state.totalSize = dataSource.size()
+            _totalCount.value = state.totalSize
+            Log.d(TAG, "Initial size: ${state.totalSize}")
 
-            if (totalSize == 0) {
+            if (state.totalSize == 0) {
                 emitMessages()
                 return
             }
 
             // Load initial batch (newest messages)
-            val loadCount = minOf(config.initialLoadSize, totalSize)
+            val loadCount = minOf(config.initialLoadSize, state.totalSize)
             loadRange(0, loadCount)
 
         } catch (e: Exception) {
@@ -334,11 +302,11 @@ class MessagePagingController(
     }
 
     private fun onSizeChanged(newSize: Int) {
-        val oldSize = totalSize
+        val oldSize = state.totalSize
         if (newSize == oldSize) return
 
         Log.d(TAG, "Size changed: $oldSize -> $newSize")
-        totalSize = newSize
+        state.totalSize = newSize
         _totalCount.value = newSize
 
         scope.launch {
@@ -356,8 +324,8 @@ class MessagePagingController(
                 newSize < oldSize -> {
                     // Messages deleted
                     // For simplicity, reload the visible range
-                    val loadStart = maxOf(0, visibleStart - config.prefetchDistance)
-                    val loadEnd = minOf(visibleEnd + config.prefetchDistance, newSize)
+                    val loadStart = maxOf(0, state.visibleStart - config.prefetchDistance)
+                    val loadEnd = minOf(state.visibleEnd + config.prefetchDistance, newSize)
                     loadRange(loadStart, loadEnd)
                 }
             }
@@ -367,7 +335,7 @@ class MessagePagingController(
     private suspend fun shiftPositions(shiftBy: Int) {
         stateMutex.withLock {
             // Increment generation FIRST to invalidate ALL in-flight loads immediately
-            generation++
+            state.generation++
 
             // Create new shifted maps
             val newSparseData = mutableMapOf<Int, MessageUiModel>()
@@ -375,22 +343,14 @@ class MessagePagingController(
 
             sparseData.forEach { (oldPosition, model) ->
                 val newPosition = oldPosition + shiftBy
-                if (newPosition >= 0 && newPosition < totalSize) {
+                if (newPosition >= 0 && newPosition < state.totalSize) {
                     newSparseData[newPosition] = model
                     newGuidToPosition[model.guid] = newPosition
                 }
             }
 
             // Update BitSet
-            val newLoadStatus = BitSet()
-            for (i in 0 until loadStatus.length()) {
-                if (loadStatus.get(i)) {
-                    val newPosition = i + shiftBy
-                    if (newPosition >= 0 && newPosition < totalSize) {
-                        newLoadStatus.set(newPosition)
-                    }
-                }
-            }
+            val newLoadStatus = MessagePagingHelpers.shiftBitSet(loadStatus, shiftBy, state.totalSize)
 
             // Atomic swap - all three data structures updated together under lock
             sparseData.clear()
@@ -403,7 +363,7 @@ class MessagePagingController(
             // Clear active load jobs - their positions are now invalid
             activeLoadJobs.clear()
 
-            Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy (generation=$generation)")
+            Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy (generation=${state.generation})")
 
             // NOTE: Don't emit here - wait for loadRange() to complete so we have consistent data
             // Emitting here with position 0 empty causes IndexOutOfBoundsException during scroll
@@ -411,15 +371,15 @@ class MessagePagingController(
     }
 
     private fun loadAroundRange(firstVisible: Int, lastVisible: Int) {
-        visibleStart = firstVisible
-        visibleEnd = lastVisible
+        state.visibleStart = firstVisible
+        state.visibleEnd = lastVisible
 
         // Calculate range with prefetch
         val loadStart = maxOf(0, firstVisible - config.prefetchDistance)
-        val loadEnd = minOf(lastVisible + config.prefetchDistance, totalSize)
+        val loadEnd = minOf(lastVisible + config.prefetchDistance, state.totalSize)
 
         // Find gaps in the range that need loading
-        val gaps = findGaps(loadStart, loadEnd)
+        val gaps = MessagePagingHelpers.findGaps(loadStart, loadEnd, loadStatus)
 
         if (gaps.isEmpty()) {
             Log.d(TAG, "No gaps to load in range [$loadStart, $loadEnd]")
@@ -439,27 +399,28 @@ class MessagePagingController(
         }
     }
 
-    private fun findGaps(start: Int, end: Int): List<IntRange> {
-        val gaps = mutableListOf<IntRange>()
-        var gapStart: Int? = null
+    /**
+     * Load data around a specific position (used by jumpToMessage).
+     * This is a non-debounced version of loadAroundRange for immediate loading.
+     */
+    private fun loadAroundPosition(position: Int) {
+        val loadStart = maxOf(0, position - config.prefetchDistance)
+        val loadEnd = minOf(position + config.prefetchDistance, state.totalSize)
 
-        for (i in start until end) {
-            val isLoaded = loadStatus.get(i)
+        // Find gaps in the range that need loading
+        val gaps = MessagePagingHelpers.findGaps(loadStart, loadEnd, loadStatus)
 
-            if (!isLoaded && gapStart == null) {
-                gapStart = i
-            } else if (isLoaded && gapStart != null) {
-                gaps.add(gapStart until i)
-                gapStart = null
+        if (gaps.isEmpty()) {
+            Log.d(TAG, "No gaps to load around position $position")
+            return
+        }
+
+        // Load each gap
+        gaps.forEach { gap ->
+            scope.launch {
+                loadRange(gap.first, gap.last + 1)
             }
         }
-
-        // Handle gap that extends to end
-        if (gapStart != null) {
-            gaps.add(gapStart until end)
-        }
-
-        return gaps
     }
 
     private suspend fun loadRange(start: Int, end: Int) {
@@ -477,7 +438,7 @@ class MessagePagingController(
                 return
             }
             activeLoadJobs.add(range)
-            loadGeneration = generation
+            loadGeneration = state.generation
             true
         }
 
@@ -493,8 +454,8 @@ class MessagePagingController(
             // Validate and write under mutex
             stateMutex.withLock {
                 // If generation changed, our positions are stale - discard
-                if (generation != loadGeneration) {
-                    Log.d(TAG, "Discarding stale load for [$start, $end): gen $loadGeneration != $generation")
+                if (state.generation != loadGeneration) {
+                    Log.d(TAG, "Discarding stale load for [$start, $end): gen $loadGeneration != ${state.generation}")
                     activeLoadJobs.remove(range)
                     return
                 }
@@ -544,8 +505,8 @@ class MessagePagingController(
                 return@withLock // Not enough data to warrant eviction
             }
 
-            val keepStart = maxOf(0, visibleStart - config.pageSize * config.bufferPages)
-            val keepEnd = minOf(totalSize, visibleEnd + config.pageSize * config.bufferPages)
+            val keepStart = maxOf(0, state.visibleStart - config.pageSize * config.bufferPages)
+            val keepEnd = minOf(state.totalSize, state.visibleEnd + config.pageSize * config.bufferPages)
 
             val toEvict = sparseData.keys.filter { it < keepStart || it >= keepEnd }
 
@@ -581,105 +542,10 @@ class MessagePagingController(
      */
     private fun emitMessagesLocked() {
         val list = SparseMessageList(
-            totalSize = totalSize,
+            totalSize = state.totalSize,
             loadedData = sparseData.toMap(),
-            loadedRanges = computeLoadedRanges()
+            loadedRanges = MessagePagingHelpers.computeLoadedRanges(loadStatus, state.totalSize)
         )
         _messages.value = list
-    }
-
-    private fun computeLoadedRanges(): List<IntRange> {
-        val ranges = mutableListOf<IntRange>()
-        var rangeStart: Int? = null
-
-        for (i in 0 until totalSize) {
-            val isLoaded = loadStatus.get(i)
-
-            if (isLoaded && rangeStart == null) {
-                rangeStart = i
-            } else if (!isLoaded && rangeStart != null) {
-                ranges.add(rangeStart until i)
-                rangeStart = null
-            }
-        }
-
-        if (rangeStart != null) {
-            ranges.add(rangeStart until totalSize)
-        }
-
-        return ranges
-    }
-}
-
-/**
- * Sparse message list for Compose LazyColumn.
- *
- * Unlike a regular List<MessageUiModel>, this allows for holes
- * where messages haven't been loaded yet. The UI can show
- * placeholders for unloaded positions.
- */
-data class SparseMessageList(
-    val totalSize: Int,
-    private val loadedData: Map<Int, MessageUiModel>,
-    val loadedRanges: List<IntRange>
-) {
-    companion object {
-        fun empty() = SparseMessageList(0, emptyMap(), emptyList())
-    }
-
-    val size: Int get() = totalSize
-
-    val isEmpty: Boolean get() = totalSize == 0
-
-    /**
-     * Get message at position, or null if not loaded.
-     */
-    operator fun get(index: Int): MessageUiModel? {
-        if (index < 0 || index >= totalSize) return null
-        return loadedData[index]
-    }
-
-    /**
-     * Check if position is loaded.
-     */
-    fun isLoaded(index: Int): Boolean {
-        return loadedData.containsKey(index)
-    }
-
-    /**
-     * Get all loaded messages as a list (for backwards compatibility).
-     * Note: This loses position information. Use sparingly.
-     *
-     * DEFENSIVE: Includes deduplication as final safety net before UI.
-     * If duplicates are detected, they are logged and filtered out.
-     */
-    fun toList(): List<MessageUiModel> {
-        val seenGuids = mutableSetOf<String>()
-        return loadedData.entries
-            .sortedBy { it.key }
-            .mapNotNull { (position, model) ->
-                if (model.guid in seenGuids) {
-                    // This should never happen if upstream mutex logic works correctly
-                    Log.w("SparseMessageList", "DEDUP: Duplicate GUID ${model.guid} at position $position - skipping")
-                    null
-                } else {
-                    seenGuids.add(model.guid)
-                    model
-                }
-            }
-    }
-
-    /**
-     * Get loaded messages in a range.
-     */
-    fun getRange(start: Int, end: Int): List<MessageUiModel?> {
-        return (start until end).map { loadedData[it] }
-    }
-
-    /**
-     * Find position by GUID.
-     */
-    fun findPositionByGuid(guid: String): Int? {
-        return loadedData.entries.find { it.value.guid == guid }?.key
     }
 }

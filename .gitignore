@@ -69,8 +69,8 @@ key.properties
 google-services.json
 credentials.json
 
-# Legacy/reference code
-referential-old-app/
+# Reference repositories (separate git repos)
+references/
 
 # Misc
 *.swp

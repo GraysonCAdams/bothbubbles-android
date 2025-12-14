@@ -167,7 +167,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun sendMessageVia(
         text: String,
-        attachments: List<android.net.Uri>,
+        attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
         onClearInput: () -> Unit,
         onDraftCleared: () -> Unit

@@ -135,7 +135,7 @@ class ConversationsViewModel @Inject constructor(
      */
     private fun observeDelegateStates() {
         viewModelScope.launch {
-            // Observer delegate state
+            // Observer delegate state - use array form for 12+ flows
             combine(
                 observerDelegate.isConnected,
                 observerDelegate.connectionState,
@@ -149,9 +149,20 @@ class ConversationsViewModel @Inject constructor(
                 observerDelegate.isInitialSync,
                 observerDelegate.syncError,
                 observerDelegate.isSyncCorrupted
-            ) { isConnected, connectionState, isSyncing, syncProgress, syncStage,
-                syncTotalChats, syncProcessedChats, syncedMessages, syncCurrentChatName,
-                isInitialSync, syncError, isSyncCorrupted ->
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                val isConnected = values[0] as Boolean
+                val connectionState = values[1] as com.bothbubbles.services.socket.ConnectionState
+                val isSyncing = values[2] as Boolean
+                val syncProgress = values[3] as Float
+                val syncStage = values[4] as String?
+                val syncTotalChats = values[5] as Int
+                val syncProcessedChats = values[6] as Int
+                val syncedMessages = values[7] as Int
+                val syncCurrentChatName = values[8] as String?
+                val isInitialSync = values[9] as Boolean
+                val syncError = values[10] as String?
+                val isSyncCorrupted = values[11] as Boolean
 
                 // Check if this was initial sync completion for notification
                 val wasInitialSync = _uiState.value.isInitialSync

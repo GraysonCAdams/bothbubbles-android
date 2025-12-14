@@ -3,6 +3,7 @@ package com.bothbubbles.di
 import android.content.Context
 import androidx.room.Room
 import com.bothbubbles.data.local.db.BothBubblesDatabase
+import com.bothbubbles.data.local.db.DatabaseMigrations
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
@@ -53,7 +54,7 @@ object DatabaseModule {
             BothBubblesDatabase::class.java,
             BothBubblesDatabase.DATABASE_NAME
         )
-            .addMigrations(*BothBubblesDatabase.ALL_MIGRATIONS)
+            .addMigrations(*DatabaseMigrations.ALL_MIGRATIONS)
             // Only destroy data on downgrade (e.g., rolling back to older app version)
             // Missing migrations will crash - this is intentional to catch issues early
             .fallbackToDestructiveMigrationOnDowngrade()

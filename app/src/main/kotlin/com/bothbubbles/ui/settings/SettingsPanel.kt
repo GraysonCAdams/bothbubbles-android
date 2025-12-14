@@ -24,12 +24,36 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.settings.about.AboutContent
+import com.bothbubbles.ui.settings.about.OpenSourceLicensesContent
+import com.bothbubbles.ui.settings.archived.ArchivedChatsContent
+import com.bothbubbles.ui.settings.autoresponder.AutoResponderSettingsContent
+import com.bothbubbles.ui.settings.blocked.BlockedContactsContent
+import com.bothbubbles.ui.settings.categorization.CategorizationSettingsContent
+import com.bothbubbles.ui.settings.export.ChatSelectionDialog
+import com.bothbubbles.ui.settings.export.DatePickerDialog
+import com.bothbubbles.ui.settings.export.ExportCompleteDialog
+import com.bothbubbles.ui.settings.export.ExportContent
+import com.bothbubbles.ui.settings.export.ExportErrorDialog
+import com.bothbubbles.ui.settings.export.ExportProgressDialog
+import com.bothbubbles.ui.settings.export.ExportViewModel
+import com.bothbubbles.services.export.ExportProgress
+import com.bothbubbles.ui.settings.notifications.NotificationSettingsContent
+import com.bothbubbles.ui.settings.server.ServerSettingsContent
+import com.bothbubbles.ui.settings.sms.SmsBackupContent
+import com.bothbubbles.ui.settings.sms.SmsSettingsContent
+import com.bothbubbles.ui.settings.spam.SpamSettingsContent
+import com.bothbubbles.ui.settings.swipe.SwipeSettingsContent
+import com.bothbubbles.ui.settings.sync.SyncSettingsContent
+import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
 
 /**
  * Settings panel that slides in from the right.
@@ -231,7 +255,7 @@ fun SettingsPanel(
                         SyncSettingsContent()
                     }
                     SettingsPanelPage.Export -> {
-                        ExportContent()
+                        ExportPanelContent()
                     }
                     SettingsPanelPage.Sms -> {
                         SmsSettingsContent(
@@ -276,5 +300,89 @@ fun SettingsPanel(
                 }
             }
         }
+    }
+}
+
+/**
+ * Export panel content wrapper with dialogs.
+ * Wraps ExportContent with required state and dialog management.
+ */
+@Composable
+private fun ExportPanelContent(
+    viewModel: ExportViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    var showChatPicker by remember { mutableStateOf(false) }
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    var showEndDatePicker by remember { mutableStateOf(false) }
+
+    ExportContent(
+        uiState = uiState,
+        viewModel = viewModel,
+        onShowChatPicker = { showChatPicker = true },
+        onShowStartDatePicker = { showStartDatePicker = true },
+        onShowEndDatePicker = { showEndDatePicker = true }
+    )
+
+    // Chat picker dialog
+    if (showChatPicker) {
+        ChatSelectionDialog(
+            chats = uiState.availableChats,
+            selectedChatGuids = uiState.selectedChatGuids,
+            onChatToggle = { viewModel.toggleChatSelection(it) },
+            onSelectAll = { viewModel.setAllChatsSelected(true) },
+            onDeselectAll = { viewModel.setAllChatsSelected(false) },
+            onDismiss = { showChatPicker = false }
+        )
+    }
+
+    // Date picker dialogs
+    if (showStartDatePicker) {
+        DatePickerDialog(
+            title = "Start Date",
+            selectedDate = uiState.startDate,
+            onDateSelected = { viewModel.setStartDate(it) },
+            onDismiss = { showStartDatePicker = false }
+        )
+    }
+
+    if (showEndDatePicker) {
+        DatePickerDialog(
+            title = "End Date",
+            selectedDate = uiState.endDate,
+            onDateSelected = { viewModel.setEndDate(it) },
+            onDismiss = { showEndDatePicker = false }
+        )
+    }
+
+    // Progress/Result dialogs
+    when (val progress = uiState.exportProgress) {
+        is ExportProgress.Loading,
+        is ExportProgress.Generating,
+        is ExportProgress.Saving -> {
+            ExportProgressDialog(
+                progress = progress,
+                onCancel = { viewModel.cancelExport() }
+            )
+        }
+        is ExportProgress.Complete -> {
+            ExportCompleteDialog(
+                result = progress,
+                onDismiss = { viewModel.resetExportState() }
+            )
+        }
+        is ExportProgress.Error -> {
+            ExportErrorDialog(
+                message = progress.message,
+                onDismiss = { viewModel.resetExportState() }
+            )
+        }
+        ExportProgress.Cancelled -> {
+            LaunchedEffect(Unit) {
+                viewModel.resetExportState()
+            }
+        }
+        ExportProgress.Idle -> { /* No dialog */ }
     }
 }

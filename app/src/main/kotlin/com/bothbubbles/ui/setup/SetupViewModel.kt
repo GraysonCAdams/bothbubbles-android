@@ -1,55 +1,52 @@
 package com.bothbubbles.ui.setup
 
-import android.Manifest
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.os.Build
-import android.os.PowerManager
-import android.provider.Settings
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.categorization.EntityExtractionService
-import com.bothbubbles.services.categorization.MlModelUpdateWorker
 import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.services.sms.SmsCapabilityStatus
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.sync.SyncService
-import com.bothbubbles.services.sync.SyncState
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import com.bothbubbles.ui.setup.delegates.*
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltViewModel
 class SetupViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsDataStore: SettingsDataStore,
-    private val api: BothBubblesApi,
-    private val socketService: SocketService,
-    private val syncService: SyncService,
-    private val smsPermissionHelper: SmsPermissionHelper,
-    private val entityExtractionService: EntityExtractionService,
-    private val firebaseConfigManager: FirebaseConfigManager,
-    private val fcmTokenManager: FcmTokenManager,
+    settingsDataStore: SettingsDataStore,
+    api: BothBubblesApi,
+    socketService: SocketService,
+    syncService: SyncService,
+    smsPermissionHelper: SmsPermissionHelper,
+    entityExtractionService: EntityExtractionService,
+    firebaseConfigManager: FirebaseConfigManager,
+    fcmTokenManager: FcmTokenManager,
     private val smsRepository: SmsRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SetupUiState())
     val uiState: StateFlow<SetupUiState> = _uiState.asStateFlow()
+
+    // Delegates for different setup steps
+    private val permissionsDelegate = PermissionsDelegate(context)
+    private val serverConnectionDelegate = ServerConnectionDelegate(settingsDataStore, api)
+    private val smsSetupDelegate = SmsSetupDelegate(smsPermissionHelper, settingsDataStore, smsRepository)
+    private val mlModelDelegate = MlModelDelegate(context, settingsDataStore, entityExtractionService)
+    private val syncDelegate = SyncDelegate(settingsDataStore, socketService, syncService, firebaseConfigManager, fcmTokenManager)
+    private val autoResponderDelegate = AutoResponderDelegate(settingsDataStore)
 
     init {
         checkPermissions()
@@ -58,425 +55,110 @@ class SetupViewModel @Inject constructor(
         checkMlModelStatus()
     }
 
-    private fun loadSmsStatus() {
-        val status = smsPermissionHelper.getSmsCapabilityStatus()
-        _uiState.update { it.copy(smsCapabilityStatus = status) }
-    }
+    // ===== Permissions =====
+
+    fun checkPermissions() = permissionsDelegate.checkPermissions(_uiState)
+
+    // ===== Server Connection =====
 
     private fun loadSavedSettings() {
         viewModelScope.launch {
-            val serverAddress = settingsDataStore.serverAddress.first()
-            val password = settingsDataStore.guidAuthKey.first()
-            _uiState.update {
-                it.copy(
-                    serverUrl = serverAddress,
-                    password = password
-                )
-            }
+            serverConnectionDelegate.loadSavedSettings(_uiState)
         }
     }
 
-    fun checkPermissions() {
-        val hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            ContextCompat.checkSelfPermission(
-                context,
-                Manifest.permission.POST_NOTIFICATIONS
-            ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+    fun updateServerUrl(url: String) = serverConnectionDelegate.updateServerUrl(_uiState, url)
 
-        val hasContactsPermission = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.READ_CONTACTS
-        ) == PackageManager.PERMISSION_GRANTED
+    fun updatePassword(password: String) = serverConnectionDelegate.updatePassword(_uiState, password)
 
-        val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
-        val isBatteryOptimizationDisabled = powerManager.isIgnoringBatteryOptimizations(context.packageName)
+    fun testConnection() = serverConnectionDelegate.testConnection(viewModelScope, _uiState)
 
-        _uiState.update {
-            it.copy(
-                hasNotificationPermission = hasNotificationPermission,
-                hasContactsPermission = hasContactsPermission,
-                isBatteryOptimizationDisabled = isBatteryOptimizationDisabled
-            )
-        }
-    }
+    fun onQrCodeScanned(data: String) = serverConnectionDelegate.onQrCodeScanned(viewModelScope, _uiState, data)
 
-    fun updateServerUrl(url: String) {
-        _uiState.update { it.copy(serverUrl = url, connectionError = null) }
-    }
+    fun showQrScanner() = serverConnectionDelegate.showQrScanner(_uiState)
 
-    fun updatePassword(password: String) {
-        _uiState.update { it.copy(password = password, connectionError = null) }
-    }
-
-    fun testConnection() {
-        val serverUrl = _uiState.value.serverUrl.trim()
-        val password = _uiState.value.password.trim()
-
-        if (serverUrl.isBlank()) {
-            _uiState.update { it.copy(connectionError = "Please enter a server URL") }
-            return
-        }
-
-        if (password.isBlank()) {
-            _uiState.update { it.copy(connectionError = "Please enter a password") }
-            return
-        }
-
-        viewModelScope.launch {
-            _uiState.update { it.copy(isTestingConnection = true, connectionError = null) }
-
-            try {
-                // Save settings temporarily to make the API call
-                settingsDataStore.setServerAddress(serverUrl)
-                settingsDataStore.setGuidAuthKey(password)
-
-                // Test connection
-                val response = api.getServerInfo()
-
-                if (response.isSuccessful) {
-                    // Persist server capabilities for feature flag detection
-                    val serverInfo = response.body()?.data
-                    settingsDataStore.setServerCapabilities(
-                        osVersion = serverInfo?.osVersion,
-                        serverVersion = serverInfo?.serverVersion,
-                        privateApiEnabled = serverInfo?.privateApi ?: false,
-                        helperConnected = serverInfo?.helperConnected ?: false
-                    )
-
-                    _uiState.update {
-                        it.copy(
-                            isTestingConnection = false,
-                            isConnectionSuccessful = true,
-                            connectionError = null
-                        )
-                    }
-                } else {
-                    val errorMessage = when (response.code()) {
-                        401 -> "Invalid password"
-                        404 -> "Server not found"
-                        else -> "Connection failed: ${response.code()}"
-                    }
-                    _uiState.update {
-                        it.copy(
-                            isTestingConnection = false,
-                            isConnectionSuccessful = false,
-                            connectionError = errorMessage
-                        )
-                    }
-                }
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isTestingConnection = false,
-                        isConnectionSuccessful = false,
-                        connectionError = "Connection failed: ${e.message}"
-                    )
-                }
-            }
-        }
-    }
-
-    fun onQrCodeScanned(data: String) {
-        try {
-            // QR code format: ["password", "serverUrl"]
-            val parsed = data.trim()
-            if (parsed.startsWith("[") && parsed.endsWith("]")) {
-                val content = parsed.substring(1, parsed.length - 1)
-                val parts = content.split(",").map { it.trim().removeSurrounding("\"") }
-                if (parts.size >= 2) {
-                    val password = parts[0]
-                    val serverUrl = parts[1]
-                    _uiState.update {
-                        it.copy(
-                            password = password,
-                            serverUrl = serverUrl,
-                            showQrScanner = false
-                        )
-                    }
-                    // Auto-test after scanning
-                    testConnection()
-                    return
-                }
-            }
-            _uiState.update { it.copy(connectionError = "Invalid QR code format") }
-        } catch (e: Exception) {
-            _uiState.update { it.copy(connectionError = "Failed to parse QR code") }
-        }
-    }
-
-    fun showQrScanner() {
-        _uiState.update { it.copy(showQrScanner = true) }
-    }
-
-    fun hideQrScanner() {
-        _uiState.update { it.copy(showQrScanner = false) }
-    }
-
-    // Sync settings
-    // NOTE: messagesPerChat is now a fixed optimal value (500) for Signal-style pagination.
-    // Users no longer select this - we load enough for context + search, and fetch more on-demand.
-
-    fun updateSkipEmptyChats(skip: Boolean) {
-        _uiState.update { it.copy(skipEmptyChats = skip) }
-    }
-
-    // SMS settings
-    fun updateSmsEnabled(enabled: Boolean) {
-        _uiState.update { it.copy(smsEnabled = enabled) }
-    }
-
-    /**
-     * Get missing SMS permissions as an array for the permission launcher
-     */
-    fun getMissingSmsPermissions(): Array<String> {
-        return smsPermissionHelper.getMissingSmsPermissions().toTypedArray()
-    }
-
-    /**
-     * Get intent to request default SMS app status
-     */
-    fun getDefaultSmsAppIntent(): Intent {
-        return smsPermissionHelper.createDefaultSmsAppIntent()
-    }
-
-    /**
-     * Called after SMS permissions are granted/denied
-     */
-    fun onSmsPermissionsResult() {
-        loadSmsStatus()
-    }
-
-    /**
-     * Called after default SMS app request completes
-     */
-    fun onDefaultSmsAppResult() {
-        loadSmsStatus()
-        // If we're now the default SMS app, auto-enable SMS
-        if (smsPermissionHelper.isDefaultSmsApp()) {
-            viewModelScope.launch {
-                settingsDataStore.setSmsEnabled(true)
-            }
-            _uiState.update { it.copy(smsEnabled = true) }
-        }
-    }
-
-    /**
-     * Finalize SMS settings when completing setup
-     */
-    fun finalizeSmsSettings() {
-        viewModelScope.launch {
-            settingsDataStore.setSmsEnabled(_uiState.value.smsEnabled)
-        }
-    }
-
-    // ===== ML Model Methods =====
-
-    /**
-     * Check if ML model is already downloaded and network status
-     */
-    private fun checkMlModelStatus() {
-        viewModelScope.launch {
-            val isDownloaded = entityExtractionService.checkModelDownloaded()
-            _uiState.update {
-                it.copy(
-                    mlModelDownloaded = isDownloaded,
-                    isOnWifi = isOnWifi()
-                )
-            }
-        }
-    }
-
-    /**
-     * Check if device is on WiFi
-     */
-    private fun isOnWifi(): Boolean {
-        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-    }
-
-    /**
-     * Update the checkbox for enabling cellular auto-updates
-     */
-    fun updateMlCellularAutoUpdate(enabled: Boolean) {
-        _uiState.update { it.copy(mlEnableCellularUpdates = enabled) }
-    }
-
-    /**
-     * Start ML model download and enable categorization
-     */
-    fun downloadMlModel() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(mlDownloading = true, mlDownloadError = null) }
-
-            val allowCellular = !isOnWifi() // If not on WiFi, user has consented to cellular
-            val success = entityExtractionService.downloadModel(allowCellular)
-
-            if (success) {
-                // Save to settings
-                settingsDataStore.setMlModelDownloaded(true)
-                // Enable categorization
-                settingsDataStore.setCategorizationEnabled(true)
-                // If downloaded on cellular and user checked the box, enable cellular updates
-                if (!isOnWifi() && _uiState.value.mlEnableCellularUpdates) {
-                    settingsDataStore.setMlAutoUpdateOnCellular(true)
-                }
-                // Schedule periodic ML model updates
-                MlModelUpdateWorker.schedule(context)
-                // Mark ML setup complete (setup finishes after sync)
-                _uiState.update {
-                    it.copy(
-                        mlDownloading = false,
-                        mlModelDownloaded = true
-                    )
-                }
-            } else {
-                _uiState.update {
-                    it.copy(
-                        mlDownloading = false,
-                        mlDownloadError = "Failed to download ML model"
-                    )
-                }
-            }
-        }
-    }
-
-    /**
-     * Skip ML model download - categorization stays disabled
-     */
-    fun skipMlDownload() {
-        _uiState.update {
-            it.copy(
-                mlDownloadSkipped = true
-            )
-        }
-    }
+    fun hideQrScanner() = serverConnectionDelegate.hideQrScanner(_uiState)
 
     fun skipServerSetup() {
-        // Clear server settings when skipping
         viewModelScope.launch {
-            settingsDataStore.setServerAddress("")
-            settingsDataStore.setGuidAuthKey("")
-        }
-        _uiState.update {
-            it.copy(
-                serverUrl = "",
-                password = "",
-                isConnectionSuccessful = false,
-                connectionError = null
-            )
+            serverConnectionDelegate.skipServerSetup(_uiState)
         }
     }
+
+    // ===== SMS Setup =====
+
+    private fun loadSmsStatus() = smsSetupDelegate.loadSmsStatus(_uiState)
+
+    fun updateSmsEnabled(enabled: Boolean) = smsSetupDelegate.updateSmsEnabled(_uiState, enabled)
+
+    fun getMissingSmsPermissions(): Array<String> = smsSetupDelegate.getMissingSmsPermissions()
+
+    fun getDefaultSmsAppIntent(): Intent = smsSetupDelegate.getDefaultSmsAppIntent()
+
+    fun onSmsPermissionsResult() = smsSetupDelegate.onSmsPermissionsResult(_uiState)
+
+    fun onDefaultSmsAppResult() = smsSetupDelegate.onDefaultSmsAppResult(viewModelScope, _uiState)
+
+    fun finalizeSmsSettings() {
+        viewModelScope.launch {
+            smsSetupDelegate.finalizeSmsSettings(_uiState)
+        }
+    }
+
+    fun loadUserPhoneNumber() = smsSetupDelegate.loadUserPhoneNumber(_uiState)
+
+    // ===== ML Model =====
+
+    private fun checkMlModelStatus() {
+        viewModelScope.launch {
+            mlModelDelegate.checkMlModelStatus(_uiState)
+        }
+    }
+
+    fun updateMlCellularAutoUpdate(enabled: Boolean) = mlModelDelegate.updateMlCellularAutoUpdate(_uiState, enabled)
+
+    fun downloadMlModel() = mlModelDelegate.downloadMlModel(viewModelScope, _uiState)
+
+    fun skipMlDownload() = mlModelDelegate.skipMlDownload(_uiState)
+
+    // ===== Sync =====
+
+    fun updateSkipEmptyChats(skip: Boolean) = syncDelegate.updateSkipEmptyChats(_uiState, skip)
 
     fun completeSetupWithoutSync() {
         viewModelScope.launch {
-            settingsDataStore.setSetupComplete(true)
-            _uiState.update { it.copy(isSyncComplete = true) }
+            syncDelegate.completeSetupWithoutSync(_uiState)
         }
     }
 
-    fun startSync() {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isSyncing = true, syncProgress = 0f, syncError = null) }
+    fun startSync() = syncDelegate.startSync(viewModelScope, _uiState)
 
-            try {
-                // Connect socket first
-                socketService.connect()
+    // ===== Auto-responder =====
 
-                // Initialize FCM for push notifications (non-blocking)
-                launch {
-                    try {
-                        firebaseConfigManager.initializeFromServer()
-                        fcmTokenManager.refreshToken()
-                    } catch (e: Exception) {
-                        android.util.Log.w("SetupViewModel", "FCM init failed", e)
-                    }
-                }
+    fun updateAutoResponderFilter(filter: String) = autoResponderDelegate.updateAutoResponderFilter(_uiState, filter)
 
-                // Mark setup complete IMMEDIATELY so user can use the app
-                // Sync will continue in background
-                settingsDataStore.setSetupComplete(true)
-                _uiState.update {
-                    it.copy(
-                        isSyncing = false,
-                        isSyncComplete = true
-                    )
-                }
+    fun enableAutoResponder() = autoResponderDelegate.enableAutoResponder(viewModelScope, _uiState)
 
-                // Start initial sync in SyncService's own scope (survives ViewModel destruction)
-                // Categorization runs automatically after sync completes in SyncService
-                syncService.startInitialSync(
-                    messagesPerChat = _uiState.value.messagesPerChat
-                )
-            } catch (e: Exception) {
-                _uiState.update {
-                    it.copy(
-                        isSyncing = false,
-                        syncError = "Failed to start sync: ${e.message}"
-                    )
-                }
-            }
-        }
-    }
+    fun skipAutoResponder() = autoResponderDelegate.skipAutoResponder(viewModelScope, _uiState)
+
+    // ===== Navigation =====
 
     fun nextPage() {
         val currentPage = _uiState.value.currentPage
         if (currentPage < 6) {
-            _uiState.update { it.copy(currentPage = currentPage + 1) }
+            _uiState.value = _uiState.value.copy(currentPage = currentPage + 1)
         }
     }
 
     fun previousPage() {
         val currentPage = _uiState.value.currentPage
         if (currentPage > 0) {
-            _uiState.update { it.copy(currentPage = currentPage - 1) }
+            _uiState.value = _uiState.value.copy(currentPage = currentPage - 1)
         }
     }
 
     fun setPage(page: Int) {
-        _uiState.update { it.copy(currentPage = page.coerceIn(0, 6)) }
-    }
-
-    // Auto-responder methods
-
-    fun loadUserPhoneNumber() {
-        val phone = smsRepository.getAvailableSims().firstOrNull()?.number
-            ?.takeIf { it.isNotBlank() }
-            ?.let { formatPhone(it) }
-        _uiState.update { it.copy(userPhoneNumber = phone) }
-    }
-
-    fun updateAutoResponderFilter(filter: String) {
-        _uiState.update { it.copy(autoResponderFilter = filter) }
-    }
-
-    fun enableAutoResponder() {
-        viewModelScope.launch {
-            settingsDataStore.setAutoResponderEnabled(true)
-            settingsDataStore.setAutoResponderFilter(_uiState.value.autoResponderFilter)
-            _uiState.update { it.copy(autoResponderEnabled = true) }
-        }
-    }
-
-    fun skipAutoResponder() {
-        viewModelScope.launch {
-            settingsDataStore.setAutoResponderEnabled(false)
-            _uiState.update { it.copy(autoResponderEnabled = false) }
-        }
-    }
-
-    private fun formatPhone(phone: String): String {
-        val digits = phone.replace(Regex("[^0-9]"), "")
-        return when {
-            digits.length == 10 -> "(${digits.substring(0, 3)}) ${digits.substring(3, 6)}-${digits.substring(6)}"
-            digits.length == 11 && digits.startsWith("1") ->
-                "(${digits.substring(1, 4)}) ${digits.substring(4, 7)}-${digits.substring(7)}"
-            else -> phone
-        }
+        _uiState.value = _uiState.value.copy(currentPage = page.coerceIn(0, 6))
     }
 }
 

@@ -22,7 +22,6 @@ import com.bothbubbles.services.contacts.ContactsContentObserver
 import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
-import com.bothbubbles.services.socket.SocketConnectionManager
 import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
@@ -40,9 +39,6 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
 
     @Inject
     lateinit var workerFactory: HiltWorkerFactory
-
-    @Inject
-    lateinit var socketConnectionManager: SocketConnectionManager
 
     @Inject
     lateinit var connectionModeManager: ConnectionModeManager
@@ -133,11 +129,6 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
         val connectionModeId = PerformanceProfiler.start("App.connectionModeManager")
         connectionModeManager.initialize()
         PerformanceProfiler.end(connectionModeId)
-
-        // Keep socket connection manager for legacy/fallback (will be phased out)
-        val socketId = PerformanceProfiler.start("App.socketManager")
-        socketConnectionManager.initialize()
-        PerformanceProfiler.end(socketId)
 
         // Initialize SMS content observer for external SMS detection (Android Auto, etc.)
         initializeSmsObserver()

@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.util.NetworkConfig
@@ -32,6 +33,7 @@ class SyncService @Inject constructor(
     private val chatSyncHelper: ChatSyncHelper,
     private val messageSyncHelper: MessageSyncHelper,
     private val syncOperations: SyncOperations,
+    private val smsRepository: SmsRepository,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -380,170 +382,45 @@ class SyncService @Inject constructor(
     }
 
     /**
-     * Clear all local data and perform fresh sync
+     * Clear all local data and perform fresh sync.
+     * Delegates to SyncOperations for database cleanup.
      */
-    suspend fun performCleanSync(): Result<Unit> = runCatching {
-        Log.i(TAG, "Performing clean sync - clearing local data")
-        _syncState.value = SyncState.Syncing(
-            progress = 0f,
-            stage = "Clearing local data...",
-            isInitialSync = true
+    suspend fun performCleanSync(): Result<Unit> =
+        syncOperations.performCleanSync(
+            performInitialSync = { performInitialSync() },
+            onStateUpdate = { _syncState.value = it },
+            onLastSyncTimeUpdate = { _lastSyncTime.value = it }
         )
-
-        // Clear all messages and chats
-        messageDao.deleteAllMessages()
-        chatDao.deleteAllChats()
-
-        // Clear sync range tracking
-        syncRangeTracker.clearAllRanges()
-
-        // Reset sync time and clear sync progress
-        settingsDataStore.setLastSyncTime(0L)
-        settingsDataStore.clearSyncProgress()
-        _lastSyncTime.value = 0L
-
-        // Perform initial sync
-        performInitialSync().getOrThrow()
-    }
 
     /**
      * Purge all data and reimport with unified chat groups.
-     * This creates proper iMessage/SMS conversation merging for single contacts.
-     * Groups (both SMS/MMS and iMessage) remain separate.
-     *
-     * iMessage and SMS import run concurrently for faster sync.
-     * Race conditions on unified group creation are handled by:
-     * - Atomic getOrCreateGroup in UnifiedChatGroupDao
-     * - iMessage claiming primary status if SMS created the group first
+     * Delegates to SyncOperations for database cleanup and concurrent import.
      */
-    suspend fun performUnifiedResync(): Result<Unit> = runCatching {
-        Log.i(TAG, "Starting unified resync - purging all data (concurrent mode)")
-        _syncState.value = SyncState.Syncing(0f, "Clearing existing data...")
-
-        // Clear all existing data including unified groups
-        messageDao.deleteAllMessages()
-        chatDao.deleteAllChatHandleCrossRefs()
-        chatDao.deleteAllChats()
-        handleDao.deleteAllHandles()
-        unifiedChatGroupDao.deleteAllData()
-
-        // Clear sync range tracking
-        syncRangeTracker.clearAllRanges()
-
-        // Reset sync markers and clear sync progress
-        settingsDataStore.setLastSyncTime(0L)
-        settingsDataStore.clearSyncProgress()
-        _lastSyncTime.value = 0L
-
-        _syncState.value = SyncState.Syncing(
-            progress = 0.1f,
-            stage = "Importing messages...",
-            isInitialSync = true
-        )
-
-        // Initialize progress tracker
-        val progressTracker = SyncProgressTracker()
-
-        // Helper to update progress display - tracks iMessage and SMS separately
-        fun updateProgress() {
-            val imPct = progressTracker.iMessageProgress.get()
-            val smsPct = progressTracker.smsProgress.get()
-            val imComplete = imPct >= 100
-            val smsIsDone = smsPct >= 100
-            val smsTotal = progressTracker.smsTotalThreads.get()
-            val smsCurrent = progressTracker.smsCurrentThread.get()
-            val smsProgressFloat = if (smsTotal > 0) smsCurrent.toFloat() / smsTotal else 0f
-
-            // Combined progress: 10% base + 85% for actual work (split between iMessage and SMS)
-            val combinedProgress = progressTracker.calculateUnifiedResyncProgress()
-            _syncState.value = SyncState.Syncing(
-                progress = combinedProgress,
-                stage = "Importing messages...",
-                isInitialSync = true,
-                iMessageProgress = imPct / 100f,
-                iMessageComplete = imComplete,
-                smsProgress = smsProgressFloat,
-                smsComplete = smsIsDone,
-                smsCurrent = smsCurrent,
-                smsTotal = smsTotal
-            )
-        }
-
-        // Run iMessage and SMS import concurrently
-        coroutineScope {
-            // iMessage sync (server data)
-            val iMessageJob = async {
-                Log.i(TAG, "Starting concurrent iMessage sync")
+    suspend fun performUnifiedResync(): Result<Unit> =
+        syncOperations.performUnifiedResync(
+            performInitialSync = { onProgress ->
                 performInitialSync(
-                    onProgress = { progress, _, _, _ ->
-                        progressTracker.iMessageProgress.set(progress)
-                        updateProgress()
-                    }
-                ).getOrThrow()
-                progressTracker.iMessageProgress.set(100)
-                updateProgress()
-                Log.i(TAG, "Concurrent iMessage sync completed")
-            }
-
-            // SMS import (local device data)
-            val smsJob = async {
-                Log.i(TAG, "Starting concurrent SMS import")
-                smsRepository.importAllThreads(
-                    onProgress = { current, total ->
-                        progressTracker.smsCurrentThread.set(current)
-                        progressTracker.smsTotalThreads.set(total)
-                        progressTracker.smsProgress.set((current * 100) / maxOf(total, 1))
-                        updateProgress()
+                    onProgress = { progress, chatsSynced, chatsTotal, messagesSynced ->
+                        onProgress(progress, chatsSynced, chatsTotal, messagesSynced)
                     }
                 )
-                progressTracker.smsProgress.set(100)
-                updateProgress()
-                Log.i(TAG, "Concurrent SMS import completed")
+            },
+            onStateUpdate = { _syncState.value = it }
+        ).also {
+            if (it.isSuccess) {
+                _lastSyncTime.value = System.currentTimeMillis()
             }
-
-            // Wait for both to complete
-            iMessageJob.await()
-            smsJob.await()
         }
 
-        _syncState.value = SyncState.Completed
-        Log.i(TAG, "Unified resync completed (concurrent)")
-        Unit
-    }.onFailure { e ->
-        Log.e(TAG, "Unified resync failed", e)
-        _syncState.value = SyncState.Error(e.message ?: "Unified resync failed")
-    }
-
     /**
-     * Clean up server data (iMessage) while keeping local SMS/MMS
-     * Used when disconnecting from BlueBubbles server
+     * Clean up server data (iMessage) while keeping local SMS/MMS.
+     * Delegates to SyncOperations for database cleanup.
      */
-    suspend fun cleanupServerData(): Result<Unit> = runCatching {
-        Log.i(TAG, "Cleaning up server data - keeping local SMS/MMS")
-        _syncState.value = SyncState.Syncing(0f, "Removing server data...")
-
-        // Delete server messages (iMessage)
-        _syncState.value = SyncState.Syncing(0.3f, "Removing server messages...")
-        messageDao.deleteServerMessages()
-
-        // Delete cross-references for server chats
-        _syncState.value = SyncState.Syncing(0.6f, "Removing server conversations...")
-        chatDao.deleteServerChatCrossRefs()
-
-        // Delete server chats
-        chatDao.deleteServerChats()
-
-        // Reset sync time since server data is gone
-        settingsDataStore.setLastSyncTime(0L)
-        _lastSyncTime.value = 0L
-
-        _syncState.value = SyncState.Completed
-        Log.i(TAG, "Server data cleanup completed")
-        Unit
-    }.onFailure { e ->
-        Log.e(TAG, "Server data cleanup failed", e)
-        _syncState.value = SyncState.Error(e.message ?: "Cleanup failed")
-    }
+    suspend fun cleanupServerData(): Result<Unit> =
+        syncOperations.cleanupServerData(
+            onStateUpdate = { _syncState.value = it },
+            onLastSyncTimeUpdate = { _lastSyncTime.value = it }
+        )
 
     /**
      * Start initial sync in the service's own scope.

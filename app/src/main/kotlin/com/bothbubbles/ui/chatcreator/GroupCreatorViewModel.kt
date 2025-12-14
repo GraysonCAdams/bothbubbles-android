@@ -437,14 +437,7 @@ data class GroupCreatorUiState(
     val createdChatGuid: String? = null
 )
 
-@kotlinx.serialization.Serializable
-data class GroupParticipant(
-    val address: String,
-    val displayName: String,
-    val service: String,
-    val avatarPath: String? = null,
-    val isManualEntry: Boolean = false
-)
+// GroupParticipant is defined in ChatCreatorModels.kt
 
 enum class GroupServiceType {
     UNDETERMINED,

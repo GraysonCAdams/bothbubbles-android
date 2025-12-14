@@ -9,6 +9,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.util.error.AppError
+import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -235,7 +236,7 @@ class ChatOperationsDelegate @Inject constructor(
             )
             true
         } catch (e: Exception) {
-            _operationError.value = AppError.ValidationError("Failed to block contact: ${e.message}")
+            _operationError.value = ValidationError.InvalidInput("contact", "Failed to block: ${e.message ?: "unknown error"}")
             false
         }
     }

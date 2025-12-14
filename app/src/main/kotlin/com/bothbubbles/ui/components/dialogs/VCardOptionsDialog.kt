@@ -11,7 +11,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.services.contacts.VCardService
+import com.bothbubbles.services.contacts.ContactData
+import com.bothbubbles.services.contacts.FieldOptions
 
 /**
  * Dialog for selecting which contact fields to include in a vCard before sharing
@@ -19,13 +20,13 @@ import com.bothbubbles.services.contacts.VCardService
 @Composable
 fun VCardOptionsDialog(
     visible: Boolean,
-    contactData: VCardService.ContactData?,
+    contactData: ContactData?,
     onDismiss: () -> Unit,
-    onConfirm: (VCardService.FieldOptions) -> Unit
+    onConfirm: (FieldOptions) -> Unit
 ) {
     if (!visible || contactData == null) return
 
-    var options by remember { mutableStateOf(VCardService.FieldOptions()) }
+    var options by remember { mutableStateOf(FieldOptions()) }
 
     AlertDialog(
         onDismissRequest = onDismiss,

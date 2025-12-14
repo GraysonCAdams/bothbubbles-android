@@ -134,7 +134,7 @@ class SocketForegroundService : Service() {
         // Cancel the notification update job - prevents zombie collectors
         notificationJob?.cancel()
         notificationJob = null
-        // Don't disconnect socket here - let SocketConnectionManager handle it
+        // Don't disconnect socket here - let ConnectionModeManager handle it
         // Don't cancel applicationScope - it's application-wide
         super.onDestroy()
     }

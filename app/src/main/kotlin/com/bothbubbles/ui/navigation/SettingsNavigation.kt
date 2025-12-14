@@ -191,8 +191,8 @@ fun NavGraphBuilder.settingsNavigation(
     // Image Quality Settings
     composable<Screen.ImageQualitySettings> { backStackEntry ->
         val route: Screen.ImageQualitySettings = backStackEntry.toRoute()
-        com.bothbubbles.ui.settings.messages.SendQualityScreen(
-            onBackClick = {
+        com.bothbubbles.ui.settings.attachments.ImageQualitySettingsScreen(
+            onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
             }
         )

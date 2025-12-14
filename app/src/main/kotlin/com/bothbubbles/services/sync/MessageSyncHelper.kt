@@ -77,6 +77,7 @@ class MessageSyncHelper @Inject constructor(
                             total,
                             progressTracker.syncedMessages.get()
                         )
+                        Unit // Explicit Unit to match Deferred<Unit> type
                     }
                 }
                 syncJobs.add(job)

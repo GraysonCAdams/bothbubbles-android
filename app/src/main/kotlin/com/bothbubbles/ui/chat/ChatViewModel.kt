@@ -46,6 +46,8 @@ import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.ContactData
+import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.media.AttachmentLimitsProvider
@@ -177,6 +179,17 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // Draft text flow (declared before composerState which depends on it)
+    private val _draftText = MutableStateFlow("")
+    val draftText: StateFlow<String> = _draftText.asStateFlow()
+
+    // Pending attachments flow (declared before composerState which depends on it)
+    private val _pendingAttachments = MutableStateFlow<List<PendingAttachmentInput>>(emptyList())
+    val pendingAttachments: StateFlow<List<PendingAttachmentInput>> = _pendingAttachments.asStateFlow()
+
+    // Attachment quality flow (declared before composerState which depends on it)
+    private val _attachmentQuality = MutableStateFlow(AttachmentQuality.STANDARD)
+
     private val _activePanel = MutableStateFlow(ComposerPanel.None)
 
     // Composer State
@@ -222,7 +235,7 @@ class ChatViewModel @Inject constructor(
         when (event) {
             is ComposerEvent.TextChanged -> {
                 _draftText.value = event.text
-                sendDelegate.onTypingStarted()
+                // TODO: Call sendDelegate.startTyping() when typing indicators are wired up
             }
             is ComposerEvent.AddAttachments -> {
                 addAttachments(event.uris)
@@ -347,12 +360,8 @@ class ChatViewModel @Inject constructor(
     // Trigger to refresh messages (incremented when attachments are downloaded)
     private val _attachmentRefreshTrigger = MutableStateFlow(0)
 
-    // Separate draft text flow for TextField performance - avoids full screen recomposition on each keystroke
-    private val _draftText = MutableStateFlow("")
-    val draftText: StateFlow<String> = _draftText.asStateFlow()
-
-    private val _pendingAttachments = MutableStateFlow<List<PendingAttachmentInput>>(emptyList())
-    val pendingAttachments: StateFlow<List<PendingAttachmentInput>> = _pendingAttachments.asStateFlow()
+    // NOTE: _draftText, val draftText, _pendingAttachments, val pendingAttachments
+    // are now declared earlier in the file (before composerState)
 
     // Attachment download progress tracking
     // Maps attachment GUID to download progress (0.0 to 1.0, or null if not downloading)
@@ -364,7 +373,7 @@ class ChatViewModel @Inject constructor(
     val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
 
     // Attachment Quality Settings
-    private val _attachmentQuality = MutableStateFlow(AttachmentQuality.STANDARD)
+    // NOTE: _attachmentQuality is now declared earlier in the file (before composerState)
     private val _rememberQuality = MutableStateFlow(false)
 
     // Smart reply suggestions (ML Kit + user templates, max 3)
@@ -2242,7 +2251,7 @@ class ChatViewModel @Inject constructor(
      * Gets contact data from a contact URI for preview in options dialog.
      * Returns null if the contact cannot be read.
      */
-    fun getContactData(contactUri: Uri): VCardService.ContactData? {
+    fun getContactData(contactUri: Uri): ContactData? {
         return vCardService.getContactData(contactUri)
     }
 
@@ -2250,7 +2259,7 @@ class ChatViewModel @Inject constructor(
      * Creates a vCard file from contact data with field options and adds it as an attachment.
      * Returns true if successful, false otherwise.
      */
-    fun addContactAsVCard(contactData: VCardService.ContactData, options: VCardService.FieldOptions): Boolean {
+    fun addContactAsVCard(contactData: ContactData, options: FieldOptions): Boolean {
         val vcardUri = vCardService.createVCardFromContactData(contactData, options)
         return if (vcardUri != null) {
             addAttachment(vcardUri)
@@ -3032,11 +3041,11 @@ class ChatViewModel @Inject constructor(
      * Note: This uses client-side scheduling with WorkManager.
      * The phone must be on and have network connectivity for the message to send.
      */
-    fun scheduleMessage(text: String, attachments: List<Uri>, sendAt: Long) {
+    fun scheduleMessage(text: String, attachments: List<PendingAttachmentInput>, sendAt: Long) {
         viewModelScope.launch {
-            // Convert attachments to JSON array string
+            // Convert attachments to JSON array string (extract URIs from PendingAttachmentInput)
             val attachmentUrisJson = if (attachments.isNotEmpty()) {
-                attachments.joinToString(",", "[", "]") { "\"${it}\"" }
+                attachments.joinToString(",", "[", "]") { "\"${it.uri}\"" }
             } else {
                 null
             }
