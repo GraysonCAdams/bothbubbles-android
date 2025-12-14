@@ -49,12 +49,23 @@ fun Avatar(
     modifier: Modifier = Modifier,
     avatarPath: String? = null,
     size: Dp = 40.dp,
-    isBusiness: Boolean = false
+    isBusiness: Boolean = false,
+    hasContactInfo: Boolean = false // Set true if this contact has saved info (prevents false business detection)
 ) {
     val initials = remember(name) { AvatarGenerator.getInitials(name) }
     val backgroundColor = remember(name) { Color(AvatarGenerator.getAvatarColorInt(name)) }
-    val showBuildingIcon = remember(name) { AvatarGenerator.isShortCodeOrAlphanumericSender(name) } || isBusiness
-    val showPersonIcon = remember(name) { AvatarGenerator.isPhoneNumber(name) }
+    // Only apply business heuristic if we don't have contact info (prevents "ALICE" being shown as business)
+    val showBuildingIcon = remember(name, hasContactInfo, avatarPath) {
+        when {
+            isBusiness -> true
+            hasContactInfo || avatarPath != null -> false // Has contact info, not a business
+            else -> AvatarGenerator.isShortCodeOrAlphanumericSender(name)
+        }
+    }
+    val showPersonIcon = remember(name, hasContactInfo, avatarPath) {
+        // Only show person icon for phone numbers without contact info
+        !showBuildingIcon && avatarPath == null && !hasContactInfo && AvatarGenerator.isPhoneNumber(name)
+    }
 
     Box(
         modifier = modifier

@@ -763,6 +763,29 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 34 to 35: Add verified_counterpart_checks table
+     * for caching counterpart chat existence checks.
+     *
+     * This enables efficient "lazy repair" of unified groups:
+     * - When opening a conversation with only SMS, check if iMessage exists on server
+     * - Cache 404 results to avoid repeated checks for Android contacts
+     * - Survives unified group rebuilds (unlike storing on the group itself)
+     */
+    val MIGRATION_34_35 = object : Migration(34, 35) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS verified_counterpart_checks (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    normalized_address TEXT NOT NULL,
+                    has_counterpart INTEGER NOT NULL,
+                    verified_at INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_verified_counterpart_checks_normalized_address ON verified_counterpart_checks(normalized_address)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -801,6 +824,7 @@ object DatabaseMigrations {
         MIGRATION_30_31,
         MIGRATION_31_32,
         MIGRATION_32_33,
-        MIGRATION_33_34
+        MIGRATION_33_34,
+        MIGRATION_34_35
     )
 }

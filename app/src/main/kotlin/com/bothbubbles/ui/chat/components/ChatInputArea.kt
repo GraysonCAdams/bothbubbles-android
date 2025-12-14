@@ -572,6 +572,7 @@ fun ChatInputArea(
                                 onStop = onRecordingStop,
                                 onRestart = onRecordingRestart,
                                 onAttach = onRecordingSend,
+                                onCancel = onRecordingCancel,
                                 inputColors = inputColors
                             )
                         }
@@ -583,6 +584,7 @@ fun ChatInputArea(
                                 isPlaying = isPlaying,
                                 onPlayPause = onPlayPause,
                                 onReRecord = onReRecord,
+                                onCancel = onPreviewCancel,
                                 inputColors = inputColors
                             )
                         }
@@ -681,6 +683,7 @@ internal fun ExpandedRecordingPanel(
     onStop: () -> Unit,
     onRestart: () -> Unit,
     onAttach: () -> Unit,
+    onCancel: () -> Unit,
     inputColors: BubbleColors,
     modifier: Modifier = Modifier
 ) {
@@ -804,12 +807,27 @@ internal fun ExpandedRecordingPanel(
                 )
             }
 
-            // Bottom controls row: Restart, Stop, Attach
+            // Bottom controls row: Cancel, Restart, Stop, Attach
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // Cancel button
+                TextButton(onClick = onCancel) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Cancel",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        text = "Cancel",
+                        color = MaterialTheme.colorScheme.error
+                    )
+                }
+
                 // Restart button
                 TextButton(onClick = onRestart) {
                     Icon(
@@ -879,6 +897,7 @@ internal fun PreviewContent(
     isPlaying: Boolean,
     onPlayPause: () -> Unit,
     onReRecord: () -> Unit,
+    onCancel: () -> Unit,
     inputColors: BubbleColors,
     modifier: Modifier = Modifier
 ) {
@@ -942,6 +961,19 @@ internal fun PreviewContent(
                 color = inputColors.inputText,
                 modifier = Modifier.width(36.dp)
             )
+
+            // Cancel button
+            IconButton(
+                onClick = onCancel,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Cancel",
+                    tint = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
 
             // Re-record button
             IconButton(

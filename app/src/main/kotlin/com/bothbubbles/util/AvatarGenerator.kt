@@ -94,9 +94,15 @@ object AvatarGenerator {
      * @param name The contact name to generate avatar for
      * @param sizePx The size of the bitmap in pixels (typically 128 for notifications)
      * @param isBusiness If true, shows building icon (for business contacts without personal name)
+     * @param hasContactInfo If true, skips business heuristic (contact has saved info)
      * @return A circular bitmap with colored background and white initials/icon
      */
-    fun generateBitmap(name: String, sizePx: Int, isBusiness: Boolean = false): Bitmap {
+    fun generateBitmap(
+        name: String,
+        sizePx: Int,
+        isBusiness: Boolean = false,
+        hasContactInfo: Boolean = false
+    ): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
@@ -111,17 +117,22 @@ object AvatarGenerator {
         val radius = sizePx / 2f
         canvas.drawCircle(radius, radius, radius, circlePaint)
 
+        // Determine icon type based on name and contact info
+        // Only apply business heuristic if we don't have contact info (prevents "ALICE" being shown as business)
+        val showBuildingIcon = when {
+            isBusiness -> true
+            hasContactInfo -> false // Has contact info, not a business
+            else -> isShortCodeOrAlphanumericSender(name)
+        }
+        val showPersonIcon = !showBuildingIcon && !hasContactInfo && isPhoneNumber(name)
+
         when {
-            // Shortcodes and alphanumeric senders (e.g., "60484", "GOOGLE") get building icon
-            isShortCodeOrAlphanumericSender(name) -> {
+            // Business contacts get building icon
+            showBuildingIcon -> {
                 drawBuildingIcon(canvas, sizePx)
             }
-            // Business contacts without personal names get building icon
-            isBusiness -> {
-                drawBuildingIcon(canvas, sizePx)
-            }
-            // Regular phone numbers get person icon
-            isPhoneNumber(name) -> {
+            // Phone numbers without contact info get person icon
+            showPersonIcon -> {
                 drawPersonIcon(canvas, sizePx)
             }
             // Everyone else gets initials
@@ -151,10 +162,11 @@ object AvatarGenerator {
      *
      * @param name The contact name to generate avatar for
      * @param sizePx The size of the bitmap in pixels
+     * @param hasContactInfo If true, skips business heuristic (contact has saved info)
      * @return An IconCompat that can be used with Person.Builder.setIcon()
      */
-    fun generateIconCompat(name: String, sizePx: Int): IconCompat {
-        val bitmap = generateBitmap(name, sizePx)
+    fun generateIconCompat(name: String, sizePx: Int, hasContactInfo: Boolean = false): IconCompat {
+        val bitmap = generateBitmap(name, sizePx, hasContactInfo = hasContactInfo)
         return IconCompat.createWithBitmap(bitmap)
     }
 
@@ -215,19 +227,27 @@ object AvatarGenerator {
      */
     private fun loadContactPhotoAlternative(context: Context, photoUri: Uri, sizePx: Int): Bitmap? {
         return try {
-            // Try to extract contact ID from various URI formats:
+            // Try to extract contact ID using robust parsing methods
+            // Supported URI formats:
             // content://com.android.contacts/contacts/{id}/photo
+            // content://com.android.contacts/contacts/{id}/display_photo
             // content://com.android.contacts/data/{id}
             val segments = photoUri.pathSegments
-            val contactId = when {
+            val contactId: Long? = when {
                 // Format: /contacts/{id}/photo or /contacts/{id}/display_photo
-                segments.size >= 2 && segments[0] == "contacts" -> segments[1].toLongOrNull()
-                // Format: /data/{id}
-                segments.size >= 2 && segments[0] == "data" -> {
-                    // Need to query for the contact ID from this data row
-                    null // Fall through to return null
+                segments.size >= 2 && segments[0] == "contacts" -> {
+                    // Use safe parsing instead of manual segment extraction
+                    segments.getOrNull(1)?.toLongOrNull()
                 }
-                else -> null
+                // Format: /data/{id} - try to use ContentUris.parseId as fallback
+                else -> {
+                    try {
+                        android.content.ContentUris.parseId(photoUri).takeIf { it > 0 }
+                    } catch (e: Exception) {
+                        // parseId throws if URI doesn't end with a valid ID
+                        photoUri.lastPathSegment?.toLongOrNull()
+                    }
+                }
             }
 
             if (contactId == null) {
@@ -377,6 +397,124 @@ object AvatarGenerator {
         }
 
         return bitmap
+    }
+
+    /**
+     * Generate a group avatar collage bitmap with actual contact photos.
+     * Participants with photos are prioritized to appear first in the collage.
+     *
+     * @param context Application context for loading contact photos
+     * @param names List of participant names (up to 4 will be shown)
+     * @param avatarPaths List of avatar paths (corresponding to names, can contain nulls)
+     * @param sizePx The size of the output bitmap in pixels
+     * @return A bitmap with multiple avatars on a transparent background
+     */
+    fun generateGroupCollageBitmapWithPhotos(
+        context: Context,
+        names: List<String>,
+        avatarPaths: List<String?>,
+        sizePx: Int
+    ): Bitmap {
+        // Sort participants to prioritize those with photos
+        val sortedIndices = names.indices.sortedByDescending { index ->
+            avatarPaths.getOrNull(index) != null
+        }
+        val sortedNames = sortedIndices.map { names[it] }
+        val sortedAvatarPaths = sortedIndices.map { avatarPaths.getOrNull(it) }
+
+        val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+
+        val displayCount = minOf(sortedNames.size, 4)
+
+        // Helper to get avatar bitmap (loads photo or generates fallback)
+        fun getParticipantBitmap(index: Int, size: Int): Bitmap {
+            val avatarPath = sortedAvatarPaths.getOrNull(index)
+            val name = sortedNames.getOrElse(index) { "?" }
+
+            // Try to load contact photo first
+            if (avatarPath != null) {
+                val photoBitmap = loadContactPhotoBitmap(context, avatarPath, size)
+                if (photoBitmap != null) {
+                    return photoBitmap
+                }
+            }
+
+            // Fall back to generated avatar (hasContactInfo = true if they had a path)
+            return generateBitmap(name, size, hasContactInfo = avatarPath != null)
+        }
+
+        when (displayCount) {
+            0, 1 -> {
+                drawGroupIcon(canvas, sizePx)
+            }
+            2 -> {
+                val smallSize = (sizePx * 0.65f).toInt()
+                val offset = sizePx - smallSize
+
+                val avatar1 = getParticipantBitmap(0, smallSize)
+                canvas.drawBitmap(avatar1, 0f, 0f, null)
+                avatar1.recycle()
+
+                val avatar2 = getParticipantBitmap(1, smallSize)
+                canvas.drawBitmap(avatar2, offset.toFloat(), offset.toFloat(), null)
+                avatar2.recycle()
+            }
+            3 -> {
+                val smallSize = (sizePx * 0.5f).toInt()
+                val centerX = (sizePx - smallSize) / 2f
+
+                val avatar1 = getParticipantBitmap(0, smallSize)
+                canvas.drawBitmap(avatar1, centerX, 0f, null)
+                avatar1.recycle()
+
+                val avatar2 = getParticipantBitmap(1, smallSize)
+                canvas.drawBitmap(avatar2, 0f, (sizePx - smallSize).toFloat(), null)
+                avatar2.recycle()
+
+                val avatar3 = getParticipantBitmap(2, smallSize)
+                canvas.drawBitmap(avatar3, (sizePx - smallSize).toFloat(), (sizePx - smallSize).toFloat(), null)
+                avatar3.recycle()
+            }
+            else -> {
+                val smallSize = (sizePx * 0.48f).toInt()
+                val gap = (sizePx - 2 * smallSize) / 3f
+
+                val positions = listOf(
+                    Pair(gap, gap),
+                    Pair(gap * 2 + smallSize, gap),
+                    Pair(gap, gap * 2 + smallSize),
+                    Pair(gap * 2 + smallSize, gap * 2 + smallSize)
+                )
+
+                for (i in 0 until 4) {
+                    val avatar = getParticipantBitmap(i, smallSize)
+                    canvas.drawBitmap(avatar, positions[i].first, positions[i].second, null)
+                    avatar.recycle()
+                }
+            }
+        }
+
+        return bitmap
+    }
+
+    /**
+     * Generate an IconCompat for group notifications with actual contact photos.
+     *
+     * @param context Application context for loading contact photos
+     * @param names List of participant names
+     * @param avatarPaths List of avatar paths (corresponding to names, can contain nulls)
+     * @param sizePx The size of the bitmap in pixels
+     * @return An IconCompat with the group collage
+     */
+    fun generateGroupIconCompatWithPhotos(
+        context: Context,
+        names: List<String>,
+        avatarPaths: List<String?>,
+        sizePx: Int
+    ): IconCompat {
+        val bitmap = generateGroupCollageBitmapWithPhotos(context, names, avatarPaths, sizePx)
+        return IconCompat.createWithBitmap(bitmap)
     }
 
     /**

@@ -5,6 +5,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -13,6 +14,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,7 +45,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -164,6 +172,25 @@ fun MediaPickerPanel(
         )
     }
 
+    // Drag state for swipe-to-dismiss
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    val dismissThreshold = 100f // dp equivalent threshold for dismissal
+
+    val draggableState = rememberDraggableState { delta ->
+        // Only allow dragging down (positive delta)
+        dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+    }
+
+    // Animate offset back to 0 when not dragging
+    val animatedOffset by animateFloatAsState(
+        targetValue = dragOffset,
+        animationSpec = spring(
+            dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
+            stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
+        ),
+        label = "dragOffset"
+    )
+
     AnimatedVisibility(
         visible = visible,
         enter = slideInVertically(
@@ -180,7 +207,19 @@ fun MediaPickerPanel(
         modifier = modifier
     ) {
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(y = animatedOffset.dp)
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Vertical,
+                    onDragStopped = {
+                        if (dragOffset > dismissThreshold) {
+                            onDismiss()
+                        }
+                        dragOffset = 0f
+                    }
+                ),
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
             tonalElevation = 8.dp
@@ -190,7 +229,7 @@ fun MediaPickerPanel(
                     .fillMaxWidth()
                     .padding(top = 12.dp, bottom = 16.dp)
             ) {
-                // Drag handle
+                // Drag handle (visual indicator for swipe-to-dismiss)
                 Box(
                     modifier = Modifier
                         .align(Alignment.CenterHorizontally)

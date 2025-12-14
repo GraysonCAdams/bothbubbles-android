@@ -65,13 +65,15 @@ class BubbleMetadataHelper @Inject constructor(
      * @param chatTitle Display name of the conversation
      * @param isGroup Whether this is a group conversation
      * @param participantNames List of participant names for group collage (optional)
+     * @param chatAvatarPath Custom group photo path (takes precedence over collage)
      * @return The shortcut ID
      */
     fun createConversationShortcut(
         chatGuid: String,
         chatTitle: String,
         isGroup: Boolean,
-        participantNames: List<String> = emptyList()
+        participantNames: List<String> = emptyList(),
+        chatAvatarPath: String? = null
     ): String {
         val shortcutId = "chat_$chatGuid"
 
@@ -81,12 +83,31 @@ class BubbleMetadataHelper @Inject constructor(
             putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, chatGuid)
         }
 
-        // Generate avatar icon - use group collage for groups, single avatar otherwise
+        // Generate avatar icon - priority: custom chat avatar > group collage > single avatar
         // Uses transparent background so no white circle appears behind the collage
-        val avatarIcon: IconCompat = if (isGroup && participantNames.size > 1) {
-            AvatarGenerator.generateGroupIconCompat(participantNames, 128)
-        } else {
-            AvatarGenerator.generateIconCompat(chatTitle, 128)
+        val avatarIcon: IconCompat = when {
+            // Custom group photo takes precedence
+            chatAvatarPath != null -> {
+                val customBitmap = AvatarGenerator.loadContactPhotoBitmap(context, chatAvatarPath, 128)
+                if (customBitmap != null) {
+                    IconCompat.createWithBitmap(customBitmap)
+                } else {
+                    // Fallback if custom photo fails to load
+                    if (isGroup && participantNames.size > 1) {
+                        AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+                    } else {
+                        AvatarGenerator.generateIconCompat(chatTitle, 128)
+                    }
+                }
+            }
+            // Group collage for groups without custom photo
+            isGroup && participantNames.size > 1 -> {
+                AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+            }
+            // Single avatar for 1:1 chats
+            else -> {
+                AvatarGenerator.generateIconCompat(chatTitle, 128)
+            }
         }
 
         // Create person for the conversation
@@ -143,13 +164,15 @@ class BubbleMetadataHelper @Inject constructor(
      * @param chatTitle Display name of the conversation
      * @param isGroup Whether this is a group conversation
      * @param participantNames List of participant names for group collage (optional)
+     * @param chatAvatarPath Custom group photo path (takes precedence over collage)
      * @return BubbleMetadata for the notification, or null if bubbles aren't supported
      */
     fun createBubbleMetadata(
         chatGuid: String,
         chatTitle: String,
         isGroup: Boolean = false,
-        participantNames: List<String> = emptyList()
+        participantNames: List<String> = emptyList(),
+        chatAvatarPath: String? = null
     ): NotificationCompat.BubbleMetadata? {
         // Bubbles require Android Q (API 29) or higher
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
@@ -166,12 +189,31 @@ class BubbleMetadataHelper @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
         )
 
-        // Generate avatar icon - use group collage for groups, single avatar otherwise
+        // Generate avatar icon - priority: custom chat avatar > group collage > single avatar
         // Uses transparent background so no white circle appears behind the collage
-        val bubbleIcon: IconCompat = if (isGroup && participantNames.size > 1) {
-            AvatarGenerator.generateGroupIconCompat(participantNames, 128)
-        } else {
-            AvatarGenerator.generateIconCompat(chatTitle, 128)
+        val bubbleIcon: IconCompat = when {
+            // Custom group photo takes precedence
+            chatAvatarPath != null -> {
+                val customBitmap = AvatarGenerator.loadContactPhotoBitmap(context, chatAvatarPath, 128)
+                if (customBitmap != null) {
+                    IconCompat.createWithBitmap(customBitmap)
+                } else {
+                    // Fallback if custom photo fails to load
+                    if (isGroup && participantNames.size > 1) {
+                        AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+                    } else {
+                        AvatarGenerator.generateIconCompat(chatTitle, 128)
+                    }
+                }
+            }
+            // Group collage for groups without custom photo
+            isGroup && participantNames.size > 1 -> {
+                AvatarGenerator.generateGroupIconCompat(participantNames, 128)
+            }
+            // Single avatar for 1:1 chats
+            else -> {
+                AvatarGenerator.generateIconCompat(chatTitle, 128)
+            }
         }
 
         // Build bubble metadata

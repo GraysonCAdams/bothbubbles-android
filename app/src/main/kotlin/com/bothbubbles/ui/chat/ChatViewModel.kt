@@ -68,6 +68,7 @@ import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.scheduled.ScheduledMessageWorker
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
+import com.bothbubbles.services.sync.CounterpartSyncService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.EmojiAnalysis
@@ -139,7 +140,9 @@ class ChatViewModel @Inject constructor(
     // Delegates for decomposition
     private val sendDelegate: ChatSendDelegate,
     private val attachmentDelegate: ChatAttachmentDelegate,
-    private val messageSendingService: MessageSendingService
+    private val messageSendingService: MessageSendingService,
+    // Sync integrity services
+    private val counterpartSyncService: CounterpartSyncService
 ) : ViewModel() {
 
     companion object {
@@ -563,6 +566,7 @@ class ChatViewModel @Inject constructor(
         observeQueuedMessages()
         startAdaptivePolling() // Catches missed messages when push is unreliable
         observeForegroundResume() // Sync when app returns from background
+        checkAndRepairCounterpart() // Lazy repair: check for missing iMessage/SMS counterpart
 
         // Check if iMessage is available again (for chats in SMS fallback mode)
         // Delay slightly to ensure chat data is loaded first
@@ -1287,6 +1291,58 @@ class ChatViewModel @Inject constructor(
             syncSmsMessages()
         } else {
             syncMessagesFromServer()
+        }
+    }
+
+    /**
+     * Tier 2 Lazy Repair: Check for missing counterpart chat (iMessage/SMS) and sync if found.
+     *
+     * When a unified group has only one chat (e.g., SMS only), this checks the server
+     * for a counterpart (e.g., iMessage). If found, it syncs the counterpart to local DB
+     * and links it to the unified group.
+     *
+     * This runs in the background and doesn't block the UI. Results are cached to avoid
+     * repeated checks for contacts without counterparts (e.g., Android users).
+     */
+    private fun checkAndRepairCounterpart() {
+        // Only run for non-merged conversations (single chat in unified group)
+        if (isMergedChat) {
+            Log.d(TAG, "Skipping counterpart check - already merged conversation")
+            return
+        }
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Find unified group for this chat
+                val unifiedGroup = chatRepository.getUnifiedGroupForChat(chatGuid)
+                if (unifiedGroup == null) {
+                    Log.d(TAG, "No unified group for $chatGuid - skipping counterpart check")
+                    return@launch
+                }
+
+                val result = counterpartSyncService.checkAndRepairCounterpart(unifiedGroup.id)
+                when (result) {
+                    is CounterpartSyncService.CheckResult.Found -> {
+                        Log.i(TAG, "Found and synced counterpart: ${result.chatGuid}")
+                        // Emit event to refresh conversation (will include new chat's messages on next open)
+                        _uiState.update { it.copy(counterpartSynced = true) }
+                    }
+                    is CounterpartSyncService.CheckResult.NotFound -> {
+                        Log.d(TAG, "No counterpart exists for this contact (likely Android user)")
+                    }
+                    is CounterpartSyncService.CheckResult.AlreadyVerified -> {
+                        Log.d(TAG, "Already verified: hasCounterpart=${result.hasCounterpart}")
+                    }
+                    is CounterpartSyncService.CheckResult.Skipped -> {
+                        Log.d(TAG, "Counterpart check skipped (group already complete)")
+                    }
+                    is CounterpartSyncService.CheckResult.Error -> {
+                        Log.w(TAG, "Counterpart check failed: ${result.message}")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking for counterpart", e)
+            }
         }
     }
 

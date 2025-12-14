@@ -18,6 +18,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.theme.BothBubblesTheme
 
 /**
  * Avatar with online indicator
@@ -80,10 +81,6 @@ fun ConversationAvatar(
     }
 }
 
-// iMessage and SMS indicator colors
-private val iMessageBlue = Color(0xFF007AFF)
-private val smsGreen = Color(0xFF34C759)
-
 /**
  * Avatar wrapper that displays a message type indicator (iMessage cloud or SMS cellular)
  * in the bottom right corner with an outline that "cuts into" the avatar.
@@ -106,6 +103,11 @@ fun AvatarWithMessageType(
     val indicatorSize = indicatorSizeOverride ?: (size * 0.36f)
     val badgeOverflow = 4.dp // How much the badge extends beyond the avatar
 
+    // Use theme-aware colors for iMessage/SMS indicators
+    val bubbleColors = BothBubblesTheme.bubbleColors
+    val iMessageColor = bubbleColors.iMessageSent
+    val smsColor = bubbleColors.smsSent
+
     // Outer box sized to accommodate badge overflow
     Box(
         modifier = modifier.size(size + badgeOverflow),
@@ -119,8 +121,8 @@ fun AvatarWithMessageType(
         if (messageSourceType != MessageSourceType.NONE) {
             val iconSize = indicatorSize * 0.6f
             val indicatorColor = when (messageSourceType) {
-                MessageSourceType.IMESSAGE -> iMessageBlue
-                MessageSourceType.SMS -> smsGreen
+                MessageSourceType.IMESSAGE -> iMessageColor
+                MessageSourceType.SMS -> smsColor
                 else -> Color.Transparent
             }
 

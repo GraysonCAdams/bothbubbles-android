@@ -88,7 +88,9 @@ data class ChatUiState(
     val canToggleSendMode: Boolean = false, // True when both SMS and iMessage are available
     val showSendModeRevealAnimation: Boolean = false, // Show Pepsi-like dual-color animation on chat open
     val sendModeManuallySet: Boolean = false, // True if user has manually toggled the mode
-    val tutorialState: TutorialState = TutorialState.NOT_SHOWN // Tutorial state for first-time users
+    val tutorialState: TutorialState = TutorialState.NOT_SHOWN, // Tutorial state for first-time users
+    // Sync integrity
+    val counterpartSynced: Boolean = false // True if counterpart chat was found and synced (refresh recommended)
 )
 
 /**

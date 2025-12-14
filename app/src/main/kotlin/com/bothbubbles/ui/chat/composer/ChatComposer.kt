@@ -198,6 +198,7 @@ private fun MainInputRow(
                         onStop = { onEvent(ComposerEvent.StopVoiceRecording) },
                         onRestart = { onEvent(ComposerEvent.RestartVoiceRecording) },
                         onAttach = { onEvent(ComposerEvent.SendVoiceMemo) },
+                        onCancel = { onEvent(ComposerEvent.CancelVoiceRecording) },
                         inputColors = inputColors
                     )
                 }
@@ -209,6 +210,7 @@ private fun MainInputRow(
                         isPlaying = recordingState.isPlaying,
                         onPlayPause = { onEvent(ComposerEvent.TogglePreviewPlayback) },
                         onReRecord = { onEvent(ComposerEvent.ReRecordVoiceMemo) },
+                        onCancel = { onEvent(ComposerEvent.CancelVoiceRecording) },
                         inputColors = inputColors
                     )
                 }

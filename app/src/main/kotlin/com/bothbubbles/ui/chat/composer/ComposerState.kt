@@ -50,8 +50,6 @@ data class ComposerState(
     val isSending: Boolean = false,
     val sendProgress: Float? = null,
 
-    // Attachment picker expanded state (for add button animation)
-    val isPickerExpanded: Boolean = false,
 
     // SMS-specific state
     val smsInputBlocked: Boolean = false,
@@ -66,6 +64,13 @@ data class ComposerState(
      */
     val canSend: Boolean
         get() = text.isNotBlank() || attachments.isNotEmpty()
+
+    /**
+     * Whether the attachment picker panel is expanded (for add button animation).
+     * Derives from activePanel state.
+     */
+    val isPickerExpanded: Boolean
+        get() = activePanel == ComposerPanel.MediaPicker
 
     /**
      * Whether to show the voice memo button instead of send button.

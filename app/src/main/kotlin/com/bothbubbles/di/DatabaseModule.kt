@@ -18,6 +18,7 @@ import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -143,5 +144,11 @@ object DatabaseModule {
     @Singleton
     fun provideAutoRespondedSenderDao(database: BothBubblesDatabase): AutoRespondedSenderDao {
         return database.autoRespondedSenderDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideVerifiedCounterpartCheckDao(database: BothBubblesDatabase): VerifiedCounterpartCheckDao {
+        return database.verifiedCounterpartCheckDao()
     }
 }

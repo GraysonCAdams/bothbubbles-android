@@ -13,7 +13,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * Group avatar showing multiple participants
+ * Group avatar showing multiple participants.
+ * Participants with photos are prioritized to appear first in the collage.
  */
 @Composable
 fun GroupAvatar(
@@ -22,7 +23,15 @@ fun GroupAvatar(
     avatarPaths: List<String?> = emptyList(),
     size: Dp = 56.dp
 ) {
-    val displayCount = minOf(names.size, 4)
+    // Sort participants to prioritize those with photos
+    // This ensures we show actual photos rather than initials when possible
+    val sortedIndices = names.indices.sortedByDescending { index ->
+        avatarPaths.getOrNull(index) != null
+    }
+    val sortedNames = sortedIndices.map { names[it] }
+    val sortedAvatarPaths = sortedIndices.map { avatarPaths.getOrNull(it) }
+
+    val displayCount = minOf(sortedNames.size, 4)
 
     Box(
         modifier = modifier.size(size),
@@ -51,8 +60,8 @@ fun GroupAvatar(
                 val smallSize = size * 0.65f
                 Box(modifier = Modifier.size(size)) {
                     Avatar(
-                        name = names.getOrElse(0) { "?" },
-                        avatarPath = avatarPaths.getOrNull(0),
+                        name = sortedNames.getOrElse(0) { "?" },
+                        avatarPath = sortedAvatarPaths.getOrNull(0),
                         size = smallSize,
                         modifier = Modifier.align(Alignment.TopStart)
                     )
@@ -62,8 +71,8 @@ fun GroupAvatar(
                             .border(2.dp, MaterialTheme.colorScheme.surface, CircleShape)
                     ) {
                         Avatar(
-                            name = names.getOrElse(1) { "?" },
-                            avatarPath = avatarPaths.getOrNull(1),
+                            name = sortedNames.getOrElse(1) { "?" },
+                            avatarPath = sortedAvatarPaths.getOrNull(1),
                             size = smallSize
                         )
                     }
@@ -74,20 +83,20 @@ fun GroupAvatar(
                 val smallSize = size * 0.5f
                 Box(modifier = Modifier.size(size)) {
                     Avatar(
-                        name = names.getOrElse(0) { "?" },
-                        avatarPath = avatarPaths.getOrNull(0),
+                        name = sortedNames.getOrElse(0) { "?" },
+                        avatarPath = sortedAvatarPaths.getOrNull(0),
                         size = smallSize,
                         modifier = Modifier.align(Alignment.TopCenter)
                     )
                     Avatar(
-                        name = names.getOrElse(1) { "?" },
-                        avatarPath = avatarPaths.getOrNull(1),
+                        name = sortedNames.getOrElse(1) { "?" },
+                        avatarPath = sortedAvatarPaths.getOrNull(1),
                         size = smallSize,
                         modifier = Modifier.align(Alignment.BottomStart)
                     )
                     Avatar(
-                        name = names.getOrElse(2) { "?" },
-                        avatarPath = avatarPaths.getOrNull(2),
+                        name = sortedNames.getOrElse(2) { "?" },
+                        avatarPath = sortedAvatarPaths.getOrNull(2),
                         size = smallSize,
                         modifier = Modifier.align(Alignment.BottomEnd)
                     )
@@ -102,24 +111,24 @@ fun GroupAvatar(
                 ) {
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         Avatar(
-                            name = names.getOrElse(0) { "?" },
-                            avatarPath = avatarPaths.getOrNull(0),
+                            name = sortedNames.getOrElse(0) { "?" },
+                            avatarPath = sortedAvatarPaths.getOrNull(0),
                             size = smallSize
                         )
                         Avatar(
-                            name = names.getOrElse(1) { "?" },
-                            avatarPath = avatarPaths.getOrNull(1),
+                            name = sortedNames.getOrElse(1) { "?" },
+                            avatarPath = sortedAvatarPaths.getOrNull(1),
                             size = smallSize
                         )
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
                         Avatar(
-                            name = names.getOrElse(2) { "?" },
-                            avatarPath = avatarPaths.getOrNull(2),
+                            name = sortedNames.getOrElse(2) { "?" },
+                            avatarPath = sortedAvatarPaths.getOrNull(2),
                             size = smallSize
                         )
-                        if (names.size > 4) {
-                            // Show +N indicator
+                        if (sortedNames.size > 4) {
+                            // Show +N indicator (use original names.size for accurate count)
                             Surface(
                                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                                 shape = CircleShape,
@@ -135,8 +144,8 @@ fun GroupAvatar(
                             }
                         } else {
                             Avatar(
-                                name = names.getOrElse(3) { "?" },
-                                avatarPath = avatarPaths.getOrNull(3),
+                                name = sortedNames.getOrElse(3) { "?" },
+                                avatarPath = sortedAvatarPaths.getOrNull(3),
                                 size = smallSize
                             )
                         }

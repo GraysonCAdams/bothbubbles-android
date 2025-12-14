@@ -17,10 +17,12 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -71,6 +73,7 @@ class ConversationListScreen(
     // Caches to avoid blocking calls during UI rendering
     private val senderNameCache = mutableMapOf<Long, String>()
     private val participantNameCache = mutableMapOf<String, String>()
+    private val avatarIconCache = mutableMapOf<String, IconCompat>() // Chat GUID -> Avatar icon
 
     init {
         // Register lifecycle observer to cancel scope when screen is destroyed
@@ -128,7 +131,7 @@ class ConversationListScreen(
                     }
                 }
 
-                // Pre-fetch participant names for all chats (PERF: single batch query)
+                // Pre-fetch participant names and generate avatars for all chats (PERF: single batch query)
                 val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
                     .groupBy({ it.chatGuid }, { it.handle })
                 for (chat in chatsToDisplay) {
@@ -149,6 +152,10 @@ class ConversationListScreen(
                         }
                     }
                     participantNameCache[chat.guid] = participantNames
+
+                    // Generate avatar icon for this chat
+                    val avatarIcon = generateAvatarIcon(chat, participants)
+                    avatarIconCache[chat.guid] = avatarIcon
                 }
 
                 android.util.Log.d(TAG, "Displaying ${chatsToDisplay.size} chats, hasMore=$hasMoreConversations")
@@ -244,15 +251,15 @@ class ConversationListScreen(
             displayTitle
         }
 
+        // Use cached avatar icon, fallback to app icon if not available
+        val avatarIcon = avatarIconCache[chat.guid]
+            ?: IconCompat.createWithResource(carContext, R.mipmap.ic_launcher)
+
         return try {
             Row.Builder()
                 .setTitle(title)
                 .addText(messagePreview)
-                .setImage(
-                    CarIcon.Builder(
-                        IconCompat.createWithResource(carContext, R.mipmap.ic_launcher)
-                    ).build()
-                )
+                .setImage(CarIcon.Builder(avatarIcon).build())
                 .setOnClickListener {
                     // Navigate to conversation detail screen
                     screenManager.push(
@@ -312,6 +319,54 @@ class ConversationListScreen(
     private fun getParticipantNames(chat: ChatEntity): String {
         // Use pre-fetched cache to avoid blocking calls
         return participantNameCache[chat.guid] ?: ""
+    }
+
+    /**
+     * Generates an avatar icon for a chat.
+     * Priority: custom chat avatar > contact photo > group collage > generated fallback
+     */
+    private fun generateAvatarIcon(chat: ChatEntity, participants: List<HandleEntity>): IconCompat {
+        val avatarSize = 128 // Standard size for Android Auto icons
+
+        // 1. Check for custom chat avatar (user-set group photo)
+        chat.customAvatarPath?.let { customPath ->
+            val customBitmap = AvatarGenerator.loadContactPhotoBitmap(carContext, customPath, avatarSize)
+            if (customBitmap != null) {
+                return IconCompat.createWithBitmap(customBitmap)
+            }
+        }
+
+        // 2. For 1:1 chats, try to load contact photo
+        if (!chat.isGroup && participants.size == 1) {
+            val participant = participants.first()
+            participant.cachedAvatarPath?.let { avatarPath ->
+                val contactBitmap = AvatarGenerator.loadContactPhotoBitmap(carContext, avatarPath, avatarSize)
+                if (contactBitmap != null) {
+                    return IconCompat.createWithBitmap(contactBitmap)
+                }
+            }
+            // Fallback to generated avatar for 1:1
+            val displayName = participant.cachedDisplayName
+                ?: participant.formattedAddress
+                ?: participant.address
+            return AvatarGenerator.generateIconCompat(displayName, avatarSize)
+        }
+
+        // 3. For group chats, generate collage from participants
+        if (chat.isGroup && participants.size > 1) {
+            val participantNames = participants.take(4).map { handle ->
+                handle.cachedDisplayName
+                    ?: handle.formattedAddress
+                    ?: handle.address
+            }
+            return AvatarGenerator.generateGroupIconCompat(participantNames, avatarSize)
+        }
+
+        // 4. Fallback: use chat identifier or display name
+        val fallbackName = chat.displayName
+            ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+            ?: "?"
+        return AvatarGenerator.generateIconCompat(fallbackName, avatarSize)
     }
 
     companion object {

@@ -123,6 +123,7 @@ data class ConversationUiModel(
     val guid: String,
     val displayName: String,
     val avatarPath: String?,
+    val chatAvatarPath: String? = null, // Custom group photo set by user (takes precedence over participant collage)
     val lastMessageText: String,
     val lastMessageTime: String,
     val lastMessageTimestamp: Long,

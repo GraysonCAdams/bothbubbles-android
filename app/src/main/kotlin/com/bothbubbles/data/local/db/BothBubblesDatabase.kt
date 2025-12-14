@@ -16,6 +16,7 @@ import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -32,6 +33,7 @@ import com.bothbubbles.data.local.db.entity.SeenMessageEntity
 import com.bothbubbles.data.local.db.entity.SyncRangeEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 
 /**
  * Room database for BothBubbles.
@@ -60,9 +62,10 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatMember
         PendingAttachmentEntity::class,
         IMessageAvailabilityCacheEntity::class,
         SyncRangeEntity::class,
-        AutoRespondedSenderEntity::class
+        AutoRespondedSenderEntity::class,
+        VerifiedCounterpartCheckEntity::class
     ],
-    version = 34,
+    version = 35,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -81,6 +84,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun iMessageCacheDao(): IMessageCacheDao
     abstract fun syncRangeDao(): SyncRangeDao
     abstract fun autoRespondedSenderDao(): AutoRespondedSenderDao
+    abstract fun verifiedCounterpartCheckDao(): VerifiedCounterpartCheckDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

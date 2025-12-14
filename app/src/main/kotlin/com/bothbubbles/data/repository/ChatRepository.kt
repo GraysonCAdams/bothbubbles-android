@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -144,6 +145,18 @@ class ChatRepository @Inject constructor(
      */
     suspend fun refreshAllContactInfo(): Int =
         participantOps.refreshAllContactInfo()
+
+    // ===== Unified Group Operations =====
+
+    /**
+     * Get the unified group that contains a specific chat.
+     * Used for counterpart sync to find if a chat is part of a unified group.
+     *
+     * @param chatGuid The chat GUID to find the unified group for
+     * @return The unified group entity if the chat is part of one, null otherwise
+     */
+    suspend fun getUnifiedGroupForChat(chatGuid: String) =
+        unifiedChatGroupDao.getGroupForChat(chatGuid)
 
     // ===== Local Mutation Operations =====
 

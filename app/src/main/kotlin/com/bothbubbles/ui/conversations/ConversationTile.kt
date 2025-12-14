@@ -161,7 +161,15 @@ internal fun GoogleStyleConversationTile(
                         }
                     } else {
                         Box(modifier = Modifier.size(56.dp)) {
-                            if (conversation.isGroup) {
+                            // Priority: custom chat avatar > participant collage (for groups) > contact photo
+                            if (conversation.chatAvatarPath != null) {
+                                // Custom group photo set by user takes precedence
+                                Avatar(
+                                    name = conversation.displayName,
+                                    avatarPath = conversation.chatAvatarPath,
+                                    size = 56.dp
+                                )
+                            } else if (conversation.isGroup) {
                                 GroupAvatar(
                                     names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
                                     avatarPaths = conversation.participantAvatarPaths,

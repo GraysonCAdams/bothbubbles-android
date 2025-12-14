@@ -192,6 +192,7 @@ suspend fun ChatEntity.toUiModel(
         guid = guid,
         displayName = resolvedDisplayName,
         avatarPath = avatarPath,
+        chatAvatarPath = customAvatarPath, // Custom group photo takes precedence
         lastMessageText = messageText,
         lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L, application),
         lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,
@@ -297,6 +298,7 @@ fun mergeChatGroup(chats: List<ConversationUiModel>): ConversationUiModel {
     val hasInferredName = preferredChat.hasInferredName
     val inferredName = preferredChat.inferredName
     val avatarPath = preferredChat.avatarPath ?: chats.firstNotNullOfOrNull { it.avatarPath }
+    val chatAvatarPath = preferredChat.chatAvatarPath ?: chats.firstNotNullOfOrNull { it.chatAvatarPath }
 
     // Check for any draft
     val chatWithDraft = chats.find { it.hasDraft }
@@ -307,6 +309,7 @@ fun mergeChatGroup(chats: List<ConversationUiModel>): ConversationUiModel {
         guid = primary.guid, // Primary guid for navigation (will use mergedChatGuids in chat)
         displayName = displayName,
         avatarPath = avatarPath,
+        chatAvatarPath = chatAvatarPath,
         unreadCount = totalUnread,
         isPinned = anyPinned,
         pinIndex = minPinIndex,
