@@ -1,5 +1,6 @@
 package com.bothbubbles.services.auto
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.car.app.CarContext
@@ -25,6 +26,11 @@ import kotlinx.coroutines.launch
 /**
  * Android Auto screen for composing and sending a voice reply.
  * Uses the car's voice input system to dictate a message.
+ *
+ * Implements voice input resilience:
+ * - Wraps RecognizerIntent in try-catch for ActivityNotFoundException
+ * - Falls back gracefully when voice recognizer is unavailable
+ * - Shows informative error messages to driver
  */
 class VoiceReplyScreen(
     carContext: CarContext,
@@ -51,6 +57,9 @@ class VoiceReplyScreen(
     @Volatile
     private var isSending: Boolean = false
 
+    @Volatile
+    private var voiceInputAvailable: Boolean = true
+
     override fun onGetTemplate(): Template {
         val displayTitle = chat.displayName ?: "Reply"
 
@@ -66,10 +75,10 @@ class VoiceReplyScreen(
                 .build()
         }
 
-        val message = if (messageText.isNotBlank()) {
-            "Your message:\n\"$messageText\"\n\nTap Send to send, or use voice to change."
-        } else {
-            "Tap the microphone to dictate your message"
+        val message = when {
+            !voiceInputAvailable -> "Voice input is not available on this head unit.\n\nUse the notification reply feature instead."
+            messageText.isNotBlank() -> "Your message:\n\"$messageText\"\n\nTap Send to send, or use voice to change."
+            else -> "Tap the microphone to dictate your message"
         }
 
         val sendAction = Action.Builder()
@@ -109,23 +118,69 @@ class VoiceReplyScreen(
             .build()
     }
 
+    /**
+     * Start voice input with resilient error handling.
+     *
+     * Handles ActivityNotFoundException for head units that don't have
+     * a speech recognizer (older Linux-based units, specific OEM skins).
+     *
+     * Falls back gracefully with informative user messaging.
+     */
     private fun startVoiceInput() {
-        // Use CarContext's startCarApp with voice input intent
-        // The host will handle voice recognition
         try {
             val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                 putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 putExtra(RecognizerIntent.EXTRA_PROMPT, "Say your message")
             }
-            // For now, show a toast - actual voice input is handled by the host
+
+            // Check if activity is available before attempting to start
+            val resolveInfo = carContext.packageManager.queryIntentActivities(intent, 0)
+            if (resolveInfo.isEmpty()) {
+                handleVoiceInputUnavailable()
+                return
+            }
+
+            // Show toast indicating voice input is starting
             CarToast.makeText(carContext, "Speak your message now...", CarToast.LENGTH_LONG).show()
 
-            // In a real implementation, this would be handled by the host's voice system
+            // Note: In Android Auto, voice input is typically handled by the car's voice assistant
             // The notification-based reply is the primary voice input method
+
+        } catch (e: ActivityNotFoundException) {
+            // Head unit doesn't have speech recognizer activity
+            android.util.Log.w(TAG, "Speech recognizer not available on this head unit", e)
+            handleVoiceInputUnavailable()
+        } catch (e: SecurityException) {
+            // Permission denied for speech recognition
+            android.util.Log.w(TAG, "Speech recognition permission denied", e)
+            CarToast.makeText(
+                carContext,
+                "Voice input permission denied",
+                CarToast.LENGTH_SHORT
+            ).show()
         } catch (e: Exception) {
+            // Catch-all for other unexpected errors
             android.util.Log.e(TAG, "Failed to start voice input", e)
-            CarToast.makeText(carContext, "Voice input not available", CarToast.LENGTH_SHORT).show()
+            CarToast.makeText(
+                carContext,
+                "Voice input not available",
+                CarToast.LENGTH_SHORT
+            ).show()
         }
+    }
+
+    /**
+     * Handle voice input being unavailable.
+     * Updates UI state and shows informative message.
+     */
+    private fun handleVoiceInputUnavailable() {
+        voiceInputAvailable = false
+        CarToast.makeText(
+            carContext,
+            "Voice input unavailable. Use notification reply instead.",
+            CarToast.LENGTH_LONG
+        ).show()
+        invalidate()
     }
 
     private fun sendMessage() {

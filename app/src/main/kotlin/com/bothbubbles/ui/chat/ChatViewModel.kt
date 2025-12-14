@@ -89,6 +89,7 @@ import com.bothbubbles.ui.chat.paging.SyncTrigger
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import com.bothbubbles.util.error.AppError
+import com.bothbubbles.util.text.TextNormalization
 import com.bothbubbles.util.error.handle
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
@@ -2591,11 +2592,32 @@ class ChatViewModel @Inject constructor(
     // ===== Inline Search =====
 
     fun activateSearch() {
-        _uiState.update { it.copy(isSearchActive = true, searchQuery = "", searchMatchIndices = emptyList(), currentSearchMatchIndex = -1) }
+        _uiState.update {
+            it.copy(
+                isSearchActive = true,
+                searchQuery = "",
+                searchMatchIndices = emptyList(),
+                currentSearchMatchIndex = -1,
+                isSearchingDatabase = false,
+                databaseSearchResultCount = 0,
+                showSearchResultsSheet = false
+            )
+        }
     }
 
     fun closeSearch() {
-        _uiState.update { it.copy(isSearchActive = false, searchQuery = "", searchMatchIndices = emptyList(), currentSearchMatchIndex = -1) }
+        searchJob?.cancel()
+        _uiState.update {
+            it.copy(
+                isSearchActive = false,
+                searchQuery = "",
+                searchMatchIndices = emptyList(),
+                currentSearchMatchIndex = -1,
+                isSearchingDatabase = false,
+                databaseSearchResultCount = 0,
+                showSearchResultsSheet = false
+            )
+        }
     }
 
     fun updateSearchQuery(query: String) {
@@ -2605,20 +2627,63 @@ class ChatViewModel @Inject constructor(
         // Update query immediately for responsive UI
         _uiState.update { it.copy(searchQuery = query) }
 
+        if (query.isBlank()) {
+            _uiState.update {
+                it.copy(
+                    searchMatchIndices = emptyList(),
+                    currentSearchMatchIndex = -1,
+                    isSearchingDatabase = false,
+                    databaseSearchResultCount = 0
+                )
+            }
+            return
+        }
+
         // Debounce the actual search to avoid running on every keystroke
         searchJob = viewModelScope.launch {
             delay(searchDebounceMs)
 
             val messages = _uiState.value.messages
-            val matchIndices = if (query.isBlank()) {
-                emptyList()
-            } else {
-                messages.mapIndexedNotNull { index, message ->
-                    if (message.text?.contains(query, ignoreCase = true) == true) index else null
-                }
+            val normalizedQuery = TextNormalization.normalizeForSearch(query)
+
+            // Search with expanded scope: text, subject, attachment filenames
+            // Uses diacritic-insensitive matching (e.g., "cafe" matches "café")
+            val matchIndices = messages.mapIndexedNotNull { index, message ->
+                if (matchesSearchQuery(message, normalizedQuery)) index else null
             }
+
             val currentIndex = if (matchIndices.isNotEmpty()) 0 else -1
-            _uiState.update { it.copy(searchMatchIndices = matchIndices, currentSearchMatchIndex = currentIndex) }
+            _uiState.update {
+                it.copy(
+                    searchMatchIndices = matchIndices,
+                    currentSearchMatchIndex = currentIndex
+                )
+            }
+
+            // TODO: Add async database search for full conversation history
+            // This would search mergedChatGuids via MessageRepository and update
+            // isSearchingDatabase and databaseSearchResultCount
+        }
+    }
+
+    /**
+     * Check if a message matches the normalized search query.
+     * Searches text, subject, and attachment filenames with diacritic-insensitive matching.
+     */
+    private fun matchesSearchQuery(message: MessageUiModel, normalizedQuery: String): Boolean {
+        // Check message text
+        if (TextNormalization.containsNormalized(message.text, normalizedQuery)) {
+            return true
+        }
+
+        // Check subject
+        if (TextNormalization.containsNormalized(message.subject, normalizedQuery)) {
+            return true
+        }
+
+        // Check attachment filenames
+        return message.attachments.any { attachment ->
+            TextNormalization.containsNormalized(attachment.transferName, normalizedQuery)
         }
     }
 
@@ -2642,6 +2707,38 @@ class ChatViewModel @Inject constructor(
             state.currentSearchMatchIndex + 1
         }
         _uiState.update { it.copy(currentSearchMatchIndex = newIndex) }
+    }
+
+    /**
+     * Show the search results bottom sheet.
+     */
+    fun showSearchResultsSheet() {
+        _uiState.update { it.copy(showSearchResultsSheet = true) }
+    }
+
+    /**
+     * Hide the search results bottom sheet.
+     */
+    fun hideSearchResultsSheet() {
+        _uiState.update { it.copy(showSearchResultsSheet = false) }
+    }
+
+    /**
+     * Scroll to a specific message by GUID and highlight it.
+     * Uses paging-aware loading and runs in viewModelScope.
+     * Meant for UI callbacks that need fire-and-forget behavior.
+     */
+    fun scrollToAndHighlightMessage(messageGuid: String) {
+        viewModelScope.launch {
+            val position = pagingController.jumpToMessage(messageGuid)
+            if (position != null) {
+                // Emit scroll event for the UI to handle
+                _scrollToGuid.emit(messageGuid)
+                // Highlight after scroll
+                delay(100)
+                highlightMessage(messageGuid)
+            }
+        }
     }
 
     /**

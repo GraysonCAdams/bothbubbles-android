@@ -10,13 +10,19 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.ui.components.common.ConversationAvatar
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
+import com.bothbubbles.util.PhoneNumberFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -49,10 +55,38 @@ fun ConversationDetailsScreen(
         }
     }
 
+    // Collapsing toolbar scroll behavior
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
+    // Calculate collapse progress (0 = fully expanded, 1 = fully collapsed)
+    val collapseProgress = scrollBehavior.state.collapsedFraction
+
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { },
+            LargeTopAppBar(
+                title = {
+                    // Animated title that fades in when collapsed
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.alpha(collapseProgress)
+                    ) {
+                        // Small avatar in collapsed state
+                        ConversationAvatar(
+                            displayName = uiState.displayName,
+                            isGroup = uiState.chat?.isGroup == true,
+                            participantNames = uiState.participants.map { it.displayName },
+                            avatarPath = uiState.chat?.customAvatarPath,
+                            size = 40.dp
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = PhoneNumberFormatter.format(uiState.displayName),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                },
                 navigationIcon = {
                     IconButton(onClick = onNavigateBack) {
                         Icon(
@@ -61,8 +95,10 @@ fun ConversationDetailsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
@@ -83,14 +119,15 @@ fun ConversationDetailsScreen(
                     .padding(paddingValues),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Header with avatar and name
+                // Expanded header with large avatar (fades out when collapsing)
                 item {
-                    ConversationHeader(
+                    CollapsingConversationHeader(
                         displayName = uiState.displayName,
                         subtitle = uiState.subtitle,
                         isGroup = uiState.chat?.isGroup == true,
                         participantNames = uiState.participants.map { it.displayName },
-                        avatarPath = uiState.chat?.customAvatarPath
+                        avatarPath = uiState.chat?.customAvatarPath,
+                        collapseProgress = collapseProgress
                     )
                 }
 

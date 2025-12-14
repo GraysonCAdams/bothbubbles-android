@@ -1,0 +1,336 @@
+package com.bothbubbles.ui.components.message
+
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
+
+/**
+ * Data class representing the bounds and metadata of a selected message.
+ */
+data class MessageBoundsInfo(
+    val bounds: Rect,
+    val isFromMe: Boolean,
+    val guid: String
+)
+
+/**
+ * Full-screen overlay for tapback/reaction menu with Material Design 3 styling.
+ *
+ * Features:
+ * - Scrim overlay (32% opacity) to focus attention on the message
+ * - Split UI: ReactionPill (top) + MessageActionMenu (bottom)
+ * - Smart positioning based on message location on screen
+ * - Dismissible by tapping the scrim
+ *
+ * Positioning Logic:
+ * - If message is near top: reactions below message, actions below reactions
+ * - If message is near bottom: actions above message, reactions above actions
+ * - Default: reactions above message, actions below message
+ *
+ * Horizontal Alignment:
+ * - Sent messages (isFromMe): align to end
+ * - Received messages: align to start
+ */
+@Composable
+fun TapbackOverlay(
+    visible: Boolean,
+    messageBounds: MessageBoundsInfo?,
+    myReactions: Set<Tapback>,
+    canReply: Boolean = false,
+    canCopy: Boolean = true,
+    canForward: Boolean = true,
+    onDismiss: () -> Unit,
+    onReactionSelected: (Tapback) -> Unit,
+    onReply: () -> Unit = {},
+    onCopy: () -> Unit = {},
+    onForward: () -> Unit = {},
+    onEmojiPickerClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier,
+    messageContent: @Composable BoxScope.() -> Unit = {}
+) {
+    if (!visible || messageBounds == null) return
+
+    val density = LocalDensity.current
+    val configuration = LocalConfiguration.current
+    val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
+    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+
+    // Scrim animation
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (visible) 0.32f else 0f,
+        animationSpec = tween(durationMillis = 200),
+        label = "scrimAlpha"
+    )
+
+    // Calculate positioning
+    val positioning = remember(messageBounds, screenHeight) {
+        calculatePositioning(
+            messageBounds = messageBounds.bounds,
+            screenHeight = screenHeight,
+            density = density.density
+        )
+    }
+
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        // Scrim background - clickable to dismiss
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha)
+                )
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onDismiss
+                )
+        )
+
+        // Message content (elevated/highlighted)
+        Box(
+            modifier = Modifier
+                .offset {
+                    IntOffset(
+                        x = messageBounds.bounds.left.roundToInt(),
+                        y = messageBounds.bounds.top.roundToInt()
+                    )
+                }
+        ) {
+            messageContent()
+        }
+
+        // Reaction Pill
+        val reactionPillAlignment = if (messageBounds.isFromMe) {
+            Alignment.TopEnd
+        } else {
+            Alignment.TopStart
+        }
+
+        Box(
+            modifier = Modifier
+                .align(reactionPillAlignment)
+                .offset {
+                    IntOffset(
+                        x = if (messageBounds.isFromMe) {
+                            (messageBounds.bounds.right - with(density) { 280.dp.toPx() }).roundToInt()
+                        } else {
+                            messageBounds.bounds.left.roundToInt()
+                        },
+                        y = positioning.reactionY.roundToInt()
+                    )
+                }
+                .padding(horizontal = 8.dp)
+        ) {
+            ReactionPill(
+                visible = visible,
+                myReactions = myReactions,
+                onReactionSelected = { tapback ->
+                    onReactionSelected(tapback)
+                    onDismiss()
+                },
+                onEmojiPickerClick = onEmojiPickerClick
+            )
+        }
+
+        // Action Menu
+        val actionMenuAlignment = if (messageBounds.isFromMe) {
+            Alignment.TopEnd
+        } else {
+            Alignment.TopStart
+        }
+
+        Box(
+            modifier = Modifier
+                .align(actionMenuAlignment)
+                .offset {
+                    IntOffset(
+                        x = if (messageBounds.isFromMe) {
+                            (messageBounds.bounds.right - with(density) { 180.dp.toPx() }).roundToInt()
+                        } else {
+                            messageBounds.bounds.left.roundToInt()
+                        },
+                        y = positioning.actionY.roundToInt()
+                    )
+                }
+                .padding(horizontal = 8.dp)
+                .width(180.dp)
+        ) {
+            MessageActionMenu(
+                visible = visible,
+                canReply = canReply,
+                canCopy = canCopy,
+                canForward = canForward,
+                onReply = {
+                    onReply()
+                    onDismiss()
+                },
+                onCopy = {
+                    onCopy()
+                    onDismiss()
+                },
+                onForward = {
+                    onForward()
+                    onDismiss()
+                }
+            )
+        }
+    }
+}
+
+/**
+ * Calculated positions for the reaction pill and action menu.
+ */
+private data class OverlayPositioning(
+    val reactionY: Float,
+    val actionY: Float,
+    val reactionsAbove: Boolean
+)
+
+/**
+ * Calculate optimal positions for reaction pill and action menu based on message location.
+ */
+private fun calculatePositioning(
+    messageBounds: Rect,
+    screenHeight: Float,
+    density: Float
+): OverlayPositioning {
+    val topThreshold = 150 * density // 150.dp in pixels
+    val bottomThreshold = screenHeight - 250 * density // 250.dp from bottom
+
+    val reactionPillHeight = 52 * density // ~52.dp
+    val actionMenuHeight = 160 * density // ~160.dp (3 items)
+    val spacing = 12 * density // 12.dp spacing
+
+    return when {
+        // Message too close to top: show everything below
+        messageBounds.top < topThreshold -> {
+            OverlayPositioning(
+                reactionY = messageBounds.bottom + spacing,
+                actionY = messageBounds.bottom + spacing + reactionPillHeight + spacing,
+                reactionsAbove = false
+            )
+        }
+        // Message too close to bottom: show everything above
+        messageBounds.bottom > bottomThreshold -> {
+            OverlayPositioning(
+                reactionY = messageBounds.top - spacing - reactionPillHeight - spacing - actionMenuHeight,
+                actionY = messageBounds.top - spacing - actionMenuHeight,
+                reactionsAbove = true
+            )
+        }
+        // Default: reactions above, actions below
+        else -> {
+            OverlayPositioning(
+                reactionY = messageBounds.top - spacing - reactionPillHeight,
+                actionY = messageBounds.bottom + spacing,
+                reactionsAbove = true
+            )
+        }
+    }
+}
+
+/**
+ * Simplified overlay for non-tapback-eligible messages (e.g., local SMS).
+ * Shows only action menu without reactions.
+ */
+@Composable
+fun ActionOnlyOverlay(
+    visible: Boolean,
+    messageBounds: MessageBoundsInfo?,
+    canCopy: Boolean = true,
+    canForward: Boolean = true,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit = {},
+    onForward: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    if (!visible || messageBounds == null) return
+
+    val density = LocalDensity.current
+
+    // Scrim animation
+    val scrimAlpha by animateFloatAsState(
+        targetValue = if (visible) 0.32f else 0f,
+        animationSpec = tween(durationMillis = 200),
+        label = "scrimAlpha"
+    )
+
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        // Scrim background
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha)
+                )
+                .clickable(
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() },
+                    onClick = onDismiss
+                )
+        )
+
+        // Action Menu only
+        val actionMenuAlignment = if (messageBounds.isFromMe) {
+            Alignment.TopEnd
+        } else {
+            Alignment.TopStart
+        }
+
+        Box(
+            modifier = Modifier
+                .align(actionMenuAlignment)
+                .offset {
+                    IntOffset(
+                        x = if (messageBounds.isFromMe) {
+                            (messageBounds.bounds.right - with(density) { 180.dp.toPx() }).roundToInt()
+                        } else {
+                            messageBounds.bounds.left.roundToInt()
+                        },
+                        y = (messageBounds.bounds.bottom + with(density) { 12.dp.toPx() }).roundToInt()
+                    )
+                }
+                .padding(horizontal = 8.dp)
+                .width(180.dp)
+        ) {
+            MessageActionMenu(
+                visible = visible,
+                canReply = false,
+                canCopy = canCopy,
+                canForward = canForward,
+                onCopy = {
+                    onCopy()
+                    onDismiss()
+                },
+                onForward = {
+                    onForward()
+                    onDismiss()
+                }
+            )
+        }
+    }
+}

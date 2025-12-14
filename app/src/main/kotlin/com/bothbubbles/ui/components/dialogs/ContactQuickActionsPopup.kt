@@ -6,6 +6,9 @@ import android.net.Uri
 import android.provider.ContactsContract
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,6 +21,7 @@ import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +29,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -50,9 +56,16 @@ data class ContactInfo(
 )
 
 /**
- * A Google Messages-style contact quick actions popup.
+ * A Material Design 3 Modal Bottom Sheet for contact quick actions.
  * Shows when tapping on a contact's avatar in the conversation list.
+ *
+ * Features:
+ * - Drag handle for easy dismissal
+ * - Large centered avatar with dynamic theming
+ * - FilledTonalButtons with labels for actions
+ * - TertiaryContainer Card for inferred name section
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ContactQuickActionsPopup(
     contactInfo: ContactInfo,
@@ -64,6 +77,7 @@ fun ContactQuickActionsPopup(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     // Add contact launcher - calls onContactAdded when returning from contacts app
     val addContactLauncher = rememberLauncherForActivityResult(
@@ -72,252 +86,281 @@ fun ContactQuickActionsPopup(
         onContactAdded()
     }
 
-    // Entrance animation state
+    // Entrance animation state for "expand from list" effect
     var animationStarted by remember { mutableStateOf(false) }
     LaunchedEffect(Unit) { animationStarted = true }
 
-    // Snappy scale + fade animation (Android 16 style)
-    val scale by animateFloatAsState(
-        targetValue = if (animationStarted) 1f else 0.85f,
+    // Avatar expand animation (simulates shared element transition)
+    val avatarScale by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0.4f,
         animationSpec = spring(
-            dampingRatio = 0.7f,
+            dampingRatio = Spring.DampingRatioMediumBouncy,
             stiffness = Spring.StiffnessMedium
         ),
-        label = "popupScale"
-    )
-    val alpha by animateFloatAsState(
-        targetValue = if (animationStarted) 1f else 0f,
-        animationSpec = tween(150),
-        label = "popupAlpha"
+        label = "avatarScale"
     )
 
-    Dialog(
+    // Content fade-in animation
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (animationStarted) 1f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessMediumLow
+        ),
+        label = "contentAlpha"
+    )
+
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            dismissOnBackPress = true,
-            dismissOnClickOutside = true,
-            usePlatformDefaultWidth = false
-        )
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface,
+        dragHandle = { BottomSheetDefaults.DragHandle() },
+        modifier = modifier
     ) {
-        Surface(
-            modifier = modifier
-                .padding(horizontal = 40.dp)
-                .wrapContentSize()
-                .graphicsLayer {
-                    scaleX = scale
-                    scaleY = scale
-                    this.alpha = alpha
-                },
-            shape = RoundedCornerShape(28.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = 6.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
+            // Large avatar with expand animation (simulates shared element)
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .scale(avatarScale)
+                    .clip(RoundedCornerShape(24.dp))
+            ) {
+                if (contactInfo.isGroup) {
+                    GroupAvatar(
+                        names = contactInfo.participantNames.ifEmpty {
+                            listOf(contactInfo.displayName)
+                        },
+                        size = 120.dp
+                    )
+                } else {
+                    Avatar(
+                        name = contactInfo.rawDisplayName,
+                        avatarPath = contactInfo.avatarPath,
+                        size = 120.dp
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Content below avatar with fade-in animation
             Column(
-                modifier = Modifier.padding(24.dp),
+                modifier = Modifier.graphicsLayer { alpha = contentAlpha },
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Large avatar
-                Box(
-                    modifier = Modifier
-                        .size(120.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                ) {
-                    if (contactInfo.isGroup) {
-                        GroupAvatar(
-                            names = contactInfo.participantNames.ifEmpty {
-                                listOf(contactInfo.displayName)
-                            },
-                            size = 120.dp
-                        )
-                    } else {
-                        Avatar(
-                            name = contactInfo.rawDisplayName,
-                            avatarPath = contactInfo.avatarPath,
-                            size = 120.dp
-                        )
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(16.dp))
-
-                // Display name with optional starred indicator
+                // Display name (Headline Medium) with optional starred indicator
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
                         text = contactInfo.displayName,
-                        style = MaterialTheme.typography.titleLarge,
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.Medium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     if (contactInfo.isStarred && !contactInfo.isGroup) {
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             imageVector = Icons.Filled.Star,
                             contentDescription = "Favorite contact",
                             tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
 
-                // Phone/email if different from display name
+                // Phone/email subtitle (Body Large, OnSurfaceVariant)
                 if (contactInfo.address != contactInfo.displayName && !contactInfo.isGroup) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = PhoneNumberFormatter.format(contactInfo.address),
-                        style = MaterialTheme.typography.bodyMedium,
+                        style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                // Action buttons row
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    modifier = Modifier.wrapContentWidth()
+                // Action buttons row - FilledTonalButtons with labels
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        // Message
-                        QuickActionButton(
-                            icon = Icons.AutoMirrored.Filled.Message,
-                            contentDescription = "Message",
+                    // Message button
+                    ActionButtonWithLabel(
+                        icon = Icons.AutoMirrored.Filled.Message,
+                        label = "Message",
+                        onClick = {
+                            onMessageClick()
+                            onDismiss()
+                        }
+                    )
+
+                    // Set group photo (only for group chats)
+                    if (contactInfo.isGroup) {
+                        ActionButtonWithLabel(
+                            icon = Icons.Default.Image,
+                            label = "Photo",
                             onClick = {
-                                onMessageClick()
+                                onSetGroupPhoto()
                                 onDismiss()
                             }
                         )
-
-                        // Set group photo (only for group chats)
-                        if (contactInfo.isGroup) {
-                            QuickActionButton(
-                                icon = Icons.Default.Image,
-                                contentDescription = "Set group photo",
-                                onClick = {
-                                    onSetGroupPhoto()
-                                    onDismiss()
-                                }
-                            )
-                        }
-
-                        // Call (only for non-group chats)
-                        if (!contactInfo.isGroup) {
-                            QuickActionButton(
-                                icon = Icons.Default.Call,
-                                contentDescription = "Call",
-                                onClick = {
-                                    launchDialer(context, contactInfo.address)
-                                    onDismiss()
-                                }
-                            )
-                        }
-
-                        // Contact info / Add contact button (for non-group chats only)
-                        // Shows "Contact info" if person is a saved contact, "Add contact" otherwise
-                        if (!contactInfo.isGroup) {
-                            if (contactInfo.hasContact) {
-                                QuickActionButton(
-                                    icon = Icons.Default.Info,
-                                    contentDescription = "Contact info",
-                                    onClick = {
-                                        viewContact(context, contactInfo.address)
-                                        onDismiss()
-                                    }
-                                )
-                            } else {
-                                QuickActionButton(
-                                    icon = Icons.Default.PersonAdd,
-                                    contentDescription = "Add contact",
-                                    onClick = {
-                                        val intent = createAddContactIntent(contactInfo.address, contactInfo.rawDisplayName)
-                                        addContactLauncher.launch(intent)
-                                        onDismiss()
-                                    }
-                                )
-                            }
-                        }
-
                     }
-                }
 
-                // Inferred name confirmation section
+                    // Call (only for non-group chats)
+                    if (!contactInfo.isGroup) {
+                        ActionButtonWithLabel(
+                            icon = Icons.Default.Call,
+                            label = "Call",
+                            onClick = {
+                                launchDialer(context, contactInfo.address)
+                                onDismiss()
+                            }
+                        )
+                    }
+
+                    // Contact info / Add contact button (for non-group chats only)
+                    if (!contactInfo.isGroup) {
+                        if (contactInfo.hasContact) {
+                            ActionButtonWithLabel(
+                                icon = Icons.Default.Info,
+                                label = "Info",
+                                onClick = {
+                                    viewContact(context, contactInfo.address)
+                                    onDismiss()
+                                }
+                            )
+                        } else {
+                            ActionButtonWithLabel(
+                                icon = Icons.Default.PersonAdd,
+                                label = "Add",
+                                onClick = {
+                                    val intent = createAddContactIntent(contactInfo.address, contactInfo.rawDisplayName)
+                                    addContactLauncher.launch(intent)
+                                    onDismiss()
+                                }
+                            )
+                        }
+                    }
+                }  // Close Row for action buttons
+
+                // Inferred name confirmation section - TertiaryContainer Card
                 if (contactInfo.hasInferredName && !contactInfo.isGroup) {
-                    Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                    Text(
-                        text = "We think this might be ${contactInfo.rawDisplayName}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        ),
+                        shape = RoundedCornerShape(16.dp)
                     ) {
-                        // Dismiss button
-                        OutlinedButton(
-                            onClick = {
-                                onDismissInferredName()
-                                onDismiss()
-                            }
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
+                            Text(
+                                text = "We think this might be ${contactInfo.rawDisplayName}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onTertiaryContainer
                             )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Not them")
-                        }
 
-                        // Save as contact button
-                        Button(
-                            onClick = {
-                                launchAddContact(context, contactInfo.address, contactInfo.rawDisplayName)
-                                onDismiss()
+                            Spacer(modifier = Modifier.height(16.dp))
+
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                // Dismiss button - OutlinedButton
+                                OutlinedButton(
+                                    onClick = {
+                                        onDismissInferredName()
+                                        onDismiss()
+                                    },
+                                    colors = ButtonDefaults.outlinedButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.onTertiaryContainer
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Not them")
+                                }
+
+                                // Save as contact button - FilledTonalButton
+                                FilledTonalButton(
+                                    onClick = {
+                                        launchAddContact(context, contactInfo.address, contactInfo.rawDisplayName)
+                                        onDismiss()
+                                    },
+                                    colors = ButtonDefaults.filledTonalButtonColors(
+                                        containerColor = MaterialTheme.colorScheme.tertiary,
+                                        contentColor = MaterialTheme.colorScheme.onTertiary
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.PersonAdd,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("Save contact")
+                                }
                             }
-                        ) {
-                            Icon(
-                                Icons.Default.PersonAdd,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text("Save contact")
                         }
                     }
                 }
-            }
+            }  // Close animated content Column
         }
     }
 }
 
+/**
+ * MD3-style action button with icon and label.
+ * Uses FilledTonalButton styling for better touch targets and visual hierarchy.
+ */
 @Composable
-private fun QuickActionButton(
+private fun ActionButtonWithLabel(
     icon: ImageVector,
-    contentDescription: String,
+    label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .clickable(onClick = onClick)
-            .background(Color.Transparent),
-        contentAlignment = Alignment.Center
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(24.dp)
+        FilledTonalButton(
+            onClick = onClick,
+            modifier = Modifier.size(56.dp),
+            shape = RoundedCornerShape(16.dp),
+            contentPadding = PaddingValues(0.dp),
+            colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+            )
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = label,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
         )
     }
 }

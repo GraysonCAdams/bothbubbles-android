@@ -23,6 +23,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.geometry.Rect
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.util.parsing.UrlParsingUtils
@@ -83,7 +84,9 @@ fun MessageBubble(
     // Group chat avatar support
     isGroupChat: Boolean = false,
     // Show avatar only on last message in a consecutive group from same sender
-    showAvatar: Boolean = false
+    showAvatar: Boolean = false,
+    // Callback for reporting message bounds (for tapback overlay positioning)
+    onBoundsChanged: ((Rect) -> Unit)? = null
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -153,6 +156,7 @@ fun MessageBubble(
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
                     onRetry = onRetry,
+                    onBoundsChanged = onBoundsChanged,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -171,6 +175,7 @@ fun MessageBubble(
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
                     onRetry = onRetry,
+                    onBoundsChanged = onBoundsChanged,
                     modifier = Modifier.weight(1f)
                 )
             }

@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
@@ -94,7 +97,8 @@ internal fun SegmentedMessageBubble(
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
-    onRetry: ((String) -> Unit)? = null
+    onRetry: ((String) -> Unit)? = null,
+    onBoundsChanged: ((Rect) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -349,7 +353,11 @@ internal fun SegmentedMessageBubble(
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Render segments with reactions on first segment
-                Box {
+                Box(
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        onBoundsChanged?.invoke(coordinates.boundsInWindow())
+                    }
+                ) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -628,7 +636,12 @@ internal fun TextBubbleSegment(
             val annotatedText = if (isLargeEmoji) {
                 null
             } else if (!searchQuery.isNullOrBlank() && text.contains(searchQuery, ignoreCase = true)) {
-                buildSearchHighlightedText(text, searchQuery, textColor, detectedDates)
+                buildSearchHighlightedText(
+                    text = text,
+                    searchQuery = searchQuery,
+                    textColor = textColor,
+                    detectedDates = detectedDates
+                )
             } else if (hasClickableContent) {
                 buildAnnotatedStringWithClickables(text, detectedDates, detectedPhoneNumbers, detectedCodes, textColor)
             } else {

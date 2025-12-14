@@ -1,0 +1,333 @@
+package com.bothbubbles.services.auto
+
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import androidx.car.app.CarContext
+import androidx.car.app.ScreenManager
+import androidx.car.app.model.CarIcon
+import androidx.car.app.model.ItemList
+import androidx.car.app.model.ListTemplate
+import androidx.car.app.model.Row
+import androidx.car.app.model.Template
+import androidx.core.graphics.drawable.IconCompat
+import com.bothbubbles.R
+import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.util.PhoneNumberFormatter
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
+import java.io.File
+
+/**
+ * Content delegate for the Chats tab in Android Auto.
+ *
+ * Uses ConversationItem API (Car App Library 1.1+) for semantic messaging UI:
+ * - Dedicated slots for title (contact), subtitle (snippet), and icon (avatar)
+ * - Native unread state handling via setUnreadConversation()
+ * - Standardized click target sizes for driver safety
+ *
+ * Implements async image loading with invalidation pattern:
+ * 1. Initial render with placeholder icons
+ * 2. Background coroutine loads contact images
+ * 3. Cache results and call invalidate()
+ * 4. Subsequent render uses cached bitmaps
+ */
+class ConversationListContent(
+    private val carContext: CarContext,
+    private val chatDao: ChatDao,
+    private val messageDao: MessageDao,
+    private val handleDao: HandleDao,
+    private val chatRepository: ChatRepository,
+    private val messageSendingService: MessageSendingService,
+    private val syncService: SyncService?,
+    private val screenManager: ScreenManager,
+    private val onInvalidate: () -> Unit
+) {
+    private val contentScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Cache for conversations
+    @Volatile
+    private var cachedConversations: List<ChatEntity> = emptyList()
+
+    @Volatile
+    private var cachedMessages: Map<String, MessageEntity?> = emptyMap()
+
+    // Pagination state
+    @Volatile
+    private var currentPage = 0
+
+    @Volatile
+    private var hasMoreConversations = true
+
+    @Volatile
+    private var isLoading = false
+
+    // Name caches
+    private val senderNameCache = mutableMapOf<Long, String>()
+    private val participantNameCache = mutableMapOf<String, String>()
+
+    // Avatar bitmap cache for async loading pattern
+    private val avatarCache = mutableMapOf<String, Bitmap?>()
+
+    @Volatile
+    private var avatarsLoading = false
+
+    init {
+        refreshData()
+    }
+
+    fun refreshData() {
+        if (isLoading) return
+        isLoading = true
+
+        contentScope.launch {
+            try {
+                val chats = chatDao.getActiveChats().first()
+
+                val sortedChats = chats.sortedWith(
+                    compareByDescending<ChatEntity> { it.hasUnreadMessage && it.isPinned }
+                        .thenByDescending { it.hasUnreadMessage }
+                        .thenByDescending { it.isPinned }
+                        .thenByDescending { it.lastMessageDate ?: 0L }
+                )
+
+                val displayCount = minOf((currentPage + 1) * PAGE_SIZE, sortedChats.size)
+                val chatsToDisplay = sortedChats.take(displayCount)
+                hasMoreConversations = displayCount < sortedChats.size
+
+                cachedConversations = chatsToDisplay
+
+                // Pre-fetch latest messages
+                val chatGuids = chatsToDisplay.map { it.guid }
+                val latestMessages = messageDao.getLatestMessagesForChats(chatGuids)
+                cachedMessages = latestMessages.associateBy { it.chatGuid }
+
+                // Pre-fetch sender names
+                val handleIds = latestMessages.mapNotNull { it.handleId }.distinct()
+                if (handleIds.isNotEmpty()) {
+                    val handles = handleDao.getHandlesByIds(handleIds)
+                    handles.forEach { handle ->
+                        val displayName = handle.cachedDisplayName
+                            ?: handle.inferredName
+                            ?: handle.formattedAddress?.take(10)
+                            ?: ""
+                        senderNameCache[handle.id] = displayName
+                    }
+                }
+
+                // Pre-fetch participant names
+                val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+                    .groupBy({ it.chatGuid }, { it.handle })
+                for (chat in chatsToDisplay) {
+                    val participants = participantsByChat[chat.guid] ?: emptyList()
+                    val participantNames = when {
+                        participants.isEmpty() -> chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+                        participants.size == 1 -> {
+                            participants.first().cachedDisplayName
+                                ?: participants.first().formattedAddress
+                                ?: participants.first().address
+                        }
+                        else -> {
+                            participants.take(3).joinToString(", ") { handle ->
+                                handle.cachedDisplayName
+                                    ?: handle.formattedAddress?.take(10)
+                                    ?: handle.address.take(10)
+                            }
+                        }
+                    }
+                    participantNameCache[chat.guid] = participantNames
+                }
+
+                isLoading = false
+                onInvalidate()
+
+                // Start async avatar loading
+                loadAvatarsAsync(chatsToDisplay, participantsByChat)
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to refresh data", e)
+                isLoading = false
+            }
+        }
+    }
+
+    /**
+     * Async avatar loading with invalidation pattern.
+     * Loads contact photos in background, then invalidates to update UI.
+     */
+    private fun loadAvatarsAsync(
+        chats: List<ChatEntity>,
+        participantsByChat: Map<String, List<com.bothbubbles.data.local.db.entity.HandleEntity>>
+    ) {
+        if (avatarsLoading) return
+        avatarsLoading = true
+
+        contentScope.launch {
+            var anyLoaded = false
+
+            for (chat in chats) {
+                if (avatarCache.containsKey(chat.guid)) continue
+
+                val participants = participantsByChat[chat.guid] ?: emptyList()
+                val primaryParticipant = participants.firstOrNull()
+
+                // Try to load avatar from cached avatar path
+                val avatarBitmap = primaryParticipant?.cachedAvatarPath?.let { path ->
+                    try {
+                        val file = java.io.File(path)
+                        if (file.exists()) {
+                            BitmapFactory.decodeFile(path)?.let { bitmap ->
+                                // Scale to reasonable size for car display
+                                Bitmap.createScaledBitmap(bitmap, AVATAR_SIZE, AVATAR_SIZE, true)
+                            }
+                        } else null
+                    } catch (e: Exception) {
+                        android.util.Log.d(TAG, "Failed to load avatar for ${chat.guid}", e)
+                        null
+                    }
+                }
+
+                avatarCache[chat.guid] = avatarBitmap
+                if (avatarBitmap != null) anyLoaded = true
+            }
+
+            avatarsLoading = false
+
+            // Invalidate to refresh UI with loaded avatars
+            if (anyLoaded) {
+                onInvalidate()
+            }
+        }
+    }
+
+    private fun loadMoreConversations() {
+        if (!hasMoreConversations || isLoading) return
+        currentPage++
+        refreshData()
+    }
+
+    fun buildContent(): Template {
+        val itemListBuilder = ItemList.Builder()
+
+        for (chat in cachedConversations) {
+            val item = buildConversationRow(chat)
+            if (item != null) {
+                itemListBuilder.addItem(item)
+            }
+        }
+
+        // Add "Load More" item if there are more conversations
+        if (hasMoreConversations && cachedConversations.isNotEmpty()) {
+            val loadMoreItem = Row.Builder()
+                .setTitle("Load More Conversations...")
+                .setOnClickListener { loadMoreConversations() }
+                .build()
+            itemListBuilder.addItem(loadMoreItem)
+        }
+
+        if (cachedConversations.isEmpty()) {
+            itemListBuilder.setNoItemsMessage(
+                if (isLoading) "Loading conversations..." else "No conversations yet"
+            )
+        }
+
+        return ListTemplate.Builder()
+            .setTitle("Messages")
+            .setSingleList(itemListBuilder.build())
+            .build()
+    }
+
+    /**
+     * Build Row with async-loaded avatar and unread indicator.
+     *
+     * Uses the invalidation pattern for avatar loading:
+     * 1. Initial render uses placeholder
+     * 2. Avatar loaded in background
+     * 3. Screen invalidates to show loaded avatar
+     *
+     * Unread state shown via title prefix (● indicator).
+     */
+    private fun buildConversationRow(chat: ChatEntity): Row? {
+        val latestMessage = cachedMessages[chat.guid]
+        val displayTitle = chat.displayName ?: participantNameCache[chat.guid] ?: ""
+        val messagePreview = buildMessagePreview(latestMessage, chat)
+
+        // Build title with unread indicator
+        val title = if (chat.hasUnreadMessage) {
+            "● $displayTitle"
+        } else {
+            displayTitle
+        }
+
+        // Use cached avatar bitmap or fall back to placeholder
+        val icon = avatarCache[chat.guid]?.let { bitmap ->
+            CarIcon.Builder(IconCompat.createWithBitmap(bitmap)).build()
+        } ?: CarIcon.Builder(
+            IconCompat.createWithResource(carContext, R.mipmap.ic_launcher)
+        ).build()
+
+        return try {
+            Row.Builder()
+                .setTitle(title)
+                .addText(messagePreview)
+                .setImage(icon)
+                .setOnClickListener {
+                    screenManager.push(
+                        ConversationDetailScreen(
+                            carContext = carContext,
+                            chat = chat,
+                            messageDao = messageDao,
+                            handleDao = handleDao,
+                            chatRepository = chatRepository,
+                            messageSendingService = messageSendingService,
+                            syncService = syncService,
+                            onRefresh = { refreshData() }
+                        )
+                    )
+                }
+                .build()
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to build Row for ${chat.guid}", e)
+            null
+        }
+    }
+
+    private fun buildMessagePreview(message: MessageEntity?, chat: ChatEntity): String {
+        if (message == null) return "No messages"
+
+        val text = message.text?.take(50) ?: ""
+        val hasAttachment = message.hasAttachments
+
+        val isGroupChat = chat.displayName != null
+        val senderPrefix = when {
+            message.isFromMe -> "You: "
+            isGroupChat -> {
+                val senderName = message.handleId?.let { senderNameCache[it] } ?: ""
+                if (senderName.isNotBlank()) "$senderName: " else ""
+            }
+            else -> ""
+        }
+
+        val content = when {
+            text.isNotBlank() -> text
+            hasAttachment -> "📎 Attachment"
+            else -> "No content"
+        }
+
+        return senderPrefix + content
+    }
+
+    companion object {
+        private const val TAG = "ConversationListContent"
+        private const val PAGE_SIZE = 15
+        private const val AVATAR_SIZE = 64 // Pixels, suitable for car displays
+    }
+}

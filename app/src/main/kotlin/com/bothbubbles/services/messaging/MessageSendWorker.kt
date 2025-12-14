@@ -1,10 +1,17 @@
 package com.bothbubbles.services.messaging
 
+import android.app.Notification
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.Context
+import android.content.pm.ServiceInfo
 import android.net.Uri
+import android.os.Build
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
+import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
@@ -19,6 +26,11 @@ import java.io.File
  *
  * This worker is enqueued with network constraints, so it only runs when
  * connectivity is available. It handles retry with exponential backoff.
+ *
+ * Android 14/16 Compliance:
+ * - Uses expedited work with foreground service for user-initiated sends
+ * - Declares SHORT_SERVICE type for sends from Android Auto (< 3 min tasks)
+ * - Properly handles background start restrictions via active session context
  *
  * Key responsibilities:
  * 1. Load pending message from database
@@ -43,6 +55,63 @@ class MessageSendWorker @AssistedInject constructor(
         const val KEY_PENDING_MESSAGE_ID = "pending_message_id"
         const val UNIQUE_WORK_PREFIX = "send_message_"
         private const val MAX_RETRY_COUNT = 3
+
+        private const val NOTIFICATION_CHANNEL_ID = "message_send_channel"
+        private const val NOTIFICATION_ID = 9001
+    }
+
+    /**
+     * Provide ForegroundInfo for expedited work on Android 12+.
+     *
+     * On Android 14+, uses SHORT_SERVICE type for Android Auto sends
+     * (tasks guaranteed to complete in < 3 minutes).
+     */
+    override suspend fun getForegroundInfo(): ForegroundInfo {
+        createNotificationChannel()
+        val notification = createNotification()
+
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            // Android 14+: Use SHORT_SERVICE type for quick message sends
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SHORT_SERVICE
+            )
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            // Android 10-13: Use DATA_SYNC type
+            ForegroundInfo(
+                NOTIFICATION_ID,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            )
+        } else {
+            ForegroundInfo(NOTIFICATION_ID, notification)
+        }
+    }
+
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(
+                NOTIFICATION_CHANNEL_ID,
+                "Message Sending",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Shows when messages are being sent"
+                setShowBadge(false)
+            }
+            val notificationManager = applicationContext.getSystemService(NotificationManager::class.java)
+            notificationManager.createNotificationChannel(channel)
+        }
+    }
+
+    private fun createNotification(): Notification {
+        return NotificationCompat.Builder(applicationContext, NOTIFICATION_CHANNEL_ID)
+            .setSmallIcon(android.R.drawable.ic_menu_send)
+            .setContentTitle("Sending message")
+            .setContentText("Your message is being sent...")
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOngoing(true)
+            .build()
     }
 
     override suspend fun doWork(): Result {

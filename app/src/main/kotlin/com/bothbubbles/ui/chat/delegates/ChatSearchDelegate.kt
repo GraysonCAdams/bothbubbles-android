@@ -1,27 +1,48 @@
 package com.bothbubbles.ui.chat.delegates
 
+import androidx.compose.runtime.Immutable
+import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.util.text.TextNormalization
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
 /**
  * Delegate responsible for in-chat message search functionality.
- * Handles search activation, query filtering, and navigation through results.
+ *
+ * Implements a hybrid search strategy:
+ * 1. Instant local search: Searches currently loaded messages in memory
+ * 2. Async database search: Searches full conversation history via FTS5/LIKE
+ *
+ * Features:
+ * - Diacritic-insensitive matching (e.g., "cafe" matches "café")
+ * - Expanded search scope: message text, subject, and attachment filenames
+ * - Search results with snippets for the "View All" bottom sheet
  */
-class ChatSearchDelegate @Inject constructor() {
+class ChatSearchDelegate @Inject constructor(
+    private val messageDao: MessageDao,
+    private val attachmentDao: AttachmentDao
+) {
 
     private companion object {
         const val SEARCH_DEBOUNCE_MS = 150L
+        const val DATABASE_SEARCH_DELAY_MS = 300L
+        const val MAX_SNIPPET_LENGTH = 100
+        const val DATABASE_SEARCH_LIMIT = 100
     }
 
     private lateinit var scope: CoroutineScope
     private var searchJob: Job? = null
+    private var databaseSearchJob: Job? = null
 
     // Search state
     private val _isSearchActive = MutableStateFlow(false)
@@ -35,6 +56,13 @@ class ChatSearchDelegate @Inject constructor() {
 
     private val _currentSearchMatchIndex = MutableStateFlow(-1)
     val currentSearchMatchIndex: StateFlow<Int> = _currentSearchMatchIndex.asStateFlow()
+
+    // Database search state
+    private val _isSearchingDatabase = MutableStateFlow(false)
+    val isSearchingDatabase: StateFlow<Boolean> = _isSearchingDatabase.asStateFlow()
+
+    private val _databaseResults = MutableStateFlow<List<SearchResult>>(emptyList())
+    val databaseResults: StateFlow<List<SearchResult>> = _databaseResults.asStateFlow()
 
     /**
      * Initialize the delegate.
@@ -51,42 +79,228 @@ class ChatSearchDelegate @Inject constructor() {
         _searchQuery.value = ""
         _searchMatchIndices.value = emptyList()
         _currentSearchMatchIndex.value = -1
+        _databaseResults.value = emptyList()
+        _isSearchingDatabase.value = false
     }
 
     /**
-     * Close search mode.
+     * Close search mode completely.
      */
     fun closeSearch() {
+        searchJob?.cancel()
+        databaseSearchJob?.cancel()
         _isSearchActive.value = false
         _searchQuery.value = ""
         _searchMatchIndices.value = emptyList()
         _currentSearchMatchIndex.value = -1
+        _databaseResults.value = emptyList()
+        _isSearchingDatabase.value = false
     }
 
     /**
-     * Update search query and perform search.
+     * Update search query and perform hybrid search.
+     *
+     * @param query The search query
+     * @param messages Currently loaded messages in memory
+     * @param chatGuids List of chat GUIDs to search within (for merged conversations)
      */
-    fun updateSearchQuery(query: String, messages: List<MessageUiModel>) {
-        // Cancel previous search job
+    fun updateSearchQuery(
+        query: String,
+        messages: List<MessageUiModel>,
+        chatGuids: List<String> = emptyList()
+    ) {
+        // Cancel previous search jobs
         searchJob?.cancel()
+        databaseSearchJob?.cancel()
 
         // Update query immediately for responsive UI
         _searchQuery.value = query
 
-        // Debounce the actual search
+        if (query.isBlank()) {
+            _searchMatchIndices.value = emptyList()
+            _currentSearchMatchIndex.value = -1
+            _databaseResults.value = emptyList()
+            _isSearchingDatabase.value = false
+            return
+        }
+
+        // 1. Instant local search with normalization
         searchJob = scope.launch {
             delay(SEARCH_DEBOUNCE_MS)
 
-            val matchIndices = if (query.isBlank()) {
-                emptyList()
-            } else {
-                messages.mapIndexedNotNull { index, message ->
-                    if (message.text?.contains(query, ignoreCase = true) == true) index else null
-                }
+            val normalizedQuery = TextNormalization.normalizeForSearch(query)
+            val matchIndices = messages.mapIndexedNotNull { index, message ->
+                if (matchesQuery(message, normalizedQuery)) index else null
             }
-            val currentIndex = if (matchIndices.isNotEmpty()) 0 else -1
+
             _searchMatchIndices.value = matchIndices
-            _currentSearchMatchIndex.value = currentIndex
+            _currentSearchMatchIndex.value = if (matchIndices.isNotEmpty()) 0 else -1
+
+            // 2. Async database search (with additional delay to prioritize local results)
+            if (chatGuids.isNotEmpty()) {
+                launchDatabaseSearch(query, chatGuids, messages)
+            }
+        }
+    }
+
+    /**
+     * Check if a message matches the normalized query.
+     * Searches text, subject, and attachment filenames.
+     */
+    private fun matchesQuery(message: MessageUiModel, normalizedQuery: String): Boolean {
+        // Check message text
+        if (TextNormalization.containsNormalized(message.text, normalizedQuery)) {
+            return true
+        }
+
+        // Check subject
+        if (TextNormalization.containsNormalized(message.subject, normalizedQuery)) {
+            return true
+        }
+
+        // Check attachment filenames
+        return message.attachments.any { attachment ->
+            TextNormalization.containsNormalized(attachment.transferName, normalizedQuery)
+        }
+    }
+
+    /**
+     * Launch async database search.
+     */
+    private fun launchDatabaseSearch(
+        query: String,
+        chatGuids: List<String>,
+        loadedMessages: List<MessageUiModel>
+    ) {
+        databaseSearchJob?.cancel()
+        databaseSearchJob = scope.launch {
+            delay(DATABASE_SEARCH_DELAY_MS) // Give local search time to show first
+
+            _isSearchingDatabase.value = true
+
+            try {
+                val results = withContext(Dispatchers.IO) {
+                    searchDatabase(query, chatGuids, loadedMessages)
+                }
+                _databaseResults.value = results
+            } catch (e: Exception) {
+                // Log error but don't crash - database search is optional
+                _databaseResults.value = emptyList()
+            } finally {
+                _isSearchingDatabase.value = false
+            }
+        }
+    }
+
+    /**
+     * Search the database for matching messages.
+     * Combines FTS5 text search with attachment filename search.
+     */
+    private suspend fun searchDatabase(
+        query: String,
+        chatGuids: List<String>,
+        loadedMessages: List<MessageUiModel>
+    ): List<SearchResult> {
+        val loadedGuids = loadedMessages.mapTo(HashSet()) { it.guid }
+        val results = mutableListOf<SearchResult>()
+
+        // Search message text/subject using FTS5 (with LIKE fallback)
+        val messageResults = try {
+            // Escape FTS5 special characters and add prefix wildcard
+            val ftsQuery = prepareFtsQuery(query)
+            messageDao.searchMessagesInChatsFts(ftsQuery, chatGuids, DATABASE_SEARCH_LIMIT)
+        } catch (e: Exception) {
+            // Fallback to LIKE-based search
+            messageDao.searchMessagesInChatsLike(query, chatGuids, DATABASE_SEARCH_LIMIT)
+        }
+
+        for (message in messageResults) {
+            val matchType = when {
+                TextNormalization.containsNormalized(message.text, query) -> MatchType.TEXT
+                TextNormalization.containsNormalized(message.subject, query) -> MatchType.SUBJECT
+                else -> MatchType.TEXT // Default
+            }
+
+            val snippet = createSnippet(
+                text = message.text ?: message.subject ?: "",
+                query = query
+            )
+
+            results.add(
+                SearchResult(
+                    messageGuid = message.guid,
+                    chatGuid = message.chatGuid,
+                    snippet = snippet,
+                    timestamp = message.dateCreated,
+                    senderName = null, // Would need to resolve from handle
+                    matchType = matchType,
+                    isLoadedInMemory = message.guid in loadedGuids
+                )
+            )
+        }
+
+        // Search attachment filenames
+        val attachmentResults = attachmentDao.searchAttachmentsByName(query, chatGuids, 50)
+        for (attachment in attachmentResults) {
+            // Avoid duplicates if message already in results
+            if (results.none { it.messageGuid == attachment.messageGuid }) {
+                results.add(
+                    SearchResult(
+                        messageGuid = attachment.messageGuid,
+                        chatGuid = "", // Would need to look up
+                        snippet = attachment.transferName ?: "Attachment",
+                        timestamp = 0L, // Would need to look up message timestamp
+                        senderName = null,
+                        matchType = MatchType.ATTACHMENT_NAME,
+                        isLoadedInMemory = attachment.messageGuid in loadedGuids
+                    )
+                )
+            }
+        }
+
+        // Sort by timestamp descending
+        return results.sortedByDescending { it.timestamp }
+    }
+
+    /**
+     * Prepare query for FTS5 MATCH syntax.
+     * Escapes special characters and adds prefix matching.
+     */
+    private fun prepareFtsQuery(query: String): String {
+        // Escape FTS5 special characters: " * - OR AND NOT ( )
+        val escaped = query
+            .replace("\"", "\"\"")
+            .replace("*", "")
+            .replace("-", " ")
+
+        // Add prefix wildcard for partial matching
+        return "\"$escaped\"*"
+    }
+
+    /**
+     * Create a snippet of text around the query match.
+     */
+    private fun createSnippet(text: String, query: String): String {
+        if (text.length <= MAX_SNIPPET_LENGTH) return text
+
+        val normalizedText = TextNormalization.normalizeForSearch(text)
+        val normalizedQuery = TextNormalization.normalizeForSearch(query)
+        val matchIndex = normalizedText.indexOf(normalizedQuery)
+
+        if (matchIndex == -1) {
+            return text.take(MAX_SNIPPET_LENGTH) + "..."
+        }
+
+        // Center the snippet around the match
+        val snippetStart = maxOf(0, matchIndex - MAX_SNIPPET_LENGTH / 3)
+        val snippetEnd = minOf(text.length, snippetStart + MAX_SNIPPET_LENGTH)
+
+        val snippet = text.substring(snippetStart, snippetEnd)
+        return when {
+            snippetStart > 0 && snippetEnd < text.length -> "...$snippet..."
+            snippetStart > 0 -> "...$snippet"
+            snippetEnd < text.length -> "$snippet..."
+            else -> snippet
         }
     }
 
@@ -121,4 +335,27 @@ class ChatSearchDelegate @Inject constructor() {
         }
         _currentSearchMatchIndex.value = newIndex
     }
+
+    /**
+     * Type of search match.
+     */
+    enum class MatchType {
+        TEXT,            // Match found in message text
+        SUBJECT,         // Match found in message subject
+        ATTACHMENT_NAME  // Match found in attachment filename
+    }
+
+    /**
+     * Result from database search with snippet for display in results list.
+     */
+    @Immutable
+    data class SearchResult(
+        val messageGuid: String,
+        val chatGuid: String,
+        val snippet: String,
+        val timestamp: Long,
+        val senderName: String?,
+        val matchType: MatchType,
+        val isLoadedInMemory: Boolean
+    )
 }

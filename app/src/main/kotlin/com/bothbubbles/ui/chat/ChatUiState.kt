@@ -53,7 +53,11 @@ data class ChatUiState(
     val searchQuery: String = "",
     val searchMatchIndices: List<Int> = emptyList(),
     val currentSearchMatchIndex: Int = -1,
-    // Highlighted message (from notification deep-link)
+    // Database search state (for "View All" results)
+    val isSearchingDatabase: Boolean = false,
+    val databaseSearchResultCount: Int = 0, // Total results from database search
+    val showSearchResultsSheet: Boolean = false, // Whether to show the "View All" bottom sheet
+    // Highlighted message (from notification deep-link or search jump)
     val highlightedMessageGuid: String? = null,
     // SMS fallback mode
     val isInSmsFallbackMode: Boolean = false,

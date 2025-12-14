@@ -110,6 +110,8 @@ import com.bothbubbles.ui.chat.components.ChatInputArea
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
+import com.bothbubbles.ui.chat.components.SearchResultsSheet
+import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
 import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
 import com.bothbubbles.ui.chat.components.QualitySelectionSheet
 import com.bothbubbles.ui.chat.components.ReplyPreview
@@ -141,7 +143,8 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.input.ScheduleMessageDialog
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.common.SpamSafetyBanner
-import com.bothbubbles.ui.components.message.TapbackMenu
+import com.bothbubbles.ui.components.message.TapbackOverlay
+import com.bothbubbles.ui.components.message.MessageBoundsInfo
 import com.bothbubbles.ui.components.message.TypingIndicator
 import com.bothbubbles.ui.components.dialogs.VCardOptionsDialog
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
@@ -332,6 +335,7 @@ fun ChatScreen(
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
+    var selectedMessageBounds by remember { mutableStateOf<MessageBoundsInfo?>(null) }
 
     // Track which message is currently being swiped for reply (to hide overlaying stickers)
     var swipingMessageGuid by remember { mutableStateOf<String?>(null) }
@@ -894,11 +898,28 @@ fun ChatScreen(
             }
         }
     ) { padding ->
-        // Auto-scroll to search result when navigating
+        // Auto-scroll to search result when navigating with smooth animation
+        // Uses offset to position the match roughly in the center of the viewport
         LaunchedEffect(uiState.currentSearchMatchIndex) {
             if (uiState.currentSearchMatchIndex >= 0 && uiState.searchMatchIndices.isNotEmpty()) {
                 val messageIndex = uiState.searchMatchIndices[uiState.currentSearchMatchIndex]
-                listState.animateScrollToItem(messageIndex)
+                // Calculate offset to roughly center the message
+                // Negative offset moves item down in reversed layout
+                val viewportHeight = listState.layoutInfo.viewportSize.height
+                val centerOffset = -(viewportHeight / 3)
+                listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
+            }
+        }
+
+        // Auto-scroll when jumping to a message (from search results or deep link)
+        LaunchedEffect(uiState.highlightedMessageGuid) {
+            uiState.highlightedMessageGuid?.let { guid ->
+                val index = uiState.messages.indexOfFirst { it.guid == guid }
+                if (index >= 0) {
+                    val viewportHeight = listState.layoutInfo.viewportSize.height
+                    val centerOffset = -(viewportHeight / 3)
+                    listState.animateScrollToItem(index, scrollOffset = centerOffset)
+                }
             }
         }
 
@@ -1011,7 +1032,7 @@ fun ChatScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
-            // Inline search bar
+            // Inline search bar with progress indicator and "View All" support
             InlineSearchBar(
                 visible = uiState.isSearchActive,
                 query = uiState.searchQuery,
@@ -1020,7 +1041,10 @@ fun ChatScreen(
                 onNavigateUp = viewModel::navigateSearchUp,
                 onNavigateDown = viewModel::navigateSearchDown,
                 currentMatch = if (uiState.searchMatchIndices.isNotEmpty()) uiState.currentSearchMatchIndex + 1 else 0,
-                totalMatches = uiState.searchMatchIndices.size
+                totalMatches = uiState.searchMatchIndices.size,
+                isSearchingDatabase = uiState.isSearchingDatabase,
+                databaseResultCount = uiState.databaseSearchResultCount,
+                onViewAllClick = viewModel::showSearchResultsSheet
             )
 
             // iOS-style sending indicator bar
@@ -1414,31 +1438,15 @@ fun ChatScreen(
                                                 }
                                             },
                                             isGroupChat = uiState.isGroup,
-                                            showAvatar = showAvatar
-                                        )
-                                    }
-
-                                    // Show tapback menu for this message (positioned above)
-                                    if (selectedMessageForTapback?.guid == message.guid) {
-                                        TapbackMenu(
-                                            visible = true,
-                                            onDismiss = { selectedMessageForTapback = null },
-                                            onReactionSelected = { tapback ->
-                                                viewModel.toggleReaction(message.guid, tapback)
-                                            },
-                                            myReactions = message.myReactions,
-                                            isFromMe = message.isFromMe,
-                                            onCopyClick = message.text?.let { text ->
-                                                {
-                                                    val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Message", text))
-                                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                                                }
-                                            },
-                                            onForwardClick = {
-                                                messageToForward = message
-                                                showForwardDialog = true
-                                            }
+                                            showAvatar = showAvatar,
+                                            // Report bounds when this message is selected for tapback
+                                            onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->
+                                                selectedMessageBounds = MessageBoundsInfo(
+                                                    bounds = bounds,
+                                                    isFromMe = message.isFromMe,
+                                                    guid = message.guid
+                                                )
+                                            } else null
                                         )
                                     }
 
@@ -1499,6 +1507,43 @@ fun ChatScreen(
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
                                 .padding(bottom = 16.dp)
+                        )
+
+                        // MD3 Tapback overlay - full screen with scrim and split reaction/action UI
+                        TapbackOverlay(
+                            visible = selectedMessageForTapback != null,
+                            messageBounds = selectedMessageBounds,
+                            myReactions = selectedMessageForTapback?.myReactions ?: emptySet(),
+                            canReply = selectedMessageForTapback?.isServerOrigin == true,
+                            canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),
+                            canForward = true,
+                            onDismiss = {
+                                selectedMessageForTapback = null
+                                selectedMessageBounds = null
+                            },
+                            onReactionSelected = { tapback ->
+                                selectedMessageForTapback?.let { message ->
+                                    viewModel.toggleReaction(message.guid, tapback)
+                                }
+                            },
+                            onReply = {
+                                selectedMessageForTapback?.let { message ->
+                                    viewModel.setReplyTo(message.guid)
+                                }
+                            },
+                            onCopy = {
+                                selectedMessageForTapback?.text?.let { text ->
+                                    val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                                    clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Message", text))
+                                    Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            onForward = {
+                                selectedMessageForTapback?.let { message ->
+                                    messageToForward = message
+                                    showForwardDialog = true
+                                }
+                            }
                         )
                     }
                 }
@@ -1568,6 +1613,19 @@ fun ChatScreen(
             showQualitySheet = false
         },
         onDismiss = { showQualitySheet = false }
+    )
+
+    // Search Results Sheet (for "View All" search results)
+    SearchResultsSheet(
+        visible = uiState.showSearchResultsSheet,
+        results = emptyList(), // TODO: Connect to actual database results when ChatSearchDelegate is fully integrated
+        isSearching = uiState.isSearchingDatabase,
+        query = uiState.searchQuery,
+        onResultClick = { result ->
+            viewModel.scrollToAndHighlightMessage(result.messageGuid)
+            viewModel.hideSearchResultsSheet()
+        },
+        onDismiss = viewModel::hideSearchResultsSheet
     )
 
     // Confirmation dialogs

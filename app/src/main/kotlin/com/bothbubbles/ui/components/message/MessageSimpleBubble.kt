@@ -16,7 +16,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
@@ -91,7 +94,8 @@ internal fun SimpleBubbleContent(
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
-    onRetry: ((String) -> Unit)? = null
+    onRetry: ((String) -> Unit)? = null,
+    onBoundsChanged: ((Rect) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -395,6 +399,9 @@ internal fun SimpleBubbleContent(
                                     Modifier
                                 }
                             )
+                            .onGloballyPositioned { coordinates ->
+                                onBoundsChanged?.invoke(coordinates.boundsInWindow())
+                            }
                             .pointerInput(message.guid) {
                                 detectTapGestures(
                                     onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
