@@ -41,6 +41,12 @@ class AttachmentRepository @Inject constructor(
 ) {
     companion object {
         private const val TAG = "AttachmentRepository"
+
+        /** Max file size for in-memory GIF processing (10MB) - larger GIFs skip speed fix */
+        private const val MAX_GIF_PROCESS_SIZE = 10L * 1024 * 1024
+
+        /** Max file size for in-memory HEIC conversion (15MB) - larger files use fallback */
+        private const val MAX_HEIC_CONVERT_SIZE = 15L * 1024 * 1024
     }
 
     private val attachmentsDir: File by lazy {
@@ -267,28 +273,39 @@ class AttachmentRepository @Inject constructor(
 
         // Convert HEIC/HEIF to PNG for stickers (Android's HEIC support is unreliable)
         val isHeic = isHeicFile(outputFile)
-        Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic")
+        val fileSize = outputFile.length()
+        Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic, size=${fileSize}")
         var finalFile = if (attachment.isSticker && isHeic) {
-            Log.d(TAG, "Converting HEIC sticker to PNG...")
-            val converted = convertHeicToPng(outputFile, attachmentGuid)
-            // Check if conversion actually succeeded (PNG file exists and is larger than 0)
-            if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
-                converted
-            } else {
-                // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
-                // Fall back to downloading JPEG version (no transparency but at least it displays)
-                Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
+            // Skip in-memory conversion for large files to prevent OOM
+            if (fileSize > MAX_HEIC_CONVERT_SIZE) {
+                Log.w(TAG, "HEIC file too large for conversion (${fileSize / 1024 / 1024}MB), using JPEG fallback")
                 outputFile.delete()
                 downloadFile(baseDownloadUrl, outputFile, onProgress)
-                Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
                 outputFile
+            } else {
+                Log.d(TAG, "Converting HEIC sticker to PNG...")
+                val converted = convertHeicToPng(outputFile, attachmentGuid)
+                // Check if conversion actually succeeded (PNG file exists and is larger than 0)
+                if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
+                    converted
+                } else {
+                    // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
+                    // Fall back to downloading JPEG version (no transparency but at least it displays)
+                    Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
+                    outputFile.delete()
+                    downloadFile(baseDownloadUrl, outputFile, onProgress)
+                    Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
+                    outputFile
+                }
             }
         } else {
             outputFile
         }
 
         // Fix GIFs with zero-delay frames (causes them to play too fast)
-        if (attachment.mimeType?.startsWith("image/gif") == true && finalFile.exists()) {
+        // Skip for large GIFs to prevent OOM from loading entire file into memory
+        val gifSize = finalFile.length()
+        if (attachment.mimeType?.startsWith("image/gif") == true && finalFile.exists() && gifSize <= MAX_GIF_PROCESS_SIZE) {
             try {
                 val originalBytes = finalFile.readBytes()
                 val fixedBytes = GifProcessor.fixSpeedyGif(originalBytes)
@@ -299,6 +316,8 @@ class AttachmentRepository @Inject constructor(
             } catch (e: Exception) {
                 Log.w(TAG, "Failed to apply GIF speed fix", e)
             }
+        } else if (gifSize > MAX_GIF_PROCESS_SIZE) {
+            Log.d(TAG, "Skipping GIF speed fix for large file (${gifSize / 1024 / 1024}MB)")
         }
 
         // Generate thumbnail for images and videos (skip GIFs - they're already small)

@@ -34,7 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -100,6 +102,7 @@ fun ComposerSendButton(
 ) {
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
+    val hapticFeedback = LocalHapticFeedback.current
 
     // Colors from theme
     val bubbleColors = BothBubblesTheme.bubbleColors
@@ -197,9 +200,12 @@ fun ComposerSendButton(
     }
 
     // Gesture callbacks
-    val gestureCallbacks = remember(onClick, onLongPress, onModeToggle) {
+    val gestureCallbacks = remember(onClick, onLongPress, onModeToggle, hapticFeedback) {
         object : SendModeGestureCallbacks {
-            override fun onTap() = onClick()
+            override fun onTap() {
+                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                onClick()
+            }
             override fun onLongPress() = onLongPress()
             override fun onModeToggle(newMode: ChatSendMode): Boolean = onModeToggle(newMode)
         }

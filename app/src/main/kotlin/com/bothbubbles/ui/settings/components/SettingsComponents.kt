@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
@@ -25,15 +27,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.services.socket.ConnectionState
 import kotlinx.coroutines.delay
-
-// Google Messages-style status colors
-private val ConnectedGreen = Color(0xFF34A853)
-private val DisconnectedRed = Color(0xFFEA4335)
-private val ConnectingOrange = Color(0xFFFBBC04)
 
 /**
  * Profile header section matching Google Messages design.
@@ -46,10 +45,14 @@ fun ProfileHeader(
     onManageServerClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(onClick = onManageServerClick)
+            .clickable(onClick = {
+                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                onManageServerClick()
+            })
             .padding(top = 24.dp, bottom = 16.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
@@ -83,15 +86,15 @@ fun ProfileHeader(
 
         Spacer(modifier = Modifier.height(4.dp))
 
-        // Connection status with dot
+        // Connection status with dot - uses MD3 semantic colors
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center
         ) {
             val statusColor = when (connectionState) {
-                ConnectionState.CONNECTED -> ConnectedGreen
-                ConnectionState.CONNECTING -> ConnectingOrange
-                ConnectionState.DISCONNECTED, ConnectionState.ERROR, ConnectionState.NOT_CONFIGURED -> DisconnectedRed
+                ConnectionState.CONNECTED -> MaterialTheme.colorScheme.tertiary
+                ConnectionState.CONNECTING -> MaterialTheme.colorScheme.secondary
+                ConnectionState.DISCONNECTED, ConnectionState.ERROR, ConnectionState.NOT_CONFIGURED -> MaterialTheme.colorScheme.error
             }
 
             Box(
@@ -174,6 +177,7 @@ fun SettingsMenuItem(
     enabled: Boolean = true,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
+    val haptic = LocalHapticFeedback.current
     ListItem(
         headlineContent = {
             Text(
@@ -199,7 +203,10 @@ fun SettingsMenuItem(
             )
         },
         trailingContent = trailingContent,
-        modifier = modifier.clickable(enabled = enabled, onClick = onClick),
+        modifier = modifier.clickable(enabled = enabled, onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        }),
         colors = ListItemDefaults.colors(
             containerColor = Color.Transparent
         )
@@ -207,7 +214,8 @@ fun SettingsMenuItem(
 }
 
 /**
- * Section title for settings groups
+ * Section title for settings groups.
+ * MD3 style: uses Primary color and LabelLarge typography for visual hierarchy.
  */
 @Composable
 fun SettingsSectionTitle(
@@ -216,14 +224,15 @@ fun SettingsSectionTitle(
 ) {
     Text(
         text = title,
-        style = MaterialTheme.typography.labelMedium,
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = modifier.padding(horizontal = 16.dp, vertical = 12.dp)
     )
 }
 
 /**
- * Status badge for messaging services (iMessage/SMS)
+ * Status badge for messaging services (iMessage/SMS).
+ * Uses MD3 semantic color roles for consistent theming.
  */
 @Composable
 fun StatusBadge(
@@ -232,14 +241,18 @@ fun StatusBadge(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     val statusColor = when (status) {
-        BadgeStatus.CONNECTED -> ConnectedGreen
-        BadgeStatus.ERROR -> DisconnectedRed
+        BadgeStatus.CONNECTED -> MaterialTheme.colorScheme.tertiary
+        BadgeStatus.ERROR -> MaterialTheme.colorScheme.error
         BadgeStatus.DISABLED -> MaterialTheme.colorScheme.outline
     }
 
     Surface(
-        onClick = onClick,
+        onClick = {
+            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            onClick()
+        },
         modifier = modifier,
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh
@@ -300,8 +313,8 @@ fun MessagingSectionHeader(
     ) {
         Text(
             text = "Messaging",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
         )
 
         Row(
@@ -320,4 +333,38 @@ fun MessagingSectionHeader(
             )
         }
     }
+}
+
+/**
+ * MD3 Switch with thumb icons.
+ * Shows a checkmark when enabled, X when disabled.
+ * Use for important toggles like Private API to emphasize state.
+ */
+@Composable
+fun SettingsSwitch(
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    showIcons: Boolean = true
+) {
+    val haptic = LocalHapticFeedback.current
+    Switch(
+        checked = checked,
+        onCheckedChange = {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            onCheckedChange(it)
+        },
+        enabled = enabled,
+        modifier = modifier,
+        thumbContent = if (showIcons) {
+            {
+                Icon(
+                    imageVector = if (checked) Icons.Default.Check else Icons.Default.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(SwitchDefaults.IconSize)
+                )
+            }
+        } else null
+    )
 }

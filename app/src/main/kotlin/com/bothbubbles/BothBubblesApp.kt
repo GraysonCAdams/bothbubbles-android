@@ -90,10 +90,11 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                     add(GifDecoder.Factory())
                 }
             }
-            // Memory cache: ~25% of available memory for image caching
+            // Memory cache: ~15% of available memory for image caching
+            // Reduced from 25% to leave more headroom for downloads and processing
             .memoryCache {
                 MemoryCache.Builder(this)
-                    .maxSizePercent(0.25)
+                    .maxSizePercent(0.15)
                     .build()
             }
             // Disk cache: 250MB dedicated directory for attachment images

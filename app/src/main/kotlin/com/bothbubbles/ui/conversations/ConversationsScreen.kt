@@ -40,11 +40,14 @@ import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.zIndex
@@ -241,6 +244,7 @@ fun ConversationsScreen(
         }
     }
     val density = LocalDensity.current
+    val haptic = LocalHapticFeedback.current
     val pullThreshold = with(density) { 80.dp.toPx() } // Distance to pull before triggering search
 
     // Nested scroll connection to detect overscroll at top
@@ -918,8 +922,12 @@ fun ConversationsScreen(
                                         onConversationClick(conversation.guid, conversation.mergedChatGuids)
                                     }
                                 },
-                                onLongClick = { selectedConversations = selectedConversations + conversation.guid },
+                                onLongClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    selectedConversations = selectedConversations + conversation.guid
+                                },
                                 onAvatarClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                     quickActionsContact = ContactInfo(
                                         chatGuid = conversation.guid,
                                         displayName = conversation.displayName,

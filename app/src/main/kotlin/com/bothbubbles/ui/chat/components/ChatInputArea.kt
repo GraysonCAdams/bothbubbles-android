@@ -82,7 +82,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -1003,6 +1005,8 @@ internal fun SendButton(
         label = "sendButtonScale"
     )
 
+    val haptic = LocalHapticFeedback.current
+
     Box(
         modifier = modifier
             .height(40.dp)
@@ -1023,8 +1027,14 @@ internal fun SendButton(
                             tryAwaitRelease()
                             isPressed = false
                         },
-                        onTap = { onClick() },
-                        onLongPress = { onLongPress() }
+                        onTap = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onClick()
+                        },
+                        onLongPress = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress()
+                        }
                     )
                 }
             },

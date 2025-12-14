@@ -130,9 +130,10 @@ fun ReactionPill(
                         },
                         onDragEnd = {
                             isDragging = false
-                            // Select the hovered reaction
+                            // Select the hovered reaction with haptic feedback
                             hoveredIndex?.let { index ->
                                 if (index < Tapback.entries.size) {
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                                     onReactionSelected(Tapback.entries[index])
                                 }
                             }
@@ -153,7 +154,11 @@ fun ReactionPill(
                     tapback = tapback,
                     isSelected = tapback in myReactions,
                     isHovered = hoveredIndex == index && isDragging,
-                    onClick = { onReactionSelected(tapback) },
+                    onClick = {
+                        // Haptic feedback on tap selection
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onReactionSelected(tapback)
+                    },
                     modifier = Modifier.size(emojiSize)
                 )
             }
@@ -170,7 +175,7 @@ fun ReactionPill(
 }
 
 /**
- * Individual reaction emoji button with selection and hover states.
+ * Individual reaction emoji button with selection, hover, and pressed states.
  */
 @Composable
 private fun ReactionEmoji(
@@ -180,9 +185,13 @@ private fun ReactionEmoji(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Scale up when hovered during scrub
+    // Track pressed state for tap animation
+    var isPressed by remember { mutableStateOf(false) }
+
+    // Scale up when hovered during scrub, or briefly when tapped
     val scale by animateFloatAsState(
         targetValue = when {
+            isPressed -> 1.2f
             isHovered -> 1.3f
             isSelected -> 1.0f
             else -> 1.0f
@@ -196,6 +205,7 @@ private fun ReactionEmoji(
 
     // Background color for selection state
     val backgroundColor = when {
+        isPressed -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.8f)
         isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f)
         isSelected -> MaterialTheme.colorScheme.primaryContainer
         else -> Color.Transparent
@@ -209,6 +219,11 @@ private fun ReactionEmoji(
             .pointerInput(Unit) {
                 // Tap fallback for accessibility and non-scrub interactions
                 detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        tryAwaitRelease()
+                        isPressed = false
+                    },
                     onTap = { onClick() }
                 )
             },

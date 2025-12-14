@@ -430,6 +430,7 @@ fun ChatScreen(
                     recordingFile = file
                     isRecording = true
                     mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                 },
                 onError = { error ->
                     Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
@@ -767,6 +768,7 @@ fun ChatScreen(
                                         mediaRecorder?.stop()
                                         mediaRecorder?.release()
                                         mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                     } catch (_: Exception) {
                                         // May fail if recording was too short
                                     }
@@ -977,9 +979,15 @@ fun ChatScreen(
 
             // Only auto-scroll if a NEW message arrived (guid changed from previous)
             val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestGuid
+            val newestMessage = uiState.messages.firstOrNull()
             previousNewestGuid = newestGuid
 
             if (isNewMessage) {
+                // Light haptic feedback for incoming messages (not from me)
+                if (newestMessage?.isFromMe == false) {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                }
+
                 if (isNearBottom) {
                     // Small delay to let the message render and calculate its height
                     kotlinx.coroutines.delay(100)

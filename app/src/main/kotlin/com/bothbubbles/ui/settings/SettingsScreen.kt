@@ -9,7 +9,9 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -22,6 +24,7 @@ import com.bothbubbles.ui.settings.components.MessagingSectionHeader
 import com.bothbubbles.ui.settings.components.SettingsCard
 import com.bothbubbles.ui.settings.components.SettingsMenuItem
 import com.bothbubbles.ui.settings.components.SettingsSectionTitle
+import com.bothbubbles.ui.settings.components.SettingsSwitch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -46,10 +49,14 @@ fun SettingsScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
+    // MD3 LargeTopAppBar with scroll-to-collapse behavior
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
-                title = { },
+            LargeTopAppBar(
+                title = { Text("Settings") },
                 navigationIcon = {
                     IconButton(onClick = onBackClick) {
                         Icon(
@@ -58,8 +65,10 @@ fun SettingsScreen(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
+                scrollBehavior = scrollBehavior,
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    scrolledContainerColor = MaterialTheme.colorScheme.surface
                 )
             )
         }
@@ -256,7 +265,7 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Private API toggle
+                // Private API toggle - uses icon switch for emphasis
                 SettingsMenuItem(
                     icon = Icons.Default.VpnKey,
                     title = "Enable Private API",
@@ -272,7 +281,7 @@ fun SettingsContent(
                     },
                     enabled = uiState.isServerConfigured,
                     trailingContent = {
-                        Switch(
+                        SettingsSwitch(
                             checked = uiState.enablePrivateApi && uiState.isServerConfigured,
                             onCheckedChange = { viewModel.setEnablePrivateApi(it) },
                             enabled = uiState.isServerConfigured
@@ -294,10 +303,11 @@ fun SettingsContent(
                     },
                     enabled = uiState.isServerConfigured && uiState.enablePrivateApi,
                     trailingContent = {
-                        Switch(
+                        SettingsSwitch(
                             checked = uiState.sendTypingIndicators && uiState.enablePrivateApi && uiState.isServerConfigured,
                             onCheckedChange = { viewModel.setSendTypingIndicators(it) },
-                            enabled = uiState.isServerConfigured && uiState.enablePrivateApi
+                            enabled = uiState.isServerConfigured && uiState.enablePrivateApi,
+                            showIcons = false  // Secondary toggle, no icons
                         )
                     }
                 )
@@ -320,9 +330,10 @@ fun SettingsContent(
                     subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
                     onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
                     trailingContent = {
-                        Switch(
+                        SettingsSwitch(
                             checked = uiState.useSimpleAppTitle,
-                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) }
+                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) },
+                            showIcons = false
                         )
                     }
                 )
@@ -366,9 +377,10 @@ fun SettingsContent(
                     subtitle = "Play sounds when sending and receiving messages",
                     onClick = { viewModel.setMessageSoundsEnabled(!uiState.messageSoundsEnabled) },
                     trailingContent = {
-                        Switch(
+                        SettingsSwitch(
                             checked = uiState.messageSoundsEnabled,
-                            onCheckedChange = { viewModel.setMessageSoundsEnabled(it) }
+                            onCheckedChange = { viewModel.setMessageSoundsEnabled(it) },
+                            showIcons = false
                         )
                     }
                 )

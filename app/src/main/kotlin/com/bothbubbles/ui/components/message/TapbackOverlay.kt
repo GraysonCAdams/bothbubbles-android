@@ -1,6 +1,8 @@
 package com.bothbubbles.ui.components.message
 
-import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -13,16 +15,25 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+// Safe zone margin for boundary clamping
+private val SafeZoneMargin = 16.dp
 
 /**
  * Data class representing the bounds and metadata of a selected message.
@@ -68,19 +79,60 @@ fun TapbackOverlay(
     modifier: Modifier = Modifier,
     messageContent: @Composable BoxScope.() -> Unit = {}
 ) {
-    if (!visible || messageBounds == null) return
+    // Decouple visibility from presence - track internal animation state
+    var isPresent by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Animation state
+    val overlayScale = remember { Animatable(0f) }
+    val overlayAlpha = remember { Animatable(0f) }
+    val scrimAlpha = remember { Animatable(0f) }
+
+    // Close with animation - awaits completion before dismissing
+    val closeWithAnimation: suspend () -> Unit = {
+        // Animate out in parallel
+        scope.launch { scrimAlpha.animateTo(0f, tween(200)) }
+        scope.launch { overlayAlpha.animateTo(0f, tween(150)) }
+        overlayScale.animateTo(
+            0f,
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
+        // Now safe to dismiss
+        isPresent = false
+        onDismiss()
+    }
+
+    // Handle visibility changes with animations
+    LaunchedEffect(visible, messageBounds) {
+        if (visible && messageBounds != null) {
+            isPresent = true
+            // Entry animation - spring scale with fade
+            launch { scrimAlpha.animateTo(0.32f, tween(200)) }
+            launch { overlayAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
+            overlayScale.animateTo(
+                1f,
+                spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+        } else if (!visible && isPresent) {
+            // Exit animation triggered externally
+            closeWithAnimation()
+        }
+    }
+
+    // Don't render if not present
+    if (!isPresent || messageBounds == null) return
 
     val density = LocalDensity.current
     val configuration = LocalConfiguration.current
     val screenHeight = with(density) { configuration.screenHeightDp.dp.toPx() }
     val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
-
-    // Scrim animation
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (visible) 0.32f else 0f,
-        animationSpec = tween(durationMillis = 200),
-        label = "scrimAlpha"
-    )
+    val safeMarginPx = with(density) { SafeZoneMargin.toPx() }
 
     // Calculate positioning
     val positioning = remember(messageBounds, screenHeight) {
@@ -91,20 +143,24 @@ fun TapbackOverlay(
         )
     }
 
+    // Reaction pill dimensions for clamping
+    val reactionPillWidth = with(density) { 280.dp.toPx() }
+    val actionMenuWidth = with(density) { 180.dp.toPx() }
+
     Box(
         modifier = modifier.fillMaxSize()
     ) {
-        // Scrim background - clickable to dismiss
+        // Scrim background - clickable to dismiss with animation
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha)
+                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha.value)
                 )
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
-                    onClick = onDismiss
+                    onClick = { scope.launch { closeWithAnimation() } }
                 )
         )
 
@@ -121,11 +177,22 @@ fun TapbackOverlay(
             messageContent()
         }
 
-        // Reaction Pill
+        // Reaction Pill with boundary clamping
         val reactionPillAlignment = if (messageBounds.isFromMe) {
             Alignment.TopEnd
         } else {
             Alignment.TopStart
+        }
+
+        // Calculate clamped X position for reaction pill
+        val reactionPillX = run {
+            val idealX = if (messageBounds.isFromMe) {
+                messageBounds.bounds.right - reactionPillWidth
+            } else {
+                messageBounds.bounds.left
+            }
+            // Clamp to safe zones
+            idealX.coerceIn(safeMarginPx, screenWidth - reactionPillWidth - safeMarginPx)
         }
 
         Box(
@@ -133,32 +200,46 @@ fun TapbackOverlay(
                 .align(reactionPillAlignment)
                 .offset {
                     IntOffset(
-                        x = if (messageBounds.isFromMe) {
-                            (messageBounds.bounds.right - with(density) { 280.dp.toPx() }).roundToInt()
-                        } else {
-                            messageBounds.bounds.left.roundToInt()
-                        },
+                        x = reactionPillX.roundToInt(),
                         y = positioning.reactionY.roundToInt()
                     )
+                }
+                .graphicsLayer {
+                    scaleX = overlayScale.value
+                    scaleY = overlayScale.value
+                    alpha = overlayAlpha.value
                 }
                 .padding(horizontal = 8.dp)
         ) {
             ReactionPill(
-                visible = visible,
+                visible = isPresent,
                 myReactions = myReactions,
                 onReactionSelected = { tapback ->
-                    onReactionSelected(tapback)
-                    onDismiss()
+                    scope.launch {
+                        onReactionSelected(tapback)
+                        closeWithAnimation()
+                    }
                 },
                 onEmojiPickerClick = onEmojiPickerClick
             )
         }
 
-        // Action Menu
+        // Action Menu with boundary clamping
         val actionMenuAlignment = if (messageBounds.isFromMe) {
             Alignment.TopEnd
         } else {
             Alignment.TopStart
+        }
+
+        // Calculate clamped X position for action menu
+        val actionMenuX = run {
+            val idealX = if (messageBounds.isFromMe) {
+                messageBounds.bounds.right - actionMenuWidth
+            } else {
+                messageBounds.bounds.left
+            }
+            // Clamp to safe zones
+            idealX.coerceIn(safeMarginPx, screenWidth - actionMenuWidth - safeMarginPx)
         }
 
         Box(
@@ -166,33 +247,40 @@ fun TapbackOverlay(
                 .align(actionMenuAlignment)
                 .offset {
                     IntOffset(
-                        x = if (messageBounds.isFromMe) {
-                            (messageBounds.bounds.right - with(density) { 180.dp.toPx() }).roundToInt()
-                        } else {
-                            messageBounds.bounds.left.roundToInt()
-                        },
+                        x = actionMenuX.roundToInt(),
                         y = positioning.actionY.roundToInt()
                     )
+                }
+                .graphicsLayer {
+                    scaleX = overlayScale.value
+                    scaleY = overlayScale.value
+                    alpha = overlayAlpha.value
                 }
                 .padding(horizontal = 8.dp)
                 .width(180.dp)
         ) {
             MessageActionMenu(
-                visible = visible,
+                visible = isPresent,
                 canReply = canReply,
                 canCopy = canCopy,
                 canForward = canForward,
                 onReply = {
-                    onReply()
-                    onDismiss()
+                    scope.launch {
+                        onReply()
+                        closeWithAnimation()
+                    }
                 },
                 onCopy = {
-                    onCopy()
-                    onDismiss()
+                    scope.launch {
+                        onCopy()
+                        closeWithAnimation()
+                    }
                 },
                 onForward = {
-                    onForward()
-                    onDismiss()
+                    scope.launch {
+                        onForward()
+                        closeWithAnimation()
+                    }
                 }
             )
         }
@@ -266,16 +354,55 @@ fun ActionOnlyOverlay(
     onForward: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    if (!visible || messageBounds == null) return
+    // Decouple visibility from presence
+    var isPresent by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // Animation state
+    val overlayScale = remember { Animatable(0f) }
+    val overlayAlpha = remember { Animatable(0f) }
+    val scrimAlpha = remember { Animatable(0f) }
+
+    // Close with animation
+    val closeWithAnimation: suspend () -> Unit = {
+        scope.launch { scrimAlpha.animateTo(0f, tween(200)) }
+        scope.launch { overlayAlpha.animateTo(0f, tween(150)) }
+        overlayScale.animateTo(
+            0f,
+            spring(
+                dampingRatio = Spring.DampingRatioNoBouncy,
+                stiffness = Spring.StiffnessMediumLow
+            )
+        )
+        isPresent = false
+        onDismiss()
+    }
+
+    // Handle visibility changes with animations
+    LaunchedEffect(visible, messageBounds) {
+        if (visible && messageBounds != null) {
+            isPresent = true
+            launch { scrimAlpha.animateTo(0.32f, tween(200)) }
+            launch { overlayAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
+            overlayScale.animateTo(
+                1f,
+                spring(
+                    dampingRatio = Spring.DampingRatioMediumBouncy,
+                    stiffness = Spring.StiffnessMedium
+                )
+            )
+        } else if (!visible && isPresent) {
+            closeWithAnimation()
+        }
+    }
+
+    if (!isPresent || messageBounds == null) return
 
     val density = LocalDensity.current
-
-    // Scrim animation
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (visible) 0.32f else 0f,
-        animationSpec = tween(durationMillis = 200),
-        label = "scrimAlpha"
-    )
+    val configuration = LocalConfiguration.current
+    val screenWidth = with(density) { configuration.screenWidthDp.dp.toPx() }
+    val safeMarginPx = with(density) { SafeZoneMargin.toPx() }
+    val actionMenuWidth = with(density) { 180.dp.toPx() }
 
     Box(
         modifier = modifier.fillMaxSize()
@@ -285,20 +412,29 @@ fun ActionOnlyOverlay(
             modifier = Modifier
                 .fillMaxSize()
                 .background(
-                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha)
+                    MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha.value)
                 )
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() },
-                    onClick = onDismiss
+                    onClick = { scope.launch { closeWithAnimation() } }
                 )
         )
 
-        // Action Menu only
+        // Action Menu only with boundary clamping
         val actionMenuAlignment = if (messageBounds.isFromMe) {
             Alignment.TopEnd
         } else {
             Alignment.TopStart
+        }
+
+        val actionMenuX = run {
+            val idealX = if (messageBounds.isFromMe) {
+                messageBounds.bounds.right - actionMenuWidth
+            } else {
+                messageBounds.bounds.left
+            }
+            idealX.coerceIn(safeMarginPx, screenWidth - actionMenuWidth - safeMarginPx)
         }
 
         Box(
@@ -306,29 +442,34 @@ fun ActionOnlyOverlay(
                 .align(actionMenuAlignment)
                 .offset {
                     IntOffset(
-                        x = if (messageBounds.isFromMe) {
-                            (messageBounds.bounds.right - with(density) { 180.dp.toPx() }).roundToInt()
-                        } else {
-                            messageBounds.bounds.left.roundToInt()
-                        },
+                        x = actionMenuX.roundToInt(),
                         y = (messageBounds.bounds.bottom + with(density) { 12.dp.toPx() }).roundToInt()
                     )
+                }
+                .graphicsLayer {
+                    scaleX = overlayScale.value
+                    scaleY = overlayScale.value
+                    alpha = overlayAlpha.value
                 }
                 .padding(horizontal = 8.dp)
                 .width(180.dp)
         ) {
             MessageActionMenu(
-                visible = visible,
+                visible = isPresent,
                 canReply = false,
                 canCopy = canCopy,
                 canForward = canForward,
                 onCopy = {
-                    onCopy()
-                    onDismiss()
+                    scope.launch {
+                        onCopy()
+                        closeWithAnimation()
+                    }
                 },
                 onForward = {
-                    onForward()
-                    onDismiss()
+                    scope.launch {
+                        onForward()
+                        closeWithAnimation()
+                    }
                 }
             )
         }

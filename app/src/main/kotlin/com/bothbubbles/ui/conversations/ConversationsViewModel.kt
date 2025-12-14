@@ -7,6 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
@@ -42,6 +44,8 @@ class ConversationsViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val application: Application,
     private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
+    private val handleRepository: HandleRepository,
     private val settingsDataStore: SettingsDataStore,
     private val api: BothBubblesApi,
     private val smsPermissionHelper: SmsPermissionHelper,
@@ -652,8 +656,39 @@ class ConversationsViewModel @Inject constructor(
         messages: List<com.bothbubbles.data.local.db.entity.MessageEntity>,
         previewsByUrl: Map<String, com.bothbubbles.data.local.db.entity.LinkPreviewEntity>
     ): List<MessageSearchResult> {
-        // Implementation same as original - omitted for brevity
-        return emptyList() // Placeholder
+        return messages.map { message ->
+            val chat = chatRepository.getChatByGuid(message.chatGuid)
+            val handle = message.handleId?.let { handleRepository.getHandleById(it) }
+            // Extract URL from message text to look up link preview
+            val messageUrl = message.text?.let { text ->
+                Regex("""https?://[^\s]+""").find(text)?.value
+            }
+            val linkPreview = messageUrl?.let { previewsByUrl[it] }
+
+            // Determine display name
+            val displayName = chat?.displayName?.takeIf { it.isNotBlank() }
+                ?: handle?.formattedAddress
+                ?: handle?.address
+                ?: "Unknown"
+
+            // Determine message type
+            val messageType = if (message.text?.isNotEmpty() == true) MessageType.TEXT else MessageType.ATTACHMENT
+
+            MessageSearchResult(
+                messageGuid = message.guid,
+                chatGuid = message.chatGuid,
+                chatDisplayName = displayName,
+                messageText = message.text ?: "",
+                timestamp = message.dateCreated,
+                formattedTime = formatRelativeTime(message.dateCreated, application),
+                isFromMe = message.isFromMe,
+                avatarPath = chat?.customAvatarPath,
+                isGroup = chat?.isGroup ?: false,
+                messageType = messageType,
+                linkTitle = linkPreview?.title,
+                linkDomain = linkPreview?.domain
+            )
+        }
     }
 
     fun handleSwipeAction(chatGuid: String, action: SwipeActionType) {

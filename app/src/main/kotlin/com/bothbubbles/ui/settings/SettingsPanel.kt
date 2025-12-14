@@ -30,6 +30,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.settings.about.AboutContent
@@ -98,11 +99,14 @@ fun SettingsPanel(
         SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
     }
 
+    // MD3: Use surfaceContainerLow for panel to distinguish from main content
     Surface(
         modifier = Modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        tonalElevation = 1.dp
     ) {
         Scaffold(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
             topBar = {
                 TopAppBar(
                     title = { Text(title) },
@@ -125,7 +129,7 @@ fun SettingsPanel(
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
                     )
                 )
             }

@@ -52,6 +52,12 @@ class AttachmentDownloadQueue @Inject constructor(
 
         /** Maximum delay for exponential backoff (30 seconds) */
         private const val MAX_BACKOFF_MS = 30_000L
+
+        /** Maximum file size for auto-download (50MB) - larger files require manual download */
+        private const val MAX_AUTO_DOWNLOAD_SIZE = 50L * 1024 * 1024
+
+        /** Minimum free memory required to start a download (20MB) */
+        private const val MIN_FREE_MEMORY_BYTES = 20L * 1024 * 1024
     }
 
     /**
@@ -291,9 +297,40 @@ class AttachmentDownloadQueue @Inject constructor(
     private suspend fun downloadAttachment(request: DownloadRequest) {
         Log.d(TAG, "Starting download: ${request.attachmentGuid}")
 
-        // Get current attachment to check retry count
+        // Get current attachment to check retry count and size
         val attachment = attachmentDao.getAttachmentByGuid(request.attachmentGuid)
         val currentRetryCount = attachment?.retryCount ?: 0
+
+        // Check memory availability before downloading
+        val runtime = Runtime.getRuntime()
+        val freeMemory = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
+        if (freeMemory < MIN_FREE_MEMORY_BYTES) {
+            Log.w(TAG, "Low memory (${freeMemory / 1024 / 1024}MB free), skipping download: ${request.attachmentGuid}")
+            // Don't mark as failed - will retry when memory is available
+            return
+        }
+
+        // Skip auto-download of large files (user can manually download)
+        val fileSize = attachment?.totalBytes ?: 0L
+        if (fileSize > MAX_AUTO_DOWNLOAD_SIZE && request.priority != Priority.IMMEDIATE) {
+            Log.d(TAG, "Skipping large file (${fileSize / 1024 / 1024}MB) for auto-download: ${request.attachmentGuid}")
+            // Mark as requiring manual download
+            attachmentDao.markTransferFailedWithError(
+                guid = request.attachmentGuid,
+                errorType = "large_file",
+                errorMessage = "File too large for auto-download. Tap to download."
+            )
+            updateProgress(
+                attachmentGuid = request.attachmentGuid,
+                bytesDownloaded = 0,
+                totalBytes = fileSize,
+                isComplete = true,
+                error = "File too large for auto-download. Tap to download.",
+                errorType = "large_file",
+                isRetryable = true
+            )
+            return
+        }
 
         // Check if max retries exceeded
         if (currentRetryCount >= MAX_RETRY_COUNT) {
