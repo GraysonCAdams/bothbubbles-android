@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Business
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,16 +36,24 @@ enum class MessageSourceType {
 /**
  * Avatar component for displaying user/contact avatars
  * with smooth fade-in animation when image loads
+ *
+ * @param name The contact name or phone number to display
+ * @param modifier Modifier for the avatar
+ * @param avatarPath Optional path to contact photo
+ * @param size Size of the avatar
+ * @param isBusiness If true, shows building icon (for business contacts without personal name)
  */
 @Composable
 fun Avatar(
     name: String,
     modifier: Modifier = Modifier,
     avatarPath: String? = null,
-    size: Dp = 40.dp
+    size: Dp = 40.dp,
+    isBusiness: Boolean = false
 ) {
     val initials = remember(name) { AvatarGenerator.getInitials(name) }
     val backgroundColor = remember(name) { Color(AvatarGenerator.getAvatarColorInt(name)) }
+    val showBuildingIcon = remember(name) { AvatarGenerator.isShortCodeOrAlphanumericSender(name) } || isBusiness
     val showPersonIcon = remember(name) { AvatarGenerator.isPhoneNumber(name) }
 
     Box(
@@ -54,22 +63,33 @@ fun Avatar(
             .background(backgroundColor),
         contentAlignment = Alignment.Center
     ) {
-        // Show placeholder (initials or person icon)
-        if (showPersonIcon) {
-            Icon(
-                Icons.Default.Person,
-                contentDescription = "Contact",
-                tint = Color.White,
-                modifier = Modifier.size(size * 0.55f)
-            )
-        } else {
-            Text(
-                text = initials,
-                style = MaterialTheme.typography.titleMedium.copy(
-                    fontSize = (size.value / 2.5f).sp
-                ),
-                color = Color.White
-            )
+        // Show placeholder (initials, person icon, or building icon)
+        when {
+            showBuildingIcon -> {
+                Icon(
+                    Icons.Default.Business,
+                    contentDescription = "Business",
+                    tint = Color.White,
+                    modifier = Modifier.size(size * 0.55f)
+                )
+            }
+            showPersonIcon -> {
+                Icon(
+                    Icons.Default.Person,
+                    contentDescription = "Contact",
+                    tint = Color.White,
+                    modifier = Modifier.size(size * 0.55f)
+                )
+            }
+            else -> {
+                Text(
+                    text = initials,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        fontSize = (size.value / 2.5f).sp
+                    ),
+                    color = Color.White
+                )
+            }
         }
 
         // Overlay with contact photo if available (fast crossfade for Android 16 style)
@@ -112,6 +132,31 @@ private fun AvatarTextPreview() {
             name = "John Appleseed",
             avatarPath = null,
             size = 56.dp
+        )
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar - Shortcode")
+@Composable
+private fun AvatarShortcodePreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Avatar(name = "60484", avatarPath = null, size = 56.dp)
+            Avatar(name = "GOOGLE", avatarPath = null, size = 56.dp)
+            Avatar(name = "AMZN", avatarPath = null, size = 56.dp)
+        }
+    }
+}
+
+@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Avatar - Business")
+@Composable
+private fun AvatarBusinessPreview() {
+    com.bothbubbles.ui.preview.PreviewWrapper {
+        Avatar(
+            name = "Acme Corporation",
+            avatarPath = null,
+            size = 56.dp,
+            isBusiness = true
         )
     }
 }

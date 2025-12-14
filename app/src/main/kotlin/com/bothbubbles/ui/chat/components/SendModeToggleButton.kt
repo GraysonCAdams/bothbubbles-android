@@ -1,24 +1,39 @@
 package com.bothbubbles.ui.chat.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Sms
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,8 +50,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
@@ -44,6 +57,8 @@ import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.DpOffset
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.bothbubbles.R
@@ -56,26 +71,32 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.cos
-import kotlin.math.sin
 import kotlin.math.sqrt
 
 /**
- * SMS Green color for the send button.
+ * MD3 Squircle corner radius for the send button.
+ * Uses 16dp to match FAB styling per Material Design 3 guidelines.
  */
-private val SmsGreen = Color(0xFF34C759)
+private val SquircleCornerRadius = 16.dp
 
 /**
  * Enhanced send button with SMS/iMessage toggle capability.
  *
- * Features:
- * - Pepsi-like dual-color animation on chat load showing both options
- * - Bidirectional swipe gesture to toggle between modes
- * - Visual feedback that follows finger during drag
- * - Spring-based snap animation when threshold is crossed
+ * MD3 Features:
+ * - Squircle shape (rounded rectangle with 16dp radius) matching FAB styling
+ * - Visual affordance with chevron indicators hinting at vertical interaction
+ * - Long-press menu for alternative mode switching
+ * - Container transform animation with circular reveal
+ * - Enhanced haptics with SEGMENT_FREQUENT_TICK during drag
+ * - Mode-specific icon badging for accessibility (SMS badge on icon)
+ *
+ * Interaction patterns:
+ * - Tap: Send message
+ * - Vertical swipe: Toggle between iMessage/SMS modes
+ * - Long press: Open dropdown menu with mode options
  *
  * @param onClick Called when user taps to send message
- * @param onLongPress Called when user long-presses (for effect picker)
+ * @param onLongPress Called when user long-presses (for effect picker in iMessage mode)
  * @param currentMode Current send mode (SMS or IMESSAGE)
  * @param canToggle Whether toggle is available (both modes supported)
  * @param onModeToggle Called when user swipes to toggle mode, returns true if switch allowed
@@ -105,32 +126,24 @@ fun SendModeToggleButton(
     val hapticFeedback = LocalHapticFeedback.current
     val coroutineScope = rememberCoroutineScope()
 
-    // Colors
+    // Colors from theme
     val bubbleColors = BothBubblesTheme.bubbleColors
-    val iMessageBlue = bubbleColors.iMessageSent
+    val iMessageColor = bubbleColors.sendButtonIMessage
+    val smsColor = bubbleColors.sendButtonSms
     val contentColor = Color.White
 
     // Determine colors based on current mode
-    val primaryColor = if (currentMode == ChatSendMode.SMS) SmsGreen else iMessageBlue
-    val secondaryColor = if (currentMode == ChatSendMode.SMS) iMessageBlue else SmsGreen
+    val primaryColor = if (currentMode == ChatSendMode.SMS) smsColor else iMessageColor
+    val secondaryColor = if (currentMode == ChatSendMode.SMS) iMessageColor else smsColor
 
     // Animation states
-    val fillProgress = remember { Animatable(if ((showRevealAnimation || tutorialActive) && canToggle) 0f else 1f) }
-    val wavePhase = remember { Animatable(0f) }
+    val revealProgress = remember { Animatable(if ((showRevealAnimation || tutorialActive) && canToggle) 0f else 1f) }
     val dragOffset = remember { Animatable(0f) }
     var hasTriggeredThresholdHaptic by remember { mutableStateOf(false) }
     var toggleState by remember { mutableStateOf<SendModeToggleState>(SendModeToggleState.Idle) }
 
-    // Reset fillProgress to show pepsi effect when tutorial becomes active
-    // This handles cases where:
-    // 1. fillProgress was initialized to 1f because conditions weren't met initially
-    // 2. The fill animation already completed before tutorial state was set
-    LaunchedEffect(tutorialActive) {
-        if (tutorialActive && canToggle && fillProgress.value > 0f) {
-            // Reset to show the dual-color split during tutorial
-            fillProgress.snapTo(0f)
-        }
-    }
+    // Long-press menu state
+    var showModeMenu by remember { mutableStateOf(false) }
 
     // Thresholds in pixels
     val swipeRangePx = with(density) { SendModeToggleConstants.SWIPE_RANGE_DP.dp.toPx() }
@@ -147,34 +160,39 @@ fun SendModeToggleButton(
         label = "sendButtonScale"
     )
 
-    // Reveal animation on first composition - pauses during tutorial
-    LaunchedEffect(showRevealAnimation, canToggle, tutorialActive) {
-        if ((showRevealAnimation || tutorialActive) && canToggle && fillProgress.value < 1f) {
-            onAnimationConfigChange(animationConfig.copy(phase = SendButtonAnimationPhase.LOADING_REVEAL))
+    // Chevron bounce animation for visual affordance
+    val chevronOffset by animateFloatAsState(
+        targetValue = if (canToggle && !isSending && revealProgress.value >= 1f) 2f else 0f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "chevronOffset"
+    )
 
-            // Animate wave during hold/tutorial phase
-            launch {
-                while (fillProgress.value < 1f) {
-                    wavePhase.animateTo(
-                        targetValue = wavePhase.value + (Math.PI * 2).toFloat(),
-                        animationSpec = tween(2000)
-                    )
-                }
-            }
+    // Reset revealProgress for tutorial
+    LaunchedEffect(tutorialActive) {
+        if (tutorialActive && canToggle && revealProgress.value > 0f) {
+            revealProgress.snapTo(0f)
+        }
+    }
+
+    // Reveal animation on first composition
+    LaunchedEffect(showRevealAnimation, canToggle, tutorialActive) {
+        if ((showRevealAnimation || tutorialActive) && canToggle && revealProgress.value < 1f) {
+            onAnimationConfigChange(animationConfig.copy(phase = SendButtonAnimationPhase.LOADING_REVEAL))
 
             // Wait for tutorial to complete before filling
             if (tutorialActive) {
-                // Keep the split visible while tutorial is active
-                // The fill will continue when tutorialActive becomes false
                 return@LaunchedEffect
             }
 
             // Hold at split for reveal duration
             delay(SendModeToggleConstants.REVEAL_HOLD_MS.toLong())
 
-            // Fill animation
+            // Fill animation - circular reveal from center
             onAnimationConfigChange(animationConfig.copy(phase = SendButtonAnimationPhase.SETTLING))
-            fillProgress.animateTo(
+            revealProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(
                     durationMillis = SendModeToggleConstants.REVEAL_DURATION_MS - SendModeToggleConstants.REVEAL_HOLD_MS,
@@ -188,10 +206,9 @@ fun SendModeToggleButton(
 
     // Continue fill animation when tutorial completes
     LaunchedEffect(tutorialActive) {
-        if (!tutorialActive && fillProgress.value < 1f && fillProgress.value > 0f) {
-            // Tutorial just completed, fill the button
+        if (!tutorialActive && revealProgress.value < 1f && revealProgress.value > 0f) {
             onAnimationConfigChange(animationConfig.copy(phase = SendButtonAnimationPhase.SETTLING))
-            fillProgress.animateTo(
+            revealProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(
                     durationMillis = SendModeToggleConstants.REVEAL_DURATION_MS - SendModeToggleConstants.REVEAL_HOLD_MS,
@@ -202,93 +219,117 @@ fun SendModeToggleButton(
         }
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxHeight()
-            .aspectRatio(1f)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(CircleShape)
-            .drawBehind {
-                val dragProgress = (dragOffset.value / swipeRangePx).coerceIn(-1f, 1f)
-                if (canToggle && fillProgress.value < 1f) {
-                    // Draw dual-color split during reveal/drag
-                    drawPepsiSplit(
-                        primaryColor = primaryColor,
-                        secondaryColor = secondaryColor,
-                        fillProgress = fillProgress.value,
-                        wavePhase = wavePhase.value,
-                        dragOffset = dragOffset.value / swipeRangePx
-                    )
-                } else if (canToggle && abs(dragProgress) > 0.001f) {
-                    drawDirectionalFill(
-                        primaryColor = primaryColor,
-                        secondaryColor = secondaryColor,
-                        progress = dragProgress,
-                        wavePhase = wavePhase.value
-                    )
-                } else {
-                    // Solid color
-                    drawRect(
-                        color = if (isSending) primaryColor.copy(alpha = 0.38f) else primaryColor
-                    )
+    Box(modifier = modifier) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .width(40.dp)
+                .graphicsLayer {
+                    scaleX = scale
+                    scaleY = scale
                 }
-            }
-            .pointerInput(isSending, canToggle) {
-                if (isSending) return@pointerInput
+                .clip(RoundedCornerShape(SquircleCornerRadius))
+                .drawBehind {
+                    val dragProgress = (dragOffset.value / swipeRangePx).coerceIn(-1f, 1f)
 
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    down.consume()
+                    if (canToggle && revealProgress.value < 1f) {
+                        // Circular reveal from center during initial animation
+                        val maxRadius = sqrt(size.width * size.width + size.height * size.height)
+                        val currentRadius = maxRadius * revealProgress.value
+                        val center = Offset(size.width / 2f, size.height / 2f)
 
-                    var cumulativeX = 0f
-                    var cumulativeY = 0f
-                    var gestureIntent: GestureIntent = GestureIntent.UNDETERMINED
-                    val pressStartTime = System.currentTimeMillis()
-                    hasTriggeredThresholdHaptic = false
-                    isPressed = true
+                        // Draw secondary color as background
+                        drawRect(color = secondaryColor)
 
-                    try {
-                        while (true) {
-                            val event = awaitPointerEvent()
-                            val change = event.changes.firstOrNull() ?: break
+                        // Draw primary color as circular reveal
+                        drawCircle(
+                            color = if (isSending) primaryColor.copy(alpha = 0.38f) else primaryColor,
+                            radius = currentRadius,
+                            center = center
+                        )
+                    } else if (canToggle && abs(dragProgress) > 0.001f) {
+                        // Directional fill during drag
+                        drawDirectionalReveal(
+                            primaryColor = primaryColor,
+                            secondaryColor = secondaryColor,
+                            progress = dragProgress
+                        )
+                    } else {
+                        // Solid color
+                        drawRect(
+                            color = if (isSending) primaryColor.copy(alpha = 0.38f) else primaryColor
+                        )
+                    }
+                }
+                .pointerInput(isSending, canToggle) {
+                    if (isSending) return@pointerInput
 
-                            if (!change.pressed) {
-                                // Handle release based on intent
-                                isPressed = false
-                                when (gestureIntent) {
-                                    GestureIntent.VERTICAL_SWIPE -> {
-                                        val normalizedProgress = (dragOffset.value / swipeRangePx).coerceIn(-1f, 1f)
-                                        val hasPassedThreshold = abs(normalizedProgress) >= SendModeToggleConstants.SNAP_THRESHOLD_PERCENT
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        down.consume()
 
-                                        if (hasPassedThreshold && canToggle) {
-                                            // Switch to other mode
-                                            val newMode = if (currentMode == ChatSendMode.SMS) {
-                                                ChatSendMode.IMESSAGE
-                                            } else {
-                                                ChatSendMode.SMS
-                                            }
+                        var cumulativeX = 0f
+                        var cumulativeY = 0f
+                        var gestureIntent: GestureIntent = GestureIntent.UNDETERMINED
+                        val pressStartTime = System.currentTimeMillis()
+                        hasTriggeredThresholdHaptic = false
+                        isPressed = true
+                        var lastTickTime = 0L
 
-                                            val direction = if (normalizedProgress < 0f) -1f else 1f
-                                            val targetOffset = direction * swipeRangePx
+                        try {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull() ?: break
 
-                                            toggleState = SendModeToggleState.Snapping(willSwitch = true)
-                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                if (!change.pressed) {
+                                    isPressed = false
+                                    when (gestureIntent) {
+                                        GestureIntent.VERTICAL_SWIPE -> {
+                                            val normalizedProgress = (dragOffset.value / swipeRangePx).coerceIn(-1f, 1f)
+                                            val hasPassedThreshold = abs(normalizedProgress) >= SendModeToggleConstants.SNAP_THRESHOLD_PERCENT
 
-                                            coroutineScope.launch {
-                                                dragOffset.animateTo(
-                                                    targetValue = targetOffset,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                        stiffness = Spring.StiffnessMedium
+                                            if (hasPassedThreshold && canToggle) {
+                                                val newMode = if (currentMode == ChatSendMode.SMS) {
+                                                    ChatSendMode.IMESSAGE
+                                                } else {
+                                                    ChatSendMode.SMS
+                                                }
+
+                                                val direction = if (normalizedProgress < 0f) -1f else 1f
+                                                val targetOffset = direction * swipeRangePx
+
+                                                toggleState = SendModeToggleState.Snapping(willSwitch = true)
+                                                // Use CONFIRM haptic for mode switch
+                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+
+                                                coroutineScope.launch {
+                                                    dragOffset.animateTo(
+                                                        targetValue = targetOffset,
+                                                        animationSpec = spring(
+                                                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                            stiffness = Spring.StiffnessMedium
+                                                        )
                                                     )
-                                                )
 
-                                                val didSwitch = onModeToggle(newMode)
+                                                    val didSwitch = onModeToggle(newMode)
 
-                                                if (!didSwitch) {
+                                                    if (!didSwitch) {
+                                                        dragOffset.animateTo(
+                                                            targetValue = 0f,
+                                                            animationSpec = spring(
+                                                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                                                stiffness = Spring.StiffnessMedium
+                                                            )
+                                                        )
+                                                    } else {
+                                                        dragOffset.snapTo(0f)
+                                                    }
+
+                                                    toggleState = SendModeToggleState.Idle
+                                                }
+                                            } else {
+                                                toggleState = SendModeToggleState.Snapping(willSwitch = false)
+                                                coroutineScope.launch {
                                                     dragOffset.animateTo(
                                                         targetValue = 0f,
                                                         animationSpec = spring(
@@ -296,135 +337,246 @@ fun SendModeToggleButton(
                                                             stiffness = Spring.StiffnessMedium
                                                         )
                                                     )
-                                                } else {
-                                                    dragOffset.snapTo(0f)
+                                                    toggleState = SendModeToggleState.Idle
                                                 }
-
-                                                toggleState = SendModeToggleState.Idle
-                                            }
-                                        } else {
-                                            // Snap back
-                                            toggleState = SendModeToggleState.Snapping(willSwitch = false)
-                                            coroutineScope.launch {
-                                                dragOffset.animateTo(
-                                                    targetValue = 0f,
-                                                    animationSpec = spring(
-                                                        dampingRatio = Spring.DampingRatioMediumBouncy,
-                                                        stiffness = Spring.StiffnessMedium
-                                                    )
-                                                )
-                                                toggleState = SendModeToggleState.Idle
                                             }
                                         }
-                                    }
 
-                                    GestureIntent.TAP_OR_HOLD -> {
-                                        val elapsed = System.currentTimeMillis() - pressStartTime
-                                        if (elapsed < 400) {
+                                        GestureIntent.TAP_OR_HOLD -> {
+                                            val elapsed = System.currentTimeMillis() - pressStartTime
+                                            if (elapsed < 400) {
+                                                onClick()
+                                            } else if (canToggle) {
+                                                // Long press opens mode menu when toggle available
+                                                showModeMenu = true
+                                            } else {
+                                                // Long press for effects in iMessage mode
+                                                onLongPress()
+                                            }
+                                        }
+
+                                        GestureIntent.UNDETERMINED -> {
                                             onClick()
-                                        } else {
-                                            onLongPress()
                                         }
                                     }
+                                    break
+                                }
 
-                                    GestureIntent.UNDETERMINED -> {
-                                        // Short tap
-                                        onClick()
+                                val dragDelta = change.positionChange()
+                                cumulativeX += dragDelta.x
+                                cumulativeY += dragDelta.y
+
+                                if (gestureIntent == GestureIntent.UNDETERMINED) {
+                                    val totalDistance = sqrt(cumulativeX * cumulativeX + cumulativeY * cumulativeY)
+                                    if (totalDistance >= detectionDistancePx) {
+                                        gestureIntent = if (abs(cumulativeY) > abs(cumulativeX) * SendModeToggleConstants.DIRECTION_RATIO) {
+                                            GestureIntent.VERTICAL_SWIPE
+                                        } else {
+                                            GestureIntent.TAP_OR_HOLD
+                                        }
                                     }
                                 }
-                                break
-                            }
 
-                            val dragDelta = change.positionChange()
-                            cumulativeX += dragDelta.x
-                            cumulativeY += dragDelta.y
+                                if (gestureIntent == GestureIntent.VERTICAL_SWIPE && canToggle) {
+                                    change.consume()
 
-                            // Determine intent once moved enough
-                            if (gestureIntent == GestureIntent.UNDETERMINED) {
-                                val totalDistance = sqrt(cumulativeX * cumulativeX + cumulativeY * cumulativeY)
-                                if (totalDistance >= detectionDistancePx) {
-                                    gestureIntent = if (abs(cumulativeY) > abs(cumulativeX) * SendModeToggleConstants.DIRECTION_RATIO) {
-                                        GestureIntent.VERTICAL_SWIPE
-                                    } else {
-                                        GestureIntent.TAP_OR_HOLD
+                                    coroutineScope.launch {
+                                        val newOffset = (dragOffset.value + dragDelta.y)
+                                            .coerceIn(-swipeRangePx, swipeRangePx)
+                                        dragOffset.snapTo(newOffset)
+
+                                        val progress = newOffset / swipeRangePx
+                                        val hasPassedThreshold = abs(progress) >= SendModeToggleConstants.SNAP_THRESHOLD_PERCENT
+
+                                        toggleState = SendModeToggleState.Dragging(
+                                            progress = progress,
+                                            hasPassedThreshold = hasPassedThreshold
+                                        )
+
+                                        // Tick haptic feedback during drag (every ~50ms)
+                                        val currentTime = System.currentTimeMillis()
+                                        if (currentTime - lastTickTime > 50 && abs(dragDelta.y) > 1f) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            lastTickTime = currentTime
+                                        }
+
+                                        // Stronger haptic at threshold crossing
+                                        if (hasPassedThreshold && !hasTriggeredThresholdHaptic) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                            hasTriggeredThresholdHaptic = true
+                                        } else if (!hasPassedThreshold && hasTriggeredThresholdHaptic) {
+                                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                            hasTriggeredThresholdHaptic = false
+                                        }
                                     }
                                 }
                             }
-
-                            // Handle vertical swipe
-                            if (gestureIntent == GestureIntent.VERTICAL_SWIPE && canToggle) {
-                                change.consume()
-
-                                coroutineScope.launch {
-                                    val newOffset = (dragOffset.value + dragDelta.y)
-                                        .coerceIn(-swipeRangePx, swipeRangePx)
-                                    dragOffset.snapTo(newOffset)
-
-                                    // Update toggle state
-                                    val progress = newOffset / swipeRangePx
-                                    val hasPassedThreshold = abs(progress) >= SendModeToggleConstants.SNAP_THRESHOLD_PERCENT
-
-                                    toggleState = SendModeToggleState.Dragging(
-                                        progress = progress,
-                                        hasPassedThreshold = hasPassedThreshold
-                                    )
-
-                                    // Haptic at threshold crossing
-                                    if (hasPassedThreshold && !hasTriggeredThresholdHaptic) {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                        hasTriggeredThresholdHaptic = true
-                                    } else if (!hasPassedThreshold && hasTriggeredThresholdHaptic) {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                        hasTriggeredThresholdHaptic = false
-                                    }
-                                }
+                        } catch (e: Exception) {
+                            isPressed = false
+                            coroutineScope.launch {
+                                dragOffset.animateTo(0f, spring())
+                                toggleState = SendModeToggleState.Idle
                             }
+                            throw e
                         }
-                    } catch (e: Exception) {
-                        isPressed = false
-                        coroutineScope.launch {
-                            dragOffset.animateTo(0f, spring())
-                            toggleState = SendModeToggleState.Idle
-                        }
-                        throw e
                     }
-                }
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        if (isSending) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = contentColor
-            )
-        } else {
-            if (isMmsMode) {
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSending) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = contentColor
+                )
+            } else {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send_message),
-                        tint = contentColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "MMS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = contentColor,
-                        fontSize = 8.sp
-                    )
+                    // Visual affordance: subtle chevron above icon when toggle available
+                    if (canToggle && revealProgress.value >= 1f) {
+                        Icon(
+                            Icons.Default.KeyboardArrowUp,
+                            contentDescription = null,
+                            tint = contentColor.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .size(10.dp)
+                                .offset { IntOffset(0, -chevronOffset.toInt()) }
+                        )
+                    }
+
+                    // Main icon with mode indicator
+                    AnimatedContent(
+                        targetState = currentMode,
+                        transitionSpec = {
+                            (fadeIn(animationSpec = tween(150)) + scaleIn(initialScale = 0.8f))
+                                .togetherWith(fadeOut(animationSpec = tween(150)) + scaleOut(targetScale = 0.8f))
+                        },
+                        label = "sendIcon"
+                    ) { mode ->
+                        if (isMmsMode) {
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = stringResource(R.string.send_message),
+                                    tint = contentColor,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = "MMS",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = contentColor,
+                                    fontSize = 7.sp
+                                )
+                            }
+                        } else if (mode == ChatSendMode.SMS) {
+                            // SMS mode: Send icon with small SMS badge for accessibility
+                            Box {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = stringResource(R.string.send_message),
+                                    tint = contentColor,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                // Small SMS indicator badge
+                                Box(
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .offset(x = 4.dp, y = 4.dp)
+                                        .size(8.dp)
+                                        .background(contentColor, RoundedCornerShape(2.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "S",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = smsColor,
+                                        fontSize = 5.sp
+                                    )
+                                }
+                            }
+                        } else {
+                            // iMessage mode: Clean send icon
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = stringResource(R.string.send_message),
+                                tint = contentColor,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        }
+                    }
+
+                    // Visual affordance: subtle chevron below icon when toggle available
+                    if (canToggle && revealProgress.value >= 1f) {
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = null,
+                            tint = contentColor.copy(alpha = 0.5f),
+                            modifier = Modifier
+                                .size(10.dp)
+                                .offset { IntOffset(0, chevronOffset.toInt()) }
+                        )
+                    }
                 }
-            } else {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    tint = contentColor,
-                    modifier = Modifier.size(18.dp)
-                )
             }
+        }
+
+        // Long-press dropdown menu for mode switching
+        DropdownMenu(
+            expanded = showModeMenu,
+            onDismissRequest = { showModeMenu = false },
+            offset = DpOffset(0.dp, (-48).dp)
+        ) {
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.Send,
+                            contentDescription = null,
+                            tint = iMessageColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text("Send as iMessage")
+                    }
+                },
+                onClick = {
+                    showModeMenu = false
+                    if (currentMode != ChatSendMode.IMESSAGE) {
+                        onModeToggle(ChatSendMode.IMESSAGE)
+                    }
+                    onClick()
+                }
+            )
+            DropdownMenuItem(
+                text = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            Icons.Filled.Sms,
+                            contentDescription = null,
+                            tint = smsColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Text("Send as SMS")
+                    }
+                },
+                onClick = {
+                    showModeMenu = false
+                    if (currentMode != ChatSendMode.SMS) {
+                        onModeToggle(ChatSendMode.SMS)
+                    }
+                    onClick()
+                }
+            )
         }
     }
 }
@@ -439,86 +591,13 @@ private enum class GestureIntent {
 }
 
 /**
- * Draws the Pepsi-style dual-color split with wavy divider.
+ * Draws directional fill during drag using circular reveal.
+ * Replaces the wavy seam with a cleaner MD3-style reveal.
  */
-private fun DrawScope.drawPepsiSplit(
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawDirectionalReveal(
     primaryColor: Color,
     secondaryColor: Color,
-    fillProgress: Float,
-    wavePhase: Float,
-    dragOffset: Float
-) {
-    val width = size.width
-    val height = size.height
-
-    // Calculate split position based on fill progress
-    // 0 = 50/50 split, 1 = fully filled with primary
-    val splitY = height * (0.5f - (fillProgress * 0.5f))
-
-    // Pepsi-inspired continuous wave: cosine arc plus subtle liquid ripple
-    val normalizedDrag = dragOffset.coerceIn(-1f, 1f)
-    val baseAmplitude = height * 0.28f
-    val rippleAmplitude = height * 0.05f
-    val dragTilt = height * 0.12f * normalizedDrag
-    val rippleFrequency = Math.PI.toFloat() * 2f
-
-    fun liquidWaveY(x: Float): Float {
-        val t = (x / width).coerceIn(0f, 1f)
-        val centered = t - 0.5f
-
-        // Compose a constant S-curve: slight slope + crest + counter-curve for the Pepsi vibe
-        val slopeComponent = centered * baseAmplitude * 0.6f
-        val crestComponent = sin(t * Math.PI.toFloat()) * baseAmplitude * 0.9f
-        val sBendComponent = sin(t * Math.PI.toFloat() * 2f) * baseAmplitude * 0.35f
-        val baseCurve = slopeComponent + crestComponent + sBendComponent
-
-        // Gentle liquid ripple that drifts across the seam
-        val ripple = sin(t * rippleFrequency + wavePhase) * rippleAmplitude
-        // Drag tilt lets the seam lean toward the direction of the user's swipe
-        val tilt = centered * dragTilt
-
-        return (splitY + baseCurve + ripple + tilt).coerceIn(0f, height)
-    }
-
-    // Draw secondary color (top)
-    val topPath = Path().apply {
-        moveTo(0f, 0f)
-        lineTo(width, 0f)
-        lineTo(width, liquidWaveY(width))
-
-        // Smooth wavy bottom edge with more frequent sampling
-        for (x in width.toInt() downTo 0) {
-            lineTo(x.toFloat(), liquidWaveY(x.toFloat()))
-        }
-
-        close()
-    }
-    drawPath(topPath, secondaryColor)
-
-    // Draw primary color (bottom)
-    val bottomPath = Path().apply {
-        moveTo(0f, height)
-        lineTo(width, height)
-        lineTo(width, liquidWaveY(width))
-
-        // Wavy top edge (matching the top path)
-        for (x in width.toInt() downTo 0) {
-            lineTo(x.toFloat(), liquidWaveY(x.toFloat()))
-        }
-
-        close()
-    }
-    drawPath(bottomPath, primaryColor)
-}
-
-/**
- * Draws the rolling toggle effect during drag.
- */
-private fun DrawScope.drawDirectionalFill(
-    primaryColor: Color,
-    secondaryColor: Color,
-    progress: Float,
-    wavePhase: Float
+    progress: Float
 ) {
     val clamped = progress.coerceIn(-1f, 1f)
     val coverage = abs(clamped).coerceIn(0f, 1f)
@@ -533,47 +612,25 @@ private fun DrawScope.drawDirectionalFill(
         return
     }
 
-    val width = size.width
-    val height = size.height
-
-    // Paint base layer with current color
+    // Draw primary as base
     drawRect(color = primaryColor)
 
+    // Calculate reveal from edge (top or bottom based on drag direction)
     val fromTop = clamped < 0f
-    val baseLine = if (fromTop) height * coverage else height * (1f - coverage)
-    val amplitude = height * (0.05f + 0.3f * coverage)
-    val tilt = clamped * height * 0.06f
-    val rippleFrequency = Math.PI.toFloat() * 2f
+    val revealHeight = size.height * coverage
 
-    fun seamY(x: Float): Float {
-        val t = (x / width).coerceIn(0f, 1f)
-        val centered = t - 0.5f
-        val slopeComponent = centered * 0.6f
-        val crestComponent = sin(t * Math.PI.toFloat()) * 0.9f
-        val sCurveComponent = sin(t * Math.PI.toFloat() * 2f) * 0.35f
-        val structuralShape = (slopeComponent + crestComponent + sCurveComponent) / 1.85f
-        val ripple = sin(t * rippleFrequency + wavePhase) * 0.5f
-        val offset = (structuralShape + ripple) * amplitude + tilt
-        val rawY = baseLine + offset
-        return rawY.coerceIn(0f, height)
+    if (fromTop) {
+        // Reveal from top
+        drawRect(
+            color = secondaryColor,
+            size = size.copy(height = revealHeight)
+        )
+    } else {
+        // Reveal from bottom
+        drawRect(
+            color = secondaryColor,
+            topLeft = Offset(0f, size.height - revealHeight),
+            size = size.copy(height = revealHeight)
+        )
     }
-
-    val overlayPath = Path().apply {
-        if (fromTop) {
-            moveTo(0f, 0f)
-            lineTo(width, 0f)
-            for (x in width.toInt() downTo 0) {
-                lineTo(x.toFloat(), seamY(x.toFloat()))
-            }
-        } else {
-            moveTo(0f, height)
-            lineTo(width, height)
-            for (x in width.toInt() downTo 0) {
-                lineTo(x.toFloat(), seamY(x.toFloat()))
-            }
-        }
-        close()
-    }
-
-    drawPath(overlayPath, secondaryColor)
 }

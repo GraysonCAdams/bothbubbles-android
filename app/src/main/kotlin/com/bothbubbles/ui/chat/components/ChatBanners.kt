@@ -6,11 +6,14 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -231,9 +234,92 @@ fun SaveContactBanner(
 }
 
 /**
- * Thin, non-obtrusive banner shown when chat is in SMS fallback mode.
+ * MD3 Helper text shown below the input field when in fallback or offline mode.
+ * Replaces the top banner with less intrusive supporting text per MD3 guidelines.
+ *
+ * @param visible Whether the helper text should be shown
+ * @param fallbackReason The reason for the fallback (if any)
+ * @param isServerConnected Whether the server is currently connected
+ * @param showExitAction Whether to show an "Undo" action to exit fallback mode
+ * @param onExitFallback Callback when user wants to exit fallback mode
+ * @param modifier Modifier for this composable
  */
 @Composable
+fun SendModeHelperText(
+    visible: Boolean,
+    fallbackReason: FallbackReason?,
+    isServerConnected: Boolean,
+    showExitAction: Boolean,
+    onExitFallback: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    // SMS Green color for helper text
+    val smsColor = Color(0xFF34C759)
+
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(animationSpec = tween(200)) + fadeIn(),
+        exit = shrinkVertically(animationSpec = tween(150)) + fadeOut()
+    ) {
+        Row(
+            modifier = modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Helper text with icon
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                // Small dot indicator matching SMS color
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(
+                            if (isServerConnected) smsColor else MaterialTheme.colorScheme.error,
+                            shape = CircleShape
+                        )
+                )
+                Text(
+                    text = when {
+                        !isServerConnected -> "Offline • Sending as SMS"
+                        fallbackReason != null -> "iMessage unavailable • Sending as SMS"
+                        else -> "Sending as SMS"
+                    },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isServerConnected) {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    }
+                )
+            }
+
+            // Undo action button (optional)
+            if (showExitAction && isServerConnected) {
+                TextButton(
+                    onClick = onExitFallback,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        text = "Undo",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Legacy thin banner - kept for backwards compatibility.
+ * Consider using SendModeHelperText instead for MD3 compliance.
+ */
+@Composable
+@Deprecated("Use SendModeHelperText below the input field instead", ReplaceWith("SendModeHelperText"))
 fun SmsFallbackBanner(
     visible: Boolean,
     fallbackReason: FallbackReason?,
@@ -242,23 +328,13 @@ fun SmsFallbackBanner(
     onExitFallback: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    AnimatedVisibility(
+    // Delegate to new helper text component
+    SendModeHelperText(
         visible = visible,
-        enter = expandVertically(),
-        exit = shrinkVertically()
-    ) {
-        Box(
-            modifier = modifier
-                .fillMaxWidth()
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-                .padding(vertical = 4.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "iMessage unavailable",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
+        fallbackReason = fallbackReason,
+        isServerConnected = isServerConnected,
+        showExitAction = showExitAction,
+        onExitFallback = onExitFallback,
+        modifier = modifier
+    )
 }

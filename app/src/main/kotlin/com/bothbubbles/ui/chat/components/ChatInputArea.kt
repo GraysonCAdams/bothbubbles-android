@@ -419,13 +419,29 @@ fun ChatInputArea(
                 ) { currentMode ->
                     when (currentMode) {
                         InputMode.NORMAL -> {
-                            // Normal text input field
+                            // Normal text input field with mode-based tinting
+                            // Subtle color tint provides context before user reaches send button
+                            val modeTint by animateColorAsState(
+                                targetValue = if (isSmsMode) {
+                                    inputColors.inputFieldTintSms
+                                } else {
+                                    inputColors.inputFieldTintIMessage
+                                },
+                                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                                label = "inputFieldTint"
+                            )
+
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .heightIn(min = 36.dp),
                                 shape = RoundedCornerShape(18.dp),
-                                color = inputColors.inputFieldBackground
+                                // Blend base color with mode tint for subtle context
+                                color = inputColors.inputFieldBackground.copy(
+                                    red = (inputColors.inputFieldBackground.red + modeTint.red * modeTint.alpha) / (1f + modeTint.alpha),
+                                    green = (inputColors.inputFieldBackground.green + modeTint.green * modeTint.alpha) / (1f + modeTint.alpha),
+                                    blue = (inputColors.inputFieldBackground.blue + modeTint.blue * modeTint.alpha) / (1f + modeTint.alpha)
+                                )
                             ) {
                                 Row(
                                     modifier = Modifier
@@ -942,9 +958,20 @@ internal fun PreviewContent(
 }
 
 /**
- * Send button with protocol-based coloring.
+ * MD3 Squircle corner radius for the send button.
+ * Uses 16dp to match FAB styling per Material Design 3 guidelines.
+ */
+private val SendButtonCornerRadius = 16.dp
+
+/**
+ * Send button with protocol-based coloring and MD3 squircle shape.
  * Green background for SMS/MMS, blue for iMessage.
  * Long press opens the effect picker for iMessage.
+ *
+ * MD3 Features:
+ * - Squircle shape (rounded rectangle with 16dp radius)
+ * - Mode-specific icon badging for accessibility
+ * - Harmonized theme colors
  */
 @Composable
 internal fun SendButton(
@@ -956,11 +983,10 @@ internal fun SendButton(
     showEffectHint: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
-    // Animated color transition for snappy mode switching (Android 16 style)
+    // Protocol-based coloring using theme colors (harmonized with dynamic color)
     val bubbleColors = BothBubblesTheme.bubbleColors
     val containerColor by animateColorAsState(
-        targetValue = if (isSmsMode) Color(0xFF34C759) else bubbleColors.iMessageSent,
+        targetValue = if (isSmsMode) bubbleColors.sendButtonSms else bubbleColors.sendButtonIMessage,
         animationSpec = tween(150, easing = FastOutSlowInEasing),
         label = "sendButtonColor"
     )
@@ -985,7 +1011,7 @@ internal fun SendButton(
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
+            .clip(RoundedCornerShape(SendButtonCornerRadius))
             .background(
                 if (isSending) containerColor.copy(alpha = 0.38f) else containerColor
             )
@@ -1030,6 +1056,32 @@ internal fun SendButton(
                         fontSize = 8.sp
                     )
                 }
+            } else if (isSmsMode) {
+                // SMS mode: Send icon with small SMS badge for accessibility
+                Box {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = stringResource(R.string.send_message),
+                        tint = contentColor,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    // Small SMS indicator badge
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(0.dp)
+                            .size(8.dp)
+                            .background(contentColor, RoundedCornerShape(2.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "S",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = bubbleColors.sendButtonSms,
+                            fontSize = 5.sp
+                        )
+                    }
+                }
             } else {
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
@@ -1043,9 +1095,13 @@ internal fun SendButton(
 }
 
 /**
- * Voice memo button with soundwave icon.
+ * Voice memo button with soundwave icon and MD3 squircle shape.
  * Protocol-colored: green for SMS, blue for iMessage.
  * Hold to record, release to stop. Tap requests permission only.
+ *
+ * MD3 Features:
+ * - Squircle shape matching send button
+ * - Harmonized theme colors
  */
 @Composable
 internal fun VoiceMemoButton(
@@ -1056,14 +1112,13 @@ internal fun VoiceMemoButton(
     isDisabled: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    // Protocol-based coloring: green for SMS, deep blue for iMessage (matching bubbles)
-    // Animated color transition for snappy mode switching (Android 16 style)
+    // Protocol-based coloring using theme colors (harmonized with dynamic color)
     val bubbleColors = BothBubblesTheme.bubbleColors
     val containerColor by animateColorAsState(
         targetValue = when {
             isDisabled -> Color.Gray.copy(alpha = 0.3f)
-            isSmsMode -> Color(0xFF34C759)
-            else -> bubbleColors.iMessageSent
+            isSmsMode -> bubbleColors.sendButtonSms
+            else -> bubbleColors.sendButtonIMessage
         },
         animationSpec = tween(150, easing = FastOutSlowInEasing),
         label = "voiceMemoButtonColor"
@@ -1073,7 +1128,7 @@ internal fun VoiceMemoButton(
         modifier = modifier
             .height(40.dp)
             .aspectRatio(1.3f)
-            .clip(RoundedCornerShape(50))
+            .clip(RoundedCornerShape(SendButtonCornerRadius))
             .background(containerColor)
             .then(
                 if (isDisabled) Modifier else Modifier.pointerInput(Unit) {

@@ -102,6 +102,14 @@ data class BubbleColors(
     val inputPlaceholder: Color,
     val inputText: Color,
     val inputIcon: Color,
+    // MD3 mode-specific tints for input field background
+    val inputFieldTintIMessage: Color,
+    val inputFieldTintSms: Color,
+    // MD3 send button colors (harmonized tonal variants)
+    val sendButtonIMessage: Color,
+    val sendButtonIMessageContent: Color,
+    val sendButtonSms: Color,
+    val sendButtonSmsContent: Color,
 )
 
 val LocalBubbleColors = staticCompositionLocalOf {
@@ -117,6 +125,12 @@ val LocalBubbleColors = staticCompositionLocalOf {
         inputPlaceholder = Color(0xFF9AA0A6),
         inputText = Color.White,
         inputIcon = Color(0xFF9AA0A6),
+        inputFieldTintIMessage = IMessageBlue.copy(alpha = 0.08f),
+        inputFieldTintSms = SmsGreen.copy(alpha = 0.08f),
+        sendButtonIMessage = IMessageBlue,
+        sendButtonIMessageContent = Color.White,
+        sendButtonSms = SmsGreen,
+        sendButtonSmsContent = Color.White,
     )
 }
 
@@ -150,6 +164,11 @@ private fun createBubbleColors(
         if (darkTheme) SmsGreenDark else SmsGreen
     }
 
+    // Create subtle tints for input field background based on current mode
+    // These provide visual context before the user reaches the send button
+    val iMessageTint = iMessageColor.copy(alpha = if (darkTheme) 0.12f else 0.08f)
+    val smsTint = smsColor.copy(alpha = if (darkTheme) 0.12f else 0.08f)
+
     return if (darkTheme) {
         BubbleColors(
             iMessageSent = iMessageColor,
@@ -165,6 +184,14 @@ private fun createBubbleColors(
             inputPlaceholder = colorScheme.onSurfaceVariant,
             inputText = colorScheme.onSurface,
             inputIcon = colorScheme.onSurfaceVariant,
+            // MD3 mode-specific tints
+            inputFieldTintIMessage = iMessageTint,
+            inputFieldTintSms = smsTint,
+            // MD3 send button colors
+            sendButtonIMessage = iMessageColor,
+            sendButtonIMessageContent = Color.White,
+            sendButtonSms = smsColor,
+            sendButtonSmsContent = Color.White,
         )
     } else {
         BubbleColors(
@@ -181,6 +208,14 @@ private fun createBubbleColors(
             inputPlaceholder = colorScheme.onSurfaceVariant,
             inputText = colorScheme.onSurface,
             inputIcon = colorScheme.onSurfaceVariant,
+            // MD3 mode-specific tints
+            inputFieldTintIMessage = iMessageTint,
+            inputFieldTintSms = smsTint,
+            // MD3 send button colors
+            sendButtonIMessage = iMessageColor,
+            sendButtonIMessageContent = Color.White,
+            sendButtonSms = smsColor,
+            sendButtonSmsContent = Color.White,
         )
     }
 }

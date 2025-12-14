@@ -9,6 +9,7 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
 import android.net.Uri
+import android.provider.ContactsContract
 import android.util.Log
 import androidx.core.graphics.drawable.IconCompat
 import kotlin.math.abs
@@ -73,14 +74,29 @@ object AvatarGenerator {
     }
 
     /**
-     * Generate a bitmap avatar with colored circle and initials (or person icon).
+     * Check if name looks like a shortcode (5-6 digit business number) or
+     * alphanumeric sender ID (e.g., "GOOGLE", "AMZN", "BANK").
+     * When true, avatar should show a Building icon.
+     */
+    fun isShortCodeOrAlphanumericSender(name: String): Boolean {
+        val normalized = name.replace(Regex("[^0-9a-zA-Z]"), "")
+        // Short codes: exactly 5-6 digits
+        val isShortCode = Regex("""^\d{5,6}$""").matches(normalized)
+        // Alphanumeric sender IDs: 3-11 letters only (e.g., "GOOGLE", "AMZN")
+        val isAlphanumeric = Regex("""^[A-Za-z]{3,11}$""").matches(normalized)
+        return isShortCode || isAlphanumeric
+    }
+
+    /**
+     * Generate a bitmap avatar with colored circle and initials (or icon).
      * Used for notifications where Compose components aren't available.
      *
      * @param name The contact name to generate avatar for
      * @param sizePx The size of the bitmap in pixels (typically 128 for notifications)
+     * @param isBusiness If true, shows building icon (for business contacts without personal name)
      * @return A circular bitmap with colored background and white initials/icon
      */
-    fun generateBitmap(name: String, sizePx: Int): Bitmap {
+    fun generateBitmap(name: String, sizePx: Int, isBusiness: Boolean = false): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
 
@@ -95,25 +111,36 @@ object AvatarGenerator {
         val radius = sizePx / 2f
         canvas.drawCircle(radius, radius, radius, circlePaint)
 
-        if (isPhoneNumber(name)) {
-            // Draw a simple person silhouette for phone numbers
-            drawPersonIcon(canvas, sizePx)
-        } else {
-            // Draw initials
-            val initials = getInitials(name)
-            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = android.graphics.Color.WHITE
-                textSize = sizePx * 0.4f
-                typeface = Typeface.DEFAULT_BOLD
-                textAlign = Paint.Align.CENTER
+        when {
+            // Shortcodes and alphanumeric senders (e.g., "60484", "GOOGLE") get building icon
+            isShortCodeOrAlphanumericSender(name) -> {
+                drawBuildingIcon(canvas, sizePx)
             }
+            // Business contacts without personal names get building icon
+            isBusiness -> {
+                drawBuildingIcon(canvas, sizePx)
+            }
+            // Regular phone numbers get person icon
+            isPhoneNumber(name) -> {
+                drawPersonIcon(canvas, sizePx)
+            }
+            // Everyone else gets initials
+            else -> {
+                val initials = getInitials(name)
+                val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = android.graphics.Color.WHITE
+                    textSize = sizePx * 0.4f
+                    typeface = Typeface.DEFAULT_BOLD
+                    textAlign = Paint.Align.CENTER
+                }
 
-            // Center text vertically
-            val textBounds = android.graphics.Rect()
-            textPaint.getTextBounds(initials, 0, initials.length, textBounds)
-            val yPos = radius - textBounds.exactCenterY()
+                // Center text vertically
+                val textBounds = android.graphics.Rect()
+                textPaint.getTextBounds(initials, 0, initials.length, textBounds)
+                val yPos = radius - textBounds.exactCenterY()
 
-            canvas.drawText(initials, radius, yPos, textPaint)
+                canvas.drawText(initials, radius, yPos, textPaint)
+            }
         }
 
         return bitmap
@@ -144,9 +171,19 @@ object AvatarGenerator {
     fun loadContactPhotoBitmap(context: Context, photoUri: String, sizePx: Int): Bitmap? {
         return try {
             val uri = Uri.parse(photoUri)
-            context.contentResolver.openInputStream(uri)?.use { inputStream ->
+            Log.d(TAG, "Loading contact photo: $photoUri")
+
+            // Try direct ContentResolver access first
+            val inputStream = context.contentResolver.openInputStream(uri)
+            if (inputStream == null) {
+                Log.w(TAG, "openInputStream returned null for: $photoUri, trying alternative method")
+                // Try alternative: use openContactPhotoInputStream which may handle permissions better
+                return loadContactPhotoAlternative(context, uri, sizePx)
+            }
+
+            inputStream.use { stream ->
                 // Decode bitmap
-                val sourceBitmap = BitmapFactory.decodeStream(inputStream)
+                val sourceBitmap = BitmapFactory.decodeStream(stream)
                 if (sourceBitmap == null) {
                     Log.w(TAG, "Failed to decode contact photo: $photoUri")
                     return null
@@ -168,6 +205,75 @@ object AvatarGenerator {
             }
         } catch (e: Exception) {
             Log.w(TAG, "Failed to load contact photo: $photoUri", e)
+            null
+        }
+    }
+
+    /**
+     * Alternative method to load contact photo using ContactsContract API.
+     * Extracts contact ID from URI and uses openContactPhotoInputStream.
+     */
+    private fun loadContactPhotoAlternative(context: Context, photoUri: Uri, sizePx: Int): Bitmap? {
+        return try {
+            // Try to extract contact ID from various URI formats:
+            // content://com.android.contacts/contacts/{id}/photo
+            // content://com.android.contacts/data/{id}
+            val segments = photoUri.pathSegments
+            val contactId = when {
+                // Format: /contacts/{id}/photo or /contacts/{id}/display_photo
+                segments.size >= 2 && segments[0] == "contacts" -> segments[1].toLongOrNull()
+                // Format: /data/{id}
+                segments.size >= 2 && segments[0] == "data" -> {
+                    // Need to query for the contact ID from this data row
+                    null // Fall through to return null
+                }
+                else -> null
+            }
+
+            if (contactId == null) {
+                Log.w(TAG, "Could not extract contact ID from URI: $photoUri")
+                return null
+            }
+
+            val contactUri = android.content.ContentUris.withAppendedId(
+                ContactsContract.Contacts.CONTENT_URI,
+                contactId
+            )
+
+            // Use the official Android API for loading contact photos
+            val photoStream = ContactsContract.Contacts.openContactPhotoInputStream(
+                context.contentResolver,
+                contactUri,
+                true // preferHighRes
+            )
+
+            if (photoStream == null) {
+                Log.w(TAG, "openContactPhotoInputStream also returned null for contact: $contactId")
+                return null
+            }
+
+            photoStream.use { stream ->
+                val sourceBitmap = BitmapFactory.decodeStream(stream)
+                if (sourceBitmap == null) {
+                    Log.w(TAG, "Failed to decode photo from alternative method")
+                    return null
+                }
+
+                val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
+                if (scaledBitmap != sourceBitmap) {
+                    sourceBitmap.recycle()
+                }
+
+                val circularBitmap = createCircularBitmap(scaledBitmap)
+                if (circularBitmap != scaledBitmap) {
+                    scaledBitmap.recycle()
+                }
+
+                Log.d(TAG, "Successfully loaded photo via alternative method for contact: $contactId")
+                circularBitmap
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Alternative photo load failed for: $photoUri", e)
             null
         }
     }
@@ -368,5 +474,73 @@ object AvatarGenerator {
             bodyTop + size * 0.35f
         )
         canvas.drawArc(bodyRect, 0f, -180f, true, paint)
+    }
+
+    /**
+     * Draw a simple building icon on the canvas.
+     * Used for shortcodes and business contacts without personal names.
+     */
+    private fun drawBuildingIcon(canvas: Canvas, size: Int) {
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.WHITE
+            style = Paint.Style.FILL
+        }
+
+        val centerX = size / 2f
+
+        // Building dimensions
+        val buildingWidth = size * 0.45f
+        val buildingHeight = size * 0.55f
+        val buildingLeft = centerX - buildingWidth / 2f
+        val buildingTop = size * 0.22f
+        val buildingBottom = buildingTop + buildingHeight
+
+        // Draw main building rectangle
+        canvas.drawRect(
+            buildingLeft,
+            buildingTop,
+            buildingLeft + buildingWidth,
+            buildingBottom,
+            paint
+        )
+
+        // Draw windows (3 rows x 2 columns) using the background color
+        val windowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = android.graphics.Color.TRANSPARENT
+            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        }
+
+        val windowWidth = buildingWidth * 0.22f
+        val windowHeight = buildingHeight * 0.12f
+        val windowHGap = (buildingWidth - 2 * windowWidth) / 3f
+        val windowVGap = buildingHeight * 0.08f
+        val windowStartY = buildingTop + windowVGap
+
+        // Draw 3 rows of 2 windows
+        for (row in 0 until 3) {
+            for (col in 0 until 2) {
+                val windowLeft = buildingLeft + windowHGap + col * (windowWidth + windowHGap)
+                val windowTop = windowStartY + row * (windowHeight + windowVGap)
+                canvas.drawRect(
+                    windowLeft,
+                    windowTop,
+                    windowLeft + windowWidth,
+                    windowTop + windowHeight,
+                    windowPaint
+                )
+            }
+        }
+
+        // Draw door at bottom center
+        val doorWidth = buildingWidth * 0.25f
+        val doorHeight = buildingHeight * 0.18f
+        val doorLeft = centerX - doorWidth / 2f
+        canvas.drawRect(
+            doorLeft,
+            buildingBottom - doorHeight,
+            doorLeft + doorWidth,
+            buildingBottom,
+            windowPaint
+        )
     }
 }

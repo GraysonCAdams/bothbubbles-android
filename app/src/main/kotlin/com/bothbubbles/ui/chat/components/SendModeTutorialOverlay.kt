@@ -1,50 +1,48 @@
 package com.bothbubbles.ui.chat.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.TouchApp
+import androidx.compose.material.icons.filled.SwipeVertical
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,20 +50,22 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.TutorialState
-import kotlinx.coroutines.delay
 
 /**
- * Interactive tutorial overlay for the SMS/iMessage toggle feature.
+ * MD3 Rich Tooltip for the SMS/iMessage toggle feature.
  *
- * This is a two-step tutorial that requires the user to actually perform the gestures:
- * 1. Step 1: Prompts user to "Swipe up to switch modes"
- * 2. Step 2: After first swipe, prompts "Now swipe back"
+ * Replaces the full-screen scrim with a less intrusive tooltip that:
+ * - Points at the send button with a subtle arrow
+ * - Shows clear instructions with animated icon
+ * - Has a "Got it" dismiss action
+ * - Allows the user to see the chat context behind it
  *
- * The tutorial can ONLY be dismissed by completing both steps.
+ * This is a two-step tutorial:
+ * 1. Step 1: "Swipe up to switch to SMS"
+ * 2. Step 2: "Now swipe back to iMessage"
  *
  * @param tutorialState Current state of the tutorial
- * @param onTutorialProgress Called when user completes a step (to update state)
- * @param sendButtonPosition Offset position of the send button (for spotlight alignment)
+ * @param onDismiss Called when user taps "Got it" or outside the tooltip
  * @param modifier Modifier for this composable
  */
 @Composable
@@ -79,274 +79,154 @@ fun SendModeTutorialOverlay(
 
     AnimatedVisibility(
         visible = isVisible,
-        enter = fadeIn(animationSpec = tween(300)),
-        exit = fadeOut(animationSpec = tween(300)),
+        enter = fadeIn(animationSpec = tween(200)) + slideInVertically(
+            initialOffsetY = { it / 4 },
+            animationSpec = tween(250)
+        ),
+        exit = fadeOut(animationSpec = tween(150)) + slideOutVertically(
+            targetOffsetY = { it / 4 },
+            animationSpec = tween(200)
+        ),
         modifier = modifier
     ) {
         Box(
             modifier = Modifier.fillMaxSize()
         ) {
-            // Scrim with spotlight cutout for the send button
-            // The spotlight is centered on the send button (may clip at edge)
-            androidx.compose.foundation.Canvas(
+            // Semi-transparent scrim - tappable to dismiss (optional)
+            // Much lighter than before to let user see the chat
+            Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer {
-                        // Required for BlendMode.Clear to work properly
-                        compositingStrategy = CompositingStrategy.Offscreen
+                    .background(Color.Black.copy(alpha = 0.3f))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null
+                    ) {
+                        // Don't dismiss on scrim tap - require user to complete or tap "Got it"
                     }
-            ) {
-                // Draw semi-transparent scrim
-                drawRect(
-                    color = Color.Black.copy(alpha = 0.7f),
-                    size = size
-                )
+            )
 
-                // Cut out a spotlight circle for the send button
-                // Position: centered on send button at bottom-right
-                // Button (40dp) is in a Row with 6dp horizontal padding
-                // Button center from right edge = 6dp + 20dp = 26dp
-                // From bottom: nav bar + input row - tuned for device
-                val spotlightRadius = 36.dp.toPx()
-                val spotlightCenter = androidx.compose.ui.geometry.Offset(
-                    x = size.width - 26.dp.toPx(),  // 6dp row padding + 20dp button center
-                    y = size.height - 58.dp.toPx()  // Tuned for nav bar + input row
-                )
-
-                // Draw transparent circle (spotlight) using BlendMode.Clear
-                drawCircle(
-                    color = Color.Transparent,
-                    radius = spotlightRadius,
-                    center = spotlightCenter,
-                    blendMode = androidx.compose.ui.graphics.BlendMode.Clear
-                )
-
-                // Draw a subtle glow ring around the spotlight
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.4f),
-                    radius = spotlightRadius + 4.dp.toPx(),
-                    center = spotlightCenter,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.dp.toPx())
-                )
-            }
-
-            // Arrow indicator positioned directly above the send button
-            // Aligned with spotlight: 26dp from right edge, positioned above the 58dp button center
-            SwipeUpArrowIndicator(
-                swipeUp = tutorialState == TutorialState.STEP_1_SWIPE_UP,
+            // Rich Tooltip positioned near the send button
+            RichTooltipCard(
+                tutorialState = tutorialState,
+                onDismiss = {
+                    // Skip to completed state when user dismisses
+                    onTutorialProgress(TutorialState.COMPLETED)
+                },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 10.dp, bottom = 100.dp) // Centered above the button spotlight
-            )
-
-            // Tutorial card positioned in center-bottom area
-            TutorialCard(
-                tutorialState = tutorialState,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(bottom = 140.dp, start = 32.dp, end = 80.dp) // Offset from button
+                    .padding(end = 8.dp, bottom = 72.dp) // Position above send button
             )
         }
     }
 }
 
 /**
- * Animated bidirectional arrow indicator showing swipe up/down gesture.
+ * MD3-style Rich Tooltip card with instructions and dismiss action.
  */
 @Composable
-private fun SwipeUpArrowIndicator(
-    swipeUp: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val infiniteTransition = rememberInfiniteTransition(label = "arrowBounce")
-
-    // Alternating up/down bounce animation
-    val offsetY by infiniteTransition.animateFloat(
-        initialValue = -12f,
-        targetValue = 12f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "arrowOffset"
-    )
-
-    // Pulsing alpha
-    val alpha by infiniteTransition.animateFloat(
-        initialValue = 1f,
-        targetValue = 0.6f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(800),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "arrowAlpha"
-    )
-
-    Column(
-        modifier = modifier,
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        // Up arrows
-        repeat(2) { index ->
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowUp,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(28.dp)
-                    .offset { IntOffset(0, (-offsetY.coerceAtLeast(0f) * (1f - index * 0.4f)).toInt()) }
-                    .alpha(alpha * (1f - index * 0.3f)),
-                tint = Color.White
-            )
-        }
-        // Down arrows
-        repeat(2) { index ->
-            Icon(
-                imageVector = Icons.Filled.KeyboardArrowDown,
-                contentDescription = null,
-                modifier = Modifier
-                    .size(28.dp)
-                    .offset { IntOffset(0, (offsetY.coerceAtLeast(0f) * (1f - index * 0.4f)).toInt()) }
-                    .alpha(alpha * (1f - index * 0.3f)),
-                tint = Color.White
-            )
-        }
-    }
-}
-
-/**
- * Tutorial instruction card.
- */
-@Composable
-private fun TutorialCard(
+private fun RichTooltipCard(
     tutorialState: TutorialState,
+    onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isStep1 = tutorialState == TutorialState.STEP_1_SWIPE_UP
-    val titleText = if (isStep1) {
-        stringResource(R.string.tutorial_send_mode_step1_title)
-    } else {
-        stringResource(R.string.tutorial_send_mode_step2_title)
-    }
-    val descriptionText = if (isStep1) {
-        stringResource(R.string.tutorial_send_mode_step1_description)
-    } else {
-        stringResource(R.string.tutorial_send_mode_step2_description)
-    }
 
-    Surface(
-        modifier = modifier,
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.surface,
-        shadowElevation = 8.dp
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            Text(
-                text = titleText,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = descriptionText,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center
-            )
-        }
-    }
-}
-
-/**
- * Animated hand/finger icon showing the swipe gesture.
- */
-@Composable
-private fun AnimatedSwipeGesture(
-    swipeUp: Boolean,
-    modifier: Modifier = Modifier
-) {
-    // Infinite animation for the hand movement
-    val infiniteTransition = rememberInfiniteTransition(label = "swipeGesture")
-
+    // Animated swipe indicator
+    val infiniteTransition = rememberInfiniteTransition(label = "swipeAnimation")
     val offsetY by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = if (swipeUp) -30f else 30f,
+        initialValue = -8f,
+        targetValue = 8f,
         animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = 800,
-                easing = LinearEasing
-            ),
+            animation = tween(600, easing = LinearEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "swipeOffset"
     )
 
-    Box(
-        modifier = modifier,
-        contentAlignment = Alignment.Center
+    Surface(
+        modifier = modifier.width(240.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.inverseSurface,
+        shadowElevation = 8.dp
     ) {
-        // Pulsing circle background
-        val pulseAlpha by infiniteTransition.animateFloat(
-            initialValue = 0.3f,
-            targetValue = 0.1f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(1000),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulseAlpha"
-        )
-
-        Box(
-            modifier = Modifier
-                .size(60.dp)
-                .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = pulseAlpha))
-        )
-
-        // Hand icon
-        Icon(
-            imageVector = Icons.Default.TouchApp,
-            contentDescription = null,
-            modifier = Modifier
-                .size(40.dp)
-                .offset { IntOffset(0, offsetY.toInt()) },
-            tint = MaterialTheme.colorScheme.primary
-        )
-    }
-}
-
-/**
- * Progress dots showing tutorial step progress.
- */
-@Composable
-private fun TutorialProgressDots(
-    currentStep: Int,
-    totalSteps: Int,
-    modifier: Modifier = Modifier
-) {
-    androidx.compose.foundation.layout.Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        repeat(totalSteps) { index ->
-            val isActive = index < currentStep
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (isActive) {
-                            MaterialTheme.colorScheme.primary
-                        } else {
-                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f)
-                        }
+        Column(
+            modifier = Modifier.padding(16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            // Animated swipe icon
+            Row(
+                modifier = Modifier.height(48.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.offset { IntOffset(0, offsetY.toInt()) }
+                ) {
+                    Icon(
+                        Icons.Default.KeyboardArrowUp,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
                     )
+                    Icon(
+                        Icons.Default.SwipeVertical,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.inverseOnSurface,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.7f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Title
+            Text(
+                text = if (isStep1) {
+                    stringResource(R.string.tutorial_send_mode_step1_title)
+                } else {
+                    stringResource(R.string.tutorial_send_mode_step2_title)
+                },
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.inverseOnSurface,
+                textAlign = TextAlign.Center
             )
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // Description
+            Text(
+                text = if (isStep1) {
+                    stringResource(R.string.tutorial_send_mode_step1_description)
+                } else {
+                    stringResource(R.string.tutorial_send_mode_step2_description)
+                },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.inverseOnSurface.copy(alpha = 0.8f),
+                textAlign = TextAlign.Center
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Action button
+            Button(
+                onClick = onDismiss,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.inversePrimary,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Got it")
+            }
         }
     }
 }
@@ -375,11 +255,16 @@ fun SendModeTutorialHint(
             stringResource(R.string.tutorial_send_mode_hint_swipe_back)
         }
 
-        Text(
-            text = text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-        )
+        Surface(
+            shape = RoundedCornerShape(12.dp),
+            color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.9f)
+        ) {
+            Text(
+                text = text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onTertiaryContainer,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
     }
 }
