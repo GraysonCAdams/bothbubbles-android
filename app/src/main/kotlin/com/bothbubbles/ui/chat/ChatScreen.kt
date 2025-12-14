@@ -1616,7 +1616,8 @@ fun ChatScreen(
                         )
 
                         // Tapback scrim overlay - full screen, dismisses on tap or drag
-                        if (selectedMessageForTapback != null) {
+                        // Only show when both message AND bounds are available
+                        if (selectedMessageForTapback != null && selectedMessageBounds != null) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -1634,7 +1635,7 @@ fun ChatScreen(
 
                         // MD3 Tapback popup - anchor-based positioning with unified card
                         TapbackPopup(
-                            visible = selectedMessageForTapback != null,
+                            visible = selectedMessageForTapback != null && selectedMessageBounds != null,
                             anchorBounds = selectedMessageBounds,
                             isFromMe = selectedMessageForTapback?.isFromMe == true,
                             composerHeight = composerHeightPx,

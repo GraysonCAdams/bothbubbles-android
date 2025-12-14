@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
+import com.bothbubbles.ui.components.common.Avatar
 
 data class LinkItem(
     val id: String,
@@ -34,6 +35,7 @@ data class LinkItem(
     val title: String?,
     val domain: String,
     val senderName: String,
+    val senderAvatarPath: String?,
     val timestamp: String,
     val thumbnailUrl: String? = null
 )
@@ -247,13 +249,14 @@ private fun LinkCard(
 
                 Spacer(modifier = Modifier.height(8.dp))
 
-                // Sender and timestamp
+                // Sender avatar and timestamp
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = "\uD83D\uDC9B", // Yellow heart emoji
-                        style = MaterialTheme.typography.bodySmall
+                    Avatar(
+                        name = link.senderName,
+                        avatarPath = link.senderAvatarPath,
+                        size = 16.dp
                     )
-                    Spacer(modifier = Modifier.width(4.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
                         text = "${link.senderName} · ${link.timestamp}",
                         style = MaterialTheme.typography.labelMedium,

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.ui.navigation.Screen
@@ -29,7 +30,8 @@ data class LinksUiState(
 class LinksViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val messageRepository: MessageRepository,
-    private val handleRepository: HandleRepository
+    private val handleRepository: HandleRepository,
+    private val linkPreviewRepository: LinkPreviewRepository
 ) : ViewModel() {
 
     private val route: Screen.LinksGallery = savedStateHandle.toRoute()
@@ -49,14 +51,33 @@ class LinksViewModel @Inject constructor(
 
     val uiState: StateFlow<LinksUiState> = messageRepository.getMessagesWithUrlsForChat(chatGuid)
         .map { messages ->
-            val links = messages.flatMap { message ->
+            // Step 1: Extract all links without preview data
+            val linksWithoutPreviews = messages.flatMap { message ->
                 extractLinksFromMessage(message)
             }.filter { link ->
                 // Exclude places/location links
                 !isPlacesUrl(link.url)
             }
+
+            // Step 2: Batch fetch link previews
+            val urls = linksWithoutPreviews.map { it.url }.distinct()
+            val previews = linkPreviewRepository.getLinkPreviews(urls)
+
+            // Step 3: Merge preview data into links
+            val linksWithPreviews = linksWithoutPreviews.map { link ->
+                val preview = previews[link.url]
+                if (preview != null && preview.isSuccess) {
+                    link.copy(
+                        title = preview.title,
+                        thumbnailUrl = preview.imageUrl
+                    )
+                } else {
+                    link
+                }
+            }
+
             LinksUiState(
-                links = links,
+                links = linksWithPreviews,
                 isLoading = false
             )
         }
@@ -72,15 +93,18 @@ class LinksViewModel @Inject constructor(
 
         if (detectedUrls.isEmpty()) return emptyList()
 
-        // Get sender name
+        // Get sender name and avatar
+        val handle = if (!message.isFromMe) {
+            message.handleId?.let { handleId -> handleRepository.getHandleById(handleId) }
+        } else null
+
         val senderName = if (message.isFromMe) {
             "You"
         } else {
-            message.handleId?.let { handleId ->
-                val handle = handleRepository.getHandleById(handleId)
-                handle?.displayName ?: handle?.address?.let { PhoneNumberFormatter.format(it) }
-            } ?: ""
+            handle?.displayName ?: handle?.address?.let { PhoneNumberFormatter.format(it) } ?: ""
         }
+
+        val senderAvatarPath = if (message.isFromMe) null else handle?.cachedAvatarPath
 
         val timestamp = dateFormat.format(Date(message.dateCreated))
 
@@ -91,6 +115,7 @@ class LinksViewModel @Inject constructor(
                 title = null, // Could be populated from LinkPreviewRepository if needed
                 domain = detected.domain,
                 senderName = senderName,
+                senderAvatarPath = senderAvatarPath,
                 timestamp = timestamp,
                 thumbnailUrl = null
             )

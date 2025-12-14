@@ -85,22 +85,24 @@ internal fun MediaThumbnail(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
     var videoDuration by remember { mutableStateOf<Long?>(null) }
+    var localFileExists by remember { mutableStateOf<Boolean?>(null) }
 
-    // Get video duration if this is a video and has a local path
+    // Check file existence and get video duration
     LaunchedEffect(attachment.guid, attachment.localPath) {
-        if (showDuration && attachment.isVideo && attachment.localPath != null) {
-            videoDuration = withContext(Dispatchers.IO) {
-                try {
+        withContext(Dispatchers.IO) {
+            // Check if local file exists
+            val fileExists = attachment.localPath?.let { File(it).exists() } ?: false
+            localFileExists = fileExists
+
+            // Get video duration if this is a video and local file exists
+            if (showDuration && attachment.isVideo && fileExists && attachment.localPath != null) {
+                videoDuration = try {
                     val retriever = MediaMetadataRetriever()
                     val file = File(attachment.localPath)
-                    if (file.exists()) {
-                        retriever.setDataSource(context, Uri.fromFile(file))
-                        val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                        retriever.release()
-                        durationStr?.toLongOrNull()
-                    } else {
-                        null
-                    }
+                    retriever.setDataSource(context, Uri.fromFile(file))
+                    val durationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    retriever.release()
+                    durationStr?.toLongOrNull()
                 } catch (e: Exception) {
                     null
                 }
@@ -116,7 +118,11 @@ internal fun MediaThumbnail(
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
-        val imageUrl = attachment.localPath ?: attachment.webUrl
+        // Use local path if file exists, otherwise fall back to web URL
+        val imageUrl = when {
+            localFileExists == true && attachment.localPath != null -> attachment.localPath
+            else -> attachment.webUrl
+        }
 
         if (imageUrl != null) {
             AsyncImage(
