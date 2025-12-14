@@ -12,16 +12,12 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.sms.*
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -46,6 +42,23 @@ class SmsRepository @Inject constructor(
     companion object {
         private const val TAG = "SmsRepository"
     }
+
+    // Delegate instances for modular operations
+    private val importer = SmsImporter(
+        chatDao = chatDao,
+        handleDao = handleDao,
+        messageDao = messageDao,
+        unifiedChatGroupDao = unifiedChatGroupDao,
+        smsContentProvider = smsContentProvider,
+        androidContactsService = androidContactsService
+    )
+
+    private val messageOperations = SmsMessageOperations(
+        context = context,
+        chatDao = chatDao,
+        messageDao = messageDao,
+        smsContentProvider = smsContentProvider
+    )
 
     // ===== App State =====
 
@@ -128,241 +141,8 @@ class SmsRepository @Inject constructor(
     suspend fun importAllThreads(
         limit: Int = 500,
         onProgress: ((Int, Int) -> Unit)? = null
-    ): Result<Int> = withContext(Dispatchers.IO) {
-        runCatching {
-            val threads = smsContentProvider.getThreads(limit = limit)
-            var imported = 0
-
-            threads.forEachIndexed { index, thread ->
-                importThread(thread)
-                imported++
-                onProgress?.invoke(index + 1, threads.size)
-            }
-
-            imported
-        }
-    }
-
-    /**
-     * Import a single SMS thread
-     */
-    private suspend fun importThread(thread: SmsThread) {
-        val rawAddresses = thread.recipientAddresses
-        if (rawAddresses.isEmpty()) return
-
-        // Filter to valid phone numbers and normalize
-        val addresses = rawAddresses
-            .filter { isValidPhoneAddress(it) }
-            .map { PhoneAndCodeParsingUtils.normalizePhoneNumber(it) }
-            .filter { it.isNotBlank() }
-            .distinct()
-
-        if (addresses.isEmpty()) {
-            Log.d(TAG, "Skipping thread ${thread.threadId} - no valid phone addresses")
-            return
-        }
-
-        val isGroup = addresses.size > 1
-        val chatGuid = if (isGroup) {
-            "mms;-;${addresses.sorted().joinToString(",")}"
-        } else {
-            "sms;-;${addresses.first()}"
-        }
-
-        // Create or update chat
-        val existingChat = chatDao.getChatByGuid(chatGuid)
-        if (existingChat == null) {
-            val chat = ChatEntity(
-                guid = chatGuid,
-                chatIdentifier = if (isGroup) null else addresses.first(),
-                displayName = null, // Will be resolved from contacts
-                isGroup = isGroup,
-                lastMessageDate = thread.lastMessageDate,
-                lastMessageText = thread.snippet,
-                unreadCount = if (thread.isRead) 0 else 1
-            )
-            chatDao.insertChat(chat)
-        }
-
-        // Create handles for addresses and link to chat
-        // Use upsertHandle to get existing handle ID instead of creating duplicates
-        // (insertHandle with REPLACE would delete existing handles, breaking cross-refs)
-        addresses.filter { it.isNotBlank() }.forEach { address ->
-            // Look up contact info from device contacts
-            val contactName = androidContactsService.getContactDisplayName(address)
-            val contactPhotoUri = androidContactsService.getContactPhotoUri(address)
-            val formattedAddress = PhoneNumberFormatter.format(address)
-
-            val handle = HandleEntity(
-                address = address,
-                formattedAddress = formattedAddress,
-                service = "SMS",
-                cachedDisplayName = contactName,
-                cachedAvatarPath = contactPhotoUri
-            )
-            val handleId = handleDao.upsertHandle(handle)
-            // Link handle to chat (required for getParticipantsForChat to work)
-            chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
-        }
-
-        // For single contacts (not groups), link to unified group
-        val validAddresses = addresses.filter { it.isNotBlank() }
-        if (!isGroup && validAddresses.isNotEmpty()) {
-            val normalizedPhone = validAddresses.first()
-            linkChatToUnifiedGroup(chatGuid, normalizedPhone)
-        }
-
-        // Import the most recent message so the badge displays correctly in conversation list
-        importLatestMessageForThread(thread.threadId, chatGuid, isGroup)
-
-        // Update unified group's latestMessageDate if applicable
-        if (!isGroup && validAddresses.isNotEmpty()) {
-            val normalizedPhone = validAddresses.first()
-            val group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            if (group != null) {
-                // Update latestMessageDate if this thread's message is newer
-                val currentLatest = group.latestMessageDate ?: 0L
-                if (thread.lastMessageDate > currentLatest) {
-                    unifiedChatGroupDao.updateLatestMessage(group.id, thread.lastMessageDate, thread.snippet)
-                }
-            }
-        }
-    }
-
-    /**
-     * Import the most recent message from an SMS/MMS thread.
-     * This ensures the conversation list can display the correct message source badge.
-     */
-    private suspend fun importLatestMessageForThread(threadId: Long, chatGuid: String, isGroup: Boolean) {
-        // First try SMS (more common)
-        val smsMessages = smsContentProvider.getSmsMessages(threadId, limit = 1)
-        val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = 1)
-
-        // Find the most recent message between SMS and MMS
-        val latestSms = smsMessages.firstOrNull()
-        val latestMms = mmsMessages.firstOrNull()
-
-        val latestMessage: MessageEntity? = when {
-            latestSms != null && latestMms != null -> {
-                if (latestSms.date >= latestMms.date) {
-                    with(smsContentProvider) { latestSms.toMessageEntity(chatGuid) }
-                } else {
-                    with(smsContentProvider) { latestMms.toMessageEntity(chatGuid) }
-                }
-            }
-            latestSms != null -> with(smsContentProvider) { latestSms.toMessageEntity(chatGuid) }
-            latestMms != null -> with(smsContentProvider) { latestMms.toMessageEntity(chatGuid) }
-            else -> null
-        }
-
-        // Insert the message if we found one (upsert to avoid duplicates)
-        latestMessage?.let { msg ->
-            messageDao.insertOrUpdateMessage(msg)
-        }
-    }
-
-    /**
-     * Link a chat to a unified group, creating the group if necessary.
-     * This enables merging SMS and iMessage conversations for the same contact.
-     */
-    private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
-        // Skip if identifier is empty or looks like an email/RCS address (not a phone)
-        // This prevents all non-phone chats from being lumped into a single group
-        if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
-            Log.d(TAG, "linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
-            return
-        }
-
-        Log.d(TAG, "linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
-
-        try {
-            // Check if unified group already exists for this phone number
-            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            Log.d(TAG, "linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
-
-            if (group == null) {
-                // Check if there's an existing iMessage chat for this phone
-                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-                Log.d(TAG, "linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
-
-                // Create new unified group and add this chat atomically
-                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
-                val newGroup = UnifiedChatGroupEntity(
-                    identifier = normalizedPhone,
-                    primaryChatGuid = primaryGuid,
-                    displayName = existingIMessageChat?.displayName
-                )
-
-                // Use atomic method to prevent FOREIGN KEY errors
-                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
-                Log.d(TAG, "linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
-
-                // Add existing iMessage chat to group if found (separate from SMS chat)
-                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
-                    Log.d(TAG, "linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
-                    unifiedChatGroupDao.insertMember(
-                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
-                    )
-                }
-            } else {
-                // Group exists, just add this SMS chat to it
-                Log.d(TAG, "linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
-                unifiedChatGroupDao.insertMember(
-                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-                )
-            }
-
-            Log.d(TAG, "linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
-        } catch (e: Exception) {
-            Log.e(TAG, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'", e)
-            throw e
-        }
-    }
-
-    /**
-     * Find an existing iMessage chat for a given phone number.
-     * Searches through non-group iMessage chats and matches by participant phone.
-     * PERF: Uses batch query to fetch all participants in a single database call.
-     */
-    private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
-        val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
-        if (nonGroupChats.isEmpty()) return null
-
-        // PERF: Batch fetch all participants for all chats in a single query
-        val chatGuids = nonGroupChats.map { it.guid }
-        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
-            .groupBy({ it.chatGuid }, { it.handle })
-
-        for (chat in nonGroupChats) {
-            val participants = participantsByChat[chat.guid] ?: emptyList()
-            for (participant in participants) {
-                val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
-                if (phonesMatch(normalized, normalizedPhone)) {
-                    return chat
-                }
-            }
-        }
-        return null
-    }
-
-    /**
-     * Check if two phone numbers match, accounting for different formats.
-     * Handles cases like +1 prefix, different country codes, etc.
-     */
-    private fun phonesMatch(phone1: String, phone2: String): Boolean {
-        // Empty strings should never match (prevents RCS/email addresses from matching all phones)
-        if (phone1.isEmpty() || phone2.isEmpty()) return false
-        if (phone1 == phone2) return true
-        // Only use endsWith matching if both strings have reasonable length
-        if (phone1.length >= 7 && phone2.length >= 7) {
-            if (phone1.endsWith(phone2) || phone2.endsWith(phone1)) return true
-        }
-        // Compare last 10 digits for US numbers
-        if (phone1.length >= 10 && phone2.length >= 10 &&
-            phone1.takeLast(10) == phone2.takeLast(10)) {
-            return true
-        }
-        return false
+    ): Result<Int> {
+        return importer.importAllThreads(limit, onProgress)
     }
 
     /**
@@ -373,54 +153,9 @@ class SmsRepository @Inject constructor(
     suspend fun importMessagesForChat(
         chatGuid: String,
         limit: Int = 100
-    ): Result<Int> = withContext(Dispatchers.IO) {
-        runCatching {
-            // Parse thread ID from chat guid or look it up
-            val threadId = getThreadIdForChat(chatGuid) ?: return@runCatching 0
-
-            var imported = 0
-
-            // Import SMS messages
-            val smsMessages = smsContentProvider.getSmsMessages(threadId, limit = limit)
-            smsMessages.forEach { sms ->
-                val guid = "sms-${sms.id}"
-                if (messageDao.getMessageByGuid(guid) == null) {
-                    val entity = sms.toMessageEntity(chatGuid)
-                    messageDao.insertMessage(entity)
-                    imported++
-                }
-            }
-
-            // Import MMS messages
-            val mmsMessages = smsContentProvider.getMmsMessages(threadId, limit = limit)
-            mmsMessages.forEach { mms ->
-                val guid = "mms-${mms.id}"
-                if (messageDao.getMessageByGuid(guid) == null) {
-                    val entity = mms.toMessageEntity(chatGuid)
-
-                    // Check for duplicate SMS message with matching content and timestamp
-                    // This prevents the same message from appearing twice when recorded as both SMS and MMS
-                    val textContent = entity.text
-                    if (textContent != null) {
-                        val matchingMessage = messageDao.findMatchingMessage(
-                            chatGuid = chatGuid,
-                            text = textContent,
-                            isFromMe = entity.isFromMe,
-                            dateCreated = entity.dateCreated,
-                            toleranceMs = 10000 // 10 second window for MMS which can have delayed timestamps
-                        )
-                        if (matchingMessage != null) {
-                            // Skip this MMS as it duplicates an existing SMS message
-                            return@forEach
-                        }
-                    }
-
-                    messageDao.insertMessage(entity)
-                    imported++
-                }
-            }
-
-            imported
+    ): Result<Int> {
+        return importer.importMessagesForChat(chatGuid, limit) { guid ->
+            getThreadIdForChat(guid)
         }
     }
 
@@ -468,76 +203,25 @@ class SmsRepository @Inject constructor(
     /**
      * Mark all messages in a thread as read (both SMS and MMS)
      */
-    suspend fun markThreadAsRead(chatGuid: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            val threadId = getThreadIdForChat(chatGuid)
-            if (threadId != null) {
-                smsContentProvider.markThreadAsRead(threadId)  // SMS
-                smsContentProvider.markMmsAsRead(threadId)     // MMS
-            }
-            chatDao.updateUnreadCount(chatGuid, 0)
-            chatDao.updateUnreadStatus(chatGuid, false)
+    suspend fun markThreadAsRead(chatGuid: String): Result<Unit> {
+        return messageOperations.markThreadAsRead(chatGuid) { guid ->
+            getThreadIdForChat(guid)
         }
     }
 
     /**
      * Delete a message
      */
-    suspend fun deleteMessage(messageGuid: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            // Delete from our database
-            messageDao.deleteMessageByGuid(messageGuid)
-
-            // Delete from system SMS/MMS database if it's a local message
-            when {
-                messageGuid.startsWith("sms-") -> {
-                    val smsId = messageGuid.removePrefix("sms-").toLongOrNull()
-                    if (smsId != null) {
-                        context.contentResolver.delete(
-                            Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, smsId.toString()),
-                            null,
-                            null
-                        )
-                    }
-                }
-                messageGuid.startsWith("mms-") -> {
-                    val mmsId = messageGuid.removePrefix("mms-").toLongOrNull()
-                    if (mmsId != null) {
-                        context.contentResolver.delete(
-                            Uri.withAppendedPath(Telephony.Mms.CONTENT_URI, mmsId.toString()),
-                            null,
-                            null
-                        )
-                    }
-                }
-            }
-        }
+    suspend fun deleteMessage(messageGuid: String): Result<Unit> {
+        return messageOperations.deleteMessage(messageGuid)
     }
 
     /**
      * Delete all messages in a thread
      */
-    suspend fun deleteThread(chatGuid: String): Result<Unit> = withContext(Dispatchers.IO) {
-        runCatching {
-            val threadId = getThreadIdForChat(chatGuid)
-            if (threadId != null) {
-                // Delete SMS messages
-                context.contentResolver.delete(
-                    Telephony.Sms.CONTENT_URI,
-                    "${Telephony.Sms.THREAD_ID} = ?",
-                    arrayOf(threadId.toString())
-                )
-                // Delete MMS messages
-                context.contentResolver.delete(
-                    Telephony.Mms.CONTENT_URI,
-                    "${Telephony.Mms.THREAD_ID} = ?",
-                    arrayOf(threadId.toString())
-                )
-            }
-
-            // Delete from our database
-            messageDao.deleteMessagesForChat(chatGuid)
-            chatDao.deleteChatByGuid(chatGuid)
+    suspend fun deleteThread(chatGuid: String): Result<Unit> {
+        return messageOperations.deleteThread(chatGuid) { guid ->
+            getThreadIdForChat(guid)
         }
     }
 
@@ -593,76 +277,6 @@ class SmsRepository @Inject constructor(
     }
 
     private suspend fun getThreadIdForChat(chatGuid: String): Long? {
-        // Extract address(es) from chat GUID
-        val parts = chatGuid.split(";-;")
-        if (parts.size != 2) return null
-
-        val addresses = parts[1].split(",")
-        if (addresses.isEmpty()) return null
-
-        // Look up thread ID from the first message with this address
-        return context.contentResolver.query(
-            Telephony.Sms.CONTENT_URI,
-            arrayOf(Telephony.Sms.THREAD_ID),
-            "${Telephony.Sms.ADDRESS} = ?",
-            arrayOf(addresses.first()),
-            "${Telephony.Sms.DATE} DESC LIMIT 1"
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getLong(0) else null
-        }
-    }
-
-    // Extension functions for entity conversion
-    private fun SmsMessage.toMessageEntity(chatGuid: String): MessageEntity {
-        return MessageEntity(
-            guid = "sms-$id",
-            chatGuid = chatGuid,
-            text = body,
-            dateCreated = date,
-            isFromMe = isFromMe,
-            error = if (isFailed) 1 else 0,
-            messageSource = MessageSource.LOCAL_SMS.name,
-            smsId = id,
-            smsThreadId = threadId,
-            smsStatus = when {
-                isDraft -> "draft"
-                isFailed -> "failed"
-                isPending -> "pending"
-                else -> "complete"
-            },
-            simSlot = if (subscriptionId >= 0) subscriptionId else null
-        )
-    }
-
-    private fun MmsMessage.toMessageEntity(chatGuid: String): MessageEntity {
-        return MessageEntity(
-            guid = "mms-$id",
-            chatGuid = chatGuid,
-            text = textParts.joinToString("\n").takeIf { it.isNotBlank() },
-            subject = subject,
-            dateCreated = date,
-            isFromMe = isFromMe,
-            hasAttachments = imageParts.isNotEmpty(),
-            messageSource = MessageSource.LOCAL_MMS.name,
-            smsId = id,
-            smsThreadId = threadId,
-            smsStatus = if (isDraft) "draft" else "complete"
-        )
-    }
-
-    /**
-     * Check if an address is a valid phone number (not RCS, email, or other non-phone format)
-     */
-    private fun isValidPhoneAddress(address: String): Boolean {
-        if (address.isBlank()) return false
-        // Filter out RCS addresses
-        if (address.contains("@")) return false
-        if (address.contains("rcs.google.com")) return false
-        if (address.contains("rbm.goog")) return false
-        // Filter out "insert-address-token" placeholder
-        if (address.contains("insert-address-token")) return false
-        // Should have at least some digits to be a phone number
-        if (address.count { it.isDigit() } < 3) return false
-        return true
+        return SmsContentProviderHelpers.getThreadIdForChat(context, chatGuid)
     }
 }
