@@ -5,8 +5,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Star
-import androidx.compose.material.icons.outlined.*
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.PersonAdd
+import androidx.compose.material.icons.outlined.Phone
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -15,16 +18,17 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 
+/**
+ * Row of 4 action buttons: Call, Video, Contact/Add, Search.
+ * Star/Favorite has been moved to TopAppBar for better layout.
+ */
 @Composable
 fun ActionButtonsRow(
     hasContact: Boolean,
-    isStarred: Boolean,
-    isGroup: Boolean,
     onCallClick: () -> Unit,
     onVideoClick: () -> Unit,
     onContactInfoClick: () -> Unit,
     onAddContactClick: () -> Unit,
-    onStarClick: () -> Unit,
     onSearchClick: () -> Unit
 ) {
     Row(
@@ -45,17 +49,9 @@ fun ActionButtonsRow(
         )
         ActionButton(
             icon = if (hasContact) Icons.Outlined.Person else Icons.Outlined.PersonAdd,
-            label = if (hasContact) "Contact info" else "Add contact",
+            label = if (hasContact) "Info" else "Add",  // Shortened labels
             onClick = if (hasContact) onContactInfoClick else onAddContactClick
         )
-        // Favorite button - only show for non-group chats with saved contacts
-        if (!isGroup && hasContact) {
-            ActionButton(
-                icon = if (isStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
-                label = if (isStarred) "Favorited" else "Favorite",
-                onClick = onStarClick
-            )
-        }
         ActionButton(
             icon = Icons.Outlined.Search,
             label = "Search",

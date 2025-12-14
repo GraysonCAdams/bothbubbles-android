@@ -80,6 +80,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -143,8 +144,8 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.input.ScheduleMessageDialog
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.common.SpamSafetyBanner
-import com.bothbubbles.ui.components.message.TapbackOverlay
-import com.bothbubbles.ui.components.message.MessageBoundsInfo
+import com.bothbubbles.ui.components.message.TapbackPopup
+import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.TypingIndicator
 import com.bothbubbles.ui.components.dialogs.VCardOptionsDialog
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
@@ -335,7 +336,10 @@ fun ChatScreen(
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
-    var selectedMessageBounds by remember { mutableStateOf<MessageBoundsInfo?>(null) }
+    var selectedMessageBounds by remember { mutableStateOf<Rect?>(null) }
+
+    // Track composer height for tapback LiveZone calculation
+    var composerHeightPx by remember { mutableStateOf(0f) }
 
     // Track which message is currently being swiped for reply (to hide overlaying stickers)
     var swipingMessageGuid by remember { mutableStateOf<String?>(null) }
@@ -362,6 +366,57 @@ fun ChatScreen(
     var canRetrySmsForMessage by remember { mutableStateOf(false) }
     val retryMenuScope = rememberCoroutineScope()
     val scrollScope = rememberCoroutineScope()
+
+    // Scroll-to-safety: When showing tapback menu, ensure message is visible and centered
+    LaunchedEffect(selectedMessageForTapback?.guid) {
+        val message = selectedMessageForTapback ?: return@LaunchedEffect
+        val messageIndex = uiState.messages.indexOfFirst { it.guid == message.guid }
+        if (messageIndex < 0) return@LaunchedEffect
+
+        // Get current viewport info
+        val layoutInfo = listState.layoutInfo
+        val visibleItems = layoutInfo.visibleItemsInfo
+        val viewportHeight = layoutInfo.viewportSize.height
+
+        // Check if message is currently visible
+        val isVisible = visibleItems.any { it.index == messageIndex }
+
+        // Calculate safe zone: center third of viewport
+        // With reverseLayout=true, we want to position message in center
+        if (!isVisible) {
+            // Message not visible - scroll to center it
+            val centerOffset = -(viewportHeight / 3)
+            listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
+        } else {
+            // Message is visible - check if it's in safe zone
+            val visibleItem = visibleItems.find { it.index == messageIndex }
+            if (visibleItem != null) {
+                val itemTop = visibleItem.offset
+                val itemBottom = visibleItem.offset + visibleItem.size
+                val safeTop = viewportHeight / 4
+                val safeBottom = viewportHeight * 3 / 4
+
+                // If message extends outside safe zone, scroll to center
+                if (itemTop < safeTop || itemBottom > safeBottom) {
+                    val centerOffset = -(viewportHeight / 3)
+                    listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
+                }
+            }
+        }
+    }
+
+    // Dismiss tapback menu when user scrolls
+    LaunchedEffect(selectedMessageForTapback) {
+        if (selectedMessageForTapback != null) {
+            snapshotFlow { listState.isScrollInProgress }
+                .collect { isScrolling ->
+                    if (isScrolling) {
+                        selectedMessageForTapback = null
+                        selectedMessageBounds = null
+                    }
+                }
+        }
+    }
 
     // Snackbar for error display
     val snackbarHostState = remember { SnackbarHostState() }
@@ -527,6 +582,24 @@ fun ChatScreen(
         viewModel.refreshContactInfo()
     }
 
+    // File picker launcher for attaching documents
+    val filePickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        uris.forEach { uri ->
+            viewModel.addAttachment(uri)
+        }
+    }
+
+    // Contact picker launcher for sharing contacts as vCard
+    val contactPickerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickContact()
+    ) { contactUri ->
+        contactUri?.let { uri ->
+            viewModel.addContactFromPicker(uri)
+        }
+    }
+
     // Handle chat deletion - navigate back
     LaunchedEffect(uiState.chatDeleted) {
         if (uiState.chatDeleted) {
@@ -551,6 +624,14 @@ fun ChatScreen(
                 caption = editedAttachmentCaption
             )
             onEditedAttachmentHandled()
+        }
+    }
+
+    // Load featured GIFs when GIF panel opens
+    val composerPanelState by viewModel.composerState.collectAsState()
+    LaunchedEffect(composerPanelState.activePanel) {
+        if (composerPanelState.activePanel == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
+            viewModel.loadFeaturedGifs()
         }
     }
 
@@ -627,7 +708,14 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            Column(modifier = Modifier.navigationBarsPadding().imePadding()) {
+            Column(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .onSizeChanged { size ->
+                        composerHeightPx = size.height.toFloat()
+                    }
+            ) {
                 // Attachment picker panel (slides up above input)
                 AttachmentPickerPanel(
                     visible = showAttachmentPicker,
@@ -885,14 +973,20 @@ fun ChatScreen(
                         onCameraClick()
                     },
                     onFileClick = {
-                        // TODO: Launch file picker
+                        filePickerLauncher.launch(arrayOf("*/*"))
                     },
                     onLocationClick = {
                         // TODO: Launch location picker
                     },
                     onContactClick = {
-                        // TODO: Launch contact picker
+                        contactPickerLauncher.launch(null)
                     },
+                    // GIF Picker
+                    gifPickerState = viewModel.gifPickerState.collectAsState().value,
+                    gifSearchQuery = viewModel.gifSearchQuery.collectAsState().value,
+                    onGifSearchQueryChange = { viewModel.updateGifSearchQuery(it) },
+                    onGifSearch = { viewModel.searchGifs(it) },
+                    onGifSelected = { gif -> viewModel.selectGif(gif) },
                     onSendButtonBoundsChanged = { bounds ->
                         sendButtonBounds = bounds
                     }
@@ -979,22 +1073,30 @@ fun ChatScreen(
 
             // Only auto-scroll if a NEW message arrived (guid changed from previous)
             val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestGuid
-            val newestMessage = uiState.messages.firstOrNull()
             previousNewestGuid = newestGuid
 
-            if (isNewMessage) {
+            if (isNewMessage && isNearBottom) {
+                // Small delay to let the message render and calculate its height
+                kotlinx.coroutines.delay(100)
+                // Use instant scroll instead of animated to avoid jank during animation
+                listState.scrollToItem(0)
+            }
+        }
+
+        // Track new messages from socket ONLY (not synced/historical messages)
+        // This ensures the "x new messages" indicator only shows for truly new incoming messages
+        LaunchedEffect(Unit) {
+            viewModel.socketNewMessage.collect { messageGuid ->
+                val isNearBottom = listState.firstVisibleItemIndex <= 2
+                val newestMessage = uiState.messages.firstOrNull { it.guid == messageGuid }
+
                 // Light haptic feedback for incoming messages (not from me)
                 if (newestMessage?.isFromMe == false) {
                     hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                 }
 
-                if (isNearBottom) {
-                    // Small delay to let the message render and calculate its height
-                    kotlinx.coroutines.delay(100)
-                    // Use instant scroll instead of animated to avoid jank during animation
-                    listState.scrollToItem(0)
-                } else {
-                    // User is scrolled away - increment new message counter
+                // Only increment counter if user is scrolled away from bottom
+                if (!isNearBottom) {
                     newMessageCountWhileAway++
                 }
             }
@@ -1449,11 +1551,7 @@ fun ChatScreen(
                                             showAvatar = showAvatar,
                                             // Report bounds when this message is selected for tapback
                                             onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->
-                                                selectedMessageBounds = MessageBoundsInfo(
-                                                    bounds = bounds,
-                                                    isFromMe = message.isFromMe,
-                                                    guid = message.guid
-                                                )
+                                                selectedMessageBounds = bounds
                                             } else null
                                         )
                                     }
@@ -1517,14 +1615,35 @@ fun ChatScreen(
                                 .padding(bottom = 16.dp)
                         )
 
-                        // MD3 Tapback overlay - full screen with scrim and split reaction/action UI
-                        TapbackOverlay(
+                        // Tapback scrim overlay - full screen, dismisses on tap or drag
+                        if (selectedMessageForTapback != null) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+                                    .pointerInput(Unit) {
+                                        detectTapGestures(
+                                            onTap = {
+                                                selectedMessageForTapback = null
+                                                selectedMessageBounds = null
+                                            }
+                                        )
+                                    }
+                            )
+                        }
+
+                        // MD3 Tapback popup - anchor-based positioning with unified card
+                        TapbackPopup(
                             visible = selectedMessageForTapback != null,
-                            messageBounds = selectedMessageBounds,
+                            anchorBounds = selectedMessageBounds,
+                            isFromMe = selectedMessageForTapback?.isFromMe == true,
+                            composerHeight = composerHeightPx,
                             myReactions = selectedMessageForTapback?.myReactions ?: emptySet(),
                             canReply = selectedMessageForTapback?.isServerOrigin == true,
                             canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),
                             canForward = true,
+                            // Show reactions only for server-origin messages (iMessage/server SMS)
+                            showReactions = selectedMessageForTapback?.isServerOrigin == true && uiState.isServerConnected,
                             onDismiss = {
                                 selectedMessageForTapback = null
                                 selectedMessageBounds = null

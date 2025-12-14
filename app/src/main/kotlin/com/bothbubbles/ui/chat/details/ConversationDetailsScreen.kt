@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -71,12 +73,17 @@ fun ConversationDetailsScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.alpha(collapseProgress)
                     ) {
-                        // Small avatar in collapsed state
+                        // Small avatar in collapsed state - use participant avatar for 1:1 chats
+                        val avatarPath = if (uiState.chat?.isGroup == true) {
+                            uiState.chat?.customAvatarPath
+                        } else {
+                            uiState.participants.firstOrNull()?.cachedAvatarPath
+                        }
                         ConversationAvatar(
                             displayName = uiState.displayName,
                             isGroup = uiState.chat?.isGroup == true,
                             participantNames = uiState.participants.map { it.displayName },
-                            avatarPath = uiState.chat?.customAvatarPath,
+                            avatarPath = avatarPath,
                             size = 40.dp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -93,6 +100,18 @@ fun ConversationDetailsScreen(
                             Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = "Back"
                         )
+                    }
+                },
+                actions = {
+                    // Favorite toggle in TopAppBar (only for 1:1 chats with saved contacts)
+                    if (uiState.chat?.isGroup != true && uiState.hasContact) {
+                        IconButton(onClick = { viewModel.toggleStarred() }) {
+                            Icon(
+                                imageVector = if (uiState.isContactStarred) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                contentDescription = if (uiState.isContactStarred) "Remove from favorites" else "Add to favorites",
+                                tint = if (uiState.isContactStarred) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 },
                 scrollBehavior = scrollBehavior,
@@ -121,23 +140,27 @@ fun ConversationDetailsScreen(
             ) {
                 // Expanded header with large avatar (fades out when collapsing)
                 item {
+                    // Use participant avatar for 1:1 chats, custom avatar for groups
+                    val headerAvatarPath = if (uiState.chat?.isGroup == true) {
+                        uiState.chat?.customAvatarPath
+                    } else {
+                        uiState.participants.firstOrNull()?.cachedAvatarPath
+                    }
                     CollapsingConversationHeader(
                         displayName = uiState.displayName,
                         subtitle = uiState.subtitle,
                         isGroup = uiState.chat?.isGroup == true,
                         participantNames = uiState.participants.map { it.displayName },
-                        avatarPath = uiState.chat?.customAvatarPath,
+                        avatarPath = headerAvatarPath,
                         collapseProgress = collapseProgress
                     )
                 }
 
-                // Action buttons row
+                // Action buttons row (4 buttons: Call, Video, Contact, Search)
                 item {
                     val context = LocalContext.current
                     ActionButtonsRow(
                         hasContact = uiState.hasContact,
-                        isStarred = uiState.isContactStarred,
-                        isGroup = uiState.chat?.isGroup == true,
                         onCallClick = {
                             val phoneNumber = uiState.firstParticipantAddress
                             if (phoneNumber.isNotBlank()) {
@@ -158,7 +181,6 @@ fun ConversationDetailsScreen(
                         onAddContactClick = {
                             launchAddContact(context, uiState.firstParticipantAddress, uiState.displayName)
                         },
-                        onStarClick = { viewModel.toggleStarred() },
                         onSearchClick = onSearchClick
                     )
                 }

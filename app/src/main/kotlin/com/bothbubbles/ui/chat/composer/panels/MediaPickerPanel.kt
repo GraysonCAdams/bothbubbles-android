@@ -47,8 +47,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -173,23 +175,31 @@ fun MediaPickerPanel(
     }
 
     // Drag state for swipe-to-dismiss
+    val density = LocalDensity.current
     var dragOffset by remember { mutableFloatStateOf(0f) }
-    val dismissThreshold = 100f // dp equivalent threshold for dismissal
+    var isDragging by remember { mutableStateOf(false) }
+    val dismissThreshold = with(density) { 120.dp.toPx() } // 120dp threshold for dismissal
 
     val draggableState = rememberDraggableState { delta ->
         // Only allow dragging down (positive delta)
         dragOffset = (dragOffset + delta).coerceAtLeast(0f)
     }
 
-    // Animate offset back to 0 when not dragging
-    val animatedOffset by animateFloatAsState(
-        targetValue = dragOffset,
+    // Animate back to 0 only when not actively dragging
+    val displayOffset by animateFloatAsState(
+        targetValue = if (isDragging) dragOffset else 0f,
         animationSpec = spring(
             dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
             stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
         ),
         label = "dragOffset"
     )
+
+    // Use raw offset while dragging, animated offset when releasing
+    // Convert pixels to dp for the offset modifier
+    val currentOffsetDp = with(density) {
+        (if (isDragging) dragOffset else displayOffset).toDp()
+    }
 
     AnimatedVisibility(
         visible = visible,
@@ -209,11 +219,13 @@ fun MediaPickerPanel(
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = animatedOffset.dp)
+                .offset(y = currentOffsetDp)
                 .draggable(
                     state = draggableState,
                     orientation = Orientation.Vertical,
+                    onDragStarted = { isDragging = true },
                     onDragStopped = {
+                        isDragging = false
                         if (dragOffset > dismissThreshold) {
                             onDismiss()
                         }

@@ -11,6 +11,7 @@ import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
 import coil.decode.ImageDecoderDecoder
+import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -89,6 +90,8 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 } else {
                     add(GifDecoder.Factory())
                 }
+                // Video frame extraction for video thumbnails
+                add(VideoFrameDecoder.Factory())
             }
             // Memory cache: ~15% of available memory for image caching
             // Reduced from 25% to leave more headroom for downloads and processing

@@ -43,6 +43,7 @@ import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.data.repository.GifRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -142,7 +143,8 @@ class ChatViewModel @Inject constructor(
     private val attachmentDelegate: ChatAttachmentDelegate,
     private val messageSendingService: MessageSendingService,
     // Sync integrity services
-    private val counterpartSyncService: CounterpartSyncService
+    private val counterpartSyncService: CounterpartSyncService,
+    private val gifRepository: GifRepository
 ) : ViewModel() {
 
     companion object {
@@ -388,6 +390,11 @@ class ChatViewModel @Inject constructor(
     // Whether to use auto-download mode (true) or manual download mode (false)
     private val _autoDownloadEnabled = MutableStateFlow(true)
     val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
+
+    // Emit socket-pushed message GUIDs for "new messages" indicator
+    // This ONLY fires for truly new messages from socket, NOT for synced/historical messages
+    private val _socketNewMessage = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val socketNewMessage: SharedFlow<String> = _socketNewMessage.asSharedFlow()
 
     // Attachment Quality Settings
     // NOTE: _attachmentQuality is now declared earlier in the file (before composerState)
@@ -1808,6 +1815,10 @@ class ChatViewModel @Inject constructor(
                     // Room Flow will handle the actual message display (single source of truth)
                     pagingController.onNewMessageInserted(event.message.guid)
 
+                    // Emit for "new messages" indicator in ChatScreen
+                    // Only socket-pushed messages should increment the counter
+                    _socketNewMessage.tryEmit(event.message.guid)
+
                     // Mark as read since user is viewing the chat
                     markAsRead()
                 }
@@ -2352,6 +2363,16 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
+     * Adds a contact as a vCard attachment directly from a contact picker URI.
+     * Uses default options (includes all fields).
+     */
+    fun addContactFromPicker(contactUri: Uri) {
+        val contactData = vCardService.getContactData(contactUri) ?: return
+        val defaultOptions = FieldOptions()
+        addContactAsVCard(contactData, defaultOptions)
+    }
+
+    /**
      * Creates a vCard file from contact data with field options and adds it as an attachment.
      * Returns true if successful, false otherwise.
      */
@@ -2362,6 +2383,33 @@ class ChatViewModel @Inject constructor(
             true
         } else {
             false
+        }
+    }
+
+    // GIF Picker state - delegate to repository
+    val gifPickerState = gifRepository.state
+    val gifSearchQuery = gifRepository.searchQuery
+
+    fun updateGifSearchQuery(query: String) {
+        gifRepository.updateSearchQuery(query)
+    }
+
+    fun searchGifs(query: String) {
+        viewModelScope.launch {
+            gifRepository.search(query)
+        }
+    }
+
+    fun loadFeaturedGifs() {
+        viewModelScope.launch {
+            gifRepository.loadFeatured()
+        }
+    }
+
+    fun selectGif(gif: com.bothbubbles.ui.chat.composer.panels.GifItem) {
+        viewModelScope.launch {
+            val fileUri = gifRepository.downloadGif(gif)
+            fileUri?.let { addAttachment(it) }
         }
     }
 

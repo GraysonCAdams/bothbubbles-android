@@ -306,3 +306,254 @@ Use tokens from `ComposerMotionTokens.kt`:
 - Test status bar fix on devices with notches, punch-holes, and dynamic island
 - Test drag-to-dismiss with various swipe velocities
 - Verify voice cancel doesn't lose unsent text
+
+---
+
+## Completed Fixes (Phase 1)
+
+| Issue | Status | Commit Notes |
+|-------|--------|--------------|
+| #1 Camera status bar | ✅ Done | Added `WindowInsets.statusBars` padding |
+| #5 Voice memo cancel | ✅ Done | Added `onCancel` to `ExpandedRecordingPanel` and `PreviewContent` |
+| #3 "+" button animation | ✅ Done | Changed `isPickerExpanded` to computed property from `activePanel` |
+| #2 Drag handle | ✅ Done | Added `draggable` modifier with 120dp threshold |
+| #4 Gallery icon | ✅ Done | Now launches `PickMultipleVisualMedia` directly |
+
+---
+
+## Media Picker Feature Implementation Plan
+
+### Current Status
+
+| Option | Status | Details |
+|--------|--------|---------|
+| **Gallery** | ✅ Working | `PickMultipleVisualMedia` - fully functional |
+| **Camera** | ✅ Working | `InAppCameraScreen` - fully functional |
+| **GIF** | ⚠️ Partial | UI exists, no API integration |
+| **Files** | ❌ TODO | Empty callback in ChatScreen.kt |
+| **Location** | ❌ TODO | Empty callback in ChatScreen.kt |
+| **Audio** | ✅ Working | Triggers voice recording |
+| **Contact** | ❌ TODO | Empty callback in ChatScreen.kt |
+
+---
+
+### 1. Files Picker (High Priority)
+
+**Technical Approach:**
+
+**Contract:** Use `ActivityResultContracts.OpenMultipleDocuments`
+```kotlin
+val filePicker = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.OpenMultipleDocuments()
+) { uris ->
+    uris.forEach { uri ->
+        // Process each file URI
+    }
+}
+
+// Launch with all document types
+filePicker.launch(arrayOf("*/*"))
+```
+
+**URI Handling:**
+- Content URIs are references to files in other apps
+- Must resolve display name and file size via `ContentResolver`:
+```kotlin
+context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+    cursor.moveToFirst()
+    val name = cursor.getString(nameIndex)
+    val size = cursor.getLong(sizeIndex)
+}
+```
+
+**Stream Copying:**
+- Copy content to app's cache directory for reliable access:
+```kotlin
+context.contentResolver.openInputStream(uri)?.use { input ->
+    File(context.cacheDir, fileName).outputStream().use { output ->
+        input.copyTo(output)
+    }
+}
+```
+
+**Integration Points:**
+- `ChatScreen.kt` line 891-892: Wire up `onFileClick`
+- Pass cached files to existing attachment pipeline via `viewModel.addAttachments()`
+
+---
+
+### 2. Contact Sharing (Medium Priority)
+
+**Technical Approach:**
+
+**Contract:** Use `ActivityResultContracts.PickContact`
+```kotlin
+val contactPicker = rememberLauncherForActivityResult(
+    contract = ActivityResultContracts.PickContact()
+) { uri ->
+    uri?.let { extractContactData(it) }
+}
+```
+
+**Data Extraction via Contacts Provider:**
+```kotlin
+fun extractContactData(contactUri: Uri): ContactData {
+    val projection = arrayOf(
+        ContactsContract.Contacts.DISPLAY_NAME,
+        ContactsContract.Contacts._ID
+    )
+    // Query for name, then sub-query for phones/emails
+}
+```
+
+**VCard Generation:**
+- Leverage existing `VCardService` in `services/contacts/`
+- Map extracted data to `ContactData` model
+- Generate `.vcf` file:
+```kotlin
+val vcardService = VCardService()
+val vcfContent = vcardService.generateVCard(contactData)
+val vcfFile = File(context.cacheDir, "${contactData.displayName}.vcf")
+vcfFile.writeText(vcfContent)
+```
+
+**Integration Points:**
+- `ChatScreen.kt` line 897-898: Wire up `onContactClick`
+- Treat `.vcf` as standard file attachment
+
+---
+
+### 3. GIF Picker (Medium Priority)
+
+**Technical Approach:**
+
+**State Management:**
+Add to `ChatViewModel` or create dedicated `GifViewModel`:
+```kotlin
+private val _gifSearchQuery = MutableStateFlow("")
+private val _gifResults = MutableStateFlow<List<GifItem>>(emptyList())
+private val _gifLoadingState = MutableStateFlow<GifPickerState>(GifPickerState.Idle)
+```
+
+**API Integration (Tenor recommended - free tier):**
+```kotlin
+interface TenorApi {
+    @GET("v2/search")
+    suspend fun searchGifs(
+        @Query("q") query: String,
+        @Query("key") apiKey: String,
+        @Query("limit") limit: Int = 20,
+        @Query("pos") position: String? = null // pagination
+    ): TenorSearchResponse
+}
+```
+
+**Wiring in ComposerPanelHostSimple:**
+```kotlin
+ComposerPanelHost(
+    // ...existing params...
+    gifPickerState = viewModel.gifLoadingState.collectAsState().value,
+    gifSearchQuery = viewModel.gifSearchQuery.collectAsState().value,
+    onGifSearchQueryChange = { viewModel.updateGifQuery(it) },
+    onGifSearch = { viewModel.searchGifs(it) },
+    onGifSelected = { gif -> viewModel.downloadAndAttachGif(gif) },
+)
+```
+
+**GIF Download Flow:**
+```kotlin
+suspend fun downloadAndAttachGif(gif: GifItem) {
+    val tempFile = File(context.cacheDir, "${gif.id}.gif")
+    URL(gif.fullUrl).openStream().use { input ->
+        tempFile.outputStream().use { output ->
+            input.copyTo(output)
+        }
+    }
+    addAttachment(tempFile.toUri())
+}
+```
+
+---
+
+### 4. Location Sharing (Low Priority / High Complexity)
+
+**Technical Approach:**
+
+**Permissions:**
+```kotlin
+val locationPermissions = arrayOf(
+    Manifest.permission.ACCESS_FINE_LOCATION,
+    Manifest.permission.ACCESS_COARSE_LOCATION
+)
+
+val permissionLauncher = rememberLauncherForActivityResult(
+    ActivityResultContracts.RequestMultiplePermissions()
+) { permissions ->
+    if (permissions.values.all { it }) {
+        getCurrentLocation()
+    }
+}
+```
+
+**Location Retrieval:**
+```kotlin
+val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+
+fusedLocationClient.getCurrentLocation(
+    Priority.PRIORITY_HIGH_ACCURACY,
+    cancellationToken
+).addOnSuccessListener { location ->
+    // location.latitude, location.longitude
+}
+```
+
+**iMessage-Compatible Format (.loc.vcf):**
+```
+BEGIN:VCARD
+VERSION:3.0
+PRODID:-//Apple Inc.//iPhone OS 17.0//EN
+N:;Current Location;;;
+FN:Current Location
+item1.URL;type=pref:http://maps.apple.com/?ll=37.7749,-122.4194&q=Current%20Location
+item1.X-ABLabel:map url
+END:VCARD
+```
+
+**Implementation Phases:**
+- **Phase 1 (MVP):** Simple "Share Current Location" confirmation dialog
+- **Phase 2:** Map picker UI with draggable pin (Google Maps SDK or OSM)
+
+---
+
+## Implementation Checklist
+
+### Files Picker
+- [ ] Add `OpenMultipleDocuments` launcher in `ChatScreen.kt`
+- [ ] Create `FileUtils.kt` for URI resolution and caching
+- [ ] Wire `onFileClick` callback
+- [ ] Test with PDF, DOCX, ZIP files
+
+### Contact Sharing
+- [ ] Add `PickContact` launcher in `ChatScreen.kt`
+- [ ] Create contact data extraction helper
+- [ ] Integrate with existing `VCardService`
+- [ ] Wire `onContactClick` callback
+- [ ] Test vCard generation and sending
+
+### GIF Picker
+- [ ] Add Tenor/Giphy API key to build config
+- [ ] Create `GifRepository` with search/trending endpoints
+- [ ] Add GIF state to `ChatViewModel`
+- [ ] Wire `ComposerPanelHostSimple` callbacks
+- [ ] Implement GIF download and caching
+- [ ] Add pagination support
+
+### Location Sharing
+- [ ] Add location permissions to manifest
+- [ ] Create permission request flow
+- [ ] Implement `FusedLocationProviderClient` integration
+- [ ] Create `.loc.vcf` generator
+- [ ] Design confirmation dialog UI
+- [ ] (Optional) Add map picker UI

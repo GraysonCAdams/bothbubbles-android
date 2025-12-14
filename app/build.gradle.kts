@@ -113,6 +113,7 @@ dependencies {
     // Images - Coil
     implementation(libs.coil.compose)
     implementation(libs.coil.gif)
+    implementation(libs.coil.video)
 
     // HEIC/AVIF decoding with alpha support
     implementation(libs.avif.coder)

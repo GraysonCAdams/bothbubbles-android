@@ -1,6 +1,9 @@
 package com.bothbubbles.ui.chat.composer
 
 import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
@@ -39,7 +42,7 @@ import com.bothbubbles.ui.chat.composer.components.ComposerSendButton
 import com.bothbubbles.ui.chat.composer.components.ComposerTextField
 import com.bothbubbles.ui.chat.composer.components.ReplyPreviewBar
 import com.bothbubbles.ui.chat.composer.components.SmartReplyRow
-import com.bothbubbles.ui.chat.composer.panels.ComposerPanelHostSimple
+import com.bothbubbles.ui.chat.composer.panels.ComposerPanelHost
 import com.bothbubbles.ui.theme.BothBubblesTheme
 
 /**
@@ -77,10 +80,25 @@ fun ChatComposer(
     onFileClick: () -> Unit = { /* TODO: Implement file picker */ },
     onLocationClick: () -> Unit = { /* TODO: Implement location sharing */ },
     onContactClick: () -> Unit = { /* TODO: Implement contact sharing */ },
+    // GIF Picker callbacks
+    gifPickerState: com.bothbubbles.ui.chat.composer.panels.GifPickerState = com.bothbubbles.ui.chat.composer.panels.GifPickerState.Idle,
+    gifSearchQuery: String = "",
+    onGifSearchQueryChange: (String) -> Unit = {},
+    onGifSearch: (String) -> Unit = {},
+    onGifSelected: (com.bothbubbles.ui.chat.composer.panels.GifItem) -> Unit = {},
     onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
+
+    // Photo picker launcher for direct gallery access from image icon
+    val pickMedia = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            onMediaSelected(uris)
+        }
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -122,14 +140,20 @@ fun ChatComposer(
             MainInputRow(
                 state = state,
                 onEvent = onEvent,
+                onGalleryClick = {
+                    pickMedia.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
+                    )
+                },
                 onSendButtonBoundsChanged = onSendButtonBoundsChanged
             )
 
             // Expandable panels (Media picker, Emoji, GIF)
-            ComposerPanelHostSimple(
+            ComposerPanelHost(
                 activePanel = state.activePanel,
                 onMediaSelected = onMediaSelected,
                 onCameraClick = onCameraClick,
+                onGifClick = { onEvent(ComposerEvent.ToggleGifPicker) },
                 onFileClick = onFileClick,
                 onLocationClick = onLocationClick,
                 onAudioClick = { onEvent(ComposerEvent.StartVoiceRecording) },
@@ -137,7 +161,11 @@ fun ChatComposer(
                 onEmojiSelected = { emoji ->
                     onEvent(ComposerEvent.TextChanged(state.text + emoji))
                 },
-                onGifPanelRequest = { onEvent(ComposerEvent.ToggleGifPicker) },
+                gifPickerState = gifPickerState,
+                gifSearchQuery = gifSearchQuery,
+                onGifSearchQueryChange = onGifSearchQueryChange,
+                onGifSearch = onGifSearch,
+                onGifSelected = onGifSelected,
                 onDismiss = { onEvent(ComposerEvent.DismissPanel) }
             )
         }
@@ -151,6 +179,7 @@ fun ChatComposer(
 private fun MainInputRow(
     state: ComposerState,
     onEvent: (ComposerEvent) -> Unit,
+    onGalleryClick: () -> Unit,
     onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {}
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
@@ -185,7 +214,8 @@ private fun MainInputRow(
                 ComposerInputMode.TEXT -> {
                     TextInputContent(
                         state = state,
-                        onEvent = onEvent
+                        onEvent = onEvent,
+                        onGalleryClick = onGalleryClick
                     )
                 }
                 ComposerInputMode.VOICE_RECORDING -> {
@@ -242,7 +272,8 @@ private fun MainInputRow(
 @Composable
 private fun TextInputContent(
     state: ComposerState,
-    onEvent: (ComposerEvent) -> Unit
+    onEvent: (ComposerEvent) -> Unit,
+    onGalleryClick: () -> Unit
 ) {
     ComposerTextField(
         text = state.text,
@@ -261,7 +292,7 @@ private fun TextInputContent(
             ComposerMediaButtons(
                 showCamera = state.text.isBlank(),
                 onCameraClick = { onEvent(ComposerEvent.OpenCamera) },
-                onImageClick = { onEvent(ComposerEvent.OpenGallery) },
+                onImageClick = onGalleryClick,
                 onEmojiClick = { onEvent(ComposerEvent.ToggleEmojiPicker) }
             )
         }

@@ -4,6 +4,7 @@ import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.AuthInterceptor
+import com.bothbubbles.data.remote.api.TenorApi
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.Module
@@ -109,5 +110,32 @@ object NetworkModule {
     @Singleton
     fun provideBothBubblesApi(retrofit: Retrofit): BothBubblesApi {
         return retrofit.create(BothBubblesApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    @Named("tenor")
+    fun provideTenorOkHttpClient(
+        loggingInterceptor: HttpLoggingInterceptor
+    ): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(15, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTenorApi(
+        @Named("tenor") okHttpClient: OkHttpClient,
+        moshi: Moshi
+    ): TenorApi {
+        return Retrofit.Builder()
+            .baseUrl(TenorApi.BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(TenorApi::class.java)
     }
 }
