@@ -1,14 +1,21 @@
 package com.bothbubbles.ui.theme
 
+import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
+import com.google.android.material.color.MaterialColors
 
 // iMessage blue for sent messages
 private val IMessageBlue = Color(0xFF007AFF)
@@ -17,6 +24,16 @@ private val IMessageBlueDark = Color(0xFF0A84FF)
 // SMS green for SMS messages
 private val SmsGreen = Color(0xFF34C759)
 private val SmsGreenDark = Color(0xFF30D158)
+
+/**
+ * Harmonizes a brand color with the theme's primary color.
+ * This shifts the hue slightly toward the primary color, making brand colors
+ * feel more integrated with the user's dynamic color theme.
+ */
+private fun harmonizeColor(brandColor: Color, primaryColor: Color): Color {
+    val harmonizedArgb = MaterialColors.harmonize(brandColor.toArgb(), primaryColor.toArgb())
+    return Color(harmonizedArgb)
+}
 
 // MD3 Baseline Light Color Scheme
 private val LightColorScheme = lightColorScheme(
@@ -103,45 +120,95 @@ val LocalBubbleColors = staticCompositionLocalOf {
     )
 }
 
+/**
+ * Creates bubble colors that integrate with the given color scheme.
+ * Uses semantic container colors for received messages and optionally
+ * harmonizes brand colors (iMessage blue, SMS green) with the theme.
+ */
 @Composable
-fun BothBubblesTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
-    content: @Composable () -> Unit
-) {
-    val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+private fun createBubbleColors(
+    colorScheme: ColorScheme,
+    darkTheme: Boolean,
+    harmonizeBrandColors: Boolean
+): BubbleColors {
+    // Optionally harmonize brand colors with the theme's primary color
+    val iMessageColor = if (harmonizeBrandColors) {
+        harmonizeColor(
+            if (darkTheme) IMessageBlueDark else IMessageBlue,
+            colorScheme.primary
+        )
+    } else {
+        if (darkTheme) IMessageBlueDark else IMessageBlue
+    }
 
-    // Bubble colors that harmonize with the current theme (Google Messages style)
-    val bubbleColors = if (darkTheme) {
+    val smsColor = if (harmonizeBrandColors) {
+        harmonizeColor(
+            if (darkTheme) SmsGreenDark else SmsGreen,
+            colorScheme.primary
+        )
+    } else {
+        if (darkTheme) SmsGreenDark else SmsGreen
+    }
+
+    return if (darkTheme) {
         BubbleColors(
-            iMessageSent = IMessageBlueDark,
+            iMessageSent = iMessageColor,
             iMessageSentText = Color.White,
-            smsSent = Color(0xFF3D4043), // Charcoal gray for sent SMS/MMS in dark mode (Google Messages)
+            smsSent = smsColor,
             smsSentText = Color.White,
-            received = Color(0xFF303134), // Dark gray for received bubbles in dark mode
-            receivedText = Color.White,
-            // Dark mode input colors (Google Messages style)
-            inputBackground = Color(0xFF1F1F1F), // Dark surface
-            inputFieldBackground = Color(0xFF3C4043), // Medium gray pill
-            inputPlaceholder = Color(0xFF9AA0A6), // Muted gray
-            inputText = Color.White,
-            inputIcon = Color(0xFF9AA0A6), // Muted gray icons
+            // Use semantic container color for received messages - tinted with theme
+            received = colorScheme.surfaceContainerHigh,
+            receivedText = colorScheme.onSurface,
+            // Dark mode input colors using semantic colors
+            inputBackground = colorScheme.surface,
+            inputFieldBackground = colorScheme.surfaceContainerHighest,
+            inputPlaceholder = colorScheme.onSurfaceVariant,
+            inputText = colorScheme.onSurface,
+            inputIcon = colorScheme.onSurfaceVariant,
         )
     } else {
         BubbleColors(
-            iMessageSent = IMessageBlue,
+            iMessageSent = iMessageColor,
             iMessageSentText = Color.White,
-            smsSent = Color(0xFFE8EAED), // Light gray for sent SMS/MMS in light mode
-            smsSentText = Color(0xFF202124), // Dark text
-            received = Color(0xFFF1F3F4), // Lighter gray for received bubbles in light mode
-            receivedText = Color(0xFF202124), // Dark text
-            // Light mode input colors (Google Messages style)
-            inputBackground = Color(0xFFF8F9FA), // Light surface
-            inputFieldBackground = Color(0xFFE8EAED), // Light gray pill
-            inputPlaceholder = Color(0xFF5F6368), // Medium gray
-            inputText = Color(0xFF202124), // Dark text
-            inputIcon = Color(0xFF5F6368), // Medium gray icons
+            smsSent = smsColor,
+            smsSentText = Color(0xFF202124), // Dark text on green background
+            // Use semantic container color for received messages - tinted with theme
+            received = colorScheme.surfaceContainerHigh,
+            receivedText = colorScheme.onSurface,
+            // Light mode input colors using semantic colors
+            inputBackground = colorScheme.surfaceContainer,
+            inputFieldBackground = colorScheme.surfaceContainerHighest,
+            inputPlaceholder = colorScheme.onSurfaceVariant,
+            inputText = colorScheme.onSurface,
+            inputIcon = colorScheme.onSurfaceVariant,
         )
     }
+}
+
+@Composable
+fun BothBubblesTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = true,
+    content: @Composable () -> Unit
+) {
+    val context = LocalContext.current
+
+    // Use dynamic color on Android 12+ when enabled, otherwise fall back to baseline
+    val colorScheme = when {
+        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
+        }
+        darkTheme -> DarkColorScheme
+        else -> LightColorScheme
+    }
+
+    // Create bubble colors using semantic colors from the scheme
+    // Harmonize brand colors when using dynamic color for better integration
+    val bubbleColors = createBubbleColors(
+        colorScheme = colorScheme,
+        darkTheme = darkTheme,
+        harmonizeBrandColors = dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    )
 
     CompositionLocalProvider(LocalBubbleColors provides bubbleColors) {
         MaterialTheme(

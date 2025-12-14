@@ -90,6 +90,99 @@ internal fun ContentResolver.getAddressesForThread(threadId: Long): List<String>
 }
 
 /**
+ * Batch get addresses for multiple threads.
+ * Returns a map of threadId -> list of addresses.
+ * This is much more efficient than calling getAddressesForThread individually.
+ */
+internal fun ContentResolver.getAddressesForThreadsBatch(threadIds: List<Long>): Map<Long, List<String>> {
+    if (threadIds.isEmpty()) return emptyMap()
+
+    val result = mutableMapOf<Long, MutableSet<String>>()
+    threadIds.forEach { result[it] = mutableSetOf() }
+
+    // Batch size to avoid SQL query limits
+    val batchSize = 500
+
+    threadIds.chunked(batchSize).forEach { batch ->
+        val placeholders = batch.joinToString(",") { "?" }
+        val selectionArgs = batch.map { it.toString() }.toTypedArray()
+
+        // Get SMS addresses for all threads in batch with a single query
+        // Uses GROUP BY to get one address per thread (the most recent)
+        query(
+            Telephony.Sms.CONTENT_URI,
+            arrayOf(Telephony.Sms.THREAD_ID, Telephony.Sms.ADDRESS),
+            "${Telephony.Sms.THREAD_ID} IN ($placeholders)",
+            selectionArgs,
+            "${Telephony.Sms.THREAD_ID}, ${Telephony.Sms.DATE} DESC"
+        )?.use { cursor ->
+            var lastThreadId: Long? = null
+            while (cursor.moveToNext()) {
+                val threadId = cursor.getLong(0)
+                // Only take first (most recent) address per thread
+                if (threadId != lastThreadId) {
+                    lastThreadId = threadId
+                    cursor.getStringOrNull(Telephony.Sms.ADDRESS)?.let { addr ->
+                        if (isValidPhoneAddress(addr)) {
+                            result[threadId]?.add(addr)
+                        }
+                    }
+                }
+            }
+        }
+
+        // For threads without SMS addresses, try MMS
+        val threadsWithoutAddresses = batch.filter { result[it]?.isEmpty() == true }
+        if (threadsWithoutAddresses.isNotEmpty()) {
+            val mmsPlaceholders = threadsWithoutAddresses.joinToString(",") { "?" }
+            val mmsSelectionArgs = threadsWithoutAddresses.map { it.toString() }.toTypedArray()
+
+            // Get MMS IDs for threads without addresses
+            val mmsIdToThreadId = mutableMapOf<Long, Long>()
+            query(
+                Telephony.Mms.CONTENT_URI,
+                arrayOf(Telephony.Mms._ID, Telephony.Mms.THREAD_ID),
+                "${Telephony.Mms.THREAD_ID} IN ($mmsPlaceholders)",
+                mmsSelectionArgs,
+                "${Telephony.Mms.DATE} DESC"
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val mmsId = cursor.getLong(0)
+                    val threadId = cursor.getLong(1)
+                    // Only keep first MMS per thread
+                    if (!mmsIdToThreadId.values.contains(threadId)) {
+                        mmsIdToThreadId[mmsId] = threadId
+                    }
+                }
+            }
+
+            // Get addresses for MMS messages (unfortunately can't batch across MMS IDs efficiently)
+            for ((mmsId, threadId) in mmsIdToThreadId) {
+                if (result[threadId]?.isNotEmpty() == true) continue
+
+                query(
+                    Uri.parse("content://mms/$mmsId/addr"),
+                    arrayOf("address", "type"),
+                    null,
+                    null,
+                    null
+                )?.use { cursor ->
+                    while (cursor.moveToNext()) {
+                        val addr = cursor.getString(0)
+                        val type = cursor.getInt(1)
+                        if (addr != null && isValidPhoneAddress(addr) && (type == 137 || type == 130)) {
+                            result[threadId]?.add(addr)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return result.mapValues { it.value.toList() }
+}
+
+/**
  * Get MMS text parts for a message
  */
 internal fun ContentResolver.getMmsTextParts(mmsId: Long): List<String> {

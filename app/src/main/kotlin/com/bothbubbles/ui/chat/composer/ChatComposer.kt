@@ -12,12 +12,17 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -72,6 +77,7 @@ fun ChatComposer(
     onFileClick: () -> Unit = { /* TODO: Implement file picker */ },
     onLocationClick: () -> Unit = { /* TODO: Implement location sharing */ },
     onContactClick: () -> Unit = { /* TODO: Implement contact sharing */ },
+    onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
@@ -115,7 +121,8 @@ fun ChatComposer(
             // Main input row
             MainInputRow(
                 state = state,
-                onEvent = onEvent
+                onEvent = onEvent,
+                onSendButtonBoundsChanged = onSendButtonBoundsChanged
             )
 
             // Expandable panels (Media picker, Emoji, GIF)
@@ -143,13 +150,15 @@ fun ChatComposer(
 @Composable
 private fun MainInputRow(
     state: ComposerState,
-    onEvent: (ComposerEvent) -> Unit
+    onEvent: (ComposerEvent) -> Unit,
+    onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {}
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .height(IntrinsicSize.Min)
             .padding(horizontal = 6.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -217,7 +226,8 @@ private fun MainInputRow(
 
                 ActionButton(
                     state = state,
-                    onEvent = onEvent
+                    onEvent = onEvent,
+                    onSendButtonBoundsChanged = onSendButtonBoundsChanged
                 )
             }
         }
@@ -265,7 +275,8 @@ private fun TextInputContent(
 @Composable
 private fun ActionButton(
     state: ComposerState,
-    onEvent: (ComposerEvent) -> Unit
+    onEvent: (ComposerEvent) -> Unit,
+    onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {}
 ) {
     val showSend = when {
         state.tutorialState.isVisible -> true
@@ -281,25 +292,31 @@ private fun ActionButton(
         if (shouldShowSend) {
             // Use toggle button when mode toggle is available
             if (state.inputMode == ComposerInputMode.TEXT && state.canToggleSendMode) {
-                ComposerSendButton(
-                    onClick = { onEvent(ComposerEvent.Send) },
-                    onLongPress = { onEvent(ComposerEvent.SendLongPress) },
-                    currentMode = state.sendMode,
-                    canToggle = state.canToggleSendMode,
-                    onModeToggle = { mode ->
-                        onEvent(ComposerEvent.ToggleSendMode(mode))
-                        true
-                    },
-                    isSending = state.isSending,
-                    isMmsMode = state.isMmsMode,
-                    showRevealAnimation = state.isSendModeAnimating,
-                    tutorialState = state.tutorialState,
-                    onAnimationPhaseChange = { phase ->
-                        if (phase == SendButtonPhase.IDLE) {
-                            onEvent(ComposerEvent.RevealAnimationComplete)
-                        }
+                Box(
+                    modifier = Modifier.onGloballyPositioned { coordinates ->
+                        onSendButtonBoundsChanged(coordinates.boundsInRoot())
                     }
-                )
+                ) {
+                    ComposerSendButton(
+                        onClick = { onEvent(ComposerEvent.Send) },
+                        onLongPress = { onEvent(ComposerEvent.SendLongPress) },
+                        currentMode = state.sendMode,
+                        canToggle = state.canToggleSendMode,
+                        onModeToggle = { mode ->
+                            onEvent(ComposerEvent.ToggleSendMode(mode))
+                            true
+                        },
+                        isSending = state.isSending,
+                        isMmsMode = state.isMmsMode,
+                        showRevealAnimation = state.isSendModeAnimating,
+                        tutorialState = state.tutorialState,
+                        onAnimationPhaseChange = { phase ->
+                            if (phase == SendButtonPhase.IDLE) {
+                                onEvent(ComposerEvent.RevealAnimationComplete)
+                            }
+                        }
+                    )
+                }
             } else {
                 // Regular send button for preview or when toggle not available
                 SendButton(

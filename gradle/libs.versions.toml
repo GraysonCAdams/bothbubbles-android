@@ -19,6 +19,9 @@ splashScreen = "1.0.1"
 composeBom = "2025.08.00"
 navigationCompose = "2.8.4"
 
+# Material
+material = "1.12.0"
+
 # Hilt
 hilt = "2.53.1"
 hiltNavigationCompose = "1.2.0"
@@ -99,6 +102,9 @@ androidx-compose-material-icons-extended = { group = "androidx.compose.material"
 
 # Navigation
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }
+
+# Material (for MaterialColors.harmonize)
+google-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
 
 # Hilt
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }

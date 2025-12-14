@@ -78,6 +78,9 @@ dependencies {
     // Navigation
     implementation(libs.androidx.navigation.compose)
 
+    // Material (for MaterialColors.harmonize in dynamic theming)
+    implementation(libs.google.material)
+
     // Hilt DI
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

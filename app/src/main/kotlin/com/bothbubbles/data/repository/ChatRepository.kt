@@ -170,6 +170,28 @@ class ChatRepository @Inject constructor(
     // ===== Remote Operations (delegated) =====
 
     /**
+     * Get total message count from server.
+     * Used for accurate progress tracking during initial sync.
+     *
+     * @param after Optional timestamp to count messages after (epoch ms)
+     * @return Total message count, or null if the API call failed
+     */
+    suspend fun getServerMessageCount(after: Long? = null): Int? {
+        return try {
+            val response = api.getMessageCount(after = after)
+            if (response.isSuccessful) {
+                response.body()?.data?.total
+            } else {
+                Log.w(TAG, "Failed to get message count: ${response.code()}")
+                null
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to get message count", e)
+            null
+        }
+    }
+
+    /**
      * Fetch all chats from server and sync to local database.
      * Uses transactional operations to ensure data consistency.
      * Retries with exponential backoff on transient network errors.

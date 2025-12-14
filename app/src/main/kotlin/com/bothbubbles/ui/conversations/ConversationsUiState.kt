@@ -3,6 +3,7 @@ package com.bothbubbles.ui.conversations
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.services.sync.UnifiedSyncProgress
 import com.bothbubbles.ui.components.common.ConnectionBannerState
 import com.bothbubbles.ui.components.common.SmsBannerState
 import com.bothbubbles.ui.components.conversation.SwipeConfig
@@ -13,22 +14,13 @@ import com.bothbubbles.ui.util.toStable
 data class ConversationsUiState(
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
-    val isSyncing: Boolean = false,
     // Pagination state
     val isLoadingMore: Boolean = false,
     val canLoadMore: Boolean = true,
     val currentPage: Int = 0,
-    val syncProgress: Float? = null,
-    val syncStage: String? = null,
-    // Detailed sync info for initial sync
-    val syncTotalChats: Int = 0,
-    val syncProcessedChats: Int = 0,
-    val syncedMessages: Int = 0,
-    val syncCurrentChatName: String? = null,
-    val isInitialSync: Boolean = false,
-    // Sync error state
-    val syncError: String? = null,
-    val isSyncCorrupted: Boolean = false,
+    // Unified sync progress (replaces individual sync/SMS/categorization fields)
+    val unifiedSyncProgress: UnifiedSyncProgress? = null,
+    // Connection state
     val isConnected: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
@@ -41,11 +33,7 @@ data class ConversationsUiState(
     val useSimpleAppTitle: Boolean = false,
     val userProfileName: String? = null,
     val userProfileAvatarUri: String? = null,
-    // SMS import state
-    val isImportingSms: Boolean = false,
-    val smsImportProgress: Float = 0f,
-    val smsImportError: String? = null,
-    // Categorization state
+    // Categorization enabled flag (for settings)
     val categorizationEnabled: Boolean = false,
     // Conversation filter state (persisted)
     val conversationFilter: String = "all",

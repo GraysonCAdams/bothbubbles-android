@@ -35,7 +35,6 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -980,7 +979,7 @@ internal fun SendButton(
 
     Box(
         modifier = modifier
-            .fillMaxHeight()
+            .height(40.dp)
             .aspectRatio(1f)
             .graphicsLayer {
                 scaleX = scale
@@ -1072,7 +1071,7 @@ internal fun VoiceMemoButton(
 
     Box(
         modifier = modifier
-            .fillMaxHeight()
+            .height(40.dp)
             .aspectRatio(1.3f)
             .clip(RoundedCornerShape(50))
             .background(containerColor)

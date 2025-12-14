@@ -5,11 +5,19 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * Tracks progress for concurrent sync operations.
  * Thread-safe counters for tracking chat and message sync progress.
+ *
+ * Progress is primarily tracked by message count for accuracy.
+ * When totalMessagesExpected is set (from server API), progress is calculated
+ * based on synced messages vs expected total. Otherwise falls back to
+ * chat-based estimation.
  */
 class SyncProgressTracker {
     val totalChatsFound = AtomicInteger(0)
     val processedChats = AtomicInteger(0)
     val syncedMessages = AtomicInteger(0)
+
+    // Total messages expected from server (set upfront for accurate progress)
+    val totalMessagesExpected = AtomicInteger(0)
 
     // SMS-specific progress
     val smsCurrentThread = AtomicInteger(0)
@@ -22,16 +30,65 @@ class SyncProgressTracker {
 
     /**
      * Calculate overall progress percentage for initial sync.
-     * Chat fetching is ~20% of work, message syncing is ~80%.
+     *
+     * When totalMessagesExpected is set (from /api/v1/message/count),
+     * uses message-based progress for accuracy:
+     * - 5% for startup/fetching count
+     * - 15% for chat fetching
+     * - 80% for message syncing (based on actual message counts)
+     *
+     * Falls back to chat-based estimation when message count unavailable.
      */
     fun calculateInitialSyncProgress(): Int {
-        val total = totalChatsFound.get()
-        val processed = processedChats.get()
+        val expectedMessages = totalMessagesExpected.get()
+        val synced = syncedMessages.get()
 
-        return if (total > 0) {
-            20 + (70 * processed / total)
+        return if (expectedMessages > 0) {
+            // Message-based progress (more accurate)
+            // 20% for setup/chat fetching, 80% for messages
+            val messageProgress = if (synced >= expectedMessages) {
+                80
+            } else {
+                (80 * synced / expectedMessages)
+            }
+            20 + messageProgress
         } else {
-            5 // Starting progress
+            // Fallback to chat-based estimation
+            val total = totalChatsFound.get()
+            val processed = processedChats.get()
+            if (total > 0) {
+                20 + (70 * processed / total)
+            } else {
+                5 // Starting progress
+            }
+        }
+    }
+
+    /**
+     * Calculate progress as a float (0.0 - 1.0) for initial sync.
+     * Uses message-based progress when available.
+     */
+    fun calculateInitialSyncProgressFloat(): Float {
+        val expectedMessages = totalMessagesExpected.get()
+        val synced = syncedMessages.get()
+
+        return if (expectedMessages > 0) {
+            // 20% for setup/chat fetching, 80% for messages
+            val messageProgress = if (synced >= expectedMessages) {
+                0.8f
+            } else {
+                0.8f * synced / expectedMessages
+            }
+            0.2f + messageProgress
+        } else {
+            // Fallback to chat-based estimation
+            val total = totalChatsFound.get()
+            val processed = processedChats.get()
+            if (total > 0) {
+                0.2f + (0.7f * processed / total)
+            } else {
+                0.05f
+            }
         }
     }
 
@@ -73,6 +130,7 @@ class SyncProgressTracker {
         totalChatsFound.set(0)
         processedChats.set(0)
         syncedMessages.set(0)
+        totalMessagesExpected.set(0)
         smsCurrentThread.set(0)
         smsTotalThreads.set(0)
         smsComplete.set(0)

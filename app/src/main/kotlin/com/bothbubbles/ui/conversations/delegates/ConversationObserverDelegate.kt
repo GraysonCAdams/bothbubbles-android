@@ -6,8 +6,12 @@ import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.sync.StageProgress
+import com.bothbubbles.services.sync.StageStatus
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
+import com.bothbubbles.services.sync.SyncStageType
+import com.bothbubbles.services.sync.UnifiedSyncProgress
 import com.bothbubbles.ui.conversations.normalizeGuid
 import com.bothbubbles.ui.util.toStable
 import kotlinx.coroutines.CoroutineScope
@@ -60,36 +64,15 @@ class ConversationObserverDelegate @Inject constructor(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    // Sync state
-    private val _isSyncing = MutableStateFlow(false)
-    val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
+    // Unified sync progress (combines iMessage sync, SMS import, and categorization)
+    private val _unifiedSyncProgress = MutableStateFlow<UnifiedSyncProgress?>(null)
+    val unifiedSyncProgress: StateFlow<UnifiedSyncProgress?> = _unifiedSyncProgress.asStateFlow()
 
-    private val _syncProgress = MutableStateFlow<Float?>(null)
-    val syncProgress: StateFlow<Float?> = _syncProgress.asStateFlow()
-
-    private val _syncStage = MutableStateFlow<String?>(null)
-    val syncStage: StateFlow<String?> = _syncStage.asStateFlow()
-
-    private val _syncTotalChats = MutableStateFlow(0)
-    val syncTotalChats: StateFlow<Int> = _syncTotalChats.asStateFlow()
-
-    private val _syncProcessedChats = MutableStateFlow(0)
-    val syncProcessedChats: StateFlow<Int> = _syncProcessedChats.asStateFlow()
-
-    private val _syncedMessages = MutableStateFlow(0)
-    val syncedMessages: StateFlow<Int> = _syncedMessages.asStateFlow()
-
-    private val _syncCurrentChatName = MutableStateFlow<String?>(null)
-    val syncCurrentChatName: StateFlow<String?> = _syncCurrentChatName.asStateFlow()
-
-    private val _isInitialSync = MutableStateFlow(false)
-    val isInitialSync: StateFlow<Boolean> = _isInitialSync.asStateFlow()
-
-    private val _syncError = MutableStateFlow<String?>(null)
-    val syncError: StateFlow<String?> = _syncError.asStateFlow()
-
-    private val _isSyncCorrupted = MutableStateFlow(false)
-    val isSyncCorrupted: StateFlow<Boolean> = _isSyncCorrupted.asStateFlow()
+    // Internal state for building unified progress
+    private val _iMessageSyncState = MutableStateFlow<SyncState>(SyncState.Idle)
+    private val _smsImportState = MutableStateFlow<SmsImportState>(SmsImportState.Idle)
+    private val _categorizationState = MutableStateFlow<CategorizationState>(CategorizationState.Idle)
+    private val _isExpanded = MutableStateFlow(false)
 
     // Callbacks for triggering refresh
     private var onDataChanged: (suspend () -> Unit)? = null
@@ -189,52 +172,302 @@ class ConversationObserverDelegate @Inject constructor(
     }
 
     /**
-     * Observe sync state changes.
+     * Observe sync state changes and build unified progress.
      */
     private fun observeSyncState() {
+        // Observe iMessage sync state
         scope.launch {
             syncService.syncState.collect { state ->
-                when (state) {
-                    is SyncState.Syncing -> {
-                        _isSyncing.value = true
-                        _syncProgress.value = state.progress
-                        _syncStage.value = state.stage
-                        _syncTotalChats.value = state.totalChats
-                        _syncProcessedChats.value = state.processedChats
-                        _syncedMessages.value = state.syncedMessages
-                        _syncCurrentChatName.value = state.currentChatName
-                        _isInitialSync.value = state.isInitialSync
-                        _syncError.value = null
-                        _isSyncCorrupted.value = false
-                    }
-                    is SyncState.Completed -> {
-                        _isSyncing.value = false
-                        _syncProgress.value = null
-                        _syncStage.value = null
-                        _syncTotalChats.value = 0
-                        _syncProcessedChats.value = 0
-                        _syncedMessages.value = 0
-                        _syncCurrentChatName.value = null
-                        _isInitialSync.value = false
-                        _syncError.value = null
-                        _isSyncCorrupted.value = false
-                    }
-                    is SyncState.Error -> {
-                        _isSyncing.value = false
-                        _syncProgress.value = null
-                        _syncStage.value = null
-                        _syncError.value = state.message
-                        _isSyncCorrupted.value = state.isCorrupted
-                    }
-                    SyncState.Idle -> {
-                        _isSyncing.value = false
-                        _syncProgress.value = null
-                        _syncStage.value = null
-                        _syncError.value = null
-                        _isSyncCorrupted.value = false
-                    }
+                Log.d(TAG, "SyncState changed: $state")
+                _iMessageSyncState.value = state
+            }
+        }
+
+        // Combine all sync states into unified progress
+        scope.launch {
+            combine(
+                _iMessageSyncState,
+                _smsImportState,
+                _categorizationState,
+                _isExpanded
+            ) { iMessageState, smsState, categState, expanded ->
+                buildUnifiedProgress(iMessageState, smsState, categState, expanded)
+            }.collect { unified ->
+                if (unified != null) {
+                    Log.d(TAG, "UnifiedProgress: stage=${unified.currentStage}, progress=${unified.overallProgress}, stages=${unified.stages.size}")
+                }
+                _unifiedSyncProgress.value = unified
+            }
+        }
+    }
+
+    /**
+     * Build unified sync progress from individual states.
+     */
+    private fun buildUnifiedProgress(
+        iMessageState: SyncState,
+        smsState: SmsImportState,
+        categState: CategorizationState,
+        isExpanded: Boolean
+    ): UnifiedSyncProgress? {
+        val stages = mutableListOf<StageProgress>()
+        var hasAnyActivity = false
+        var hasError = false
+        var currentStage = "Setting up..."
+
+        // iMessage sync stage (weight: 60% - typically the longest)
+        when (iMessageState) {
+            is SyncState.Syncing -> {
+                hasAnyActivity = true
+                val detail = buildIMessageDetail(iMessageState)
+                currentStage = if (iMessageState.isInitialSync) {
+                    "Importing BlueBubbles messages..."
+                } else {
+                    iMessageState.stage
+                }
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.IMESSAGE,
+                        name = "iMessage sync",
+                        status = StageStatus.IN_PROGRESS,
+                        progress = iMessageState.progress,
+                        weight = 0.6f,
+                        detail = detail
+                    )
+                )
+            }
+            is SyncState.Error -> {
+                hasAnyActivity = true
+                hasError = true
+                currentStage = "iMessage sync failed"
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.IMESSAGE,
+                        name = "iMessage sync",
+                        status = StageStatus.ERROR,
+                        progress = 0f,
+                        weight = 0.6f,
+                        errorMessage = iMessageState.message,
+                        isCorrupted = iMessageState.isCorrupted
+                    )
+                )
+            }
+            is SyncState.Completed -> {
+                // Only show completed stage if other stages are active
+                if (smsState !is SmsImportState.Idle || categState !is CategorizationState.Idle) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.IMESSAGE,
+                            name = "iMessage sync",
+                            status = StageStatus.COMPLETE,
+                            progress = 1f,
+                            weight = 0.6f
+                        )
+                    )
                 }
             }
+            SyncState.Idle -> {
+                // Don't add idle stages unless other stages are active
+                if (smsState !is SmsImportState.Idle || categState !is CategorizationState.Idle) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.IMESSAGE,
+                            name = "iMessage sync",
+                            status = StageStatus.WAITING,
+                            weight = 0.6f
+                        )
+                    )
+                }
+            }
+        }
+
+        // SMS import stage (weight: 25%)
+        when (smsState) {
+            is SmsImportState.Importing -> {
+                hasAnyActivity = true
+                if (iMessageState !is SyncState.Syncing) {
+                    currentStage = if (smsState.total == 0) "Preparing SMS import..." else "Importing SMS messages..."
+                }
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.SMS_IMPORT,
+                        name = "SMS import",
+                        status = StageStatus.IN_PROGRESS,
+                        progress = smsState.progress,
+                        weight = 0.25f,
+                        detail = when {
+                            smsState.total > 0 -> "${smsState.current} of ${smsState.total} threads"
+                            else -> "Preparing..."
+                        }
+                    )
+                )
+            }
+            is SmsImportState.Error -> {
+                hasAnyActivity = true
+                hasError = true
+                if (iMessageState !is SyncState.Syncing && iMessageState !is SyncState.Error) {
+                    currentStage = "SMS import failed"
+                }
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.SMS_IMPORT,
+                        name = "SMS import",
+                        status = StageStatus.ERROR,
+                        progress = 0f,
+                        weight = 0.25f,
+                        errorMessage = smsState.message
+                    )
+                )
+            }
+            SmsImportState.Complete -> {
+                if (iMessageState is SyncState.Syncing || categState !is CategorizationState.Idle) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.SMS_IMPORT,
+                            name = "SMS import",
+                            status = StageStatus.COMPLETE,
+                            progress = 1f,
+                            weight = 0.25f
+                        )
+                    )
+                }
+            }
+            SmsImportState.Idle -> {
+                if (iMessageState is SyncState.Syncing || categState !is CategorizationState.Idle) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.SMS_IMPORT,
+                            name = "SMS import",
+                            status = StageStatus.SKIPPED,
+                            weight = 0.25f
+                        )
+                    )
+                }
+            }
+        }
+
+        // Categorization stage (weight: 15%)
+        when (categState) {
+            is CategorizationState.Categorizing -> {
+                hasAnyActivity = true
+                if (iMessageState !is SyncState.Syncing && smsState !is SmsImportState.Importing) {
+                    currentStage = "Organizing messages..."
+                }
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.CATEGORIZATION,
+                        name = "Organizing",
+                        status = StageStatus.IN_PROGRESS,
+                        progress = categState.progress,
+                        weight = 0.15f,
+                        detail = if (categState.total > 0) "${categState.current} of ${categState.total} conversations" else null
+                    )
+                )
+            }
+            is CategorizationState.Error -> {
+                hasAnyActivity = true
+                hasError = true
+                stages.add(
+                    StageProgress(
+                        type = SyncStageType.CATEGORIZATION,
+                        name = "Organizing",
+                        status = StageStatus.ERROR,
+                        progress = 0f,
+                        weight = 0.15f,
+                        errorMessage = categState.message
+                    )
+                )
+            }
+            CategorizationState.Complete -> {
+                if (stages.isNotEmpty()) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.CATEGORIZATION,
+                            name = "Organizing",
+                            status = StageStatus.COMPLETE,
+                            progress = 1f,
+                            weight = 0.15f
+                        )
+                    )
+                }
+            }
+            CategorizationState.Idle -> {
+                if (iMessageState is SyncState.Syncing || smsState is SmsImportState.Importing) {
+                    stages.add(
+                        StageProgress(
+                            type = SyncStageType.CATEGORIZATION,
+                            name = "Organizing",
+                            status = StageStatus.WAITING,
+                            weight = 0.15f
+                        )
+                    )
+                }
+            }
+        }
+
+        // Return null if no activity
+        if (!hasAnyActivity) return null
+
+        val overallProgress = UnifiedSyncProgress.calculateOverallProgress(stages)
+
+        return UnifiedSyncProgress(
+            overallProgress = overallProgress,
+            currentStage = currentStage,
+            stages = stages,
+            isExpanded = isExpanded,
+            hasError = hasError,
+            canRetry = true
+        )
+    }
+
+    private fun buildIMessageDetail(state: SyncState.Syncing): String? {
+        return buildString {
+            if (state.totalChats > 0) {
+                append("${state.processedChats}/${state.totalChats} chats")
+            }
+            if (state.syncedMessages > 0) {
+                if (isNotEmpty()) append(" • ")
+                if (state.totalMessagesExpected > 0) {
+                    append("${state.syncedMessages} of ${state.totalMessagesExpected} messages")
+                } else {
+                    append("${state.syncedMessages} messages")
+                }
+            }
+        }.takeIf { it.isNotEmpty() }
+    }
+
+    // Public methods to update SMS and categorization state (called from ViewModel)
+
+    fun updateSmsImportState(state: SmsImportState) {
+        _smsImportState.value = state
+    }
+
+    fun updateCategorizationState(state: CategorizationState) {
+        _categorizationState.value = state
+    }
+
+    fun toggleExpanded() {
+        _isExpanded.value = !_isExpanded.value
+    }
+
+    fun dismissSyncError() {
+        // Reset error states
+        when {
+            _iMessageSyncState.value is SyncState.Error -> {
+                // Let SyncService handle its own error clearing
+            }
+            _smsImportState.value is SmsImportState.Error -> {
+                _smsImportState.value = SmsImportState.Idle
+            }
+            _categorizationState.value is CategorizationState.Error -> {
+                _categorizationState.value = CategorizationState.Idle
+            }
+        }
+        // Clear unified progress if all are idle/complete
+        if (_iMessageSyncState.value is SyncState.Idle &&
+            _smsImportState.value is SmsImportState.Idle &&
+            _categorizationState.value is CategorizationState.Idle) {
+            _unifiedSyncProgress.value = null
         }
     }
 
@@ -303,4 +536,32 @@ class ConversationObserverDelegate @Inject constructor(
 // Extension to update MutableStateFlow
 private fun <T> MutableStateFlow<Set<T>>.update(function: (Set<T>) -> Set<T>) {
     value = function(value)
+}
+
+/**
+ * State for SMS import progress.
+ */
+sealed class SmsImportState {
+    data object Idle : SmsImportState()
+    data class Importing(
+        val progress: Float,
+        val current: Int = 0,
+        val total: Int = 0
+    ) : SmsImportState()
+    data object Complete : SmsImportState()
+    data class Error(val message: String) : SmsImportState()
+}
+
+/**
+ * State for categorization progress.
+ */
+sealed class CategorizationState {
+    data object Idle : CategorizationState()
+    data class Categorizing(
+        val progress: Float,
+        val current: Int = 0,
+        val total: Int = 0
+    ) : CategorizationState()
+    data object Complete : CategorizationState()
+    data class Error(val message: String) : CategorizationState()
 }

@@ -221,3 +221,11 @@ data class FcmAppConfig(
 data class FaceTimeLinkDto(
     @Json(name = "link") val link: String
 )
+
+/**
+ * Message count DTO - returned by /api/v1/message/count
+ */
+@JsonClass(generateAdapter = true)
+data class MessageCountDto(
+    @Json(name = "total") val total: Int
+)

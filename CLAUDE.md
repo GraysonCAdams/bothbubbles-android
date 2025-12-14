@@ -465,17 +465,20 @@ import androidx.compose.animation.core.animateFloatAsState
 
 ### Flow Combine for Many Flows
 
-When combining 6+ flows, use array syntax with explicit casts:
+When combining 6+ flows, use array syntax with **safe casts and defaults**:
 ```kotlin
 combine(
     flow1, flow2, flow3, flow4, flow5, flow6, flow7, flow8
 ) { values: Array<Any?> ->
     @Suppress("UNCHECKED_CAST")
-    val value1 = values[0] as Boolean
-    val value2 = values[1] as String?
-    // ... extract each value with explicit type cast
+    val value1 = values[0] as? Boolean ?: false        // Safe cast with default
+    val value2 = values[1] as? String                   // Nullable stays nullable
+    val value3 = values[2] as? Float ?: 0f              // Safe cast with default
+    // ... extract each value with safe type cast
 }
 ```
+
+**Important**: Use `as?` (safe cast) with Elvis operator defaults, not `as` (unsafe cast). StateFlow values can be null during initialization, causing `ClassCastException` at runtime.
 
 The standard `combine` with trailing lambda only supports up to 5 flows.
 

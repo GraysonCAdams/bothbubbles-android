@@ -48,8 +48,15 @@ class SmsImporter(
         onProgress: ((Int, Int) -> Unit)? = null
     ): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
+            Log.d(TAG, "Getting SMS threads (limit=$limit)...")
             val threads = smsContentProvider.getThreads(limit = limit)
+            Log.d(TAG, "Found ${threads.size} SMS threads to import")
             var imported = 0
+
+            // If there are no threads, report completion immediately
+            if (threads.isEmpty()) {
+                onProgress?.invoke(0, 0)
+            }
 
             threads.forEachIndexed { index, thread ->
                 importThread(thread)
@@ -57,6 +64,7 @@ class SmsImporter(
                 onProgress?.invoke(index + 1, threads.size)
             }
 
+            Log.d(TAG, "SMS import finished: $imported threads imported")
             imported
         }
     }

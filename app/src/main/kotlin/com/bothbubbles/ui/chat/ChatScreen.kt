@@ -118,6 +118,8 @@ import com.bothbubbles.ui.chat.components.SendingIndicatorBar
 import com.bothbubbles.ui.chat.components.SendModeToggleButton
 import com.bothbubbles.ui.chat.composer.ChatComposer
 import com.bothbubbles.ui.chat.composer.ComposerEvent
+import com.bothbubbles.ui.chat.composer.ComposerInputMode
+import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.tutorial.ComposerTutorial
 import com.bothbubbles.ui.chat.composer.tutorial.toComposerTutorialState
 import com.bothbubbles.ui.chat.components.SmsFallbackBanner
@@ -701,8 +703,39 @@ fun ChatScreen(
                 // Unified input area with animated content transitions
                 val composerState by viewModel.composerState.collectAsStateWithLifecycle()
 
+                // Compute adjusted composer state with voice recording state from local variables
+                val adjustedComposerState = remember(
+                    composerState,
+                    isRecording,
+                    isPreviewingVoiceMemo,
+                    recordingDuration,
+                    amplitudeHistory,
+                    isNoiseCancellationEnabled,
+                    isPlayingVoiceMemo,
+                    playbackPosition,
+                    recordingFile
+                ) {
+                    composerState.copy(
+                        inputMode = when {
+                            isRecording -> ComposerInputMode.VOICE_RECORDING
+                            isPreviewingVoiceMemo -> ComposerInputMode.VOICE_PREVIEW
+                            else -> ComposerInputMode.TEXT
+                        },
+                        recordingState = if (isRecording || isPreviewingVoiceMemo) {
+                            RecordingState(
+                                durationMs = recordingDuration,
+                                amplitudeHistory = amplitudeHistory,
+                                isNoiseCancellationEnabled = isNoiseCancellationEnabled,
+                                playbackPositionMs = playbackPosition,
+                                isPlaying = isPlayingVoiceMemo,
+                                recordedUri = recordingFile?.toUri()
+                            )
+                        } else null
+                    )
+                }
+
                 ChatComposer(
-                    state = composerState,
+                    state = adjustedComposerState,
                     onEvent = { event ->
                         when (event) {
                             is ComposerEvent.OpenCamera -> {
@@ -719,6 +752,122 @@ fun ChatScreen(
                             }
                             is ComposerEvent.EditAttachment -> {
                                 onEditAttachmentClick(event.attachment.uri)
+                            }
+                            // Voice recording events - handled locally
+                            is ComposerEvent.StartVoiceRecording, is ComposerEvent.VoiceMemoTap -> {
+                                audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                            }
+                            is ComposerEvent.StopVoiceRecording -> {
+                                if (isRecording) {
+                                    try {
+                                        mediaRecorder?.stop()
+                                        mediaRecorder?.release()
+                                        mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
+                                    } catch (_: Exception) {
+                                        // May fail if recording was too short
+                                    }
+                                    mediaRecorder = null
+                                    isRecording = false
+                                    // Transition to preview mode if we have a recording
+                                    if (recordingFile?.exists() == true) {
+                                        isPreviewingVoiceMemo = true
+                                        playbackDuration = recordingDuration
+                                    }
+                                }
+                            }
+                            is ComposerEvent.CancelVoiceRecording -> {
+                                try {
+                                    mediaRecorder?.stop()
+                                    mediaRecorder?.release()
+                                } catch (_: Exception) {}
+                                mediaRecorder = null
+                                isRecording = false
+                                recordingFile?.delete()
+                                recordingFile = null
+                            }
+                            is ComposerEvent.RestartVoiceRecording -> {
+                                // Stop current recording and start fresh
+                                try {
+                                    mediaRecorder?.stop()
+                                    mediaRecorder?.release()
+                                } catch (_: Exception) {}
+                                mediaRecorder = null
+                                recordingFile?.delete()
+                                // Start new recording
+                                startVoiceMemoRecording(
+                                    context = context,
+                                    enableNoiseCancellation = isNoiseCancellationEnabled,
+                                    onRecorderCreated = { recorder, file ->
+                                        mediaRecorder = recorder
+                                        recordingFile = file
+                                        isRecording = true
+                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
+                                    },
+                                    onError = { error ->
+                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                            is ComposerEvent.ToggleNoiseCancellation -> {
+                                isNoiseCancellationEnabled = !isNoiseCancellationEnabled
+                            }
+                            is ComposerEvent.TogglePreviewPlayback -> {
+                                if (isPlayingVoiceMemo) {
+                                    mediaPlayer?.pause()
+                                    isPlayingVoiceMemo = false
+                                } else {
+                                    if (mediaPlayer == null && recordingFile != null) {
+                                        mediaPlayer = MediaPlayer().apply {
+                                            setDataSource(recordingFile!!.absolutePath)
+                                            prepare()
+                                            setOnCompletionListener {
+                                                isPlayingVoiceMemo = false
+                                                playbackPosition = 0L
+                                            }
+                                        }
+                                    }
+                                    mediaPlayer?.start()
+                                    isPlayingVoiceMemo = true
+                                }
+                            }
+                            is ComposerEvent.ReRecordVoiceMemo -> {
+                                // Clean up preview state
+                                mediaPlayer?.release()
+                                mediaPlayer = null
+                                isPlayingVoiceMemo = false
+                                playbackPosition = 0L
+                                isPreviewingVoiceMemo = false
+                                recordingFile?.delete()
+                                recordingFile = null
+                                // Start new recording
+                                startVoiceMemoRecording(
+                                    context = context,
+                                    enableNoiseCancellation = isNoiseCancellationEnabled,
+                                    onRecorderCreated = { recorder, file ->
+                                        mediaRecorder = recorder
+                                        recordingFile = file
+                                        isRecording = true
+                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
+                                    },
+                                    onError = { error ->
+                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
+                                    }
+                                )
+                            }
+                            is ComposerEvent.SendVoiceMemo -> {
+                                // Clean up playback
+                                mediaPlayer?.release()
+                                mediaPlayer = null
+                                isPlayingVoiceMemo = false
+                                // Add voice memo as attachment and send
+                                recordingFile?.let { file ->
+                                    viewModel.addAttachment(file.toUri())
+                                    viewModel.sendMessage()
+                                }
+                                // Reset state
+                                isPreviewingVoiceMemo = false
+                                playbackPosition = 0L
+                                recordingFile = null
                             }
                             else -> viewModel.onComposerEvent(event)
                         }
@@ -737,6 +886,9 @@ fun ChatScreen(
                     },
                     onContactClick = {
                         // TODO: Launch contact picker
+                    },
+                    onSendButtonBoundsChanged = { bounds ->
+                        sendButtonBounds = bounds
                     }
                 )
             }
@@ -1578,8 +1730,15 @@ fun ChatScreen(
     }
 
     // Tutorial overlay - full screen overlay on top of everything
+    // Only show when sendButtonBounds are valid (not Rect.Zero) to avoid layout issues
+    val effectiveTutorialState = if (sendButtonBounds != Rect.Zero) {
+        uiState.tutorialState.toComposerTutorialState()
+    } else {
+        com.bothbubbles.ui.chat.composer.ComposerTutorialState.Hidden
+    }
+
     ComposerTutorial(
-        tutorialState = uiState.tutorialState.toComposerTutorialState(),
+        tutorialState = effectiveTutorialState,
         sendButtonBounds = sendButtonBounds,
         onStepComplete = { step ->
             // The tutorial progresses based on actual swipe gestures, not step completion

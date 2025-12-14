@@ -618,15 +618,18 @@ fun ConversationsScreen(
                 }
             },
             floatingActionButton = {
-                // Calculate bottom padding based on visible progress bars
-                // Each bar is ~80dp, animate the offset so FAB stays above them
-                val progressBarHeight = 80.dp
-                val visibleProgressBars = listOf(
-                    uiState.isSyncing && !isSearchActive,
-                    uiState.isImportingSms
-                ).count { it }
+                // Calculate bottom padding based on unified progress bar visibility
+                // Single bar is ~80dp (or ~168dp when expanded), animate the offset so FAB stays above
+                val showProgressBar = uiState.unifiedSyncProgress != null && !isSearchActive
+                val isExpanded = uiState.unifiedSyncProgress?.isExpanded == true
+                val stageCount = uiState.unifiedSyncProgress?.stages?.size ?: 0
+                val progressBarHeight = if (isExpanded && stageCount > 1) {
+                    80.dp + (32.dp * stageCount) // Base + per-stage rows
+                } else {
+                    80.dp
+                }
                 val fabBottomPadding by animateDpAsState(
-                    targetValue = progressBarHeight * visibleProgressBars,
+                    targetValue = if (showProgressBar) progressBarHeight else 0.dp,
                     animationSpec = tween(durationMillis = 300),
                     label = "fabPadding"
                 )
@@ -1109,7 +1112,7 @@ fun ConversationsScreen(
         )
 
         // Corruption detected dialog - non-dismissable
-        if (uiState.isSyncCorrupted) {
+        if (uiState.unifiedSyncProgress?.isCorrupted == true) {
             AlertDialog(
                 onDismissRequest = { /* Not dismissable */ },
                 icon = {
@@ -1302,46 +1305,18 @@ fun ConversationsScreen(
                 .align(Alignment.BottomCenter),
             verticalArrangement = Arrangement.Bottom
         ) {
-            // BlueBubbles sync progress bar (shows during initial/incremental sync)
+            // Unified sync progress bar (combines iMessage sync, SMS import, and categorization)
             AnimatedVisibility(
-                visible = uiState.isSyncing && !isSearchActive,
+                visible = uiState.unifiedSyncProgress != null && !isSearchActive,
                 enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
                 exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
             ) {
-                SyncProgressBar(
-                    progress = uiState.syncProgress ?: 0f,
-                    stage = uiState.syncStage ?: "Syncing...",
-                    totalChats = uiState.syncTotalChats,
-                    processedChats = uiState.syncProcessedChats,
-                    syncedMessages = uiState.syncedMessages,
-                    isInitialSync = uiState.isInitialSync,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // SMS import progress bar
-            AnimatedVisibility(
-                visible = uiState.isImportingSms,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                SmsImportProgressBar(
-                    progress = uiState.smsImportProgress,
-                    modifier = Modifier.fillMaxWidth()
-                )
-            }
-
-            // SMS import error bar (shown when import fails)
-            AnimatedVisibility(
-                visible = uiState.smsImportError != null && !uiState.isImportingSms,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                uiState.smsImportError?.let { error ->
-                    SmsImportErrorBar(
-                        errorMessage = error,
-                        onRetry = { viewModel.startSmsImport() },
-                        onDismiss = { viewModel.dismissSmsImportError() },
+                uiState.unifiedSyncProgress?.let { progress ->
+                    UnifiedSyncProgressBar(
+                        progress = progress,
+                        onExpandToggle = { viewModel.toggleSyncProgressExpanded() },
+                        onRetry = { viewModel.retrySyncOperation() },
+                        onDismiss = { viewModel.dismissSyncError() },
                         modifier = Modifier.fillMaxWidth()
                     )
                 }

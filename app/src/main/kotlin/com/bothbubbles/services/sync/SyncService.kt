@@ -28,6 +28,7 @@ import javax.inject.Singleton
 @Singleton
 class SyncService @Inject constructor(
     private val chatDao: ChatDao,
+    private val chatRepository: com.bothbubbles.data.repository.ChatRepository,
     private val messageRepository: MessageRepository,
     private val settingsDataStore: SettingsDataStore,
     private val chatSyncHelper: ChatSyncHelper,
@@ -95,16 +96,27 @@ class SyncService @Inject constructor(
             )
         }
 
+        // Fetch total message count upfront for accurate progress tracking
+        val totalMessageCount = chatRepository.getServerMessageCount()
+        if (totalMessageCount != null) {
+            Log.i(TAG, "Total messages to sync: $totalMessageCount")
+        } else {
+            Log.w(TAG, "Could not fetch message count - using chat-based progress estimation")
+        }
+
         // Get already synced chats (for resume scenario)
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
 
         // Initialize progress tracker
-        val progressTracker = SyncProgressTracker()
+        val progressTracker = SyncProgressTracker().apply {
+            totalMessagesExpected.set(totalMessageCount ?: 0)
+        }
 
         // Helper to update progress - tracks iMessage and SMS separately
-        fun updateProgress(iMessageProgressPercent: Int, stage: String, chatName: String? = null) {
-            val imProgress = iMessageProgressPercent / 100f
-            val imComplete = iMessageProgressPercent >= 100
+        // Uses message-based progress when available for accuracy
+        fun updateProgress(stage: String, chatName: String? = null) {
+            val imProgress = progressTracker.calculateInitialSyncProgressFloat()
+            val imComplete = imProgress >= 0.99f
             val smsProgressPct = progressTracker.calculateSmsProgress()
             val smsIsDone = progressTracker.smsComplete.get() == 1
 
@@ -121,6 +133,7 @@ class SyncService @Inject constructor(
                 totalChats = progressTracker.totalChatsFound.get(),
                 processedChats = progressTracker.processedChats.get(),
                 syncedMessages = progressTracker.syncedMessages.get(),
+                totalMessagesExpected = progressTracker.totalMessagesExpected.get(),
                 currentChatName = chatName,
                 isInitialSync = true,
                 iMessageProgress = imProgress,
@@ -167,7 +180,7 @@ class SyncService @Inject constructor(
                     chatQueue = chatQueue,
                     onProgress = { progress ->
                         if (onProgress == null) {
-                            updateProgress(progress, "Fetching conversations...")
+                            updateProgress("Fetching conversations...")
                         } else {
                             onProgress(progress, 0, 0, 0)
                         }
@@ -184,11 +197,7 @@ class SyncService @Inject constructor(
                     progressTracker = progressTracker,
                     onProgress = { progress, processed, total, synced ->
                         if (onProgress == null) {
-                            updateProgress(
-                                progress,
-                                "Syncing messages...",
-                                null // Chat name is tracked internally
-                            )
+                            updateProgress("Syncing messages...")
                         } else {
                             onProgress(progress, processed, total, synced)
                         }
@@ -214,8 +223,7 @@ class SyncService @Inject constructor(
         // Mark initial sync as complete
         settingsDataStore.setInitialSyncComplete(true)
 
-        // Run retroactive categorization after sync completes (only if enabled)
-        syncOperations.runCategorizationIfEnabled()
+        // Note: Categorization now runs in background on ConversationsScreen after all syncs complete
 
         // Only update internal state if no external progress handler
         if (onProgress == null) {
@@ -293,8 +301,7 @@ class SyncService @Inject constructor(
 
         settingsDataStore.setInitialSyncComplete(true)
 
-        // Run retroactive categorization after resume sync completes (only if enabled)
-        syncOperations.runCategorizationIfEnabled()
+        // Note: Categorization now runs in background on ConversationsScreen after all syncs complete
 
         _syncState.value = SyncState.Completed
     }.onFailure { e ->

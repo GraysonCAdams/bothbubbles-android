@@ -73,6 +73,15 @@ interface BothBubblesApi {
     @GET("api/v1/chat/count")
     suspend fun getChatCount(): Response<ApiResponse<Int>>
 
+    // ===== Message Count =====
+
+    @GET("api/v1/message/count")
+    suspend fun getMessageCount(
+        @Query("after") after: Long? = null,
+        @Query("before") before: Long? = null,
+        @Query("chatGuid") chatGuid: String? = null
+    ): Response<ApiResponse<MessageCountDto>>
+
     // ===== Messages =====
 
     @POST("api/v1/message/text")

@@ -10,6 +10,7 @@ import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.SmsPermissionHelper
@@ -20,9 +21,11 @@ import com.bothbubbles.ui.components.common.determineConnectionBannerState
 import com.bothbubbles.ui.components.common.determineSmsBannerState
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
+import com.bothbubbles.ui.conversations.delegates.CategorizationState
 import com.bothbubbles.ui.conversations.delegates.ConversationActionsDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationLoadingDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationObserverDelegate
+import com.bothbubbles.ui.conversations.delegates.SmsImportState
 import com.bothbubbles.ui.util.toStable
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
@@ -47,6 +50,7 @@ class ConversationsViewModel @Inject constructor(
     private val androidContactsService: AndroidContactsService,
     private val notificationService: NotificationService,
     private val syncService: SyncService,
+    private val categorizationRepository: CategorizationRepository,
     // Delegates
     private val loadingDelegate: ConversationLoadingDelegate,
     private val observerDelegate: ConversationObserverDelegate,
@@ -61,6 +65,9 @@ class ConversationsViewModel @Inject constructor(
 
     private val _searchQuery = MutableStateFlow("")
     private val _smsStateRefreshTrigger = MutableStateFlow(0)
+
+    // Track if we've already started categorization this session
+    private var hasStartedCategorization = false
 
     // SavedStateHandle-backed scroll position restoration (survives process death)
     private companion object {
@@ -128,6 +135,7 @@ class ConversationsViewModel @Inject constructor(
         checkInitialSmsImport()
         checkAndResumeSync()
         markExistingMmsDrafts()
+        observeCategorizationTrigger()
     }
 
     /**
@@ -135,60 +143,18 @@ class ConversationsViewModel @Inject constructor(
      */
     private fun observeDelegateStates() {
         viewModelScope.launch {
-            // Observer delegate state - use array form for 12+ flows
+            // Observer delegate state - simplified with unified sync progress
             combine(
                 observerDelegate.isConnected,
                 observerDelegate.connectionState,
-                observerDelegate.isSyncing,
-                observerDelegate.syncProgress,
-                observerDelegate.syncStage,
-                observerDelegate.syncTotalChats,
-                observerDelegate.syncProcessedChats,
-                observerDelegate.syncedMessages,
-                observerDelegate.syncCurrentChatName,
-                observerDelegate.isInitialSync,
-                observerDelegate.syncError,
-                observerDelegate.isSyncCorrupted
-            ) { values: Array<Any?> ->
-                @Suppress("UNCHECKED_CAST")
-                val isConnected = values[0] as Boolean
-                val connectionState = values[1] as com.bothbubbles.services.socket.ConnectionState
-                val isSyncing = values[2] as Boolean
-                val syncProgress = values[3] as Float
-                val syncStage = values[4] as String?
-                val syncTotalChats = values[5] as Int
-                val syncProcessedChats = values[6] as Int
-                val syncedMessages = values[7] as Int
-                val syncCurrentChatName = values[8] as String?
-                val isInitialSync = values[9] as Boolean
-                val syncError = values[10] as String?
-                val isSyncCorrupted = values[11] as Boolean
-
-                // Check if this was initial sync completion for notification
-                val wasInitialSync = _uiState.value.isInitialSync
-                val messageCount = _uiState.value.syncedMessages
-                val justCompleted = wasInitialSync && !isSyncing && !isInitialSync
-
+                observerDelegate.unifiedSyncProgress
+            ) { isConnected, connectionState, unifiedSyncProgress ->
                 _uiState.update {
                     it.copy(
                         isConnected = isConnected,
                         connectionState = connectionState,
-                        isSyncing = isSyncing,
-                        syncProgress = syncProgress,
-                        syncStage = syncStage,
-                        syncTotalChats = syncTotalChats,
-                        syncProcessedChats = syncProcessedChats,
-                        syncedMessages = syncedMessages,
-                        syncCurrentChatName = syncCurrentChatName,
-                        isInitialSync = isInitialSync,
-                        syncError = syncError,
-                        isSyncCorrupted = isSyncCorrupted
+                        unifiedSyncProgress = unifiedSyncProgress
                     )
-                }
-
-                // Show notification for first-time initial sync completion
-                if (justCompleted && messageCount > 0) {
-                    notificationService.showBlueBubblesSyncCompleteNotification(messageCount)
                 }
             }.collect()
         }
@@ -308,9 +274,14 @@ class ConversationsViewModel @Inject constructor(
             ) { smsEnabled, hasImported ->
                 smsEnabled to hasImported
             }.distinctUntilChanged().collect { (smsEnabled, hasImported) ->
+                // Check if SMS import is in progress via unified sync state
+                val isImportingSms = _uiState.value.unifiedSyncProgress?.stages?.any {
+                    it.type == com.bothbubbles.services.sync.SyncStageType.SMS_IMPORT &&
+                    it.status == com.bothbubbles.services.sync.StageStatus.IN_PROGRESS
+                } == true
                 if (smsEnabled && !hasImported &&
                     smsPermissionHelper.hasReadSmsPermission() &&
-                    !_uiState.value.isImportingSms) {
+                    !isImportingSms) {
                     startSmsImport()
                 }
             }
@@ -566,6 +537,68 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Observe sync states and trigger categorization when BOTH:
+     * 1. iMessage/BlueBubbles sync is complete (not syncing)
+     * 2. SMS import is complete (not importing)
+     * 3. Categorization is enabled
+     * 4. We haven't already started categorization this session
+     */
+    private fun observeCategorizationTrigger() {
+        viewModelScope.launch {
+            // Combine all relevant states to determine when to start categorization
+            combine(
+                observerDelegate.unifiedSyncProgress,
+                settingsDataStore.categorizationEnabled,
+                settingsDataStore.initialSyncComplete,
+                settingsDataStore.hasCompletedInitialSmsImport
+            ) { syncProgress, categorizationEnabled, syncComplete, smsImportComplete ->
+                // Check if any syncing is in progress
+                val isSyncing = syncProgress != null && !syncProgress.hasError
+                // All conditions must be met
+                !isSyncing && categorizationEnabled && syncComplete &&
+                    // SMS import complete OR SMS is disabled
+                    (smsImportComplete || !settingsDataStore.smsEnabled.first())
+            }.distinctUntilChanged().collect { shouldCategorize ->
+                if (shouldCategorize && !hasStartedCategorization) {
+                    hasStartedCategorization = true
+                    startCategorization()
+                }
+            }
+        }
+    }
+
+    /**
+     * Start retroactive categorization with progress tracking.
+     * Called automatically when all syncs complete and categorization is enabled.
+     */
+    private fun startCategorization() {
+        viewModelScope.launch {
+            android.util.Log.i("ConversationsViewModel", "Starting retroactive categorization")
+            observerDelegate.updateCategorizationState(CategorizationState.Categorizing(0f, 0, 0))
+
+            try {
+                val categorized = categorizationRepository.categorizeAllChats { current, total ->
+                    observerDelegate.updateCategorizationState(
+                        CategorizationState.Categorizing(
+                            progress = if (total > 0) current.toFloat() / total else 0f,
+                            current = current,
+                            total = total
+                        )
+                    )
+                }
+                android.util.Log.i("ConversationsViewModel", "Categorization complete: $categorized chats")
+                observerDelegate.updateCategorizationState(CategorizationState.Complete)
+                // Clear completion state after a delay
+                delay(2000)
+                observerDelegate.updateCategorizationState(CategorizationState.Idle)
+            } catch (e: Exception) {
+                android.util.Log.e("ConversationsViewModel", "Categorization failed", e)
+                observerDelegate.updateCategorizationState(CategorizationState.Error(e.message ?: "Unknown error"))
+            }
+        }
+    }
+
     private fun observeSwipeSettings() {
         viewModelScope.launch {
             combine(
@@ -654,27 +687,80 @@ class ConversationsViewModel @Inject constructor(
 
     fun startSmsImport() {
         viewModelScope.launch {
-            _uiState.update { it.copy(isImportingSms = true, smsImportProgress = 0f, smsImportError = null) }
+            android.util.Log.d("ConversationsViewModel", "Starting SMS import...")
+            observerDelegate.updateSmsImportState(SmsImportState.Importing(0f, 0, 0))
             smsRepository.importAllThreads(
                 limit = 500,
                 onProgress = { current, total ->
-                    _uiState.update { it.copy(smsImportProgress = current.toFloat() / total.toFloat()) }
+                    android.util.Log.d("ConversationsViewModel", "SMS import progress: $current of $total")
+                    // Avoid division by zero when there are no threads
+                    val progress = if (total > 0) current.toFloat() / total.toFloat() else 0f
+                    observerDelegate.updateSmsImportState(
+                        SmsImportState.Importing(
+                            progress = progress,
+                            current = current,
+                            total = total
+                        )
+                    )
                 }
             ).fold(
                 onSuccess = { count ->
-                    _uiState.update { it.copy(isImportingSms = false, smsImportProgress = 1f) }
+                    android.util.Log.d("ConversationsViewModel", "SMS import completed: $count threads imported")
+                    observerDelegate.updateSmsImportState(SmsImportState.Complete)
                     settingsDataStore.setHasCompletedInitialSmsImport(true)
                     notificationService.showSmsImportCompleteNotification()
+                    // Clear completion state after a delay
+                    delay(2000)
+                    observerDelegate.updateSmsImportState(SmsImportState.Idle)
                 },
                 onFailure = { e ->
-                    _uiState.update { it.copy(isImportingSms = false, smsImportError = e.message) }
+                    android.util.Log.e("ConversationsViewModel", "SMS import failed", e)
+                    observerDelegate.updateSmsImportState(SmsImportState.Error(e.message ?: "Unknown error"))
                 }
             )
         }
     }
 
     fun dismissSmsImportError() {
-        _uiState.update { it.copy(smsImportError = null) }
+        observerDelegate.updateSmsImportState(SmsImportState.Idle)
+    }
+
+    /**
+     * Toggle the expanded state of the unified sync progress bar.
+     */
+    fun toggleSyncProgressExpanded() {
+        observerDelegate.toggleExpanded()
+    }
+
+    /**
+     * Retry the failed sync operation.
+     */
+    fun retrySyncOperation() {
+        val progress = _uiState.value.unifiedSyncProgress ?: return
+        when (progress.failedStageType) {
+            com.bothbubbles.services.sync.SyncStageType.IMESSAGE -> {
+                // Retry iMessage sync
+                syncService.startBackgroundSync()
+            }
+            com.bothbubbles.services.sync.SyncStageType.SMS_IMPORT -> {
+                // Retry SMS import
+                startSmsImport()
+            }
+            com.bothbubbles.services.sync.SyncStageType.CATEGORIZATION -> {
+                // Retry categorization
+                viewModelScope.launch {
+                    // Categorization will be triggered by observeCategorizationTrigger
+                }
+            }
+            null -> { /* No failed stage */ }
+        }
+    }
+
+    /**
+     * Dismiss sync error and hide the progress bar if all operations are complete.
+     */
+    fun dismissSyncError() {
+        observerDelegate.dismissSyncError()
     }
 
     fun resetAppData(onReset: () -> Unit) {
@@ -684,7 +770,8 @@ class ConversationsViewModel @Inject constructor(
                 // Note: Other deletions delegated to repositories
                 settingsDataStore.clearSyncProgress()
                 settingsDataStore.setSetupComplete(false)
-                _uiState.update { it.copy(syncError = null, isSyncCorrupted = false) }
+                // Clear any sync error state
+                observerDelegate.dismissSyncError()
                 withContext(Dispatchers.Main) {
                     onReset()
                 }

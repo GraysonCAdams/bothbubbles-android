@@ -4,6 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
+import android.util.Log
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -14,6 +15,10 @@ import javax.inject.Singleton
 class SmsContentProvider @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
+    companion object {
+        private const val TAG = "SmsContentProvider"
+    }
+
     private val contentResolver: ContentResolver = context.contentResolver
 
     // ===== Threads (Conversations) =====
@@ -22,6 +27,7 @@ class SmsContentProvider @Inject constructor(
      * Get all SMS/MMS threads (conversations)
      */
     suspend fun getThreads(limit: Int = 100, offset: Int = 0): List<SmsThread> = withContext(Dispatchers.IO) {
+        Log.d(TAG, "getThreads called (limit=$limit, offset=$offset)")
         val threads = mutableListOf<SmsThread>()
 
         val projection = arrayOf(
@@ -33,7 +39,8 @@ class SmsContentProvider @Inject constructor(
             Telephony.Threads.RECIPIENT_IDS
         )
 
-        contentResolver.query(
+        Log.d(TAG, "Querying content resolver...")
+        val cursor = contentResolver.query(
             Telephony.Threads.CONTENT_URI.buildUpon()
                 .appendQueryParameter("simple", "true")
                 .build(),
@@ -41,24 +48,57 @@ class SmsContentProvider @Inject constructor(
             null,
             null,
             "${Telephony.Threads.DATE} DESC LIMIT $limit OFFSET $offset"
-        )?.use { cursor ->
-            while (cursor.moveToNext()) {
-                val threadId = cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Threads._ID))
-                val recipientIds = cursor.getString(cursor.getColumnIndexOrThrow(Telephony.Threads.RECIPIENT_IDS))
+        )
+        Log.d(TAG, "Query returned, cursor count: ${cursor?.count ?: -1}")
 
-                threads.add(
-                    SmsThread(
+        // First pass: collect thread info without addresses
+        data class ThreadInfo(
+            val threadId: Long,
+            val snippet: String?,
+            val messageCount: Int,
+            val lastMessageDate: Long,
+            val isRead: Boolean
+        )
+        val threadInfos = mutableListOf<ThreadInfo>()
+
+        cursor?.use {
+            while (it.moveToNext()) {
+                val threadId = it.getLong(it.getColumnIndexOrThrow(Telephony.Threads._ID))
+                threadInfos.add(
+                    ThreadInfo(
                         threadId = threadId,
-                        recipientAddresses = contentResolver.getAddressesForThread(threadId),
-                        snippet = cursor.getStringOrNull(Telephony.Threads.SNIPPET),
-                        messageCount = cursor.getInt(cursor.getColumnIndexOrThrow(Telephony.Threads.MESSAGE_COUNT)),
-                        lastMessageDate = cursor.getLong(cursor.getColumnIndexOrThrow(Telephony.Threads.DATE)),
-                        isRead = cursor.getInt(cursor.getColumnIndexOrThrow(Telephony.Threads.READ)) == 1
+                        snippet = it.getStringOrNull(Telephony.Threads.SNIPPET),
+                        messageCount = it.getInt(it.getColumnIndexOrThrow(Telephony.Threads.MESSAGE_COUNT)),
+                        lastMessageDate = it.getLong(it.getColumnIndexOrThrow(Telephony.Threads.DATE)),
+                        isRead = it.getInt(it.getColumnIndexOrThrow(Telephony.Threads.READ)) == 1
                     )
                 )
             }
         }
 
+        Log.d(TAG, "Collected ${threadInfos.size} thread infos, fetching addresses in batch...")
+
+        // Batch lookup addresses for all threads at once (much faster than N+1 queries)
+        val threadIds = threadInfos.map { it.threadId }
+        val addressMap = contentResolver.getAddressesForThreadsBatch(threadIds)
+
+        Log.d(TAG, "Batch address lookup complete, building thread objects...")
+
+        // Build final thread objects
+        for (info in threadInfos) {
+            threads.add(
+                SmsThread(
+                    threadId = info.threadId,
+                    recipientAddresses = addressMap[info.threadId] ?: emptyList(),
+                    snippet = info.snippet,
+                    messageCount = info.messageCount,
+                    lastMessageDate = info.lastMessageDate,
+                    isRead = info.isRead
+                )
+            )
+        }
+
+        Log.d(TAG, "Returning ${threads.size} threads")
         threads
     }
 
