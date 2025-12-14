@@ -2,8 +2,10 @@ package com.bothbubbles.services.linkpreview
 
 import android.content.Context
 import android.util.Log
+import com.bothbubbles.data.local.prefs.FeaturePreferences
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -27,7 +29,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class LinkPreviewService @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val featurePreferences: FeaturePreferences
 ) {
     companion object {
         private const val TAG = "LinkPreviewService"
@@ -68,11 +71,15 @@ class LinkPreviewService @Inject constructor(
     }
 
     /**
-     * Fetches metadata from a URL using oEmbed if available, falling back to Open Graph
+     * Fetches metadata from a URL using oEmbed if available, falling back to Open Graph.
+     * Respects the user's link preview preference setting.
      */
     suspend fun fetchMetadata(url: String): LinkMetadataResult = withContext(Dispatchers.IO) {
-        // TEMPORARILY DISABLED: Skip link preview fetching to focus on text-only performance
-        return@withContext LinkMetadataResult.NoPreview
+        // Check if link previews are enabled in user settings
+        val enabled = featurePreferences.linkPreviewsEnabled.first()
+        if (!enabled) {
+            return@withContext LinkMetadataResult.NoPreview
+        }
 
         rateLimiter.withPermit {
             try {

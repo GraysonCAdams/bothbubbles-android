@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -22,13 +23,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.theme.BothBubblesTheme
 
 /**
  * Reply preview shown above the input when replying to a message.
+ * Shows a thumbnail for media attachments.
  */
 @Composable
 fun ReplyPreview(
@@ -37,6 +44,21 @@ fun ReplyPreview(
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
+
+    // Get first media attachment for thumbnail preview
+    val mediaAttachment = message.attachments.firstOrNull { it.isImage || it.isVideo }
+    val thumbnailUrl = mediaAttachment?.let {
+        it.thumbnailPath ?: it.localPath ?: it.webUrl
+    }
+
+    // Build preview text - show attachment type if no text
+    val previewText = when {
+        !message.text.isNullOrBlank() -> message.text
+        mediaAttachment?.isVideo == true -> "Video"
+        mediaAttachment?.isImage == true -> "Photo"
+        message.attachments.isNotEmpty() -> "Attachment"
+        else -> ""
+    }
 
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -66,12 +88,51 @@ fun ReplyPreview(
                     color = MaterialTheme.colorScheme.primary
                 )
                 Text(
-                    text = message.text ?: "[Attachment]",
+                    text = previewText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            // Media thumbnail preview
+            if (thumbnailUrl != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(thumbnailUrl)
+                            .crossfade(true)
+                            .size(108) // 36dp * 3x density
+                            .build(),
+                        contentDescription = "Attachment preview",
+                        modifier = Modifier.size(36.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                    // Video play icon overlay
+                    if (mediaAttachment?.isVideo == true) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .background(Color.Black.copy(alpha = 0.3f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = Color.White
+                            )
+                        }
+                    }
+                }
             }
 
             IconButton(

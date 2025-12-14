@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.core.*
@@ -69,6 +70,7 @@ import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -109,6 +111,7 @@ import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.chat.components.AttachmentPreview
 import com.bothbubbles.ui.chat.components.ChatInputArea
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
+import com.bothbubbles.ui.chat.components.EtaSharingBanner
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
 import com.bothbubbles.ui.chat.components.SearchResultsSheet
@@ -130,6 +133,7 @@ import com.bothbubbles.ui.chat.calculateGroupPosition
 import com.bothbubbles.ui.chat.formatTimeSeparator
 import com.bothbubbles.ui.chat.shouldShowTimeSeparator
 import com.bothbubbles.ui.chat.startVoiceMemoRecording
+import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
 import com.bothbubbles.ui.components.input.AttachmentPickerPanel
 import com.bothbubbles.ui.components.input.EmojiPickerPanel
 import com.bothbubbles.ui.components.common.Avatar
@@ -144,7 +148,7 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.input.ScheduleMessageDialog
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.common.SpamSafetyBanner
-import com.bothbubbles.ui.components.message.TapbackPopup
+import com.bothbubbles.ui.components.message.MessageSpotlightOverlay
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.TypingIndicator
 import com.bothbubbles.ui.components.dialogs.VCardOptionsDialog
@@ -154,6 +158,7 @@ import com.bothbubbles.ui.components.common.MessageListSkeleton
 import com.bothbubbles.ui.components.common.staggeredEntrance
 import com.bothbubbles.ui.effects.EffectPickerSheet
 import com.bothbubbles.ui.effects.MessageEffect
+import com.bothbubbles.ui.modifiers.materialAttentionHighlight
 import com.bothbubbles.ui.effects.bubble.BubbleEffectWrapper
 import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
 import com.bothbubbles.ui.theme.BothBubblesTheme
@@ -338,6 +343,12 @@ fun ChatScreen(
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
     var selectedMessageBounds by remember { mutableStateOf<Rect?>(null) }
 
+    // Handle back press to dismiss tapback menu
+    BackHandler(enabled = selectedMessageForTapback != null) {
+        selectedMessageForTapback = null
+        selectedMessageBounds = null
+    }
+
     // Track composer height for tapback LiveZone calculation
     var composerHeightPx by remember { mutableStateOf(0f) }
 
@@ -367,6 +378,9 @@ fun ChatScreen(
     val retryMenuScope = rememberCoroutineScope()
     val scrollScope = rememberCoroutineScope()
 
+    // Track if we're doing programmatic scroll-to-safety (don't dismiss during this)
+    var isScrollToSafetyInProgress by remember { mutableStateOf(false) }
+
     // Scroll-to-safety: When showing tapback menu, ensure message is visible and centered
     LaunchedEffect(selectedMessageForTapback?.guid) {
         val message = selectedMessageForTapback ?: return@LaunchedEffect
@@ -385,8 +399,10 @@ fun ChatScreen(
         // With reverseLayout=true, we want to position message in center
         if (!isVisible) {
             // Message not visible - scroll to center it
+            isScrollToSafetyInProgress = true
             val centerOffset = -(viewportHeight / 3)
             listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
+            isScrollToSafetyInProgress = false
         } else {
             // Message is visible - check if it's in safe zone
             val visibleItem = visibleItems.find { it.index == messageIndex }
@@ -398,19 +414,22 @@ fun ChatScreen(
 
                 // If message extends outside safe zone, scroll to center
                 if (itemTop < safeTop || itemBottom > safeBottom) {
+                    isScrollToSafetyInProgress = true
                     val centerOffset = -(viewportHeight / 3)
                     listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
+                    isScrollToSafetyInProgress = false
                 }
             }
         }
     }
 
-    // Dismiss tapback menu when user scrolls
+    // Dismiss tapback menu when user scrolls (but not during programmatic scroll-to-safety)
     LaunchedEffect(selectedMessageForTapback) {
         if (selectedMessageForTapback != null) {
-            snapshotFlow { listState.isScrollInProgress }
-                .collect { isScrolling ->
-                    if (isScrolling) {
+            // Wait for scroll-to-safety to complete before enabling dismiss-on-scroll
+            snapshotFlow { listState.isScrollInProgress to isScrollToSafetyInProgress }
+                .collect { (isScrolling, isScrollToSafety) ->
+                    if (isScrolling && !isScrollToSafety) {
                         selectedMessageForTapback = null
                         selectedMessageBounds = null
                     }
@@ -661,6 +680,9 @@ fun ChatScreen(
         }
     }
 
+    // Provide ExoPlayerPool to video composables for pooled player management
+    // This limits active video players and auto-evicts oldest when scrolling
+    CompositionLocalProvider(LocalExoPlayerPool provides viewModel.exoPlayerPool) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -870,12 +892,20 @@ fun ChatScreen(
                                 }
                             }
                             is ComposerEvent.CancelVoiceRecording -> {
+                                // Clean up recording state
                                 try {
                                     mediaRecorder?.stop()
                                     mediaRecorder?.release()
                                 } catch (_: Exception) {}
                                 mediaRecorder = null
                                 isRecording = false
+                                // Clean up preview/playback state
+                                mediaPlayer?.release()
+                                mediaPlayer = null
+                                isPlayingVoiceMemo = false
+                                isPreviewingVoiceMemo = false
+                                playbackPosition = 0L
+                                // Delete recording file
                                 recordingFile?.delete()
                                 recordingFile = null
                             }
@@ -1194,6 +1224,17 @@ fun ChatScreen(
                 onDismiss = viewModel::dismissSaveContactBanner
             )
 
+            // ETA sharing banner - shows when navigation is detected (one-tap access while driving)
+            EtaSharingBanner(
+                isNavigationActive = uiState.isNavigationActive && uiState.isEtaSharingEnabled,
+                isCurrentlySharing = uiState.isEtaSharing,
+                currentEtaMinutes = uiState.currentEtaMinutes,
+                destination = uiState.etaDestination,
+                recipientName = uiState.chatTitle,
+                onStartSharing = { viewModel.startEtaSharing() },
+                onStopSharing = { viewModel.stopEtaSharing() }
+            )
+
             // Delayed loading indicator - only show after 500ms to avoid flash
             var showDelayedLoader by remember { mutableStateOf(false) }
             LaunchedEffect(initialLoadComplete) {
@@ -1404,24 +1445,6 @@ fun ChatScreen(
                             // Check if this message should be highlighted (from notification deep-link)
                             val isHighlighted = uiState.highlightedMessageGuid == message.guid
 
-                            // iOS-like highlight animation: amber/gold glow that pulses and fades
-                            val highlightAlpha = remember { Animatable(0f) }
-                            LaunchedEffect(isHighlighted) {
-                                if (isHighlighted) {
-                                    // Phase 1: Fade in
-                                    highlightAlpha.animateTo(0.3f, tween(200))
-                                    // Phase 2: Pulse 3 times
-                                    repeat(3) {
-                                        highlightAlpha.animateTo(0.15f, tween(200))
-                                        highlightAlpha.animateTo(0.3f, tween(200))
-                                    }
-                                    // Phase 3: Fade out
-                                    highlightAlpha.animateTo(0f, tween(400))
-                                    // Clear highlight state after animation completes
-                                    viewModel.clearHighlight()
-                                }
-                            }
-
                             Column(
                                 modifier = Modifier
                                     .zIndex(if (message.isPlacedSticker) 1f else 0f)  // Stickers render on top
@@ -1438,13 +1461,10 @@ fun ChatScreen(
                                         fadeOutSpec = null,
                                         placementSpec = snap()
                                     )
-                                    .then(
-                                        if (highlightAlpha.value > 0f) {
-                                            Modifier.background(
-                                                color = Color(0xFFFFD54F).copy(alpha = highlightAlpha.value),
-                                                shape = RoundedCornerShape(16.dp)
-                                            )
-                                        } else Modifier
+                                    // MD3 attention highlight: tints bubble with tertiaryContainer color
+                                    .materialAttentionHighlight(
+                                        shouldHighlight = isHighlighted,
+                                        onHighlightFinished = { viewModel.clearHighlight() }
                                     )
                             ) {
                                 // Show centered time separator BEFORE the message
@@ -1615,26 +1635,9 @@ fun ChatScreen(
                                 .padding(bottom = 16.dp)
                         )
 
-                        // Tapback scrim overlay - full screen, dismisses on tap or drag
-                        // Only show when both message AND bounds are available
-                        if (selectedMessageForTapback != null && selectedMessageBounds != null) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
-                                    .pointerInput(Unit) {
-                                        detectTapGestures(
-                                            onTap = {
-                                                selectedMessageForTapback = null
-                                                selectedMessageBounds = null
-                                            }
-                                        )
-                                    }
-                            )
-                        }
-
-                        // MD3 Tapback popup - anchor-based positioning with unified card
-                        TapbackPopup(
+                        // Message Spotlight Overlay - full-screen overlay with highlighted message
+                        // Uses same-window layering (not Popup) for proper touch handling
+                        MessageSpotlightOverlay(
                             visible = selectedMessageForTapback != null && selectedMessageBounds != null,
                             anchorBounds = selectedMessageBounds,
                             isFromMe = selectedMessageForTapback?.isFromMe == true,
@@ -1672,7 +1675,19 @@ fun ChatScreen(
                                     showForwardDialog = true
                                 }
                             }
-                        )
+                        ) {
+                            // Render spotlight message bubble (simplified, no interaction)
+                            selectedMessageForTapback?.let { message ->
+                                MessageBubble(
+                                    message = message,
+                                    onLongPress = {}, // No interaction in spotlight
+                                    onMediaClick = {}, // No interaction in spotlight
+                                    groupPosition = MessageGroupPosition.SINGLE,
+                                    showDeliveryIndicator = false,
+                                    onBoundsChanged = null // Don't track bounds in spotlight
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1695,6 +1710,7 @@ fun ChatScreen(
         onDismiss = { viewModel.dismissThreadOverlay() }
     )
     } // End of outer Box
+    } // End of CompositionLocalProvider
 
     // Effect picker bottom sheet
     if (showEffectPicker) {

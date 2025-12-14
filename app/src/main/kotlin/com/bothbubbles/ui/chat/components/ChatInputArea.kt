@@ -808,35 +808,50 @@ internal fun ExpandedRecordingPanel(
             }
 
             // Bottom controls row: Cancel, Restart, Stop, Attach
+            // Using icon-only buttons for Cancel/Restart to save space
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // Cancel button
-                TextButton(onClick = onCancel) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Cancel",
-                        tint = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        text = "Cancel",
-                        color = MaterialTheme.colorScheme.error
-                    )
+                // Cancel button (icon-only)
+                Surface(
+                    onClick = onCancel,
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f)
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
-                // Restart button
-                TextButton(onClick = onRestart) {
-                    Icon(
-                        Icons.Default.RestartAlt,
-                        contentDescription = stringResource(R.string.restart_recording),
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text(stringResource(R.string.restart_recording))
+                // Restart button (icon-only)
+                Surface(
+                    onClick = onRestart,
+                    modifier = Modifier.size(44.dp),
+                    shape = CircleShape,
+                    color = MaterialTheme.colorScheme.surfaceVariant
+                ) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            Icons.Default.RestartAlt,
+                            contentDescription = stringResource(R.string.restart_recording),
+                            tint = inputColors.inputIcon,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
                 }
 
                 // Red stop button (prominent)
@@ -859,14 +874,14 @@ internal fun ExpandedRecordingPanel(
                     }
                 }
 
-                // Attach button (pill shape with checkmark)
+                // Attach/Done button (pill shape with checkmark)
                 Surface(
                     onClick = onAttach,
                     shape = RoundedCornerShape(20.dp),
                     color = MaterialTheme.colorScheme.primary
                 ) {
                     Row(
-                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
@@ -877,7 +892,7 @@ internal fun ExpandedRecordingPanel(
                         )
                         Spacer(Modifier.width(4.dp))
                         Text(
-                            text = stringResource(R.string.attach_voice_memo),
+                            text = "Done",
                             color = MaterialTheme.colorScheme.onPrimary
                         )
                     }

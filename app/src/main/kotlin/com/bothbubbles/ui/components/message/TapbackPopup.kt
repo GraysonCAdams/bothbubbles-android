@@ -158,9 +158,7 @@ fun TapbackPopup(
             density = density.density
         ),
         properties = PopupProperties(
-            focusable = true,
-            dismissOnBackPress = true,
-            dismissOnClickOutside = false // Handled by scrim
+            focusable = false // Allow touches to pass through to underlying content (scrolling, scrim taps)
         ),
         onDismissRequest = { scope.launch { closeWithAnimation() } }
     ) {

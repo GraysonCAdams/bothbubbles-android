@@ -143,6 +143,10 @@
     <string name="picker_contacts">Contacts</string>
     <string name="picker_schedule">Schedule</string>
 
+    <!-- ETA Sharing -->
+    <string name="eta_sharing_service_label">ETA Sharing</string>
+    <string name="picker_eta">Share ETA</string>
+
     <!-- Send Mode Toggle Tutorial -->
     <string name="tutorial_send_mode_step1_title">Switch messaging modes</string>
     <string name="tutorial_send_mode_step1_description">Swipe up or down on the send button to switch between iMessage and SMS</string>

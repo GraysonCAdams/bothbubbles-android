@@ -64,6 +64,8 @@ fun AttachmentPickerPanel(
     onScheduleClick: () -> Unit,
     onMagicComposeClick: () -> Unit = {},  // Reserved for future AI-powered compose feature
     onCameraClick: () -> Unit = {},
+    onEtaSharingClick: () -> Unit = {},  // ETA sharing with navigation apps
+    isEtaSharingAvailable: Boolean = false,  // True when navigation is active
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -123,17 +125,20 @@ fun AttachmentPickerPanel(
         }
     }
 
-    // Define picker options
-    val pickerOptions = remember {
-        listOf(
-            AttachmentOption("gallery", Icons.Outlined.Image, R.string.picker_gallery, Color(0xFF673AB7)),
-            AttachmentOption("camera", Icons.Outlined.CameraAlt, R.string.picker_camera, Color(0xFF2196F3)),
-            AttachmentOption("gif", Icons.Outlined.Gif, R.string.picker_gifs, Color(0xFFE91E63)),
-            AttachmentOption("stickers", Icons.Outlined.EmojiEmotions, R.string.picker_stickers, Color(0xFFFF9800)),
-            AttachmentOption("files", Icons.Outlined.AttachFile, R.string.picker_files, Color(0xFF4CAF50)),
-            AttachmentOption("location", Icons.Outlined.LocationOn, R.string.picker_location, Color(0xFFF44336)),
-            AttachmentOption("contacts", Icons.Outlined.Person, R.string.picker_contacts, Color(0xFF00BCD4))
-        )
+    // Define picker options (conditionally include ETA when navigation is active)
+    val pickerOptions = remember(isEtaSharingAvailable) {
+        buildList {
+            add(AttachmentOption("gallery", Icons.Outlined.Image, R.string.picker_gallery, Color(0xFF673AB7)))
+            add(AttachmentOption("camera", Icons.Outlined.CameraAlt, R.string.picker_camera, Color(0xFF2196F3)))
+            add(AttachmentOption("gif", Icons.Outlined.Gif, R.string.picker_gifs, Color(0xFFE91E63)))
+            add(AttachmentOption("stickers", Icons.Outlined.EmojiEmotions, R.string.picker_stickers, Color(0xFFFF9800)))
+            add(AttachmentOption("files", Icons.Outlined.AttachFile, R.string.picker_files, Color(0xFF4CAF50)))
+            add(AttachmentOption("location", Icons.Outlined.LocationOn, R.string.picker_location, Color(0xFFF44336)))
+            add(AttachmentOption("contacts", Icons.Outlined.Person, R.string.picker_contacts, Color(0xFF00BCD4)))
+            if (isEtaSharingAvailable) {
+                add(AttachmentOption("eta", Icons.Outlined.Navigation, R.string.picker_eta, Color(0xFF009688)))
+            }
+        }
     }
 
     AnimatedVisibility(
@@ -235,6 +240,10 @@ fun AttachmentPickerPanel(
                                         )
                                     }
                                     "contacts" -> contactLauncher.launch(null)
+                                    "eta" -> {
+                                        onEtaSharingClick()
+                                        onDismiss()
+                                    }
                                 }
                             }
                         )

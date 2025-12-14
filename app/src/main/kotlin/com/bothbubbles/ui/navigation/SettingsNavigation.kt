@@ -28,6 +28,7 @@ fun NavGraphBuilder.settingsNavigation(
             onSwipeSettingsClick = { navController.navigate(Screen.SwipeSettings(returnToSettings = true)) },
             onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
             onImageQualityClick = { navController.navigate(Screen.ImageQualitySettings(returnToSettings = true)) },
+            onEtaSharingClick = { navController.navigate(Screen.EtaSharingSettings(returnToSettings = true)) },
             onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
         )
     }
@@ -182,6 +183,16 @@ fun NavGraphBuilder.settingsNavigation(
     composable<Screen.AutoResponderSettings> { backStackEntry ->
         val route: Screen.AutoResponderSettings = backStackEntry.toRoute()
         com.bothbubbles.ui.settings.autoresponder.AutoResponderSettingsScreen(
+            onNavigateBack = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            }
+        )
+    }
+
+    // ETA Sharing Settings
+    composable<Screen.EtaSharingSettings> { backStackEntry ->
+        val route: Screen.EtaSharingSettings = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.eta.EtaSharingSettingsScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
             }

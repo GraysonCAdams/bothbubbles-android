@@ -46,6 +46,32 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.DEVELOPER_MODE_ENABLED] ?: false
     }
 
+    // ===== Link Previews =====
+
+    val linkPreviewsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.LINK_PREVIEWS_ENABLED] ?: false  // Default false until pagination is implemented
+    }
+
+    // ===== ETA Sharing =====
+
+    val etaSharingEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.ETA_SHARING_ENABLED] ?: false
+    }
+
+    /**
+     * How often to send ETA updates (minimum minutes between updates)
+     */
+    val etaUpdateInterval: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.ETA_UPDATE_INTERVAL] ?: 15
+    }
+
+    /**
+     * Minimum ETA change (in minutes) to trigger an update
+     */
+    val etaChangeThreshold: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.ETA_CHANGE_THRESHOLD] ?: 5
+    }
+
     // ===== Auto-Responder =====
 
     val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -108,6 +134,30 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setLinkPreviewsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LINK_PREVIEWS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setEtaSharingEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ETA_SHARING_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setEtaUpdateInterval(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ETA_UPDATE_INTERVAL] = minutes.coerceIn(5, 30)
+        }
+    }
+
+    suspend fun setEtaChangeThreshold(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ETA_CHANGE_THRESHOLD] = minutes.coerceIn(2, 15)
+        }
+    }
+
     suspend fun setAutoResponderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
@@ -139,9 +189,17 @@ class FeaturePreferences @Inject constructor(
         // Developer Mode
         val DEVELOPER_MODE_ENABLED = booleanPreferencesKey("developer_mode_enabled")
 
+        // Link Previews
+        val LINK_PREVIEWS_ENABLED = booleanPreferencesKey("link_previews_enabled")
+
         // Auto-Responder
         val AUTO_RESPONDER_ENABLED = booleanPreferencesKey("auto_responder_enabled")
         val AUTO_RESPONDER_FILTER = stringPreferencesKey("auto_responder_filter")
         val AUTO_RESPONDER_RATE_LIMIT = intPreferencesKey("auto_responder_rate_limit")
+
+        // ETA Sharing
+        val ETA_SHARING_ENABLED = booleanPreferencesKey("eta_sharing_enabled")
+        val ETA_UPDATE_INTERVAL = intPreferencesKey("eta_update_interval")
+        val ETA_CHANGE_THRESHOLD = intPreferencesKey("eta_change_threshold")
     }
 }

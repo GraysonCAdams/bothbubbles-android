@@ -90,7 +90,13 @@ data class ChatUiState(
     val sendModeManuallySet: Boolean = false, // True if user has manually toggled the mode
     val tutorialState: TutorialState = TutorialState.NOT_SHOWN, // Tutorial state for first-time users
     // Sync integrity
-    val counterpartSynced: Boolean = false // True if counterpart chat was found and synced (refresh recommended)
+    val counterpartSynced: Boolean = false, // True if counterpart chat was found and synced (refresh recommended)
+    // ETA sharing (navigation)
+    val isEtaSharingEnabled: Boolean = false,
+    val isNavigationActive: Boolean = false,
+    val isEtaSharing: Boolean = false,
+    val currentEtaMinutes: Int = 0,
+    val etaDestination: String? = null
 )
 
 /**

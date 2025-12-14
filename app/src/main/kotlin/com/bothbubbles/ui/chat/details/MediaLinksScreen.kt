@@ -115,11 +115,9 @@ fun MediaLinksScreen(
                 if (uiState.videos.isNotEmpty()) {
                     item {
                         Spacer(modifier = Modifier.height(16.dp))
-                        Text(
-                            text = "Videos",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        MediaSectionHeader(
+                            title = "Videos",
+                            onSeeAllClick = onSeeAllVideos
                         )
                     }
                     item {

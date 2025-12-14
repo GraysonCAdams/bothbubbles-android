@@ -33,8 +33,8 @@ class ExoPlayerPool @Inject constructor(
 ) {
     companion object {
         private const val TAG = "ExoPlayerPool"
-        private const val MAX_POOL_SIZE = 3 // Maximum players to keep pooled
-        private const val MAX_ACTIVE_PLAYERS = 2 // Maximum players playing simultaneously
+        private const val MAX_POOL_SIZE = 2 // Maximum players to keep pooled
+        private const val MAX_ACTIVE_PLAYERS = 1 // Only one video plays at a time
     }
 
     // Active players currently in use, keyed by attachment GUID

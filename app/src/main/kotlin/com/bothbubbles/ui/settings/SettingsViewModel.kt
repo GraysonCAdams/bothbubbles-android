@@ -40,6 +40,7 @@ class SettingsViewModel @Inject constructor(
         observeSoundSettings()
         observeDeveloperMode()
         observeSmsEnabled()
+        observeLinkPreviews()
     }
 
     private fun observeSmsEnabled() {
@@ -126,6 +127,20 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.developerModeEnabled.collect { enabled ->
                 _uiState.update { it.copy(developerModeEnabled = enabled) }
             }
+        }
+    }
+
+    private fun observeLinkPreviews() {
+        viewModelScope.launch {
+            settingsDataStore.linkPreviewsEnabled.collect { enabled ->
+                _uiState.update { it.copy(linkPreviewsEnabled = enabled) }
+            }
+        }
+    }
+
+    fun setLinkPreviewsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setLinkPreviewsEnabled(enabled)
         }
     }
 
@@ -258,5 +273,7 @@ data class SettingsUiState(
     // SMS state
     val smsEnabled: Boolean = false,
     // Developer mode
-    val developerModeEnabled: Boolean = false
+    val developerModeEnabled: Boolean = false,
+    // Link previews
+    val linkPreviewsEnabled: Boolean = false
 )

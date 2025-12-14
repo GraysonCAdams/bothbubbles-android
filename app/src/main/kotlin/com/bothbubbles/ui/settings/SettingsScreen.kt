@@ -7,6 +7,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -44,6 +45,7 @@ fun SettingsScreen(
     onImageQualityClick: () -> Unit = {},
     onTemplatesClick: () -> Unit = {},
     onAutoResponderClick: () -> Unit = {},
+    onEtaSharingClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
@@ -92,6 +94,7 @@ fun SettingsScreen(
             onImageQualityClick = onImageQualityClick,
             onTemplatesClick = onTemplatesClick,
             onAutoResponderClick = onAutoResponderClick,
+            onEtaSharingClick = onEtaSharingClick,
             onAboutClick = onAboutClick,
             viewModel = viewModel
         )
@@ -124,6 +127,7 @@ fun SettingsContent(
     onImageQualityClick: () -> Unit,
     onTemplatesClick: () -> Unit,
     onAutoResponderClick: () -> Unit,
+    onEtaSharingClick: () -> Unit = {},
     onAboutClick: () -> Unit,
     viewModel: SettingsViewModel
 ) {
@@ -250,6 +254,16 @@ fun SettingsContent(
                     title = "Auto-responder",
                     subtitle = "Greet first-time iMessage contacts",
                     onClick = onAutoResponderClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // ETA Sharing
+                SettingsMenuItem(
+                    icon = Icons.Outlined.Navigation,
+                    title = "ETA sharing",
+                    subtitle = "Share arrival time while navigating",
+                    onClick = onEtaSharingClick
                 )
             }
         }
@@ -437,6 +451,23 @@ fun SettingsContent(
                     title = "Export messages",
                     subtitle = "Save conversations as HTML or PDF",
                     onClick = onExportClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Link previews toggle
+                SettingsMenuItem(
+                    icon = Icons.Default.Link,
+                    title = "Link previews",
+                    subtitle = if (uiState.linkPreviewsEnabled) "Show rich previews for URLs" else "Disabled to improve performance",
+                    onClick = { viewModel.setLinkPreviewsEnabled(!uiState.linkPreviewsEnabled) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.linkPreviewsEnabled,
+                            onCheckedChange = { viewModel.setLinkPreviewsEnabled(it) },
+                            showIcons = false
+                        )
+                    }
                 )
             }
         }

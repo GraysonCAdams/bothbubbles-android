@@ -53,6 +53,7 @@ import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.media.AttachmentPreloader
+import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.services.media.ValidationError
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
@@ -82,6 +83,7 @@ import com.bothbubbles.ui.components.message.ThreadChain
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.paging.MessagePagingController
 import com.bothbubbles.ui.chat.paging.PagingConfig
@@ -141,10 +143,13 @@ class ChatViewModel @Inject constructor(
     // Delegates for decomposition
     private val sendDelegate: ChatSendDelegate,
     private val attachmentDelegate: ChatAttachmentDelegate,
+    private val etaSharingDelegate: ChatEtaSharingDelegate,
     private val messageSendingService: MessageSendingService,
     // Sync integrity services
     private val counterpartSyncService: CounterpartSyncService,
-    private val gifRepository: GifRepository
+    private val gifRepository: GifRepository,
+    // Media playback
+    val exoPlayerPool: ExoPlayerPool
 ) : ViewModel() {
 
     companion object {
@@ -496,6 +501,7 @@ class ChatViewModel @Inject constructor(
         // Initialize delegates
         sendDelegate.initialize(chatGuid, viewModelScope)
         attachmentDelegate.initialize(chatGuid, viewModelScope, mergedChatGuids)
+        etaSharingDelegate.initialize(viewModelScope)
 
         // Observe delegate state flows and forward to UI state
         viewModelScope.launch {
@@ -531,6 +537,20 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             attachmentDelegate.refreshTrigger.collect { trigger ->
                 _attachmentRefreshTrigger.value = trigger
+            }
+        }
+        // Forward ETA sharing delegate's state to UI state
+        viewModelScope.launch {
+            etaSharingDelegate.etaSharingState.collect { etaState ->
+                _uiState.update {
+                    it.copy(
+                        isEtaSharingEnabled = etaState.isEnabled,
+                        isNavigationActive = etaState.isNavigationActive,
+                        isEtaSharing = etaState.isCurrentlySharing,
+                        currentEtaMinutes = etaState.currentEtaMinutes,
+                        etaDestination = etaState.destination
+                    )
+                }
             }
         }
 
@@ -3317,6 +3337,24 @@ class ChatViewModel @Inject constructor(
             // Save the work request ID for potential cancellation
             scheduledMessageRepository.updateWorkRequestId(id, workRequest.id.toString())
         }
+    }
+
+    // ===== ETA Sharing =====
+
+    /**
+     * Start sharing ETA with the current chat recipient.
+     * This reads navigation notifications and sends periodic updates.
+     */
+    fun startEtaSharing() {
+        val chatTitle = _uiState.value.chatTitle
+        etaSharingDelegate.startSharingEta(chatGuid, chatTitle)
+    }
+
+    /**
+     * Stop sharing ETA with the current chat recipient.
+     */
+    fun stopEtaSharing() {
+        etaSharingDelegate.stopSharingEta()
     }
 }
 

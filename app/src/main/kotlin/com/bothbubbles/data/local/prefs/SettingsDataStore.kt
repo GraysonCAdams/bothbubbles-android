@@ -219,9 +219,13 @@ class SettingsDataStore @Inject constructor(
     val mlAutoUpdateOnCellular: Flow<Boolean> get() = featurePrefs.mlAutoUpdateOnCellular
     val categorizationEnabled: Flow<Boolean> get() = featurePrefs.categorizationEnabled
     val developerModeEnabled: Flow<Boolean> get() = featurePrefs.developerModeEnabled
+    val linkPreviewsEnabled: Flow<Boolean> get() = featurePrefs.linkPreviewsEnabled
     val autoResponderEnabled: Flow<Boolean> get() = featurePrefs.autoResponderEnabled
     val autoResponderFilter: Flow<String> get() = featurePrefs.autoResponderFilter
     val autoResponderRateLimit: Flow<Int> get() = featurePrefs.autoResponderRateLimit
+    val etaSharingEnabled: Flow<Boolean> get() = featurePrefs.etaSharingEnabled
+    val etaUpdateInterval: Flow<Int> get() = featurePrefs.etaUpdateInterval
+    val etaChangeThreshold: Flow<Int> get() = featurePrefs.etaChangeThreshold
 
     suspend fun setSpamDetectionEnabled(enabled: Boolean) = featurePrefs.setSpamDetectionEnabled(enabled)
     suspend fun setSpamThreshold(threshold: Int) = featurePrefs.setSpamThreshold(threshold)
@@ -229,9 +233,13 @@ class SettingsDataStore @Inject constructor(
     suspend fun setMlAutoUpdateOnCellular(enabled: Boolean) = featurePrefs.setMlAutoUpdateOnCellular(enabled)
     suspend fun setCategorizationEnabled(enabled: Boolean) = featurePrefs.setCategorizationEnabled(enabled)
     suspend fun setDeveloperModeEnabled(enabled: Boolean) = featurePrefs.setDeveloperModeEnabled(enabled)
+    suspend fun setLinkPreviewsEnabled(enabled: Boolean) = featurePrefs.setLinkPreviewsEnabled(enabled)
     suspend fun setAutoResponderEnabled(enabled: Boolean) = featurePrefs.setAutoResponderEnabled(enabled)
     suspend fun setAutoResponderFilter(filter: String) = featurePrefs.setAutoResponderFilter(filter)
     suspend fun setAutoResponderRateLimit(limit: Int) = featurePrefs.setAutoResponderRateLimit(limit)
+    suspend fun setEtaSharingEnabled(enabled: Boolean) = featurePrefs.setEtaSharingEnabled(enabled)
+    suspend fun setEtaUpdateInterval(minutes: Int) = featurePrefs.setEtaUpdateInterval(minutes)
+    suspend fun setEtaChangeThreshold(minutes: Int) = featurePrefs.setEtaChangeThreshold(minutes)
 
     // ===== Global Operations =====
 

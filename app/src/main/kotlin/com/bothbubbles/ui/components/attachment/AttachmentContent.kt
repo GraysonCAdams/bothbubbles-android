@@ -20,6 +20,7 @@ import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.PictureAsPdf
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.VolumeOff
@@ -59,8 +60,16 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
+import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.util.rememberBlurhashBitmap
+
+/**
+ * CompositionLocal for providing ExoPlayerPool to video composables.
+ * When provided, videos will use pooled players with automatic eviction
+ * to limit memory usage and prevent multiple videos playing simultaneously.
+ */
+val LocalExoPlayerPool = staticCompositionLocalOf<ExoPlayerPool?> { null }
 
 /**
  * Renders an attachment within a message bubble.
@@ -419,8 +428,9 @@ private fun ImageAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    // Use thumbnail for faster loading in message list, fall back to full image
-    val imageUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+    // Use full-resolution image for crisp display in chat (thumbnails are only 300px)
+    // Coil handles memory-efficient loading via size() constraint
+    val imageUrl = attachment.localPath ?: attachment.webUrl
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -440,7 +450,7 @@ private fun ImageAttachment(
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
-            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -605,7 +615,7 @@ private fun GifAttachment(
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
-            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .clip(RoundedCornerShape(12.dp))
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
     ) {
@@ -748,7 +758,8 @@ private fun GifAttachment(
 }
 
 /**
- * Inline video player with mute/unmute and fullscreen controls.
+ * Inline video attachment that shows thumbnail until user taps play.
+ * Only acquires ExoPlayer when actively playing to minimize resource usage.
  * Double-tap opens fullscreen media viewer.
  */
 @Composable
@@ -761,6 +772,7 @@ private fun InlineVideoAttachment(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val exoPlayerPool = LocalExoPlayerPool.current
 
     val videoUrl = attachment.localPath ?: attachment.webUrl
 
@@ -771,36 +783,54 @@ private fun InlineVideoAttachment(
         16f / 9f // Default video aspect ratio
     }
 
+    // Player state - only acquire when actively playing
+    var isPlayerActive by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(true) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var showPlayButton by remember { mutableStateOf(true) }
+    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
-    // Create ExoPlayer
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
+    // Function to start playback - acquires player lazily
+    fun startPlayback() {
+        if (videoUrl == null) return
+
+        val player = if (exoPlayerPool != null) {
+            exoPlayerPool.acquire(attachment.guid)
+        } else {
+            ExoPlayer.Builder(context).build()
+        }
+
+        player.apply {
             repeatMode = Player.REPEAT_MODE_ALL
-            volume = 0f // Start muted
+            volume = if (isMuted) 0f else 1f
+            setMediaItem(MediaItem.fromUri(videoUrl))
+            prepare()
+            play()
         }
+
+        exoPlayer = player
+        isPlayerActive = true
     }
 
-    // Set media item when URL is available
-    LaunchedEffect(videoUrl) {
-        videoUrl?.let { url ->
-            exoPlayer.setMediaItem(MediaItem.fromUri(url))
-            exoPlayer.prepare()
+    // Function to stop playback and release player
+    fun stopPlayback() {
+        exoPlayer?.let { player ->
+            player.stop()
+            if (exoPlayerPool != null) {
+                exoPlayerPool.release(attachment.guid)
+            } else {
+                player.release()
+            }
         }
+        exoPlayer = null
+        isPlayerActive = false
     }
 
-    // Handle lifecycle
-    DisposableEffect(lifecycleOwner) {
+    // Handle lifecycle - pause on background, release on dispose
+    DisposableEffect(lifecycleOwner, attachment.guid) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    exoPlayer.pause()
-                    isPlaying = false
-                }
-                Lifecycle.Event.ON_RESUME -> {
-                    // Don't auto-resume
+                    // Stop playback when app goes to background
+                    stopPlayback()
                 }
                 else -> {}
             }
@@ -809,13 +839,13 @@ private fun InlineVideoAttachment(
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            exoPlayer.release()
+            stopPlayback()
         }
     }
 
     // Update volume when mute state changes
-    LaunchedEffect(isMuted) {
-        exoPlayer.volume = if (isMuted) 0f else 1f
+    LaunchedEffect(isMuted, exoPlayer) {
+        exoPlayer?.volume = if (isMuted) 0f else 1f
     }
 
     if (videoUrl == null) {
@@ -828,59 +858,197 @@ private fun InlineVideoAttachment(
         return
     }
 
+    // Show thumbnail when not playing, video player when active
+    if (!isPlayerActive || exoPlayer == null) {
+        // Thumbnail mode - show preview with play button
+        VideoThumbnailWithControls(
+            attachment = attachment,
+            aspectRatio = aspectRatio,
+            onPlayClick = { startPlayback() },
+            onFullscreenClick = onFullscreenClick,
+            isUploading = isUploading,
+            uploadProgress = uploadProgress,
+            modifier = modifier
+        )
+    } else {
+        // Active playback mode
+        Box(
+            modifier = modifier
+                .widthIn(max = 250.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            // Pause and return to thumbnail on tap
+                            stopPlayback()
+                        },
+                        onDoubleTap = {
+                            // Open fullscreen on double tap
+                            stopPlayback()
+                            onFullscreenClick()
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            // Video player
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = exoPlayer
+                },
+                modifier = Modifier
+                    .widthIn(max = 250.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+            )
+
+            // Mute/Unmute button (top-left corner)
+            Surface(
+                onClick = { isMuted = !isMuted },
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Fullscreen button (top-right corner)
+            Surface(
+                onClick = {
+                    stopPlayback()
+                    onFullscreenClick()
+                },
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Fullscreen,
+                        contentDescription = "Fullscreen",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Pause indicator in center (tap to pause)
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.4f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Pause,
+                        contentDescription = "Tap to pause",
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Video thumbnail with play button and fullscreen control.
+ * Used as the default state before user starts playback.
+ */
+@Composable
+private fun VideoThumbnailWithControls(
+    attachment: AttachmentUiModel,
+    aspectRatio: Float,
+    onPlayClick: () -> Unit,
+    onFullscreenClick: () -> Unit,
+    isUploading: Boolean,
+    uploadProgress: Float,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+    var isError by remember { mutableStateOf(false) }
+
+    val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = {
-                        // Toggle play/pause on single tap
-                        if (isPlaying) {
-                            exoPlayer.pause()
-                            isPlaying = false
-                            showPlayButton = true
-                        } else {
-                            exoPlayer.play()
-                            isPlaying = true
-                            showPlayButton = false
-                        }
-                    },
-                    onDoubleTap = {
-                        // Open fullscreen on double tap
-                        exoPlayer.pause()
-                        isPlaying = false
-                        onFullscreenClick()
-                    }
+                    onTap = { if (!isUploading) onPlayClick() },
+                    onDoubleTap = { onFullscreenClick() }
                 )
             },
         contentAlignment = Alignment.Center
     ) {
-        // Video player
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+        if (thumbnailUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(thumbnailUrl)
+                    .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
+                    .build(),
+                contentDescription = attachment.transferName ?: "Video",
+                modifier = Modifier
+                    .widthIn(max = 250.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
+                    isError = state is AsyncImagePainter.State.Error
                 }
-            },
-            modifier = Modifier
-                .widthIn(max = 250.dp)
-                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-        )
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .width(200.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+            )
+        }
 
-        // Play button overlay with fade + scale animation (shown when paused)
-        AnimatedVisibility(
-            visible = showPlayButton,
-            enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
-            exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
-        ) {
+        // Loading indicator
+        if (isLoading && thumbnailUrl != null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(32.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        // Play button overlay (shown when not loading and not uploading)
+        if (!isLoading && !isUploading) {
             Surface(
                 shape = CircleShape,
                 color = Color.Black.copy(alpha = 0.6f),
@@ -897,33 +1065,9 @@ private fun InlineVideoAttachment(
             }
         }
 
-        // Mute/Unmute button (top-left corner)
-        Surface(
-            onClick = { isMuted = !isMuted },
-            shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.6f),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp)
-                .size(32.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                    contentDescription = if (isMuted) "Unmute" else "Mute",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
         // Fullscreen button (top-right corner)
         Surface(
-            onClick = {
-                exoPlayer.pause()
-                isPlaying = false
-                onFullscreenClick()
-            },
+            onClick = onFullscreenClick,
             shape = CircleShape,
             color = Color.Black.copy(alpha = 0.6f),
             modifier = Modifier
@@ -941,12 +1085,8 @@ private fun InlineVideoAttachment(
             }
         }
 
-        // Upload progress overlay for outbound attachments
-        AnimatedVisibility(
-            visible = isUploading,
-            enter = fadeIn(tween(150)),
-            exit = fadeOut(tween(150))
-        ) {
+        // Upload progress overlay
+        if (isUploading) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -1515,11 +1655,11 @@ private fun BorderlessImageAttachment(
 
     // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
     // Force download first to trigger HEIC→PNG conversion
-    // For non-stickers, use thumbnail when available for faster loading
+    // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+        attachment.localPath ?: attachment.webUrl
     }
 
     // Calculate aspect ratio for proper sizing
@@ -1552,7 +1692,7 @@ private fun BorderlessImageAttachment(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
             .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .clip(RoundedCornerShape(12.dp))
             .then(
                 if (isPlacedSticker) {
                     Modifier.graphicsLayer { rotationZ = rotation }
@@ -1652,11 +1792,11 @@ private fun BorderlessGifAttachment(
 
     // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
     // Force download first to trigger HEIC→PNG conversion
-    // For non-stickers, use thumbnail when available for faster loading
+    // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+        attachment.localPath ?: attachment.webUrl
     }
 
     // Calculate aspect ratio for proper sizing
@@ -1689,7 +1829,7 @@ private fun BorderlessGifAttachment(
     Box(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
-            .then(if (isTransparent) Modifier else Modifier.clip(RoundedCornerShape(12.dp)))
+            .clip(RoundedCornerShape(12.dp))
             .then(
                 if (isPlacedSticker) {
                     Modifier.graphicsLayer { rotationZ = rotation }
@@ -1794,7 +1934,8 @@ private fun BorderlessGifAttachment(
 }
 
 /**
- * Borderless inline video player with mute/unmute and fullscreen controls.
+ * Borderless video attachment that shows thumbnail until user taps play.
+ * Only acquires ExoPlayer when actively playing to minimize resource usage.
  * Double-tap opens fullscreen media viewer.
  */
 @Composable
@@ -1806,6 +1947,7 @@ private fun BorderlessInlineVideoAttachment(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val exoPlayerPool = LocalExoPlayerPool.current
 
     val videoUrl = attachment.localPath ?: attachment.webUrl
 
@@ -1816,36 +1958,53 @@ private fun BorderlessInlineVideoAttachment(
         16f / 9f // Default video aspect ratio
     }
 
+    // Player state - only acquire when actively playing
+    var isPlayerActive by remember { mutableStateOf(false) }
     var isMuted by remember { mutableStateOf(true) }
-    var isPlaying by remember { mutableStateOf(false) }
-    var showPlayButton by remember { mutableStateOf(true) }
+    var exoPlayer by remember { mutableStateOf<ExoPlayer?>(null) }
 
-    // Create ExoPlayer
-    val exoPlayer = remember {
-        ExoPlayer.Builder(context).build().apply {
+    // Function to start playback - acquires player lazily
+    fun startPlayback() {
+        if (videoUrl == null) return
+
+        val player = if (exoPlayerPool != null) {
+            exoPlayerPool.acquire(attachment.guid)
+        } else {
+            ExoPlayer.Builder(context).build()
+        }
+
+        player.apply {
             repeatMode = Player.REPEAT_MODE_ALL
-            volume = 0f // Start muted
+            volume = if (isMuted) 0f else 1f
+            setMediaItem(MediaItem.fromUri(videoUrl))
+            prepare()
+            play()
         }
+
+        exoPlayer = player
+        isPlayerActive = true
     }
 
-    // Set media item when URL is available
-    LaunchedEffect(videoUrl) {
-        videoUrl?.let { url ->
-            exoPlayer.setMediaItem(MediaItem.fromUri(url))
-            exoPlayer.prepare()
+    // Function to stop playback and release player
+    fun stopPlayback() {
+        exoPlayer?.let { player ->
+            player.stop()
+            if (exoPlayerPool != null) {
+                exoPlayerPool.release(attachment.guid)
+            } else {
+                player.release()
+            }
         }
+        exoPlayer = null
+        isPlayerActive = false
     }
 
-    // Handle lifecycle
-    DisposableEffect(lifecycleOwner) {
+    // Handle lifecycle - pause on background, release on dispose
+    DisposableEffect(lifecycleOwner, attachment.guid) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
                 Lifecycle.Event.ON_PAUSE -> {
-                    exoPlayer.pause()
-                    isPlaying = false
-                }
-                Lifecycle.Event.ON_RESUME -> {
-                    // Don't auto-resume
+                    stopPlayback()
                 }
                 else -> {}
             }
@@ -1854,17 +2013,16 @@ private fun BorderlessInlineVideoAttachment(
 
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
-            exoPlayer.release()
+            stopPlayback()
         }
     }
 
     // Update volume when mute state changes
-    LaunchedEffect(isMuted) {
-        exoPlayer.volume = if (isMuted) 0f else 1f
+    LaunchedEffect(isMuted, exoPlayer) {
+        exoPlayer?.volume = if (isMuted) 0f else 1f
     }
 
     if (videoUrl == null) {
-        // Fallback to thumbnail view if no URL
         BorderlessVideoThumbnailAttachment(
             attachment = attachment,
             onClick = onFullscreenClick,
@@ -1874,59 +2032,186 @@ private fun BorderlessInlineVideoAttachment(
         return
     }
 
+    // Show thumbnail when not playing, video player when active
+    if (!isPlayerActive || exoPlayer == null) {
+        // Thumbnail mode
+        BorderlessVideoThumbnailWithControls(
+            attachment = attachment,
+            aspectRatio = aspectRatio,
+            maxWidth = maxWidth,
+            onPlayClick = { startPlayback() },
+            onFullscreenClick = onFullscreenClick,
+            modifier = modifier
+        )
+    } else {
+        // Active playback mode
+        Box(
+            modifier = modifier
+                .widthIn(max = maxWidth)
+                .clip(RoundedCornerShape(12.dp))
+                .background(Color.Black)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { stopPlayback() },
+                        onDoubleTap = {
+                            stopPlayback()
+                            onFullscreenClick()
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            AndroidView(
+                factory = { ctx ->
+                    PlayerView(ctx).apply {
+                        player = exoPlayer
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        layoutParams = ViewGroup.LayoutParams(
+                            ViewGroup.LayoutParams.MATCH_PARENT,
+                            ViewGroup.LayoutParams.MATCH_PARENT
+                        )
+                    }
+                },
+                update = { playerView ->
+                    playerView.player = exoPlayer
+                },
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+            )
+
+            // Mute/Unmute button (top-left)
+            Surface(
+                onClick = { isMuted = !isMuted },
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                        contentDescription = if (isMuted) "Unmute" else "Mute",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Fullscreen button (top-right)
+            Surface(
+                onClick = {
+                    stopPlayback()
+                    onFullscreenClick()
+                },
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Fullscreen,
+                        contentDescription = "Fullscreen",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            // Pause indicator
+            Surface(
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.4f),
+                modifier = Modifier.size(48.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Pause,
+                        contentDescription = "Tap to pause",
+                        tint = Color.White.copy(alpha = 0.8f),
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Borderless video thumbnail with play button.
+ */
+@Composable
+private fun BorderlessVideoThumbnailWithControls(
+    attachment: AttachmentUiModel,
+    aspectRatio: Float,
+    maxWidth: androidx.compose.ui.unit.Dp,
+    onPlayClick: () -> Unit,
+    onFullscreenClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var isLoading by remember { mutableStateOf(true) }
+
+    val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
+
+    val density = LocalDensity.current
+    val maxWidthPx = with(density) { maxWidth.toPx().toInt() }
+    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+
     Box(
         modifier = modifier
             .widthIn(max = maxWidth)
             .clip(RoundedCornerShape(12.dp))
-            .background(Color.Black)
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = {
-                        // Toggle play/pause on single tap
-                        if (isPlaying) {
-                            exoPlayer.pause()
-                            isPlaying = false
-                            showPlayButton = true
-                        } else {
-                            exoPlayer.play()
-                            isPlaying = true
-                            showPlayButton = false
-                        }
-                    },
-                    onDoubleTap = {
-                        // Open fullscreen on double tap
-                        exoPlayer.pause()
-                        isPlaying = false
-                        onFullscreenClick()
-                    }
+                    onTap = { onPlayClick() },
+                    onDoubleTap = { onFullscreenClick() }
                 )
             },
         contentAlignment = Alignment.Center
     ) {
-        // Video player
-        AndroidView(
-            factory = { ctx ->
-                PlayerView(ctx).apply {
-                    player = exoPlayer
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+        if (thumbnailUrl != null) {
+            AsyncImage(
+                model = ImageRequest.Builder(LocalContext.current)
+                    .data(thumbnailUrl)
+                    .crossfade(true)
+                    .size(maxWidthPx, targetHeightPx)
+                    .precision(Precision.INEXACT)
+                    .build(),
+                contentDescription = attachment.transferName ?: "Video",
+                modifier = Modifier
+                    .widthIn(max = maxWidth)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                contentScale = ContentScale.Crop,
+                onState = { state ->
+                    isLoading = state is AsyncImagePainter.State.Loading
                 }
-            },
-            modifier = Modifier
-                .widthIn(max = maxWidth)
-                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-        )
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .width(200.dp)
+                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+            )
+        }
 
-        // Play button overlay with fade + scale animation (shown when paused)
-        AnimatedVisibility(
-            visible = showPlayButton,
-            enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
-            exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
-        ) {
+        // Loading indicator
+        if (isLoading && thumbnailUrl != null) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(32.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+        }
+
+        // Play button
+        if (!isLoading) {
             Surface(
                 shape = CircleShape,
                 color = Color.Black.copy(alpha = 0.6f),
@@ -1943,33 +2228,9 @@ private fun BorderlessInlineVideoAttachment(
             }
         }
 
-        // Mute/Unmute button (top-left corner)
+        // Fullscreen button (top-right)
         Surface(
-            onClick = { isMuted = !isMuted },
-            shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.6f),
-            modifier = Modifier
-                .align(Alignment.TopStart)
-                .padding(8.dp)
-                .size(32.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
-                    contentDescription = if (isMuted) "Unmute" else "Mute",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        // Fullscreen button (top-right corner)
-        Surface(
-            onClick = {
-                exoPlayer.pause()
-                isPlaying = false
-                onFullscreenClick()
-            },
+            onClick = onFullscreenClick,
             shape = CircleShape,
             color = Color.Black.copy(alpha = 0.6f),
             modifier = Modifier

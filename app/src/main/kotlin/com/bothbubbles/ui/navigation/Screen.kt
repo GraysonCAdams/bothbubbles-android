@@ -106,6 +106,9 @@ sealed interface Screen {
     data class AutoResponderSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class EtaSharingSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class ImageQualitySettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
