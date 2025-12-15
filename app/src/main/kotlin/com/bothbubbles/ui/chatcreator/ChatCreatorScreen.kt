@@ -1,38 +1,30 @@
 package com.bothbubbles.ui.chatcreator
 
-import androidx.compose.foundation.horizontalScroll
+import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.GroupAdd
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.graphics.SolidColor
-import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
-import androidx.compose.ui.input.key.key
-import androidx.compose.ui.input.key.onKeyEvent
-import androidx.compose.ui.input.key.type
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.launch
@@ -48,6 +40,7 @@ fun ChatCreatorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
+    val isGroupMode = uiState.mode == ChatCreatorMode.GROUP
 
     // Auto-focus the To field when screen opens
     LaunchedEffect(Unit) {
@@ -69,37 +62,58 @@ fun ChatCreatorScreen(
         }
     }
 
+    // Handle back press in group mode - exit group mode instead of navigating back
+    BackHandler(enabled = isGroupMode) {
+        viewModel.exitGroupMode()
+    }
+
     Scaffold(
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = {
-                    Text(
-                        text = "New chat",
-                        style = MaterialTheme.typography.titleLarge.copy(
-                            fontWeight = FontWeight.Normal
+                    AnimatedContent(
+                        targetState = isGroupMode,
+                        transitionSpec = {
+                            fadeIn() togetherWith fadeOut()
+                        },
+                        label = "title"
+                    ) { inGroupMode ->
+                        Text(
+                            text = if (inGroupMode) "New group" else "New conversation",
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontWeight = FontWeight.Normal
+                            )
                         )
-                    )
+                    }
                 },
                 navigationIcon = {
-                    IconButton(onClick = onBackClick) {
+                    IconButton(
+                        onClick = {
+                            if (isGroupMode) {
+                                viewModel.exitGroupMode()
+                            } else {
+                                onBackClick()
+                            }
+                        }
+                    ) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back"
+                            imageVector = if (isGroupMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = if (isGroupMode) "Cancel" else "Back"
                         )
                     }
                 },
                 actions = {
-                    // Show Continue button when recipients are selected
-                    android.util.Log.d("ChatCreator", "selectedRecipients: ${uiState.selectedRecipients.size}, isLoading: ${uiState.isLoading}")
-                    if (uiState.selectedRecipients.isNotEmpty()) {
+                    // Show Next button when in group mode with 2+ recipients
+                    AnimatedVisibility(
+                        visible = isGroupMode && uiState.selectedRecipients.size >= 2,
+                        enter = fadeIn() + slideInVertically(),
+                        exit = fadeOut() + slideOutVertically()
+                    ) {
                         TextButton(
-                            onClick = {
-                                android.util.Log.d("ChatCreator", "Continue button clicked!")
-                                viewModel.onContinue()
-                            },
+                            onClick = { viewModel.onContinue() },
                             enabled = !uiState.isLoading
                         ) {
-                            Text("Continue")
+                            Text("Next")
                             Spacer(modifier = Modifier.width(4.dp))
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowForward,
@@ -109,10 +123,31 @@ fun ChatCreatorScreen(
                         }
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
+                colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface
                 )
             )
+        },
+        floatingActionButton = {
+            // Show FAB for "Next" in group mode when 2+ recipients selected
+            AnimatedVisibility(
+                visible = isGroupMode && uiState.selectedRecipients.size >= 2,
+                enter = fadeIn() + slideInVertically { it },
+                exit = fadeOut() + slideOutVertically { it }
+            ) {
+                ExtendedFloatingActionButton(
+                    onClick = { viewModel.onContinue() },
+                    icon = {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null
+                        )
+                    },
+                    text = { Text("Next") },
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                )
+            }
         }
     ) { padding ->
         Column(
@@ -120,146 +155,18 @@ fun ChatCreatorScreen(
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            // Selected recipients chips row
-            if (uiState.selectedRecipients.isNotEmpty()) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    uiState.selectedRecipients.forEach { recipient ->
-                        RecipientChip(
-                            recipient = recipient,
-                            onRemove = { viewModel.removeRecipient(recipient.address) }
-                        )
-                    }
-                }
-            }
-
-            // Search/To field
-            Surface(
-                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                shape = RoundedCornerShape(28.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "To:",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.width(12.dp))
-
-                    // Track previous query for soft keyboard backspace detection
-                    var previousQuery by remember { mutableStateOf("") }
-
-                    BasicTextField(
-                        value = uiState.searchQuery,
-                        onValueChange = { newValue ->
-                            // Detect backspace when previous was empty and still empty (soft keyboard workaround)
-                            // This triggers when cursor is at position 0 and backspace is pressed
-                            if (previousQuery.isEmpty() && newValue.isEmpty() && uiState.selectedRecipients.isNotEmpty()) {
-                                // Soft keyboard sent empty -> empty, which can happen on some keyboards
-                                // We'll rely on the onKeyEvent for this case
-                            }
-                            previousQuery = newValue
-                            viewModel.updateSearchQuery(newValue)
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(focusRequester)
-                            .onKeyEvent { event ->
-                                // Handle backspace when input is empty to remove last recipient
-                                // Only trigger on KeyDown to avoid double-firing
-                                if (event.type == KeyEventType.KeyDown &&
-                                    event.key == Key.Backspace &&
-                                    uiState.searchQuery.isEmpty() &&
-                                    uiState.selectedRecipients.isNotEmpty()
-                                ) {
-                                    viewModel.removeLastRecipient()
-                                    true
-                                } else {
-                                    false
-                                }
-                            },
-                        textStyle = TextStyle(
-                            color = MaterialTheme.colorScheme.onSurface,
-                            fontSize = 16.sp
-                        ),
-                        cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                // Add current query as recipient if it's a valid phone/email
-                                viewModel.onDonePressed()
-                            }
-                        ),
-                        decorationBox = { innerTextField ->
-                            Box {
-                                if (uiState.searchQuery.isEmpty()) {
-                                    Text(
-                                        text = if (uiState.selectedRecipients.isEmpty()) {
-                                            "Type name, phone number, or email"
-                                        } else {
-                                            "Add another recipient..."
-                                        },
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        fontSize = 16.sp
-                                    )
-                                }
-                                innerTextField()
-                            }
-                        }
-                    )
-                }
-            }
-
-            // Create group button - only show when 2+ recipients, or when no recipients selected (to discover feature)
-            val showCreateGroupButton = uiState.selectedRecipients.size >= 2
-            if (showCreateGroupButton) {
-                Surface(
-                    onClick = { viewModel.onContinue() },
-                    color = MaterialTheme.colorScheme.primaryContainer,
-                    shape = RoundedCornerShape(28.dp),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 4.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Icon(
-                            Icons.Default.GroupAdd,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Create group (${uiState.selectedRecipients.size} people)",
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    }
-                }
-            }
+            // M3 Recipient field with inline chips
+            M3RecipientField(
+                recipients = uiState.selectedRecipients,
+                searchQuery = uiState.searchQuery,
+                onSearchQueryChange = { viewModel.updateSearchQuery(it) },
+                onRemoveRecipient = { viewModel.removeRecipient(it) },
+                onRemoveLastRecipient = { viewModel.removeLastRecipient() },
+                onDone = { viewModel.onDonePressed() },
+                focusRequester = focusRequester,
+                placeholder = if (isGroupMode) "Add participants..." else "Type name, phone number, or email",
+                addMorePlaceholder = if (isGroupMode) "Add more participants..." else "Add another recipient..."
+            )
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -287,9 +194,11 @@ fun ChatCreatorScreen(
             }
 
             // Build section index map for fast scrolling
-            val sectionIndexMap = remember(uiState.recentContacts, uiState.favoriteContacts, uiState.groupedContacts, uiState.searchQuery) {
+            val sectionIndexMap = remember(uiState.recentContacts, uiState.favoriteContacts, uiState.groupedContacts, uiState.searchQuery, isGroupMode) {
                 buildMap {
                     var index = 0
+                    // Create group row (only in single mode, not searching)
+                    if (!isGroupMode && uiState.searchQuery.isEmpty()) index++
                     // Manual entry item
                     if (uiState.manualAddressEntry != null) index++
                     // Recent section
@@ -327,126 +236,154 @@ fun ChatCreatorScreen(
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     state = listState,
-                    contentPadding = PaddingValues(bottom = 16.dp, end = if (availableLetters.size > 1) 24.dp else 0.dp)
+                    contentPadding = PaddingValues(
+                        bottom = if (isGroupMode && uiState.selectedRecipients.size >= 2) 88.dp else 16.dp,
+                        end = if (availableLetters.size > 1) 24.dp else 0.dp
+                    )
                 ) {
-                // Manual address entry option (when a valid phone number or email is typed)
-                uiState.manualAddressEntry?.let { entry ->
-                    item(key = "manual_address_${entry.address}") {
-                        ManualAddressTile(
-                            address = entry.address,
-                            service = entry.service,
-                            isCheckingAvailability = uiState.isCheckingAvailability,
-                            onClick = {
-                                viewModel.addManualRecipient(entry.address, entry.service)
-                            }
-                        )
-                    }
-                }
-
-                // Recent section (up to 4 contacts with recent conversations)
-                if (uiState.recentContacts.isNotEmpty() && uiState.searchQuery.isEmpty()) {
-                    item(key = "recent_header") {
-                        Text(
-                            text = "Recent",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Medium
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
-
-                    items(
-                        items = uiState.recentContacts,
-                        key = { "${it.address}_recent" }
-                    ) { contact ->
-                        val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
-                        ContactTile(
-                            contact = contact,
-                            isSelected = isSelected,
-                            onClick = { viewModel.toggleRecipient(contact) }
-                        )
-                    }
-                }
-
-                // "All Contacts" divider before alphabetical list
-                val hasMoreContacts = uiState.groupedContacts.isNotEmpty() || uiState.favoriteContacts.isNotEmpty()
-                if (hasMoreContacts && uiState.searchQuery.isEmpty()) {
-                    item(key = "all_contacts_header") {
-                        Text(
-                            text = "All Contacts",
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Medium
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
-                }
-
-                // Favorites section (if any)
-                if (uiState.favoriteContacts.isNotEmpty()) {
-                    items(
-                        items = uiState.favoriteContacts,
-                        key = { "${it.address}_fav" }
-                    ) { contact ->
-                        val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
-                        ContactTile(
-                            contact = contact,
-                            isSelected = isSelected,
-                            onClick = { viewModel.toggleRecipient(contact) }
-                        )
-                    }
-                }
-
-                // Alphabetical sections
-                uiState.groupedContacts.forEach { (letter, contacts) ->
-                    item(key = "letter_$letter") {
-                        Text(
-                            text = letter,
-                            style = MaterialTheme.typography.titleSmall.copy(
-                                fontWeight = FontWeight.Medium
-                            ),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-                        )
-                    }
-
-                    items(
-                        items = contacts,
-                        key = { "${it.address}_${it.service}" }
-                    ) { contact ->
-                        val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
-                        ContactTile(
-                            contact = contact,
-                            isSelected = isSelected,
-                            onClick = { viewModel.toggleRecipient(contact) }
-                        )
-                    }
-                }
-
-                // Empty state
-                if (uiState.recentContacts.isEmpty() && uiState.groupedContacts.isEmpty() && uiState.favoriteContacts.isEmpty() && !uiState.isLoading) {
-                    item {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = if (uiState.searchQuery.isNotEmpty()) {
-                                    "No contacts found"
-                                } else {
-                                    "No contacts"
-                                },
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                    // "Create group" action row (only in single mode when not searching)
+                    if (!isGroupMode && uiState.searchQuery.isEmpty()) {
+                        item(key = "create_group_action") {
+                            CreateGroupListItem(
+                                onClick = { viewModel.enterGroupMode() }
                             )
                         }
                     }
+
+                    // Manual address entry option (when a valid phone number or email is typed)
+                    uiState.manualAddressEntry?.let { entry ->
+                        item(key = "manual_address_${entry.address}") {
+                            ManualAddressTile(
+                                address = entry.address,
+                                service = entry.service,
+                                isCheckingAvailability = uiState.isCheckingAvailability,
+                                onClick = {
+                                    viewModel.addManualRecipient(entry.address, entry.service)
+                                }
+                            )
+                        }
+                    }
+
+                    // Recent section (up to 4 contacts with recent conversations)
+                    if (uiState.recentContacts.isNotEmpty() && uiState.searchQuery.isEmpty()) {
+                        item(key = "recent_header") {
+                            Text(
+                                text = "Recent",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        items(
+                            items = uiState.recentContacts,
+                            key = { "${it.address}_recent" }
+                        ) { contact ->
+                            val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
+                            ContactTile(
+                                contact = contact,
+                                isSelected = isSelected,
+                                showCheckbox = isGroupMode,
+                                onClick = {
+                                    if (isGroupMode) {
+                                        viewModel.toggleRecipient(contact)
+                                    } else {
+                                        // In single mode, directly start conversation
+                                        viewModel.selectContact(contact)
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // "All Contacts" divider before alphabetical list
+                    val hasMoreContacts = uiState.groupedContacts.isNotEmpty() || uiState.favoriteContacts.isNotEmpty()
+                    if (hasMoreContacts && uiState.searchQuery.isEmpty()) {
+                        item(key = "all_contacts_header") {
+                            Text(
+                                text = "All Contacts",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+                    }
+
+                    // Favorites section (if any)
+                    if (uiState.favoriteContacts.isNotEmpty()) {
+                        items(
+                            items = uiState.favoriteContacts,
+                            key = { "${it.address}_fav" }
+                        ) { contact ->
+                            val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
+                            ContactTile(
+                                contact = contact,
+                                isSelected = isSelected,
+                                showCheckbox = isGroupMode,
+                                onClick = {
+                                    if (isGroupMode) {
+                                        viewModel.toggleRecipient(contact)
+                                    } else {
+                                        viewModel.selectContact(contact)
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // Alphabetical sections
+                    uiState.groupedContacts.forEach { (letter, contacts) ->
+                        item(key = "letter_$letter") {
+                            Text(
+                                text = letter,
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            )
+                        }
+
+                        items(
+                            items = contacts,
+                            key = { "${it.address}_${it.service}" }
+                        ) { contact ->
+                            val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
+                            ContactTile(
+                                contact = contact,
+                                isSelected = isSelected,
+                                showCheckbox = isGroupMode,
+                                onClick = {
+                                    if (isGroupMode) {
+                                        viewModel.toggleRecipient(contact)
+                                    } else {
+                                        viewModel.selectContact(contact)
+                                    }
+                                }
+                            )
+                        }
+                    }
+
+                    // Empty state
+                    if (uiState.recentContacts.isEmpty() && uiState.groupedContacts.isEmpty() && uiState.favoriteContacts.isEmpty() && !uiState.isLoading) {
+                        item {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(32.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = if (uiState.searchQuery.isNotEmpty()) {
+                                        "No contacts found"
+                                    } else {
+                                        "No contacts"
+                                    },
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
-            }
 
                 // Fast scroll alphabet bar
                 if (availableLetters.size > 1 && uiState.searchQuery.isEmpty()) {

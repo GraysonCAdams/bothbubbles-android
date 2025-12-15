@@ -229,3 +229,17 @@ data class FaceTimeLinkDto(
 data class MessageCountDto(
     @Json(name = "total") val total: Int
 )
+
+/**
+ * iCloud account info DTO - returned by /api/v1/icloud/account
+ */
+@JsonClass(generateAdapter = true)
+data class ICloudAccountInfoDto(
+    @Json(name = "vetted_aliases") val vettedAliases: List<ICloudAliasDto>? = null,
+    @Json(name = "active_alias") val activeAlias: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class ICloudAliasDto(
+    @Json(name = "Alias") val alias: String
+)

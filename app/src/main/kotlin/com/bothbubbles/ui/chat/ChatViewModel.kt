@@ -272,11 +272,23 @@ class ChatViewModel @Inject constructor(
             is ComposerEvent.ToggleEmojiPicker -> {
                 _activePanel.update { if (it == ComposerPanel.EmojiKeyboard) ComposerPanel.None else ComposerPanel.EmojiKeyboard }
             }
+            is ComposerEvent.ToggleGifPicker -> {
+                _activePanel.update { if (it == ComposerPanel.GifPicker) ComposerPanel.None else ComposerPanel.GifPicker }
+            }
             is ComposerEvent.OpenGallery -> {
                 _activePanel.update { ComposerPanel.MediaPicker }
             }
             is ComposerEvent.DismissPanel -> {
                 _activePanel.update { ComposerPanel.None }
+            }
+            is ComposerEvent.ReorderAttachments -> {
+                // Convert AttachmentItem back to PendingAttachmentInput order
+                val reorderedUris = event.attachments.map { it.uri }
+                _pendingAttachments.update { currentList ->
+                    reorderedUris.mapNotNull { uri ->
+                        currentList.find { it.uri == uri }
+                    }
+                }
             }
             else -> {
                 // Handle other events or ignore

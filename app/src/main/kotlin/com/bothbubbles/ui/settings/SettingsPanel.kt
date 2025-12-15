@@ -55,6 +55,7 @@ import com.bothbubbles.ui.settings.spam.SpamSettingsContent
 import com.bothbubbles.ui.settings.swipe.SwipeSettingsContent
 import com.bothbubbles.ui.settings.sync.SyncSettingsContent
 import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
+import com.bothbubbles.ui.settings.eta.EtaSharingSettingsContent
 
 /**
  * Settings panel that slides in from the right.
@@ -95,6 +96,7 @@ fun SettingsPanel(
         SettingsPanelPage.ImageQuality -> "Image quality"
         SettingsPanelPage.Templates -> "Quick reply templates"
         SettingsPanelPage.AutoResponder -> "Auto-responder"
+        SettingsPanelPage.EtaSharing -> "ETA sharing"
         SettingsPanelPage.About -> "About"
         SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
     }
@@ -228,6 +230,10 @@ fun SettingsPanel(
                                 isForward.value = true
                                 navigator.navigateTo(SettingsPanelPage.AutoResponder)
                             },
+                            onEtaSharingClick = {
+                                isForward.value = true
+                                navigator.navigateTo(SettingsPanelPage.EtaSharing)
+                            },
                             onAboutClick = {
                                 isForward.value = true
                                 navigator.navigateTo(SettingsPanelPage.About)
@@ -289,6 +295,9 @@ fun SettingsPanel(
                     }
                     SettingsPanelPage.AutoResponder -> {
                         AutoResponderSettingsContent()
+                    }
+                    SettingsPanelPage.EtaSharing -> {
+                        EtaSharingSettingsContent()
                     }
                     SettingsPanelPage.About -> {
                         AboutContent(

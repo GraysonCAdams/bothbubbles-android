@@ -5,6 +5,7 @@ import android.service.notification.StatusBarNotification
 import android.util.Log
 import android.widget.RemoteViews
 import java.lang.reflect.Field
+import java.util.Calendar
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -58,15 +59,27 @@ class NavigationEtaParser @Inject constructor() {
      * Layer 1: Parse from standard notification extras
      */
     private fun parseFromExtras(notification: Notification, app: NavigationApp): ParsedEtaData? {
-        val extras = notification.extras ?: return null
+        val extras = notification.extras ?: run {
+            Log.d(TAG, "No extras in notification")
+            return null
+        }
+
+        // Log ALL keys to see what's available
+        Log.d(TAG, "=== Notification Extras Keys ===")
+        extras.keySet().forEach { key ->
+            val value = extras.get(key)
+            Log.d(TAG, "  $key = $value (${value?.javaClass?.simpleName})")
+        }
 
         // Common fields used by navigation apps
         val title = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
         val subText = extras.getCharSequence(Notification.EXTRA_SUB_TEXT)?.toString()
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
+        val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()
+        val summaryText = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
 
-        Log.d(TAG, "Extras - title: $title, text: $text, subText: $subText")
+        Log.d(TAG, "Parsed fields - title: $title, text: $text, subText: $subText, bigText: $bigText, infoText: $infoText")
 
         // Combine all text sources for parsing
         val combinedText = listOfNotNull(title, text, subText, bigText).joinToString(" ")
@@ -194,25 +207,75 @@ class NavigationEtaParser @Inject constructor() {
     }
 
     /**
-     * Parse ETA in minutes from text
+     * Parse ETA in minutes from text.
+     * Handles both duration format ("15 min") and arrival time format ("Arrive 17:30")
      */
     private fun parseEtaMinutes(text: String): Int? {
         var totalMinutes = 0
         var found = false
 
-        // Parse hours
+        // Parse hours (duration format)
         ETA_HOURS_PATTERN.find(text)?.let { match ->
             totalMinutes += (match.groupValues[1].toIntOrNull() ?: 0) * 60
             found = true
         }
 
-        // Parse minutes
+        // Parse minutes (duration format)
         ETA_MINUTES_PATTERN.find(text)?.let { match ->
             totalMinutes += match.groupValues[1].toIntOrNull() ?: 0
             found = true
         }
 
-        return if (found && totalMinutes > 0) totalMinutes else null
+        if (found && totalMinutes > 0) return totalMinutes
+
+        // Try parsing arrival time format like "Arrive 17:30" or "17:30"
+        val arrivalMinutes = parseArrivalTimeToMinutes(text)
+        if (arrivalMinutes != null && arrivalMinutes > 0) {
+            Log.d(TAG, "Parsed arrival time to $arrivalMinutes minutes")
+            return arrivalMinutes
+        }
+
+        return null
+    }
+
+    /**
+     * Parse arrival time format ("Arrive 17:30" or "Arrive 5:30 PM") and convert to minutes from now
+     */
+    private fun parseArrivalTimeToMinutes(text: String): Int? {
+        // Match "Arrive HH:MM" or just "HH:MM" with optional AM/PM
+        val arrivePattern = Regex("""(?:Arrive\s+)?(\d{1,2}):(\d{2})\s*(AM|PM)?""", RegexOption.IGNORE_CASE)
+        val match = arrivePattern.find(text) ?: return null
+
+        val hour = match.groupValues[1].toIntOrNull() ?: return null
+        val minute = match.groupValues[2].toIntOrNull() ?: return null
+        val amPm = match.groupValues[3].uppercase().takeIf { it.isNotEmpty() }
+
+        // Convert to 24-hour format
+        val hour24 = when {
+            amPm == "AM" && hour == 12 -> 0
+            amPm == "PM" && hour != 12 -> hour + 12
+            amPm == null && hour in 0..23 -> hour  // Already 24-hour format
+            else -> hour
+        }
+
+        val now = Calendar.getInstance()
+        val arrival = Calendar.getInstance().apply {
+            set(Calendar.HOUR_OF_DAY, hour24)
+            set(Calendar.MINUTE, minute)
+            set(Calendar.SECOND, 0)
+            set(Calendar.MILLISECOND, 0)
+
+            // If arrival time is before now, assume it's tomorrow
+            if (before(now)) {
+                add(Calendar.DAY_OF_YEAR, 1)
+            }
+        }
+
+        val diffMs = arrival.timeInMillis - now.timeInMillis
+        val diffMinutes = (diffMs / 60000).toInt()
+
+        Log.d(TAG, "Arrival time parsed: $hour24:$minute, diff from now: $diffMinutes min")
+        return if (diffMinutes > 0) diffMinutes else null
     }
 
     /**

@@ -7,11 +7,11 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
@@ -22,15 +22,25 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.chat.components.ExpandedRecordingPanel
 import com.bothbubbles.ui.chat.components.PreviewContent
 import com.bothbubbles.ui.chat.components.SendButton
@@ -90,6 +100,42 @@ fun ChatComposer(
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val density = LocalDensity.current
+
+    // Hide keyboard when any panel opens
+    LaunchedEffect(state.activePanel) {
+        if (state.activePanel != ComposerPanel.None) {
+            keyboardController?.hide()
+        }
+    }
+
+    // Drag state for swipe-to-dismiss panels (unified with ComposerPanelHost)
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+    val dismissThreshold = with(density) { ComposerMotionTokens.Dimension.DragDismissThreshold.toPx() }
+
+    // Animate back to 0 only when not actively dragging
+    val displayOffset by animateFloatAsState(
+        targetValue = if (isDragging) dragOffset else 0f,
+        animationSpec = spring(
+            dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
+            stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
+        ),
+        label = "dragOffset"
+    )
+
+    // Use raw offset while dragging, animated offset when releasing
+    val currentOffsetDp = with(density) {
+        (if (isDragging) dragOffset else displayOffset).toDp()
+    }
+
+    // Reset drag offset when panel closes
+    LaunchedEffect(state.activePanel) {
+        if (state.activePanel == ComposerPanel.None) {
+            dragOffset = 0f
+        }
+    }
 
     // Photo picker launcher for direct gallery access from image icon
     val pickMedia = rememberLauncherForActivityResult(
@@ -136,7 +182,7 @@ fun ChatComposer(
                 onReplyClick = { onEvent(ComposerEvent.SelectSmartReply(it)) }
             )
 
-            // Main input row
+            // Main input row - moves with panel when dragging
             MainInputRow(
                 state = state,
                 onEvent = onEvent,
@@ -145,10 +191,12 @@ fun ChatComposer(
                         PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageAndVideo)
                     )
                 },
-                onSendButtonBoundsChanged = onSendButtonBoundsChanged
+                onSendButtonBoundsChanged = onSendButtonBoundsChanged,
+                modifier = Modifier.offset(y = currentOffsetDp)
             )
 
             // Expandable panels (Media picker, Emoji, GIF)
+            // Drag handle is now inside each panel via ComposerPanelHost
             ComposerPanelHost(
                 activePanel = state.activePanel,
                 onMediaSelected = onMediaSelected,
@@ -166,7 +214,22 @@ fun ChatComposer(
                 onGifSearchQueryChange = onGifSearchQueryChange,
                 onGifSearch = onGifSearch,
                 onGifSelected = onGifSelected,
-                onDismiss = { onEvent(ComposerEvent.DismissPanel) }
+                onDismiss = { onEvent(ComposerEvent.DismissPanel) },
+                onDragDelta = { delta ->
+                    // Only allow dragging down (positive delta) when panel is open
+                    if (state.activePanel != ComposerPanel.None) {
+                        dragOffset = (dragOffset + delta).coerceAtLeast(0f)
+                    }
+                },
+                onDragStarted = { isDragging = true },
+                onDragStopped = {
+                    isDragging = false
+                    if (dragOffset > dismissThreshold) {
+                        onEvent(ComposerEvent.DismissPanel)
+                    }
+                    dragOffset = 0f
+                },
+                modifier = Modifier.offset(y = currentOffsetDp)
             )
         }
     }
@@ -180,12 +243,13 @@ private fun MainInputRow(
     state: ComposerState,
     onEvent: (ComposerEvent) -> Unit,
     onGalleryClick: () -> Unit,
-    onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {}
+    onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
 
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .height(IntrinsicSize.Min)
             .padding(horizontal = 6.dp, vertical = 4.dp),

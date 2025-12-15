@@ -1113,33 +1113,9 @@ internal fun SendButton(
                         fontSize = 8.sp
                     )
                 }
-            } else if (isSmsMode) {
-                // SMS mode: Send icon with small SMS badge for accessibility
-                Box {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send_message),
-                        tint = contentColor,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    // Small SMS indicator badge
-                    Box(
-                        modifier = Modifier
-                            .align(Alignment.BottomEnd)
-                            .padding(0.dp)
-                            .size(8.dp)
-                            .background(contentColor, RoundedCornerShape(2.dp)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "S",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = bubbleColors.sendButtonSms,
-                            fontSize = 5.sp
-                        )
-                    }
-                }
             } else {
+                // SMS mode or iMessage mode: Just show the send icon
+                // The green/blue button color already indicates the mode
                 Icon(
                     Icons.AutoMirrored.Filled.Send,
                     contentDescription = stringResource(R.string.send_message),

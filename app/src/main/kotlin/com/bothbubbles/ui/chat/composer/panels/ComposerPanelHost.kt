@@ -12,13 +12,18 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import com.bothbubbles.ui.chat.composer.ComposerPanel
 import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
+import com.bothbubbles.ui.chat.composer.components.PanelDragHandle
 
 /**
  * Host component that manages panel transitions and displays the active panel.
@@ -27,6 +32,10 @@ import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
  * - Smooth transitions between panels (slide, fade, scale)
  * - Panel-specific animations (opening vs. closing vs. switching)
  * - Coordinated visibility of multiple panel types
+ * - Unified drag-to-dismiss gesture handling for all panels
+ *
+ * The drag handle is rendered inside each panel for visual consistency (MD3),
+ * while the gesture handling is unified at this level.
  *
  * @param activePanel The currently active panel
  * @param onMediaSelected Callback when media is selected from gallery
@@ -43,6 +52,9 @@ import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
  * @param onGifSearch Callback when GIF search is submitted
  * @param onGifSelected Callback when a GIF is selected
  * @param onDismiss Callback to dismiss the panel
+ * @param onDragDelta Callback when drag delta changes (for unified drag handling)
+ * @param onDragStarted Callback when drag starts
+ * @param onDragStopped Callback when drag stops with final offset
  * @param modifier Modifier for the host
  */
 @Composable
@@ -62,8 +74,14 @@ fun ComposerPanelHost(
     onGifSearch: (String) -> Unit,
     onGifSelected: (GifItem) -> Unit,
     onDismiss: () -> Unit,
+    onDragDelta: (Float) -> Unit = {},
+    onDragStarted: () -> Unit = {},
+    onDragStopped: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val draggableState = rememberDraggableState { delta ->
+        onDragDelta(delta)
+    }
     AnimatedContent(
         targetState = activePanel,
         transitionSpec = {
@@ -111,35 +129,68 @@ fun ComposerPanelHost(
                 Box(modifier = Modifier.fillMaxWidth())
             }
             ComposerPanel.MediaPicker -> {
-                MediaPickerPanel(
-                    visible = true, // AnimatedContent handles visibility
-                    onMediaSelected = onMediaSelected,
-                    onCameraClick = onCameraClick,
-                    onGifClick = onGifClick,
-                    onFileClick = onFileClick,
-                    onLocationClick = onLocationClick,
-                    onAudioClick = onAudioClick,
-                    onContactClick = onContactClick,
-                    onDismiss = onDismiss
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Unified drag handle with gesture
+                    PanelDragHandle(
+                        modifier = Modifier.draggable(
+                            state = draggableState,
+                            orientation = Orientation.Vertical,
+                            onDragStarted = { onDragStarted() },
+                            onDragStopped = { onDragStopped() }
+                        )
+                    )
+                    MediaPickerPanel(
+                        visible = true, // AnimatedContent handles visibility
+                        onMediaSelected = onMediaSelected,
+                        onCameraClick = onCameraClick,
+                        onGifClick = onGifClick,
+                        onFileClick = onFileClick,
+                        onLocationClick = onLocationClick,
+                        onAudioClick = onAudioClick,
+                        onContactClick = onContactClick,
+                        onDismiss = onDismiss
+                    )
+                }
             }
             ComposerPanel.EmojiKeyboard -> {
-                EmojiKeyboardPanel(
-                    visible = true,
-                    onEmojiSelected = onEmojiSelected,
-                    onDismiss = onDismiss
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Unified drag handle with gesture
+                    PanelDragHandle(
+                        modifier = Modifier.draggable(
+                            state = draggableState,
+                            orientation = Orientation.Vertical,
+                            onDragStarted = { onDragStarted() },
+                            onDragStopped = { onDragStopped() }
+                        )
+                    )
+                    EmojiKeyboardPanel(
+                        visible = true,
+                        onEmojiSelected = onEmojiSelected,
+                        onDismiss = onDismiss
+                    )
+                }
             }
             ComposerPanel.GifPicker -> {
-                GifPickerPanel(
-                    visible = true,
-                    state = gifPickerState,
-                    searchQuery = gifSearchQuery,
-                    onSearchQueryChange = onGifSearchQueryChange,
-                    onSearch = onGifSearch,
-                    onGifSelected = onGifSelected,
-                    onDismiss = onDismiss
-                )
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Unified drag handle with gesture
+                    PanelDragHandle(
+                        modifier = Modifier.draggable(
+                            state = draggableState,
+                            orientation = Orientation.Vertical,
+                            onDragStarted = { onDragStarted() },
+                            onDragStopped = { onDragStopped() }
+                        )
+                    )
+                    GifPickerPanel(
+                        visible = true,
+                        state = gifPickerState,
+                        searchQuery = gifSearchQuery,
+                        onSearchQueryChange = onGifSearchQueryChange,
+                        onSearch = onGifSearch,
+                        onGifSelected = onGifSelected,
+                        onDismiss = onDismiss
+                    )
+                }
             }
         }
     }
@@ -161,6 +212,9 @@ fun ComposerPanelHostSimple(
     onEmojiSelected: (String) -> Unit,
     onGifPanelRequest: () -> Unit = {},
     onDismiss: () -> Unit,
+    onDragDelta: (Float) -> Unit = {},
+    onDragStarted: () -> Unit = {},
+    onDragStopped: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     ComposerPanelHost(
@@ -179,6 +233,9 @@ fun ComposerPanelHostSimple(
         onGifSearch = {},
         onGifSelected = {},
         onDismiss = onDismiss,
+        onDragDelta = onDragDelta,
+        onDragStarted = onDragStarted,
+        onDragStopped = onDragStopped,
         modifier = modifier
     )
 }

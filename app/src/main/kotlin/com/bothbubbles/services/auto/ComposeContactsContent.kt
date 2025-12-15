@@ -14,6 +14,7 @@ import com.bothbubbles.R
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,7 @@ class ComposeContactsContent(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val messageSendingService: MessageSendingService,
+    private val socketConnection: SocketConnection?,
     private val screenManager: ScreenManager,
     private val onInvalidate: () -> Unit,
     private val onMessageSent: () -> Unit
@@ -205,7 +207,8 @@ class ComposeContactsContent(
                         messageSendingService = messageSendingService,
                         onMessageSent = {
                             onMessageSent()
-                        }
+                        },
+                        socketConnection = socketConnection
                     )
                 )
             }

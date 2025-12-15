@@ -1,30 +1,25 @@
 package com.bothbubbles.ui.chat.composer.panels
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -45,6 +40,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,7 +48,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -87,11 +85,13 @@ sealed class GifPickerState {
  * - Grid of GIF results with staggered layout
  * - Loading and error states
  * - Trending GIFs shown initially
+ * - Height expands when keyboard is hidden
+ * - Scroll triggers keyboard dismiss
  *
  * Note: Integration with Giphy/Tenor API should be done in the ViewModel.
- * This component only handles UI and delegates search/selection events.
+ * Visibility, animations, and drag-to-dismiss are handled by ComposerPanelHost.
  *
- * @param visible Whether the panel is visible
+ * @param visible Whether the panel is visible (kept for compatibility, handled by parent)
  * @param state Current state of the GIF picker
  * @param searchQuery Current search query
  * @param onSearchQueryChange Callback when search query changes
@@ -113,6 +113,24 @@ fun GifPickerPanel(
 ) {
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
+    val density = LocalDensity.current
+
+    // Track IME (keyboard) visibility for height expansion
+    val imeBottomInset = WindowInsets.ime.getBottom(density)
+    val isKeyboardVisible = imeBottomInset > 0
+
+    // Base height + extra space when keyboard is hidden
+    val baseHeight = ComposerMotionTokens.Dimension.PanelHeight
+    val expandedHeight = baseHeight + ComposerMotionTokens.Dimension.PanelExpandedExtra
+
+    val animatedContentHeight by animateDpAsState(
+        targetValue = if (isKeyboardVisible) baseHeight else expandedHeight,
+        animationSpec = spring(
+            dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
+            stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
+        ),
+        label = "contentHeight"
+    )
 
     // Auto-focus search field when panel becomes visible
     LaunchedEffect(visible) {
@@ -121,121 +139,94 @@ fun GifPickerPanel(
         }
     }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInVertically(
-            initialOffsetY = { it },
-            animationSpec = spring(
-                dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
-                stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
-            )
-        ) + fadeIn(tween(ComposerMotionTokens.Duration.FAST)),
-        exit = slideOutVertically(
-            targetOffsetY = { it },
-            animationSpec = tween(ComposerMotionTokens.Duration.NORMAL)
-        ) + fadeOut(tween(ComposerMotionTokens.Duration.FAST)),
-        modifier = modifier
+    // Panel content - visibility/animations/drag handled by ComposerPanelHost
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        tonalElevation = 8.dp
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            tonalElevation = 8.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp) // Match spacing with bottom (12dp spacer below search bar)
         ) {
-            Column(
+            // Search bar
+            GifSearchBar(
+                query = searchQuery,
+                onQueryChange = onSearchQueryChange,
+                onSearch = {
+                    onSearch(searchQuery)
+                    focusManager.clearFocus()
+                },
+                onClear = { onSearchQueryChange("") },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 12.dp)
+                    .padding(horizontal = 16.dp)
+                    .focusRequester(focusRequester)
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Content based on state - height expands when keyboard hidden
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(animatedContentHeight),
+                contentAlignment = Alignment.Center
             ) {
-                // Drag handle
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(32.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Search bar
-                GifSearchBar(
-                    query = searchQuery,
-                    onQueryChange = onSearchQueryChange,
-                    onSearch = {
-                        onSearch(searchQuery)
-                        focusManager.clearFocus()
-                    },
-                    onClear = { onSearchQueryChange("") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .focusRequester(focusRequester)
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Content based on state
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(ComposerMotionTokens.Dimension.PanelHeight),
-                    contentAlignment = Alignment.Center
-                ) {
-                    when (state) {
-                        is GifPickerState.Idle -> {
+                when (state) {
+                    is GifPickerState.Idle -> {
+                        Text(
+                            text = "Search for GIFs",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                    is GifPickerState.Loading -> {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(48.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    is GifPickerState.Error -> {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
                             Text(
-                                text = "Search for GIFs",
+                                text = "Failed to load GIFs",
                                 style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.error
+                            )
+                            Text(
+                                text = state.message,
+                                style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        is GifPickerState.Loading -> {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(48.dp),
-                                color = MaterialTheme.colorScheme.primary
+                    }
+                    is GifPickerState.Success -> {
+                        if (state.gifs.isEmpty()) {
+                            Text(
+                                text = "No GIFs found",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
-                        }
-                        is GifPickerState.Error -> {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Text(
-                                    text = "Failed to load GIFs",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.error
-                                )
-                                Text(
-                                    text = state.message,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                        is GifPickerState.Success -> {
-                            if (state.gifs.isEmpty()) {
-                                Text(
-                                    text = "No GIFs found",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            } else {
-                                GifGrid(
-                                    gifs = state.gifs,
-                                    onGifSelected = { gif ->
-                                        onGifSelected(gif)
-                                        onDismiss()
-                                    }
-                                )
-                            }
+                        } else {
+                            GifGrid(
+                                gifs = state.gifs,
+                                onGifSelected = { gif ->
+                                    onGifSelected(gif)
+                                    onDismiss()
+                                }
+                            )
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
             }
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }
@@ -305,8 +296,47 @@ private fun GifGrid(
     onGifSelected: (GifItem) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val gridState = rememberLazyGridState()
+    val keyboardController = LocalSoftwareKeyboardController.current
+
+    // Hide keyboard when user scrolls ~100dp worth
+    LaunchedEffect(gridState) {
+        var previousScrollOffset = gridState.firstVisibleItemScrollOffset
+        var previousFirstVisibleItem = gridState.firstVisibleItemIndex
+        var accumulatedScroll = 0
+
+        snapshotFlow {
+            Triple(
+                gridState.firstVisibleItemIndex,
+                gridState.firstVisibleItemScrollOffset,
+                gridState.isScrollInProgress
+            )
+        }.collect { (currentIndex, currentOffset, isScrolling) ->
+            if (isScrolling) {
+                val scrollDelta = if (currentIndex == previousFirstVisibleItem) {
+                    currentOffset - previousScrollOffset
+                } else {
+                    (currentIndex - previousFirstVisibleItem) * 200
+                }
+                accumulatedScroll += kotlin.math.abs(scrollDelta)
+
+                // Hide keyboard after scrolling threshold
+                if (accumulatedScroll > ComposerMotionTokens.Dimension.GifScrollThresholdPx) {
+                    keyboardController?.hide()
+                    accumulatedScroll = 0
+                }
+            } else {
+                accumulatedScroll = 0
+            }
+
+            previousFirstVisibleItem = currentIndex
+            previousScrollOffset = currentOffset
+        }
+    }
+
     LazyVerticalGrid(
         columns = GridCells.Fixed(3),
+        state = gridState,
         modifier = modifier
             .fillMaxSize()
             .padding(horizontal = 8.dp),

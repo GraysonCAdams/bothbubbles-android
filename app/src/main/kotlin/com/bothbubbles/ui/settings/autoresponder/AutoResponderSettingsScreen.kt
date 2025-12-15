@@ -18,10 +18,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
@@ -31,6 +37,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -88,7 +97,7 @@ fun AutoResponderSettingsContent(
             SettingsSection(title = null) {
                 SettingsToggleItem(
                     title = "Enable Auto-Responder",
-                    subtitle = "Send greeting message to first-time iMessage contacts",
+                    subtitle = "Send iMessage greeting to SMS senders who are iMessage-capable",
                     checked = uiState.enabled,
                     onCheckedChange = viewModel::setEnabled
                 )
@@ -100,11 +109,21 @@ fun AutoResponderSettingsContent(
                     MessagePreviewCard(message = uiState.messagePreview)
                 }
 
+                // Alias selection
+                SettingsSection(title = "Recommend adding") {
+                    AliasSelector(
+                        availableAliases = uiState.availableAliases,
+                        selectedAlias = uiState.selectedAlias,
+                        isLoading = uiState.isLoadingAliases,
+                        onAliasSelected = viewModel::setRecommendedAlias
+                    )
+                }
+
                 // Filter options
                 SettingsSection(title = "Auto-respond to") {
                     FilterOption(
                         title = "Everyone",
-                        subtitle = "All iMessage users who message you",
+                        subtitle = "Any SMS sender who is iMessage-capable",
                         selected = uiState.filterMode == "everyone",
                         onClick = { viewModel.setFilterMode("everyone") }
                     )
@@ -157,16 +176,16 @@ private fun InfoCard() {
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Help contacts reach you",
+                    text = "Help SMS contacts switch to iMessage",
                     style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = "When someone messages you on iMessage for the first time, " +
-                        "this sends a friendly greeting explaining how to add your email to " +
-                        "their contacts so you can message them from your phone number too.",
+                    text = "When someone sends you an SMS but is also registered on iMessage, " +
+                        "this sends them an iMessage explaining how to add your iMessage address " +
+                        "to their contacts so future messages go through iMessage instead of SMS.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
@@ -335,5 +354,101 @@ private fun RateLimitSlider(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant
         )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AliasSelector(
+    availableAliases: List<String>,
+    selectedAlias: String,
+    isLoading: Boolean,
+    onAliasSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        if (isLoading) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(20.dp),
+                    strokeWidth = 2.dp
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    text = "Loading your iMessage addresses...",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        } else if (availableAliases.isEmpty()) {
+            Text(
+                text = "Could not load iMessage addresses. Make sure Private API is enabled on your server.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            ExposedDropdownMenuBox(
+                expanded = expanded,
+                onExpandedChange = { expanded = it }
+            ) {
+                OutlinedTextField(
+                    value = selectedAlias.ifBlank { "Select an address to recommend" },
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable),
+                    colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors()
+                )
+                ExposedDropdownMenu(
+                    expanded = expanded,
+                    onDismissRequest = { expanded = false }
+                ) {
+                    // Option for generic message (no specific alias)
+                    DropdownMenuItem(
+                        text = {
+                            Text(
+                                text = "Don't specify (generic message)",
+                                style = MaterialTheme.typography.bodyMedium
+                            )
+                        },
+                        onClick = {
+                            onAliasSelected("")
+                            expanded = false
+                        }
+                    )
+                    // Available aliases
+                    availableAliases.forEach { alias ->
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = alias,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                            },
+                            onClick = {
+                                onAliasSelected(alias)
+                                expanded = false
+                            }
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = "Choose which phone number or email to recommend contacts add",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
     }
 }

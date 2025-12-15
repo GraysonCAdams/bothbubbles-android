@@ -100,6 +100,11 @@ sealed interface ComposerEvent {
      */
     data object RemoveWarningAttachment : ComposerEvent
 
+    /**
+     * User reordered attachments via drag-and-drop.
+     */
+    data class ReorderAttachments(val attachments: List<AttachmentItem>) : ComposerEvent
+
     // ============================================
     // Reply Events
     // ============================================

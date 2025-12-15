@@ -195,4 +195,9 @@ interface BothBubblesApi {
     suspend fun leaveFaceTime(
         @Path("callUuid") callUuid: String
     ): Response<ApiResponse<Unit>>
+
+    // ===== iCloud =====
+
+    @GET("api/v1/icloud/account")
+    suspend fun getICloudAccountInfo(): Response<ApiResponse<ICloudAccountInfoDto>>
 }

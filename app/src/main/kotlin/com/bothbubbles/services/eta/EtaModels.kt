@@ -1,6 +1,17 @@
 package com.bothbubbles.services.eta
 
 /**
+ * Types of ETA messages that can be sent
+ */
+enum class EtaMessageType {
+    INITIAL,            // "On my way to..."
+    DESTINATION_CHANGE, // "Change of plans! Now heading to..."
+    CHANGE,             // "ETA Update: Now X min..."
+    ARRIVING_SOON,      // "Almost there!..."
+    ARRIVED             // "I've arrived..."
+}
+
+/**
  * Navigation app types we support for ETA scraping
  */
 enum class NavigationApp(val packageName: String) {
@@ -36,7 +47,8 @@ data class EtaSharingSession(
     val startedAt: Long = System.currentTimeMillis(),
     val lastSentTime: Long = 0,
     val lastEtaMinutes: Int = 0,
-    val updateCount: Int = 0
+    val updateCount: Int = 0,
+    val lastMessageType: EtaMessageType = EtaMessageType.INITIAL
 )
 
 /**

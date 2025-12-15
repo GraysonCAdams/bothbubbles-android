@@ -175,6 +175,15 @@ object ComposerMotionTokens {
 
         /** Spotlight radius for tutorial overlay */
         val SpotlightRadius: Dp = 40.dp
+
+        /** Extra height when panel expands (keyboard hidden) */
+        val PanelExpandedExtra: Dp = 200.dp
+
+        /** Drag-to-dismiss threshold for panels */
+        val DragDismissThreshold: Dp = 120.dp
+
+        /** GIF scroll threshold for keyboard dismiss (~100dp worth of scroll) */
+        const val GifScrollThresholdPx: Int = 300
     }
 
     /**

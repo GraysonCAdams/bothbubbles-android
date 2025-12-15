@@ -72,6 +72,17 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.ETA_CHANGE_THRESHOLD] ?: 5
     }
 
+    // ===== Android Auto Settings =====
+
+    /**
+     * Privacy mode for Android Auto.
+     * When enabled, hides message content on the car display,
+     * showing only "New Message" instead of actual text.
+     */
+    val androidAutoPrivacyMode: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.ANDROID_AUTO_PRIVACY_MODE] ?: false
+    }
+
     // ===== Auto-Responder =====
 
     val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -94,6 +105,14 @@ class FeaturePreferences @Inject constructor(
      */
     val autoResponderRateLimit: Flow<Int> = dataStore.data.map { prefs ->
         prefs[Keys.AUTO_RESPONDER_RATE_LIMIT] ?: 10
+    }
+
+    /**
+     * The iMessage alias (phone number or email) to recommend in auto-response messages.
+     * Empty string means let the user choose from available aliases.
+     */
+    val autoResponderRecommendedAlias: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_RESPONDER_RECOMMENDED_ALIAS] ?: ""
     }
 
     // ===== Setters =====
@@ -158,6 +177,12 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setAndroidAutoPrivacyMode(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.ANDROID_AUTO_PRIVACY_MODE] = enabled
+        }
+    }
+
     suspend fun setAutoResponderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
@@ -173,6 +198,12 @@ class FeaturePreferences @Inject constructor(
     suspend fun setAutoResponderRateLimit(limit: Int) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_RATE_LIMIT] = limit.coerceIn(1, 50)
+        }
+    }
+
+    suspend fun setAutoResponderRecommendedAlias(alias: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_RESPONDER_RECOMMENDED_ALIAS] = alias
         }
     }
 
@@ -196,10 +227,14 @@ class FeaturePreferences @Inject constructor(
         val AUTO_RESPONDER_ENABLED = booleanPreferencesKey("auto_responder_enabled")
         val AUTO_RESPONDER_FILTER = stringPreferencesKey("auto_responder_filter")
         val AUTO_RESPONDER_RATE_LIMIT = intPreferencesKey("auto_responder_rate_limit")
+        val AUTO_RESPONDER_RECOMMENDED_ALIAS = stringPreferencesKey("auto_responder_recommended_alias")
 
         // ETA Sharing
         val ETA_SHARING_ENABLED = booleanPreferencesKey("eta_sharing_enabled")
         val ETA_UPDATE_INTERVAL = intPreferencesKey("eta_update_interval")
         val ETA_CHANGE_THRESHOLD = intPreferencesKey("eta_change_threshold")
+
+        // Android Auto
+        val ANDROID_AUTO_PRIVACY_MODE = booleanPreferencesKey("android_auto_privacy_mode")
     }
 }

@@ -7,11 +7,15 @@ import androidx.car.app.Screen
 import androidx.car.app.Session
 import androidx.car.app.SessionInfo
 import androidx.car.app.validation.HostValidator
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.prefs.FeaturePreferences
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -46,6 +50,18 @@ class BothBubblesCarAppService : CarAppService() {
     @Inject
     lateinit var syncService: SyncService
 
+    @Inject
+    lateinit var socketConnection: SocketConnection
+
+    @Inject
+    lateinit var featurePreferences: FeaturePreferences
+
+    @Inject
+    lateinit var attachmentRepository: AttachmentRepository
+
+    @Inject
+    lateinit var attachmentDao: AttachmentDao
+
     override fun createHostValidator(): HostValidator {
         // Allow all hosts in debug builds, only known hosts in release
         return if (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) {
@@ -64,7 +80,11 @@ class BothBubblesCarAppService : CarAppService() {
             handleDao = handleDao,
             chatRepository = chatRepository,
             messageSendingService = messageSendingService,
-            syncService = syncService
+            syncService = syncService,
+            socketConnection = socketConnection,
+            featurePreferences = featurePreferences,
+            attachmentRepository = attachmentRepository,
+            attachmentDao = attachmentDao
         )
     }
 }
@@ -82,7 +102,11 @@ class BothBubblesAutoSession(
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
     private val messageSendingService: MessageSendingService,
-    private val syncService: SyncService
+    private val syncService: SyncService,
+    private val socketConnection: SocketConnection,
+    private val featurePreferences: FeaturePreferences,
+    private val attachmentRepository: AttachmentRepository,
+    private val attachmentDao: AttachmentDao
 ) : Session() {
 
     override fun onCreateScreen(intent: Intent): Screen {
@@ -93,7 +117,11 @@ class BothBubblesAutoSession(
             handleDao = handleDao,
             chatRepository = chatRepository,
             messageSendingService = messageSendingService,
-            syncService = syncService
+            syncService = syncService,
+            socketConnection = socketConnection,
+            featurePreferences = featurePreferences,
+            attachmentRepository = attachmentRepository,
+            attachmentDao = attachmentDao
         )
     }
 }

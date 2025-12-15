@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.conversations.delegates
 
 import android.util.Log
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.socket.ConnectionState
@@ -40,7 +41,8 @@ class ConversationObserverDelegate @Inject constructor(
     private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
     private val chatRepository: ChatRepository,
     private val socketService: SocketService,
-    private val syncService: SyncService
+    private val syncService: SyncService,
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "ConversationObserverDelegate"
@@ -189,9 +191,16 @@ class ConversationObserverDelegate @Inject constructor(
                 _iMessageSyncState,
                 _smsImportState,
                 _categorizationState,
-                _isExpanded
-            ) { iMessageState, smsState, categState, expanded ->
-                buildUnifiedProgress(iMessageState, smsState, categState, expanded)
+                _isExpanded,
+                settingsDataStore.initialSyncComplete
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                val iMessageState = values[0] as? SyncState ?: SyncState.Idle
+                val smsState = values[1] as? SmsImportState ?: SmsImportState.Idle
+                val categState = values[2] as? CategorizationState ?: CategorizationState.Idle
+                val expanded = values[3] as? Boolean ?: false
+                val initialSyncComplete = values[4] as? Boolean ?: false
+                buildUnifiedProgress(iMessageState, smsState, categState, expanded, initialSyncComplete)
             }.collect { unified ->
                 if (unified != null) {
                     Log.d(TAG, "UnifiedProgress: stage=${unified.currentStage}, progress=${unified.overallProgress}, stages=${unified.stages.size}")
@@ -203,13 +212,17 @@ class ConversationObserverDelegate @Inject constructor(
 
     /**
      * Build unified sync progress from individual states.
+     * @param initialSyncComplete If true, categorization progress is hidden (runs silently in background)
      */
     private fun buildUnifiedProgress(
         iMessageState: SyncState,
         smsState: SmsImportState,
         categState: CategorizationState,
-        isExpanded: Boolean
+        isExpanded: Boolean,
+        initialSyncComplete: Boolean
     ): UnifiedSyncProgress? {
+        // After initial sync, categorization runs silently in the background
+        val showCategorization = !initialSyncComplete
         val stages = mutableListOf<StageProgress>()
         var hasAnyActivity = false
         var hasError = false
@@ -254,7 +267,7 @@ class ConversationObserverDelegate @Inject constructor(
             }
             is SyncState.Completed -> {
                 // Only show completed stage if other stages are active
-                if (smsState !is SmsImportState.Idle || categState !is CategorizationState.Idle) {
+                if (smsState !is SmsImportState.Idle || (showCategorization && categState !is CategorizationState.Idle)) {
                     stages.add(
                         StageProgress(
                             type = SyncStageType.IMESSAGE,
@@ -268,7 +281,7 @@ class ConversationObserverDelegate @Inject constructor(
             }
             SyncState.Idle -> {
                 // Don't add idle stages unless other stages are active
-                if (smsState !is SmsImportState.Idle || categState !is CategorizationState.Idle) {
+                if (smsState !is SmsImportState.Idle || (showCategorization && categState !is CategorizationState.Idle)) {
                     stages.add(
                         StageProgress(
                             type = SyncStageType.IMESSAGE,
@@ -320,7 +333,7 @@ class ConversationObserverDelegate @Inject constructor(
                 )
             }
             SmsImportState.Complete -> {
-                if (iMessageState is SyncState.Syncing || categState !is CategorizationState.Idle) {
+                if (iMessageState is SyncState.Syncing || (showCategorization && categState !is CategorizationState.Idle)) {
                     stages.add(
                         StageProgress(
                             type = SyncStageType.SMS_IMPORT,
@@ -333,7 +346,7 @@ class ConversationObserverDelegate @Inject constructor(
                 }
             }
             SmsImportState.Idle -> {
-                if (iMessageState is SyncState.Syncing || categState !is CategorizationState.Idle) {
+                if (iMessageState is SyncState.Syncing || (showCategorization && categState !is CategorizationState.Idle)) {
                     stages.add(
                         StageProgress(
                             type = SyncStageType.SMS_IMPORT,
@@ -346,61 +359,63 @@ class ConversationObserverDelegate @Inject constructor(
             }
         }
 
-        // Categorization stage (weight: 15%)
-        when (categState) {
-            is CategorizationState.Categorizing -> {
-                hasAnyActivity = true
-                if (iMessageState !is SyncState.Syncing && smsState !is SmsImportState.Importing) {
-                    currentStage = "Organizing messages..."
-                }
-                stages.add(
-                    StageProgress(
-                        type = SyncStageType.CATEGORIZATION,
-                        name = "Organizing",
-                        status = StageStatus.IN_PROGRESS,
-                        progress = categState.progress,
-                        weight = 0.15f,
-                        detail = if (categState.total > 0) "${categState.current} of ${categState.total} conversations" else null
-                    )
-                )
-            }
-            is CategorizationState.Error -> {
-                hasAnyActivity = true
-                hasError = true
-                stages.add(
-                    StageProgress(
-                        type = SyncStageType.CATEGORIZATION,
-                        name = "Organizing",
-                        status = StageStatus.ERROR,
-                        progress = 0f,
-                        weight = 0.15f,
-                        errorMessage = categState.message
-                    )
-                )
-            }
-            CategorizationState.Complete -> {
-                if (stages.isNotEmpty()) {
+        // Categorization stage (weight: 15%) - only shown during initial sync
+        if (showCategorization) {
+            when (categState) {
+                is CategorizationState.Categorizing -> {
+                    hasAnyActivity = true
+                    if (iMessageState !is SyncState.Syncing && smsState !is SmsImportState.Importing) {
+                        currentStage = "Organizing messages..."
+                    }
                     stages.add(
                         StageProgress(
                             type = SyncStageType.CATEGORIZATION,
                             name = "Organizing",
-                            status = StageStatus.COMPLETE,
-                            progress = 1f,
-                            weight = 0.15f
+                            status = StageStatus.IN_PROGRESS,
+                            progress = categState.progress,
+                            weight = 0.15f,
+                            detail = if (categState.total > 0) "${categState.current} of ${categState.total} conversations" else null
                         )
                     )
                 }
-            }
-            CategorizationState.Idle -> {
-                if (iMessageState is SyncState.Syncing || smsState is SmsImportState.Importing) {
+                is CategorizationState.Error -> {
+                    hasAnyActivity = true
+                    hasError = true
                     stages.add(
                         StageProgress(
                             type = SyncStageType.CATEGORIZATION,
                             name = "Organizing",
-                            status = StageStatus.WAITING,
-                            weight = 0.15f
+                            status = StageStatus.ERROR,
+                            progress = 0f,
+                            weight = 0.15f,
+                            errorMessage = categState.message
                         )
                     )
+                }
+                CategorizationState.Complete -> {
+                    if (stages.isNotEmpty()) {
+                        stages.add(
+                            StageProgress(
+                                type = SyncStageType.CATEGORIZATION,
+                                name = "Organizing",
+                                status = StageStatus.COMPLETE,
+                                progress = 1f,
+                                weight = 0.15f
+                            )
+                        )
+                    }
+                }
+                CategorizationState.Idle -> {
+                    if (iMessageState is SyncState.Syncing || smsState is SmsImportState.Importing) {
+                        stages.add(
+                            StageProgress(
+                                type = SyncStageType.CATEGORIZATION,
+                                name = "Organizing",
+                                status = StageStatus.WAITING,
+                                weight = 0.15f
+                            )
+                        )
+                    }
                 }
             }
         }

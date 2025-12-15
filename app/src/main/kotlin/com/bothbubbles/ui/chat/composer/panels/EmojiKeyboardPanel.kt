@@ -1,13 +1,5 @@
 package com.bothbubbles.ui.chat.composer.panels
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -68,12 +59,13 @@ private data class EmojiCategory(
  * Emoji keyboard panel that replaces the system keyboard.
  *
  * Following Google Messages design, this panel:
- * - Slides up from the bottom with spring animation
  * - Shows category tabs at the top
  * - Displays emojis in a scrollable grid
  * - Matches the height of a typical keyboard
  *
- * @param visible Whether the panel is visible
+ * Note: Visibility, animations, and drag-to-dismiss are handled by ComposerPanelHost.
+ *
+ * @param visible Whether the panel is visible (kept for compatibility, handled by parent)
  * @param onEmojiSelected Callback when an emoji is selected
  * @param onDismiss Callback when panel should be dismissed
  * @param modifier Modifier for the panel
@@ -206,95 +198,68 @@ fun EmojiKeyboardPanel(
         emojiCategories.find { it.id == selectedCategory }?.emojis ?: emptyList()
     }
 
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInVertically(
-            initialOffsetY = { it },
-            animationSpec = spring(
-                dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
-                stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
-            )
-        ) + fadeIn(tween(ComposerMotionTokens.Duration.FAST)),
-        exit = slideOutVertically(
-            targetOffsetY = { it },
-            animationSpec = tween(ComposerMotionTokens.Duration.NORMAL)
-        ) + fadeOut(tween(ComposerMotionTokens.Duration.FAST)),
-        modifier = modifier
+    // Panel content - visibility/animations/drag handled by ComposerPanelHost
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        tonalElevation = 8.dp
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            tonalElevation = 8.dp
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp)
         ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp)
+            // Category tabs
+            LazyRow(
+                modifier = Modifier.fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
-                // Drag handle
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(32.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                // Category tabs
-                LazyRow(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(emojiCategories) { category ->
-                        val isSelected = category.id == selectedCategory
-                        IconButton(
-                            onClick = { selectedCategory = category.id },
-                            modifier = Modifier.size(40.dp)
-                        ) {
-                            Icon(
-                                imageVector = category.icon,
-                                contentDescription = category.id,
-                                tint = if (isSelected) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
-                                },
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                }
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 8.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant
-                )
-
-                // Emoji grid
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(8),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(ComposerMotionTokens.Dimension.PanelHeight)
-                        .padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(currentEmojis) { emoji ->
-                        EmojiItem(
-                            emoji = emoji,
-                            onClick = { onEmojiSelected(emoji) }
+                items(emojiCategories) { category ->
+                    val isSelected = category.id == selectedCategory
+                    IconButton(
+                        onClick = { selectedCategory = category.id },
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Icon(
+                            imageVector = category.icon,
+                            contentDescription = category.id,
+                            tint = if (isSelected) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                            modifier = Modifier.size(24.dp)
                         )
                     }
                 }
-
-                Spacer(modifier = Modifier.height(8.dp))
             }
+
+            HorizontalDivider(
+                modifier = Modifier.padding(vertical = 8.dp),
+                color = MaterialTheme.colorScheme.outlineVariant
+            )
+
+            // Emoji grid
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(8),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ComposerMotionTokens.Dimension.PanelHeight)
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                items(currentEmojis) { emoji ->
+                    EmojiItem(
+                        emoji = emoji,
+                        onClick = { onEmojiSelected(emoji) }
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
         }
     }
 }

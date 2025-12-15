@@ -5,6 +5,7 @@ import androidx.room.RoomDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
@@ -85,6 +86,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun syncRangeDao(): SyncRangeDao
     abstract fun autoRespondedSenderDao(): AutoRespondedSenderDao
     abstract fun verifiedCounterpartCheckDao(): VerifiedCounterpartCheckDao
+    abstract fun chatQueryDao(): ChatQueryDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

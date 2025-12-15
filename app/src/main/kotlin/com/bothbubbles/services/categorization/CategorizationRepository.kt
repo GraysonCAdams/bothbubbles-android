@@ -22,6 +22,8 @@ class CategorizationRepository @Inject constructor(
     companion object {
         private const val TAG = "CategorizationRepository"
         private const val MESSAGES_TO_ANALYZE = 10
+        /** Marker for chats that were attempted but couldn't be confidently categorized */
+        const val CATEGORY_UNCATEGORIZED = "uncategorized"
     }
 
     /**
@@ -69,6 +71,20 @@ class CategorizationRepository @Inject constructor(
     }
 
     /**
+     * Mark a chat as "uncategorized" - attempted but couldn't be confidently categorized.
+     * This prevents the chat from being re-processed on every app launch.
+     */
+    private suspend fun markAsUncategorized(chatGuid: String) {
+        chatDao.updateCategory(
+            guid = chatGuid,
+            category = CATEGORY_UNCATEGORIZED,
+            confidence = 0,
+            timestamp = System.currentTimeMillis()
+        )
+        Log.d(TAG, "Marked chat $chatGuid as uncategorized (no confident match)")
+    }
+
+    /**
      * Categorize all uncategorized chats retroactively.
      * This is used after ML model download or when enabling categorization
      * to categorize existing conversations that were synced before.
@@ -97,6 +113,8 @@ class CategorizationRepository @Inject constructor(
                     .filter { !it.isFromMe && !it.text.isNullOrBlank() }
 
                 if (messages.isEmpty()) {
+                    // No messages to analyze - mark as uncategorized so we don't retry
+                    markAsUncategorized(chat.guid)
                     return@forEachIndexed
                 }
 
@@ -140,10 +158,16 @@ class CategorizationRepository @Inject constructor(
                         )
                         categorizedCount++
                         Log.d(TAG, "Categorized chat ${chat.guid} as ${result.category} (multi-message)")
+                        return@forEachIndexed
                     }
                 }
+
+                // Couldn't categorize with confidence - mark as uncategorized so we don't retry
+                markAsUncategorized(chat.guid)
             } catch (e: Exception) {
                 Log.e(TAG, "Error categorizing chat ${chat.guid}", e)
+                // Mark as uncategorized on error so we don't retry indefinitely
+                markAsUncategorized(chat.guid)
             }
         }
 

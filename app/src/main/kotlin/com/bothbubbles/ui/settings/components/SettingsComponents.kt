@@ -11,9 +11,11 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -233,6 +235,9 @@ fun SettingsSectionTitle(
 /**
  * Status badge for messaging services (iMessage/SMS).
  * Uses MD3 semantic color roles for consistent theming.
+ *
+ * Accessibility: Uses icons (checkmark/warning) in addition to color
+ * to support colorblind users. Includes chevron to indicate interactivity.
  */
 @Composable
 fun StatusBadge(
@@ -253,35 +258,59 @@ fun StatusBadge(
             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
             onClick()
         },
-        modifier = modifier,
+        modifier = modifier
+            // Ensure minimum 48dp touch target for accessibility
+            .defaultMinSize(minHeight = 48.dp),
         shape = RoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
         Row(
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
-            // Status dot - filled for connected/error, hollow for disabled
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .then(
-                        if (status == BadgeStatus.DISABLED) {
-                            Modifier
-                                .background(Color.Transparent)
-                                .border(1.5.dp, statusColor, CircleShape)
-                        } else {
-                            Modifier.background(statusColor)
-                        }
+            // Status indicator with icon for accessibility (colorblind support)
+            when (status) {
+                BadgeStatus.CONNECTED -> {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = "Connected",
+                        modifier = Modifier.size(14.dp),
+                        tint = statusColor
                     )
-            )
+                }
+                BadgeStatus.ERROR -> {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = "Error",
+                        modifier = Modifier.size(14.dp),
+                        tint = statusColor
+                    )
+                }
+                BadgeStatus.DISABLED -> {
+                    // Hollow circle for disabled state
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(Color.Transparent)
+                            .border(1.5.dp, statusColor, CircleShape)
+                    )
+                }
+            }
 
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // Chevron to indicate badge is tappable/navigable
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

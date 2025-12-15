@@ -286,11 +286,12 @@
             </intent-filter>
         </service>
 
-        <!-- ETA Sharing Stop Receiver -->
+        <!-- ETA Sharing Receiver (start/stop sharing actions) -->
         <receiver
-            android:name=".services.eta.EtaSharingStopReceiver"
+            android:name=".services.eta.EtaSharingReceiver"
             android:exported="false">
             <intent-filter>
+                <action android:name="com.bothbubbles.action.START_ETA_SHARING" />
                 <action android:name="com.bothbubbles.action.STOP_ETA_SHARING" />
             </intent-filter>
         </receiver>

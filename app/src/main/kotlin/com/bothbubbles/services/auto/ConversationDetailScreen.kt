@@ -11,12 +11,17 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.prefs.FeaturePreferences
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -43,11 +48,24 @@ class ConversationDetailScreen(
     private val chatRepository: ChatRepository,
     private val messageSendingService: MessageSendingService,
     private val syncService: SyncService? = null,
+    private val socketConnection: SocketConnection? = null,
+    private val featurePreferences: FeaturePreferences? = null,
+    private val attachmentRepository: AttachmentRepository? = null,
+    private val attachmentDao: AttachmentDao? = null,
     private val onRefresh: () -> Unit
 ) : Screen(carContext) {
 
     // Screen-local scope that follows screen lifecycle
     private val screenScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    // Audio player for voice messages
+    private val audioPlayer by lazy { AutoAudioPlayer(carContext) }
+
+    // TTS for reading messages aloud
+    private val textToSpeech by lazy { AutoTextToSpeech(carContext) }
+
+    // Cache for audio attachments by message guid
+    private val audioAttachmentCache = mutableMapOf<String, AttachmentEntity?>()
 
     @Volatile
     private var cachedMessages: List<MessageEntity> = emptyList()
@@ -65,6 +83,10 @@ class ConversationDetailScreen(
     @Volatile
     private var totalMessageCount = 0
 
+    // Privacy mode - hide message content when enabled
+    @Volatile
+    private var privacyModeEnabled = false
+
     // Cache for sender names to avoid blocking calls
     private val senderNameCache = mutableMapOf<Long, String>()
 
@@ -74,10 +96,37 @@ class ConversationDetailScreen(
         // Register lifecycle observer to cancel scope when screen is destroyed
         lifecycle.addObserver(object : DefaultLifecycleObserver {
             override fun onDestroy(owner: LifecycleOwner) {
+                audioPlayer.stop()
+                textToSpeech.shutdown()
                 screenScope.cancel()
             }
         })
+
+        // Load privacy mode preference
+        screenScope.launch {
+            featurePreferences?.androidAutoPrivacyMode?.collect { enabled ->
+                if (enabled != privacyModeEnabled) {
+                    privacyModeEnabled = enabled
+                    invalidate()
+                }
+            }
+        }
+
         refreshMessages()
+
+        // Auto mark-as-read when entering conversation
+        // This ensures the notification is cleared on the phone
+        if (chat.hasUnreadMessage) {
+            screenScope.launch {
+                try {
+                    chatRepository.markChatAsRead(chat.guid)
+                    android.util.Log.d(TAG, "Auto-marked chat ${chat.guid} as read")
+                    onRefresh() // Refresh conversation list to update unread indicator
+                } catch (e: Exception) {
+                    android.util.Log.e(TAG, "Failed to auto mark as read", e)
+                }
+            }
+        }
     }
 
     private fun refreshMessages() {
@@ -141,12 +190,40 @@ class ConversationDetailScreen(
                 }
 
                 android.util.Log.d(TAG, "Loaded ${cachedMessages.size} messages, total=$totalMessageCount, hasMore=$hasMoreMessages")
+
+                // Pre-fetch audio attachments for messages with attachments
+                prefetchAudioAttachments(cachedMessages)
+
                 invalidate()
             } catch (e: Exception) {
                 android.util.Log.e(TAG, "Failed to refresh messages", e)
                 isLoadingMessages = false
                 invalidate()
             }
+        }
+    }
+
+    /**
+     * Pre-fetch audio attachments for messages to enable playback.
+     */
+    private suspend fun prefetchAudioAttachments(messages: List<MessageEntity>) {
+        if (attachmentDao == null) return
+
+        val messagesWithAttachments = messages.filter { it.hasAttachments }
+        if (messagesWithAttachments.isEmpty()) return
+
+        val messageGuids = messagesWithAttachments.map { it.guid }
+        try {
+            val attachments = attachmentDao.getAttachmentsForMessages(messageGuids)
+            for (attachment in attachments) {
+                // Check if it's an audio attachment
+                if (attachment.mimeType?.startsWith("audio/") == true) {
+                    audioAttachmentCache[attachment.messageGuid] = attachment
+                    android.util.Log.d(TAG, "Found audio attachment: ${attachment.guid} for message ${attachment.messageGuid}")
+                }
+            }
+        } catch (e: Exception) {
+            android.util.Log.e(TAG, "Failed to prefetch audio attachments", e)
         }
     }
 
@@ -180,6 +257,22 @@ class ConversationDetailScreen(
             }
         }
 
+        // Add "Read Aloud" row if there are messages and privacy mode is off
+        if (cachedMessages.isNotEmpty() && !privacyModeEnabled) {
+            val readAloudRow = Row.Builder()
+                .setTitle(if (textToSpeech.isSpeaking) "Stop Reading" else "Read Aloud")
+                .setImage(
+                    CarIcon.Builder(
+                        IconCompat.createWithResource(carContext, android.R.drawable.ic_btn_speak_now)
+                    ).build()
+                )
+                .setOnClickListener {
+                    readMessagesAloud()
+                }
+                .build()
+            itemListBuilder.addItem(readAloudRow)
+        }
+
         if (cachedMessages.isEmpty()) {
             itemListBuilder.setNoItemsMessage(
                 if (isLoadingMessages) "Loading messages..." else "No messages yet"
@@ -204,7 +297,8 @@ class ConversationDetailScreen(
                         onMessageSent = {
                             refreshMessages()
                             onRefresh()
-                        }
+                        },
+                        socketConnection = socketConnection
                     )
                 )
             }
@@ -235,8 +329,23 @@ class ConversationDetailScreen(
     }
 
     private fun buildMessageRow(message: MessageEntity): Row? {
-        val text = message.text ?: return null
-        if (text.isBlank()) return null
+        // Check if this is an audio message
+        val audioAttachment = audioAttachmentCache[message.guid]
+        val isAudioMessage = audioAttachment != null
+
+        val rawText = message.text
+        val hasText = !rawText.isNullOrBlank()
+
+        // If no text and not an audio message with attachment, skip
+        if (!hasText && !isAudioMessage) return null
+
+        // Privacy mode: show generic message instead of content
+        val text = when {
+            privacyModeEnabled -> if (isAudioMessage) "🔊 Voice Message" else "Message"
+            isAudioMessage -> "🔊 Voice Message" + if (hasText) " - ${AutoUtils.parseReactionText(rawText!!)}" else ""
+            hasText -> AutoUtils.parseReactionText(rawText!!)
+            else -> return null
+        }
 
         val senderName = if (message.isFromMe) {
             "You"
@@ -247,14 +356,101 @@ class ConversationDetailScreen(
         val time = dateFormat.format(Date(message.dateCreated))
 
         return try {
-            Row.Builder()
+            val rowBuilder = Row.Builder()
                 .setTitle("$senderName - $time")
                 .addText(text)
-                .build()
+
+            // Add click handler for audio messages to play them
+            if (isAudioMessage && attachmentRepository != null) {
+                rowBuilder.setOnClickListener {
+                    playAudioMessage(audioAttachment!!)
+                }
+            }
+
+            rowBuilder.build()
         } catch (e: Exception) {
             android.util.Log.e(TAG, "Failed to build message row", e)
             null
         }
+    }
+
+    /**
+     * Play an audio message attachment.
+     * Downloads if not available locally, then plays with audio focus.
+     */
+    private fun playAudioMessage(attachment: AttachmentEntity) {
+        if (attachmentRepository == null) return
+
+        // If already playing, stop
+        if (audioPlayer.isPlaying) {
+            audioPlayer.stop()
+            CarToast.makeText(carContext, "Stopped", CarToast.LENGTH_SHORT).show()
+            return
+        }
+
+        CarToast.makeText(carContext, "Loading audio...", CarToast.LENGTH_SHORT).show()
+
+        screenScope.launch {
+            try {
+                // Download if not available locally
+                val file = attachmentRepository.getAttachmentFile(attachment.guid).getOrThrow()
+
+                audioPlayer.playAudio(
+                    filePath = file.absolutePath,
+                    onComplete = {
+                        CarToast.makeText(carContext, "Playback complete", CarToast.LENGTH_SHORT).show()
+                    },
+                    onError = { e ->
+                        android.util.Log.e(TAG, "Audio playback error", e)
+                        CarToast.makeText(carContext, "Playback failed", CarToast.LENGTH_SHORT).show()
+                    }
+                )
+            } catch (e: Exception) {
+                android.util.Log.e(TAG, "Failed to play audio message", e)
+                CarToast.makeText(carContext, "Failed to load audio", CarToast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    /**
+     * Read recent messages aloud using TTS.
+     */
+    private fun readMessagesAloud() {
+        // If already speaking, stop
+        if (textToSpeech.isSpeaking) {
+            textToSpeech.stop()
+            CarToast.makeText(carContext, "Stopped", CarToast.LENGTH_SHORT).show()
+            invalidate()
+            return
+        }
+
+        // Get recent messages to read (last 5, oldest first)
+        val messagesToRead = cachedMessages
+            .reversed()
+            .takeLast(MAX_MESSAGES_TO_READ)
+            .filter { !it.text.isNullOrBlank() }
+
+        if (messagesToRead.isEmpty()) {
+            CarToast.makeText(carContext, "No messages to read", CarToast.LENGTH_SHORT).show()
+            return
+        }
+
+        // Build list of (sender, text) pairs
+        val messages = messagesToRead.map { message ->
+            val sender = if (message.isFromMe) "You" else getSenderName(message).ifEmpty { "Someone" }
+            val text = message.text ?: ""
+            sender to text
+        }
+
+        CarToast.makeText(carContext, "Reading ${messages.size} messages...", CarToast.LENGTH_SHORT).show()
+        invalidate()
+
+        textToSpeech.speakMessages(
+            messages = messages,
+            onComplete = {
+                invalidate()
+            }
+        )
     }
 
     private fun getSenderName(message: MessageEntity): String {
@@ -266,5 +462,6 @@ class ConversationDetailScreen(
     companion object {
         private const val TAG = "ConversationDetailScreen"
         private const val PAGE_SIZE = 15  // Show 15 messages per page
+        private const val MAX_MESSAGES_TO_READ = 5  // Limit TTS to recent messages
     }
 }

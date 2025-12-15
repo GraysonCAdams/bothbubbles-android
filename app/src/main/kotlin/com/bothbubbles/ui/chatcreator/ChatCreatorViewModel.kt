@@ -302,4 +302,26 @@ class ChatCreatorViewModel @Inject constructor(
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
+
+    /**
+     * Enter group selection mode. Shows checkboxes on contacts.
+     */
+    fun enterGroupMode() {
+        _uiState.update { it.copy(mode = ChatCreatorMode.GROUP) }
+    }
+
+    /**
+     * Exit group mode and return to single chat mode.
+     * Clears any selected recipients.
+     */
+    fun exitGroupMode() {
+        recipientSelectionDelegate.clearRecipients()
+        _uiState.update { it.copy(mode = ChatCreatorMode.SINGLE) }
+    }
+
+    /**
+     * Check if we're in group selection mode
+     */
+    val isGroupMode: Boolean
+        get() = _uiState.value.mode == ChatCreatorMode.GROUP
 }

@@ -5,13 +5,21 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
+import com.bothbubbles.data.local.db.dao.ChatQueryDao
+import com.bothbubbles.services.ActiveConversationManager
 import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
@@ -27,9 +35,14 @@ class NavigationListenerService : NotificationListenerService() {
     companion object {
         private const val TAG = "NavigationListenerSvc"
         const val CHANNEL_ETA_SHARING = "eta_sharing"
+        const val CHANNEL_ETA_PROMPT = "eta_prompt"
         const val NOTIFICATION_ID_ETA_SHARING = 3000001
+        const val NOTIFICATION_ID_ETA_PROMPT = 3000002
 
         const val ACTION_STOP_SHARING = "com.bothbubbles.action.STOP_ETA_SHARING"
+
+        // Delay before showing prompt notification (to ensure navigation is stable)
+        private const val NAVIGATION_STABLE_DELAY_MS = 20_000L // 20 seconds
     }
 
     @Inject
@@ -38,18 +51,32 @@ class NavigationListenerService : NotificationListenerService() {
     @Inject
     lateinit var etaSharingManager: EtaSharingManager
 
+    @Inject
+    lateinit var chatQueryDao: ChatQueryDao
+
+    @Inject
+    lateinit var activeConversationManager: ActiveConversationManager
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val handler = Handler(Looper.getMainLooper())
+
     // Track which navigation notifications we're monitoring
     private val activeNavigationNotifications = mutableSetOf<String>()
+
+    // Track if we've already shown the prompt for this navigation session
+    private var promptShownForSession = false
+    private var pendingPromptRunnable: Runnable? = null
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "NavigationListenerService created")
-        createNotificationChannel()
+        createNotificationChannels()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "NavigationListenerService destroyed")
+        pendingPromptRunnable?.let { handler.removeCallbacks(it) }
     }
 
     override fun onListenerConnected() {
@@ -81,6 +108,11 @@ class NavigationListenerService : NotificationListenerService() {
             if (activeNavigationNotifications.isEmpty()) {
                 etaSharingManager.onNavigationStopped()
                 cancelSharingNotification()
+                cancelPromptNotification()
+                // Reset session tracking for next navigation
+                promptShownForSession = false
+                pendingPromptRunnable?.let { handler.removeCallbacks(it) }
+                pendingPromptRunnable = null
             }
         }
     }
@@ -97,7 +129,8 @@ class NavigationListenerService : NotificationListenerService() {
             return
         }
 
-        Log.d(TAG, "Navigation notification from ${app.name}: ${sbn.key}")
+        val isNewSession = activeNavigationNotifications.isEmpty()
+        Log.d(TAG, "Navigation notification from ${app.name}: ${sbn.key} (new session: $isNewSession)")
         activeNavigationNotifications.add(sbn.key)
 
         // Parse ETA data
@@ -106,16 +139,47 @@ class NavigationListenerService : NotificationListenerService() {
             Log.d(TAG, "Parsed ETA: ${etaData.etaMinutes} min to ${etaData.destination}")
             etaSharingManager.onEtaUpdate(etaData)
             updateSharingNotificationIfActive(etaData)
+
+            // Schedule prompt notification for new navigation sessions
+            if (isNewSession && !promptShownForSession && !etaSharingManager.state.value.isSharing) {
+                schedulePromptNotification(etaData)
+            }
         } else {
             Log.d(TAG, "Could not parse ETA from notification")
         }
     }
 
     /**
-     * Create notification channel for ETA sharing status
+     * Schedule the "Navigation Detected" prompt notification after a delay
+     * to ensure navigation is stable and not just a quick check
      */
-    private fun createNotificationChannel() {
-        val channel = NotificationChannel(
+    private fun schedulePromptNotification(etaData: ParsedEtaData) {
+        // Cancel any existing pending prompt
+        pendingPromptRunnable?.let { handler.removeCallbacks(it) }
+
+        pendingPromptRunnable = Runnable {
+            // Double-check navigation is still active and not already sharing
+            if (activeNavigationNotifications.isNotEmpty() &&
+                !etaSharingManager.state.value.isSharing &&
+                !promptShownForSession
+            ) {
+                showPromptNotification(etaData)
+                promptShownForSession = true
+            }
+        }
+
+        handler.postDelayed(pendingPromptRunnable!!, NAVIGATION_STABLE_DELAY_MS)
+        Log.d(TAG, "Scheduled prompt notification in ${NAVIGATION_STABLE_DELAY_MS}ms")
+    }
+
+    /**
+     * Create notification channels for ETA sharing
+     */
+    private fun createNotificationChannels() {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+
+        // Channel for active sharing status (low priority, ongoing)
+        val sharingChannel = NotificationChannel(
             CHANNEL_ETA_SHARING,
             "ETA Sharing",
             NotificationManager.IMPORTANCE_LOW
@@ -124,15 +188,125 @@ class NavigationListenerService : NotificationListenerService() {
             setShowBadge(false)
         }
 
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.createNotificationChannel(channel)
+        // Channel for prompt notifications (default priority for visibility)
+        val promptChannel = NotificationChannel(
+            CHANNEL_ETA_PROMPT,
+            "Navigation Detected",
+            NotificationManager.IMPORTANCE_DEFAULT
+        ).apply {
+            description = "Suggests sharing your ETA when navigation starts"
+            setShowBadge(true)
+        }
+
+        notificationManager.createNotificationChannel(sharingChannel)
+        notificationManager.createNotificationChannel(promptChannel)
     }
 
     /**
-     * Show or update the "sharing active" notification
+     * Show the "Navigation Detected" prompt notification with Android Auto support
+     */
+    private fun showPromptNotification(etaData: ParsedEtaData) {
+        scope.launch {
+            // Try to get a suggested recipient
+            val suggestedChat = getSuggestedRecipient()
+            val recipientName = suggestedChat?.let {
+                it.displayName ?: it.chatIdentifier ?: "contact"
+            }
+
+            val contentTitle = "Navigation Detected"
+            val contentText = buildString {
+                append("ETA: ${formatEtaMinutes(etaData.etaMinutes)}")
+                etaData.destination?.let { append(" to $it") }
+            }
+
+            // Create start sharing intent
+            val startIntent = Intent(EtaSharingReceiver.ACTION_START_SHARING).apply {
+                setPackage(packageName)
+                suggestedChat?.let {
+                    putExtra(EtaSharingReceiver.EXTRA_CHAT_GUID, it.guid)
+                    putExtra(EtaSharingReceiver.EXTRA_DISPLAY_NAME, recipientName)
+                }
+            }
+            val startPendingIntent = PendingIntent.getBroadcast(
+                this@NavigationListenerService,
+                1,
+                startIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            // Create open app intent
+            val openIntent = Intent(this@NavigationListenerService, MainActivity::class.java)
+            val openPendingIntent = PendingIntent.getActivity(
+                this@NavigationListenerService,
+                0,
+                openIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+
+            // Build the action button text
+            val actionText = if (recipientName != null) {
+                "Share with $recipientName"
+            } else {
+                "Share ETA"
+            }
+
+            val notification = NotificationCompat.Builder(this@NavigationListenerService, CHANNEL_ETA_PROMPT)
+                .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+                .setContentTitle(contentTitle)
+                .setContentText(contentText)
+                .setContentIntent(openPendingIntent)
+                .setAutoCancel(true)
+                .addAction(
+                    android.R.drawable.ic_menu_share,
+                    actionText,
+                    startPendingIntent
+                )
+                .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                // Android Auto support via CarExtender
+                .extend(
+                    NotificationCompat.CarExtender()
+                        .setUnreadConversation(
+                            NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
+                                .addMessage(contentText)
+                                .setLatestTimestamp(System.currentTimeMillis())
+                                .setReplyAction(startPendingIntent, null)
+                                .build()
+                        )
+                )
+                .build()
+
+            val notificationManager = getSystemService(NotificationManager::class.java)
+            notificationManager.notify(NOTIFICATION_ID_ETA_PROMPT, notification)
+            Log.d(TAG, "Showed prompt notification (suggested: $recipientName)")
+        }
+    }
+
+    /**
+     * Get a suggested recipient for ETA sharing based on context:
+     * 1. Currently active chat (if any)
+     * 2. Most recently messaged non-group chat
+     */
+    private suspend fun getSuggestedRecipient(): com.bothbubbles.data.local.db.entity.ChatEntity? {
+        // First, check if there's an active conversation
+        val activeGuid = activeConversationManager.getActiveConversation()
+        if (activeGuid != null) {
+            val activeChat = chatQueryDao.getChatByGuid(activeGuid)
+            if (activeChat != null && !activeChat.isGroup) {
+                return activeChat
+            }
+        }
+
+        // Fall back to most recent non-group chat
+        return chatQueryDao.getRecentChats(5)
+            .firstOrNull { !it.isGroup }
+    }
+
+    /**
+     * Show or update the "sharing active" notification with Android Auto support
      */
     fun showSharingNotification(recipientName: String, etaMinutes: Int) {
-        val stopIntent = Intent(ACTION_STOP_SHARING).apply {
+        val stopIntent = Intent(EtaSharingReceiver.ACTION_STOP_SHARING).apply {
             setPackage(packageName)
         }
         val stopPendingIntent = PendingIntent.getBroadcast(
@@ -150,11 +324,14 @@ class NavigationListenerService : NotificationListenerService() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val etaText = if (etaMinutes > 0) " ($etaMinutes min away)" else ""
+        val etaText = if (etaMinutes > 0) " (${formatEtaMinutes(etaMinutes)})" else ""
+        val contentTitle = "Sharing ETA with $recipientName"
+        val contentText = "You're sharing your arrival time$etaText"
+
         val notification = NotificationCompat.Builder(this, CHANNEL_ETA_SHARING)
             .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle("Sharing ETA with $recipientName")
-            .setContentText("You're sharing your arrival time$etaText")
+            .setContentTitle(contentTitle)
+            .setContentText(contentText)
             .setOngoing(true)
             .setContentIntent(openPendingIntent)
             .addAction(
@@ -164,10 +341,24 @@ class NavigationListenerService : NotificationListenerService() {
             )
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
+            // Android Auto support
+            .extend(
+                NotificationCompat.CarExtender()
+                    .setUnreadConversation(
+                        NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
+                            .addMessage(contentText)
+                            .setLatestTimestamp(System.currentTimeMillis())
+                            .setReplyAction(stopPendingIntent, null)
+                            .build()
+                    )
+            )
             .build()
 
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.notify(NOTIFICATION_ID_ETA_SHARING, notification)
+
+        // Cancel the prompt notification when sharing starts
+        cancelPromptNotification()
     }
 
     /**
@@ -184,5 +375,25 @@ class NavigationListenerService : NotificationListenerService() {
     fun cancelSharingNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.cancel(NOTIFICATION_ID_ETA_SHARING)
+    }
+
+    /**
+     * Cancel the prompt notification
+     */
+    private fun cancelPromptNotification() {
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(NOTIFICATION_ID_ETA_PROMPT)
+    }
+
+    private fun formatEtaMinutes(minutes: Int): String {
+        return when {
+            minutes < 1 -> "Arriving"
+            minutes < 60 -> "$minutes min"
+            else -> {
+                val hours = minutes / 60
+                val mins = minutes % 60
+                if (mins > 0) "${hours}h ${mins}m" else "${hours}h"
+            }
+        }
     }
 }

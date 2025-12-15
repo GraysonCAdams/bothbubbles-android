@@ -285,7 +285,9 @@ class ConversationListScreen(
     private fun buildMessagePreview(message: MessageEntity?, chat: ChatEntity): String {
         if (message == null) return "No messages"
 
-        val text = message.text?.take(50) ?: ""
+        val rawText = message.text?.take(50) ?: ""
+        // Parse reaction text to emoji format for better glanceability
+        val text = AutoUtils.parseReactionText(rawText)
         val hasAttachment = message.hasAttachments
 
         // Build preview with sender prefix

@@ -29,14 +29,13 @@ class EtaSharingManager @Inject constructor(
     companion object {
         private const val TAG = "EtaSharingManager"
 
-        // Debouncing rules
-        const val SIGNIFICANT_CHANGE_MINUTES = 5  // Send update if ETA changes by 5+ min
-        const val PERIODIC_UPDATE_MS = 15 * 60 * 1000L  // Send update every 15 minutes
-        const val ARRIVAL_THRESHOLD_MINUTES = 2  // Send "arriving" message when under 2 min
+        // Thresholds
+        const val ARRIVING_SOON_THRESHOLD = 3   // Send "arriving soon" at 3 min
+        const val ARRIVED_THRESHOLD = 1         // Consider "arrived" at 0-1 min
+        const val DEFAULT_CHANGE_THRESHOLD = 5  // Default if not configured
 
         // Terminal state protection
         const val TERMINAL_STATE_COOLDOWN_MS = 30 * 60 * 1000L  // 30 min before allowing new session
-        const val ARRIVED_ETA_THRESHOLD = 1  // Consider "arrived" when ETA is 0-1 min
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -61,7 +60,8 @@ class EtaSharingManager @Inject constructor(
             recipientGuid = chatGuid,
             recipientDisplayName = displayName,
             destination = initialEta?.destination,
-            lastEtaMinutes = initialEta?.etaMinutes ?: 0
+            lastEtaMinutes = initialEta?.etaMinutes ?: 0,
+            lastMessageType = EtaMessageType.INITIAL
         )
 
         _state.value = EtaState(
@@ -73,7 +73,9 @@ class EtaSharingManager @Inject constructor(
 
         // Send initial message
         initialEta?.let { eta ->
-            sendEtaUpdate(session, eta, isInitial = true)
+            scope.launch {
+                sendMessageForType(session, eta, EtaMessageType.INITIAL)
+            }
         }
     }
 
@@ -119,20 +121,59 @@ class EtaSharingManager @Inject constructor(
             return
         }
 
-        // Check if we just arrived (ETA hit 0-1 min)
-        if (etaData.etaMinutes <= ARRIVED_ETA_THRESHOLD && session.lastEtaMinutes > ARRIVED_ETA_THRESHOLD) {
-            Log.d(TAG, "ETA reached arrival threshold - entering terminal state")
-            enterTerminalState(etaData.destination)
-            scope.launch {
-                sendArrivedMessage(session)
+        // Determine what type of message to send (if any)
+        scope.launch {
+            val messageType = determineUpdateType(session, etaData)
+
+            if (messageType != null) {
+                sendMessageForType(session, etaData, messageType)
             }
-            stopSharing(sendFinalMessage = false)
-            return
+        }
+    }
+
+    /**
+     * Determine what type of update message to send, if any.
+     * Returns null if no update should be sent.
+     */
+    private suspend fun determineUpdateType(
+        session: EtaSharingSession,
+        eta: ParsedEtaData
+    ): EtaMessageType? {
+        val newEtaMinutes = eta.etaMinutes
+        val etaDelta = abs(newEtaMinutes - session.lastEtaMinutes)
+        val changeThreshold = settingsDataStore.etaChangeThreshold.first()
+
+        // Priority 1: Check for arrival (terminal state)
+        if (newEtaMinutes <= ARRIVED_THRESHOLD && session.lastMessageType != EtaMessageType.ARRIVED) {
+            Log.d(TAG, "Update type: ARRIVED (ETA: $newEtaMinutes min)")
+            return EtaMessageType.ARRIVED
         }
 
-        if (shouldSendUpdate(session, etaData.etaMinutes)) {
-            sendEtaUpdate(session, etaData, isInitial = false)
+        // Priority 2: Check for destination change
+        if (eta.destination != null && session.destination != null &&
+            !isSameDestination(eta.destination, session.destination)
+        ) {
+            Log.d(TAG, "Update type: DESTINATION_CHANGE (${session.destination} → ${eta.destination})")
+            return EtaMessageType.DESTINATION_CHANGE
         }
+
+        // Priority 3: Check for "arriving soon" (only send once)
+        if (newEtaMinutes <= ARRIVING_SOON_THRESHOLD &&
+            session.lastEtaMinutes > ARRIVING_SOON_THRESHOLD &&
+            session.lastMessageType != EtaMessageType.ARRIVING_SOON
+        ) {
+            Log.d(TAG, "Update type: ARRIVING_SOON (ETA dropped to $newEtaMinutes min)")
+            return EtaMessageType.ARRIVING_SOON
+        }
+
+        // Priority 4: Significant ETA change (user-configurable threshold)
+        if (etaDelta >= changeThreshold) {
+            Log.d(TAG, "Update type: CHANGE (delta: $etaDelta min, threshold: $changeThreshold)")
+            return EtaMessageType.CHANGE
+        }
+
+        // No meaningful change
+        return null
     }
 
     /**
@@ -219,6 +260,10 @@ class EtaSharingManager @Inject constructor(
 
     /**
      * Handle navigation stopped (notification removed)
+     *
+     * Logic:
+     * - If we were close to destination (≤3 min), assume we arrived
+     * - Otherwise, assume trip was cancelled
      */
     fun onNavigationStopped() {
         Log.d(TAG, "Navigation stopped")
@@ -227,91 +272,121 @@ class EtaSharingManager @Inject constructor(
         val currentState = _state.value
         _state.value = currentState.copy(isNavigationActive = false)
 
-        // If we were sharing, send arrival message and stop
+        // If we were sharing, determine if this was arrival or cancellation
         if (currentState.isSharing && currentState.session != null) {
+            val session = currentState.session
+            val lastEta = session.lastEtaMinutes
+
+            // If we were close to destination (≤3 min), assume we arrived
+            val wasNearDestination = lastEta <= ARRIVING_SOON_THRESHOLD
+
             scope.launch {
-                sendArrivedMessage(currentState.session)
-            }
-            stopSharing(sendFinalMessage = false)
-        }
-    }
-
-    /**
-     * Check if we should send an update based on debouncing rules
-     */
-    private fun shouldSendUpdate(session: EtaSharingSession, newEtaMinutes: Int): Boolean {
-        val timeSinceLastSend = System.currentTimeMillis() - session.lastSentTime
-        val etaDelta = abs(newEtaMinutes - session.lastEtaMinutes)
-
-        // Rule 1: Significant change in ETA
-        if (etaDelta >= SIGNIFICANT_CHANGE_MINUTES) {
-            Log.d(TAG, "Sending update: significant ETA change ($etaDelta min)")
-            return true
-        }
-
-        // Rule 2: Periodic update
-        if (timeSinceLastSend >= PERIODIC_UPDATE_MS) {
-            Log.d(TAG, "Sending update: periodic (${timeSinceLastSend / 1000}s since last)")
-            return true
-        }
-
-        // Rule 3: About to arrive
-        if (newEtaMinutes <= ARRIVAL_THRESHOLD_MINUTES && session.lastEtaMinutes > ARRIVAL_THRESHOLD_MINUTES) {
-            Log.d(TAG, "Sending update: arriving soon")
-            return true
-        }
-
-        return false
-    }
-
-    /**
-     * Send an ETA update message via WorkManager for background safety
-     */
-    private fun sendEtaUpdate(session: EtaSharingSession, eta: ParsedEtaData, isInitial: Boolean) {
-        scope.launch {
-            val message = buildEtaMessage(eta, isInitial)
-            Log.d(TAG, "Queueing ETA update: $message")
-
-            // Use PendingMessageRepository for WorkManager-backed delivery
-            // This ensures messages are sent even if phone is locked/app backgrounded
-            pendingMessageRepository.queueMessage(
-                chatGuid = session.recipientGuid,
-                text = message
-            ).onSuccess {
-                Log.d(TAG, "ETA message queued successfully: $it")
-
-                // Update session with new send time
-                val updatedSession = session.copy(
-                    lastSentTime = System.currentTimeMillis(),
-                    lastEtaMinutes = eta.etaMinutes,
-                    updateCount = session.updateCount + 1,
-                    destination = eta.destination ?: session.destination
-                )
-
-                _state.value = _state.value.copy(session = updatedSession)
-            }.onFailure { e ->
-                Log.e(TAG, "Failed to queue ETA update", e)
+                if (wasNearDestination) {
+                    Log.d(TAG, "Navigation stopped near destination - sending arrived message")
+                    // Create a fake ETA for the arrived message
+                    val arrivedEta = ParsedEtaData(
+                        etaMinutes = 0,
+                        destination = session.destination,
+                        distanceText = null,
+                        arrivalTimeText = null,
+                        navigationApp = currentState.currentEta?.navigationApp ?: NavigationApp.GOOGLE_MAPS
+                    )
+                    sendMessageForType(session, arrivedEta, EtaMessageType.ARRIVED)
+                } else {
+                    Log.d(TAG, "Navigation stopped far from destination - sending cancelled message")
+                    sendStoppedMessage(session)
+                    stopSharing(sendFinalMessage = false)
+                }
             }
         }
     }
 
     /**
-     * Build the ETA message text
+     * Send a message based on the determined type
      */
-    private fun buildEtaMessage(eta: ParsedEtaData, isInitial: Boolean): String {
-        val prefix = if (isInitial) "📍 On my way!" else "📍 ETA Update"
-        val etaText = formatEtaTime(eta.etaMinutes)
-        val destText = eta.destination?.let { " to $it" } ?: ""
+    private suspend fun sendMessageForType(
+        session: EtaSharingSession,
+        eta: ParsedEtaData,
+        messageType: EtaMessageType
+    ) {
+        val message = when (messageType) {
+            EtaMessageType.INITIAL -> buildInitialMessage(eta)
+            EtaMessageType.DESTINATION_CHANGE -> buildDestinationChangeMessage(eta)
+            EtaMessageType.CHANGE -> buildChangeMessage(eta, session.lastEtaMinutes)
+            EtaMessageType.ARRIVING_SOON -> buildArrivingSoonMessage(eta)
+            EtaMessageType.ARRIVED -> buildArrivedMessage(eta.destination ?: session.destination)
+        }
 
+        Log.d(TAG, "Sending $messageType message: $message")
+
+        pendingMessageRepository.queueMessage(
+            chatGuid = session.recipientGuid,
+            text = message
+        ).onSuccess {
+            // Update session state
+            val updatedSession = session.copy(
+                lastSentTime = System.currentTimeMillis(),
+                lastEtaMinutes = eta.etaMinutes,
+                updateCount = session.updateCount + 1,
+                destination = eta.destination ?: session.destination,
+                lastMessageType = messageType
+            )
+            _state.value = _state.value.copy(session = updatedSession)
+
+            // Handle terminal state for ARRIVED
+            if (messageType == EtaMessageType.ARRIVED) {
+                enterTerminalState(eta.destination)
+                stopSharing(sendFinalMessage = false)
+            }
+        }.onFailure { e ->
+            Log.e(TAG, "Failed to send $messageType message", e)
+        }
+    }
+
+    // ===== Message Builders =====
+
+    private fun buildInitialMessage(eta: ParsedEtaData): String {
+        val dest = eta.destination ?: "destination"
         return buildString {
-            append(prefix)
-            append("\n")
-            append(etaText)
-            append(destText)
-            eta.arrivalTimeText?.let {
-                append("\nArriving around $it")
+            append("📍 On my way to $dest!")
+            append("\nETA: ${formatEtaTime(eta.etaMinutes)}")
+            eta.arrivalTimeText?.let { append(" (arriving ~$it)") }
+        }
+    }
+
+    private fun buildDestinationChangeMessage(eta: ParsedEtaData): String {
+        val dest = eta.destination ?: "new destination"
+        return buildString {
+            append("📍 Change of plans!")
+            append("\nNow heading to $dest")
+            append("\nETA: ${formatEtaTime(eta.etaMinutes)}")
+            eta.arrivalTimeText?.let { append(" (arriving ~$it)") }
+        }
+    }
+
+    private fun buildChangeMessage(eta: ParsedEtaData, previousEta: Int): String {
+        val dest = eta.destination ?: "destination"
+        return buildString {
+            append("📍 ETA Update")
+            append("\nNow ${formatEtaTime(eta.etaMinutes)} to $dest")
+            if (previousEta > 0) {
+                append(" (was ${formatEtaTime(previousEta)})")
             }
         }
+    }
+
+    private fun buildArrivingSoonMessage(eta: ParsedEtaData): String {
+        val dest = eta.destination?.let { " at $it" } ?: ""
+        return "📍 Almost there! Arriving$dest in ~${eta.etaMinutes} min"
+    }
+
+    private fun buildArrivedMessage(destination: String?): String {
+        val dest = destination?.let { " at $it" } ?: ""
+        return "📍 I've arrived$dest!"
+    }
+
+    private fun buildCancelledMessage(): String {
+        return "📍 Stopped sharing location"
     }
 
     /**
@@ -319,26 +394,14 @@ class EtaSharingManager @Inject constructor(
      */
     private fun formatEtaTime(minutes: Int): String {
         return when {
-            minutes < 1 -> "Arriving now"
-            minutes < 60 -> "$minutes min away"
+            minutes < 1 -> "arriving now"
+            minutes == 1 -> "1 min"
+            minutes < 60 -> "$minutes min"
             else -> {
                 val hours = minutes / 60
                 val mins = minutes % 60
-                if (mins > 0) "${hours}hr ${mins}min away" else "${hours}hr away"
+                if (mins > 0) "${hours}hr ${mins}min" else "${hours}hr"
             }
-        }
-    }
-
-    /**
-     * Send message that we've arrived via WorkManager
-     */
-    private suspend fun sendArrivedMessage(session: EtaSharingSession) {
-        val message = "📍 I've arrived${session.destination?.let { " at $it" } ?: ""}!"
-        pendingMessageRepository.queueMessage(
-            chatGuid = session.recipientGuid,
-            text = message
-        ).onFailure { e ->
-            Log.e(TAG, "Failed to queue arrived message", e)
         }
     }
 
@@ -346,7 +409,7 @@ class EtaSharingManager @Inject constructor(
      * Send message that sharing was stopped via WorkManager
      */
     private suspend fun sendStoppedMessage(session: EtaSharingSession) {
-        val message = "📍 Stopped sharing location"
+        val message = buildCancelledMessage()
         pendingMessageRepository.queueMessage(
             chatGuid = session.recipientGuid,
             text = message

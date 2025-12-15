@@ -1,6 +1,9 @@
 package com.bothbubbles.di
 
 import android.content.Context
+import androidx.datastore.core.DataStore
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.WorkManager
 import coil.ImageLoader
 import dagger.Module
@@ -9,6 +12,8 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
+
+private val Context.featureDataStore: DataStore<Preferences> by preferencesDataStore(name = "feature_preferences")
 
 /**
  * Hilt module providing application-scoped utilities.
@@ -32,5 +37,11 @@ object AppModule {
     fun provideImageLoader(@ApplicationContext context: Context): ImageLoader {
         // Coil 3.x: ImageLoaderFactory creates the ImageLoader via newImageLoader()
         return (context.applicationContext as coil.ImageLoaderFactory).newImageLoader()
+    }
+
+    @Provides
+    @Singleton
+    fun provideFeatureDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
+        return context.featureDataStore
     }
 }

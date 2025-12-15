@@ -1,6 +1,17 @@
 package com.bothbubbles.ui.chatcreator
 
 /**
+ * Selection mode for the chat creator screen.
+ * Determines whether the user is creating a 1:1 chat or a group chat.
+ */
+enum class ChatCreatorMode {
+    /** Default mode - tapping a contact opens a 1:1 chat directly */
+    SINGLE,
+    /** Group selection mode - contacts show checkboxes, multiple can be selected */
+    GROUP
+}
+
+/**
  * UI model for displaying a contact in the list
  */
 data class ContactUiModel(
@@ -18,6 +29,7 @@ data class ContactUiModel(
  * Main UI state for the ChatCreator screen
  */
 data class ChatCreatorUiState(
+    val mode: ChatCreatorMode = ChatCreatorMode.SINGLE,
     val searchQuery: String = "",
     val recentContacts: List<ContactUiModel> = emptyList(),  // Recent conversations (up to 4)
     val groupedContacts: Map<String, List<ContactUiModel>> = emptyMap(),

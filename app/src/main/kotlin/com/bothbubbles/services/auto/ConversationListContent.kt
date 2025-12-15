@@ -11,13 +11,17 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.prefs.FeaturePreferences
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +53,10 @@ class ConversationListContent(
     private val chatRepository: ChatRepository,
     private val messageSendingService: MessageSendingService,
     private val syncService: SyncService?,
+    private val socketConnection: SocketConnection?,
+    private val featurePreferences: FeaturePreferences?,
+    private val attachmentRepository: AttachmentRepository?,
+    private val attachmentDao: AttachmentDao?,
     private val screenManager: ScreenManager,
     private val onInvalidate: () -> Unit
 ) {
@@ -71,6 +79,10 @@ class ConversationListContent(
     @Volatile
     private var isLoading = false
 
+    // Privacy mode - hide message content when enabled
+    @Volatile
+    private var privacyModeEnabled = false
+
     // Name caches
     private val senderNameCache = mutableMapOf<Long, String>()
     private val participantNameCache = mutableMapOf<String, String>()
@@ -82,6 +94,15 @@ class ConversationListContent(
     private var avatarsLoading = false
 
     init {
+        // Load privacy mode preference
+        contentScope.launch {
+            featurePreferences?.androidAutoPrivacyMode?.collect { enabled ->
+                if (enabled != privacyModeEnabled) {
+                    privacyModeEnabled = enabled
+                    onInvalidate()
+                }
+            }
+        }
         refreshData()
     }
 
@@ -217,7 +238,7 @@ class ConversationListContent(
     fun buildContent(): Template {
         val itemListBuilder = ItemList.Builder()
 
-        for (chat in cachedConversations) {
+        for ((index, chat) in cachedConversations.withIndex()) {
             val item = buildConversationRow(chat)
             if (item != null) {
                 itemListBuilder.addItem(item)
@@ -227,10 +248,23 @@ class ConversationListContent(
         // Add "Load More" item if there are more conversations
         if (hasMoreConversations && cachedConversations.isNotEmpty()) {
             val loadMoreItem = Row.Builder()
-                .setTitle("Load More Conversations...")
-                .setOnClickListener { loadMoreConversations() }
+                .setTitle(if (isLoading) "Loading..." else "Load More Conversations...")
+                .setOnClickListener {
+                    if (!isLoading) loadMoreConversations()
+                }
                 .build()
             itemListBuilder.addItem(loadMoreItem)
+        }
+
+        // Add visibility listener for infinite scroll
+        // When the last few items become visible, auto-trigger load
+        itemListBuilder.setOnItemsVisibilityChangedListener { startIndex, endIndex ->
+            val totalItems = cachedConversations.size
+            // If we're showing items near the end and there are more, auto-load
+            if (hasMoreConversations && !isLoading && endIndex >= totalItems - SCROLL_THRESHOLD) {
+                android.util.Log.d(TAG, "Auto-loading more conversations (visible: $startIndex-$endIndex, total: $totalItems)")
+                loadMoreConversations()
+            }
         }
 
         if (cachedConversations.isEmpty()) {
@@ -289,6 +323,10 @@ class ConversationListContent(
                             chatRepository = chatRepository,
                             messageSendingService = messageSendingService,
                             syncService = syncService,
+                            socketConnection = socketConnection,
+                            featurePreferences = featurePreferences,
+                            attachmentRepository = attachmentRepository,
+                            attachmentDao = attachmentDao,
                             onRefresh = { refreshData() }
                         )
                     )
@@ -303,7 +341,14 @@ class ConversationListContent(
     private fun buildMessagePreview(message: MessageEntity?, chat: ChatEntity): String {
         if (message == null) return "No messages"
 
-        val text = message.text?.take(50) ?: ""
+        // Privacy mode: show generic message instead of content
+        if (privacyModeEnabled) {
+            return if (chat.hasUnreadMessage) "New Message" else "Message"
+        }
+
+        val rawText = message.text?.take(50) ?: ""
+        // Parse reaction text to emoji format for better glanceability
+        val text = AutoUtils.parseReactionText(rawText)
         val hasAttachment = message.hasAttachments
 
         val isGroupChat = chat.displayName != null
@@ -329,5 +374,6 @@ class ConversationListContent(
         private const val TAG = "ConversationListContent"
         private const val PAGE_SIZE = 15
         private const val AVATAR_SIZE = 64 // Pixels, suitable for car displays
+        private const val SCROLL_THRESHOLD = 3 // Load more when within 3 items of end
     }
 }

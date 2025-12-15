@@ -227,6 +227,7 @@ class SettingsDataStore @Inject constructor(
     val autoResponderEnabled: Flow<Boolean> get() = featurePrefs.autoResponderEnabled
     val autoResponderFilter: Flow<String> get() = featurePrefs.autoResponderFilter
     val autoResponderRateLimit: Flow<Int> get() = featurePrefs.autoResponderRateLimit
+    val autoResponderRecommendedAlias: Flow<String> get() = featurePrefs.autoResponderRecommendedAlias
     val etaSharingEnabled: Flow<Boolean> get() = featurePrefs.etaSharingEnabled
     val etaUpdateInterval: Flow<Int> get() = featurePrefs.etaUpdateInterval
     val etaChangeThreshold: Flow<Int> get() = featurePrefs.etaChangeThreshold
@@ -241,6 +242,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setAutoResponderEnabled(enabled: Boolean) = featurePrefs.setAutoResponderEnabled(enabled)
     suspend fun setAutoResponderFilter(filter: String) = featurePrefs.setAutoResponderFilter(filter)
     suspend fun setAutoResponderRateLimit(limit: Int) = featurePrefs.setAutoResponderRateLimit(limit)
+    suspend fun setAutoResponderRecommendedAlias(alias: String) = featurePrefs.setAutoResponderRecommendedAlias(alias)
     suspend fun setEtaSharingEnabled(enabled: Boolean) = featurePrefs.setEtaSharingEnabled(enabled)
     suspend fun setEtaUpdateInterval(minutes: Int) = featurePrefs.setEtaUpdateInterval(minutes)
     suspend fun setEtaChangeThreshold(minutes: Int) = featurePrefs.setEtaChangeThreshold(minutes)

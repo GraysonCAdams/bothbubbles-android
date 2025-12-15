@@ -53,6 +53,9 @@ sealed class SettingsPanelPage {
     /** Auto-responder settings */
     data object AutoResponder : SettingsPanelPage()
 
+    /** ETA sharing settings */
+    data object EtaSharing : SettingsPanelPage()
+
     /** About screen */
     data object About : SettingsPanelPage()
 

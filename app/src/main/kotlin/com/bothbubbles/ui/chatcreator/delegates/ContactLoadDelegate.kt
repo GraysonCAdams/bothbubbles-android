@@ -42,8 +42,14 @@ class ContactLoadDelegate @Inject constructor(
         val grouped: Map<String, List<ContactUiModel>>,
         val favorites: List<ContactUiModel>,
         val groupChats: List<GroupChatUiModel>,
-        val query: String
+        val query: String,
+        val hasContactsPermission: Boolean
     )
+
+    /**
+     * Check if the app has READ_CONTACTS permission.
+     */
+    fun hasContactsPermission(): Boolean = androidContactsService.hasReadPermission()
 
     /**
      * Load all contacts and observe search query changes.
@@ -53,6 +59,9 @@ class ContactLoadDelegate @Inject constructor(
         searchQueryFlow: Flow<String>,
         scope: CoroutineScope
     ): Flow<ContactsData> = flow {
+        // Check permission first
+        val hasPermission = androidContactsService.hasReadPermission()
+
         // Load contacts from phone contacts (not from handles)
         val phoneContacts = androidContactsService.getAllContacts()
 

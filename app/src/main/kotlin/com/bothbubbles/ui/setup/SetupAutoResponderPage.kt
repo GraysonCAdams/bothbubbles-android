@@ -86,7 +86,7 @@ internal fun AutoResponderSetupPage(
         Spacer(modifier = Modifier.height(12.dp))
 
         Text(
-            text = "Let new iMessage contacts know how to reach you",
+            text = "Help SMS contacts switch to iMessage",
             style = MaterialTheme.typography.bodyMedium,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
@@ -127,7 +127,7 @@ internal fun AutoResponderSetupPage(
 
         // Filter selection
         Text(
-            text = "Auto-respond to first message from:",
+            text = "Auto-respond to first SMS from:",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier.fillMaxWidth()
@@ -137,7 +137,7 @@ internal fun AutoResponderSetupPage(
 
         AutoResponderFilterOption(
             title = "Everyone",
-            subtitle = "All iMessage users",
+            subtitle = "Any SMS sender who is iMessage-capable",
             selected = uiState.autoResponderFilter == "everyone",
             onClick = { onFilterModeChange("everyone") }
         )
@@ -256,11 +256,11 @@ private fun AutoResponderFilterOption(
 
 private fun buildAutoResponderMessage(phoneNumber: String?): String {
     val baseMessage = "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
-        "Please add this email to my contact card so I can reach you through " +
-        "my phone number or email."
+        "Please add my iMessage address to my contact card so future messages " +
+        "go through iMessage."
 
     return if (phoneNumber != null) {
-        "$baseMessage You can still also reach me at $phoneNumber"
+        "$baseMessage You can still reach me via SMS at $phoneNumber."
     } else {
         baseMessage
     }

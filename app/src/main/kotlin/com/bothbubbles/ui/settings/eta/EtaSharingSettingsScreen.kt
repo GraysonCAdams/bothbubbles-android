@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -49,9 +50,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlin.math.roundToInt
 
@@ -88,7 +92,6 @@ fun EtaSharingSettingsScreen(
             modifier = Modifier.padding(paddingValues),
             uiState = uiState,
             onEnableChanged = viewModel::setEnabled,
-            onUpdateIntervalChanged = viewModel::setUpdateInterval,
             onChangeThresholdChanged = viewModel::setChangeThreshold,
             onOpenNotificationSettings = {
                 context.startActivity(viewModel.getNotificationAccessSettingsIntent())
@@ -103,10 +106,28 @@ fun EtaSharingSettingsContent(
     viewModel: EtaSharingSettingsViewModel = hiltViewModel(),
     uiState: EtaSharingSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     onEnableChanged: (Boolean) -> Unit = viewModel::setEnabled,
-    onUpdateIntervalChanged: (Int) -> Unit = viewModel::setUpdateInterval,
     onChangeThresholdChanged: (Int) -> Unit = viewModel::setChangeThreshold,
-    onOpenNotificationSettings: () -> Unit = {}
+    onOpenNotificationSettings: (() -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val resolvedOnOpenNotificationSettings = onOpenNotificationSettings ?: {
+        context.startActivity(viewModel.getNotificationAccessSettingsIntent())
+    }
+
+    // Refresh permission state when returning from settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshNotificationAccess()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -118,11 +139,10 @@ fun EtaSharingSettingsContent(
         // Permission status card
         PermissionStatusCard(
             hasNotificationAccess = uiState.hasNotificationAccess,
-            onOpenSettings = onOpenNotificationSettings
+            onOpenSettings = resolvedOnOpenNotificationSettings
         )
 
         // Battery optimization card (Samsung/Xiaomi devices aggressively kill background services)
-        val context = LocalContext.current
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         val isIgnoringBatteryOptimizations = powerManager.isIgnoringBatteryOptimizations(context.packageName)
 
@@ -160,23 +180,12 @@ fun EtaSharingSettingsContent(
                 )
             }
 
-            // Update interval
-            SettingsSection(title = "Update Frequency") {
+            // Change threshold (no more periodic updates - only meaningful changes)
+            SettingsSection(title = "Update Sensitivity") {
                 IntervalSlider(
-                    label = "Send updates every ${uiState.updateIntervalMinutes} minutes",
-                    description = "Minimum time between automatic ETA updates",
-                    value = uiState.updateIntervalMinutes,
-                    onValueChange = onUpdateIntervalChanged,
-                    valueRange = 5f..30f,
-                    steps = 4
-                )
-            }
-
-            // Change threshold
-            SettingsSection(title = "Change Sensitivity") {
-                IntervalSlider(
-                    label = "Update when ETA changes by ${uiState.changeThresholdMinutes}+ minutes",
-                    description = "Send updates immediately when arrival time changes significantly",
+                    label = "Notify when ETA changes by ${uiState.changeThresholdMinutes}+ minutes",
+                    description = "Updates are sent when your arrival time changes significantly, " +
+                        "when you're about to arrive (~3 min away), or when you've arrived.",
                     value = uiState.changeThresholdMinutes,
                     onValueChange = onChangeThresholdChanged,
                     valueRange = 2f..15f,

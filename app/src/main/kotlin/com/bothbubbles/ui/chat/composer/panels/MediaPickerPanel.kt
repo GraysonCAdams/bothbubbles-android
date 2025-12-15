@@ -4,30 +4,15 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.Orientation
-import androidx.compose.foundation.gestures.draggable
-import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -45,12 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,7 +41,6 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 
 /**
  * Media picker option type for the grid.
@@ -128,7 +107,9 @@ enum class MediaPickerOption(
  * - Audio (starts voice recording)
  * - Contact (shares a contact)
  *
- * @param visible Whether the panel is visible
+ * Note: Visibility and drag-to-dismiss are handled by ComposerPanelHost.
+ *
+ * @param visible Whether the panel is visible (kept for compatibility, handled by parent)
  * @param onMediaSelected Callback when media is selected from gallery
  * @param onCameraClick Callback when camera option is tapped
  * @param onGifClick Callback when GIF option is tapped
@@ -174,133 +155,66 @@ fun MediaPickerPanel(
         )
     }
 
-    // Drag state for swipe-to-dismiss
-    val density = LocalDensity.current
-    var dragOffset by remember { mutableFloatStateOf(0f) }
-    var isDragging by remember { mutableStateOf(false) }
-    val dismissThreshold = with(density) { 120.dp.toPx() } // 120dp threshold for dismissal
-
-    val draggableState = rememberDraggableState { delta ->
-        // Only allow dragging down (positive delta)
-        dragOffset = (dragOffset + delta).coerceAtLeast(0f)
-    }
-
-    // Animate back to 0 only when not actively dragging
-    val displayOffset by animateFloatAsState(
-        targetValue = if (isDragging) dragOffset else 0f,
-        animationSpec = spring(
-            dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
-            stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
-        ),
-        label = "dragOffset"
-    )
-
-    // Use raw offset while dragging, animated offset when releasing
-    // Convert pixels to dp for the offset modifier
-    val currentOffsetDp = with(density) {
-        (if (isDragging) dragOffset else displayOffset).toDp()
-    }
-
-    AnimatedVisibility(
-        visible = visible,
-        enter = slideInVertically(
-            initialOffsetY = { it },
-            animationSpec = spring(
-                dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
-                stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
-            )
-        ) + fadeIn(tween(ComposerMotionTokens.Duration.FAST)),
-        exit = slideOutVertically(
-            targetOffsetY = { it },
-            animationSpec = tween(ComposerMotionTokens.Duration.NORMAL)
-        ) + fadeOut(tween(ComposerMotionTokens.Duration.FAST)),
-        modifier = modifier
+    // Panel content - visibility/animations handled by ComposerPanelHost
+    Surface(
+        modifier = modifier.fillMaxWidth(),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        tonalElevation = 8.dp
     ) {
-        Surface(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .offset(y = currentOffsetDp)
-                .draggable(
-                    state = draggableState,
-                    orientation = Orientation.Vertical,
-                    onDragStarted = { isDragging = true },
-                    onDragStopped = {
-                        isDragging = false
-                        if (dragOffset > dismissThreshold) {
-                            onDismiss()
-                        }
-                        dragOffset = 0f
-                    }
-                ),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-            shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-            tonalElevation = 8.dp
+                .padding(top = 4.dp, bottom = 16.dp)
         ) {
-            Column(
+            // Options grid
+            LazyVerticalGrid(
+                columns = GridCells.Fixed(4),
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 12.dp, bottom = 16.dp)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Drag handle (visual indicator for swipe-to-dismiss)
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .width(32.dp)
-                        .height(4.dp)
-                        .clip(RoundedCornerShape(2.dp))
-                        .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
-                )
-
-                // Options grid
-                LazyVerticalGrid(
-                    columns = GridCells.Fixed(4),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 16.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                ) {
-                    items(options) { option ->
-                        MediaPickerOptionItem(
-                            option = option,
-                            onClick = {
-                                when (option) {
-                                    MediaPickerOption.GALLERY -> {
-                                        pickMedia.launch(
-                                            PickVisualMediaRequest(
-                                                ActivityResultContracts.PickVisualMedia.ImageAndVideo
-                                            )
+                items(options) { option ->
+                    MediaPickerOptionItem(
+                        option = option,
+                        onClick = {
+                            when (option) {
+                                MediaPickerOption.GALLERY -> {
+                                    pickMedia.launch(
+                                        PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.ImageAndVideo
                                         )
-                                    }
-                                    MediaPickerOption.CAMERA -> {
-                                        onCameraClick()
-                                        onDismiss()
-                                    }
-                                    MediaPickerOption.GIF -> {
-                                        onGifClick()
-                                        // Don't dismiss - switch to GIF panel
-                                    }
-                                    MediaPickerOption.FILES -> {
-                                        onFileClick()
-                                        onDismiss()
-                                    }
-                                    MediaPickerOption.LOCATION -> {
-                                        onLocationClick()
-                                        onDismiss()
-                                    }
-                                    MediaPickerOption.AUDIO -> {
-                                        onAudioClick()
-                                        onDismiss()
-                                    }
-                                    MediaPickerOption.CONTACT -> {
-                                        onContactClick()
-                                        onDismiss()
-                                    }
+                                    )
+                                }
+                                MediaPickerOption.CAMERA -> {
+                                    onCameraClick()
+                                    onDismiss()
+                                }
+                                MediaPickerOption.GIF -> {
+                                    onGifClick()
+                                    // Don't dismiss - switch to GIF panel
+                                }
+                                MediaPickerOption.FILES -> {
+                                    onFileClick()
+                                    onDismiss()
+                                }
+                                MediaPickerOption.LOCATION -> {
+                                    onLocationClick()
+                                    onDismiss()
+                                }
+                                MediaPickerOption.AUDIO -> {
+                                    onAudioClick()
+                                    onDismiss()
+                                }
+                                MediaPickerOption.CONTACT -> {
+                                    onContactClick()
+                                    onDismiss()
                                 }
                             }
-                        )
-                    }
+                        }
+                    )
                 }
             }
         }

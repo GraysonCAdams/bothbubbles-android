@@ -1,8 +1,9 @@
 package com.bothbubbles.ui.settings.eta
 
-import android.content.ComponentName
 import android.content.Context
 import android.provider.Settings
+import android.util.Log
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -20,7 +21,6 @@ import javax.inject.Inject
 data class EtaSharingSettingsUiState(
     val enabled: Boolean = false,
     val hasNotificationAccess: Boolean = false,
-    val updateIntervalMinutes: Int = 15,
     val changeThresholdMinutes: Int = 5,
     val isNavigationActive: Boolean = false,
     val isCurrentlySharing: Boolean = false,
@@ -40,7 +40,6 @@ class EtaSharingSettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<EtaSharingSettingsUiState> = combine(
         settingsDataStore.etaSharingEnabled,
-        settingsDataStore.etaUpdateInterval,
         settingsDataStore.etaChangeThreshold,
         _hasNotificationAccess,
         etaSharingManager.isNavigationActive,
@@ -48,17 +47,16 @@ class EtaSharingSettingsViewModel @Inject constructor(
         settingsDataStore.developerModeEnabled
     ) { values: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
-        val etaState = values[5] as? com.bothbubbles.services.eta.EtaState
+        val etaState = values[4] as? com.bothbubbles.services.eta.EtaState
         EtaSharingSettingsUiState(
             enabled = values[0] as? Boolean ?: false,
-            updateIntervalMinutes = values[1] as? Int ?: 15,
-            changeThresholdMinutes = values[2] as? Int ?: 5,
-            hasNotificationAccess = values[3] as? Boolean ?: false,
-            isNavigationActive = values[4] as? Boolean ?: false,
+            changeThresholdMinutes = values[1] as? Int ?: 5,
+            hasNotificationAccess = values[2] as? Boolean ?: false,
+            isNavigationActive = values[3] as? Boolean ?: false,
             isCurrentlySharing = etaState?.isSharing ?: false,
             currentEtaMinutes = etaState?.currentEta?.etaMinutes ?: 0,
             destination = etaState?.currentEta?.destination,
-            isDeveloperMode = values[6] as? Boolean ?: false
+            isDeveloperMode = values[5] as? Boolean ?: false
         )
     }.stateIn(
         scope = viewModelScope,
@@ -72,12 +70,6 @@ class EtaSharingSettingsViewModel @Inject constructor(
         }
     }
 
-    fun setUpdateInterval(minutes: Int) {
-        viewModelScope.launch {
-            settingsDataStore.setEtaUpdateInterval(minutes)
-        }
-    }
-
     fun setChangeThreshold(minutes: Int) {
         viewModelScope.launch {
             settingsDataStore.setEtaChangeThreshold(minutes)
@@ -85,21 +77,16 @@ class EtaSharingSettingsViewModel @Inject constructor(
     }
 
     fun refreshNotificationAccess() {
+        Log.d("EtaSettings", "refreshNotificationAccess() called")
         _hasNotificationAccess.value = checkNotificationAccess()
     }
 
     private fun checkNotificationAccess(): Boolean {
-        val enabledListeners = Settings.Secure.getString(
-            context.contentResolver,
-            "enabled_notification_listeners"
-        ) ?: return false
-
-        val componentName = ComponentName(
-            context.packageName,
-            "com.bothbubbles.services.eta.NavigationListenerService"
-        ).flattenToString()
-
-        return enabledListeners.contains(componentName)
+        val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
+        val hasAccess = enabledPackages.contains(context.packageName)
+        Log.d("EtaSettings", "checkNotificationAccess: enabledPackages = $enabledPackages")
+        Log.d("EtaSettings", "checkNotificationAccess: looking for '${context.packageName}', hasAccess = $hasAccess")
+        return hasAccess
     }
 
     fun getNotificationAccessSettingsIntent(): android.content.Intent {

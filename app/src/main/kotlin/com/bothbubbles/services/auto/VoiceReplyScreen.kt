@@ -15,6 +15,7 @@ import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.socket.SocketConnection
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.CoroutineScope
@@ -31,12 +32,17 @@ import kotlinx.coroutines.launch
  * - Wraps RecognizerIntent in try-catch for ActivityNotFoundException
  * - Falls back gracefully when voice recognizer is unavailable
  * - Shows informative error messages to driver
+ *
+ * Connection status awareness:
+ * - Shows warning when offline
+ * - Messages are queued for delivery when back online
  */
 class VoiceReplyScreen(
     carContext: CarContext,
     private val chat: ChatEntity,
     private val messageSendingService: MessageSendingService,
-    private val onMessageSent: () -> Unit
+    private val onMessageSent: () -> Unit,
+    private val socketConnection: SocketConnection? = null
 ) : Screen(carContext) {
 
     // Screen-local scope that follows screen lifecycle
@@ -186,6 +192,12 @@ class VoiceReplyScreen(
     private fun sendMessage() {
         if (messageText.isBlank()) return
 
+        // Check connection status and warn user if offline
+        val isOnline = socketConnection?.isConnected() ?: true
+        if (!isOnline) {
+            CarToast.makeText(carContext, "Offline: Message queued", CarToast.LENGTH_LONG).show()
+        }
+
         isSending = true
         invalidate()
 
@@ -195,7 +207,8 @@ class VoiceReplyScreen(
                     chatGuid = chat.guid,
                     text = messageText
                 )
-                CarToast.makeText(carContext, "Message sent!", CarToast.LENGTH_SHORT).show()
+                val toastMessage = if (isOnline) "Message sent!" else "Message queued for delivery"
+                CarToast.makeText(carContext, toastMessage, CarToast.LENGTH_SHORT).show()
                 onMessageSent()
                 screenManager.pop()
             } catch (e: Exception) {

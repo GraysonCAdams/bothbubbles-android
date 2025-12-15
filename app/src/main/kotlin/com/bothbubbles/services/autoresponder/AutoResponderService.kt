@@ -14,10 +14,11 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Service that handles automatic responses to first-time iMessage contacts.
+ * Service that handles automatic responses to SMS senders who are iMessage-capable.
  *
- * Sends a greeting message to help new contacts know how to reach the user
- * through their iMessage email address or phone number.
+ * When someone sends you an SMS but is also registered on iMessage, this sends
+ * them an iMessage explaining how to add your email to their contacts so future
+ * messages go through iMessage instead of SMS.
  */
 @Singleton
 class AutoResponderService @Inject constructor(
@@ -77,7 +78,7 @@ class AutoResponderService @Inject constructor(
             return false
         }
 
-        // 6. Check iMessage availability (only respond to iMessage users)
+        // 6. Check iMessage availability (only respond if sender can receive iMessage)
         val availabilityResult = iMessageAvailabilityService.checkAvailability(senderAddress)
         if (availabilityResult.isFailure || availabilityResult.getOrNull() != true) {
             Log.d(TAG, "Sender not iMessage registered: $senderAddress")
@@ -106,8 +107,10 @@ class AutoResponderService @Inject constructor(
             return false
         }
 
-        // 9. Build and send message
-        val message = buildMessage()
+        // 9. Build and send message (using stored alias preference)
+        val recommendedAlias = settingsDataStore.autoResponderRecommendedAlias.first()
+            .takeIf { it.isNotBlank() }
+        val message = buildMessage(recommendedAlias)
         Log.d(TAG, "Sending auto-response to $senderAddress: $message")
 
         return try {
@@ -129,19 +132,27 @@ class AutoResponderService @Inject constructor(
 
     /**
      * Build the auto-response message.
-     * Includes phone number if available from SIM.
+     *
+     * @param recommendedAlias Optional alias (phone/email) to recommend adding to contacts.
+     *                         If null, uses a generic message.
      */
-    fun buildMessage(): String {
+    fun buildMessage(recommendedAlias: String? = null): String {
         val phone = smsRepository.getAvailableSims().firstOrNull()?.number
             ?.takeIf { it.isNotBlank() }
             ?.let { formatPhone(it) }
 
-        val baseMessage = "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
-            "Please add this email to my contact card so I can reach you through " +
-            "my phone number or email."
+        val baseMessage = if (recommendedAlias != null) {
+            "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
+                "Please add $recommendedAlias to my contact card so future messages " +
+                "go through iMessage."
+        } else {
+            "Hello, I am on BlueBubbles which lets me use iMessage on my Android. " +
+                "Please add my iMessage address to my contact card so future messages " +
+                "go through iMessage."
+        }
 
-        return if (phone != null) {
-            "$baseMessage You can still also reach me at $phone"
+        return if (phone != null && recommendedAlias != phone) {
+            "$baseMessage You can still reach me via SMS at $phone."
         } else {
             baseMessage
         }
