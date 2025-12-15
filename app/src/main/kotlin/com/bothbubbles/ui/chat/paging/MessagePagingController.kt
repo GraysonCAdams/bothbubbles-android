@@ -228,6 +228,27 @@ class MessagePagingController(
     }
 
     /**
+     * Update a message locally without database round-trip.
+     * Used for optimistic UI updates (e.g., reactions).
+     *
+     * @param guid The message GUID to update
+     * @param transform Function to transform the message model
+     * @return True if the message was found and updated
+     */
+    suspend fun updateMessageLocally(guid: String, transform: (MessageUiModel) -> MessageUiModel): Boolean {
+        return stateMutex.withLock {
+            val position = guidToPosition[guid] ?: return@withLock false
+            val currentModel = sparseData[position] ?: return@withLock false
+
+            val updatedModel = transform(currentModel)
+            sparseData[position] = updatedModel
+            emitMessagesLocked()
+            Log.d(TAG, "Locally updated message at position $position: $guid")
+            true
+        }
+    }
+
+    /**
      * Handle a new message being inserted.
      * Called when a message arrives via socket or is sent locally.
      *

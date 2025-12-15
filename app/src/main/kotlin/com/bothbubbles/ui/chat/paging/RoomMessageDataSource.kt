@@ -150,7 +150,13 @@ class RoomMessageDataSource(
         }
 
         // Group iMessage reactions by their associated message GUID
-        val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
+        // Note: associatedMessageGuid may have "p:X/" prefix (e.g., "p:0/MESSAGE_GUID")
+        // Strip the prefix to match against plain message GUIDs
+        val reactionsByMessage = iMessageReactions.groupBy { reaction ->
+            reaction.associatedMessageGuid?.let { guid ->
+                if (guid.contains("/")) guid.substringAfter("/") else guid
+            }
+        }
 
         // Batch load all attachments in a single query
         val allAttachments = attachmentRepository.getAttachmentsForMessages(messageGuids)

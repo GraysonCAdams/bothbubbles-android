@@ -4,6 +4,7 @@ import androidx.room.Database
 import androidx.room.RoomDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
+import com.bothbubbles.data.local.db.dao.AutoShareRuleDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
@@ -20,6 +21,8 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
+import com.bothbubbles.data.local.db.entity.AutoShareRecipientEntity
+import com.bothbubbles.data.local.db.entity.AutoShareRuleEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
@@ -64,9 +67,11 @@ import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
         IMessageAvailabilityCacheEntity::class,
         SyncRangeEntity::class,
         AutoRespondedSenderEntity::class,
-        VerifiedCounterpartCheckEntity::class
+        VerifiedCounterpartCheckEntity::class,
+        AutoShareRuleEntity::class,
+        AutoShareRecipientEntity::class
     ],
-    version = 35,
+    version = 36,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -87,6 +92,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun autoRespondedSenderDao(): AutoRespondedSenderDao
     abstract fun verifiedCounterpartCheckDao(): VerifiedCounterpartCheckDao
     abstract fun chatQueryDao(): ChatQueryDao
+    abstract fun autoShareRuleDao(): AutoShareRuleDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

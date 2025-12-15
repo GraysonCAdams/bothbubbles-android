@@ -203,17 +203,64 @@ class ChatViewModel @Inject constructor(
 
     private val _activePanel = MutableStateFlow(ComposerPanel.None)
 
+    // ============================================================================
+    // COMPOSER STATE OPTIMIZATION
+    // Decouples composer from full _uiState (80+ fields) to prevent cascade recomposition.
+    // Only the ~8 fields actually needed by the composer are extracted and gated by distinctUntilChanged.
+    // ============================================================================
+
+    /**
+     * Lightweight projection of ChatUiState containing only fields relevant to the composer.
+     * This isolates the composer from unrelated UI state changes (messages, search, etc.).
+     */
+    private data class ComposerRelevantState(
+        val replyToMessage: MessageUiModel? = null,
+        val currentSendMode: ChatSendMode = ChatSendMode.SMS,
+        val isSending: Boolean = false,
+        val smsInputBlocked: Boolean = false,
+        val isLocalSmsChat: Boolean = false,
+        val isInSmsFallbackMode: Boolean = false,
+        val attachmentWarning: AttachmentWarning? = null
+    )
+
+    /**
+     * Derived flow that extracts only composer-relevant fields from _uiState.
+     * distinctUntilChanged prevents downstream emissions unless these specific fields change.
+     */
+    private val composerRelevantState: Flow<ComposerRelevantState> = _uiState
+        .map { ui ->
+            ComposerRelevantState(
+                replyToMessage = ui.replyToMessage,
+                currentSendMode = ui.currentSendMode,
+                isSending = ui.isSending,
+                smsInputBlocked = ui.smsInputBlocked,
+                isLocalSmsChat = ui.isLocalSmsChat,
+                isInSmsFallbackMode = ui.isInSmsFallbackMode,
+                attachmentWarning = ui.attachmentWarning
+            )
+        }
+        .distinctUntilChanged()
+
+    // Memoization caches for expensive transformations inside combine
+    @Volatile private var _cachedAttachmentItems: List<AttachmentItem> = emptyList()
+    @Volatile private var _lastAttachmentInputs: List<PendingAttachmentInput>? = null
+    @Volatile private var _lastAttachmentQuality: AttachmentQuality? = null
+    @Volatile private var _cachedReplyPreview: MessagePreview? = null
+    @Volatile private var _lastReplyMessageGuid: String? = null
+
     // Composer State
     val composerState: StateFlow<ComposerState> = combine(
-        _uiState,
+        composerRelevantState,  // Gated by distinctUntilChanged - only emits when composer fields change
         _draftText,
         _pendingAttachments,
         _attachmentQuality,
         _activePanel
-    ) { ui, text, attachments, quality, panel ->
-        ComposerState(
-            text = text,
-            attachments = attachments.map { 
+    ) { relevant, text, attachments, quality, panel ->
+        // Memoized attachment transformation - only rebuild if inputs changed (referential equality)
+        val attachmentItems = if (attachments === _lastAttachmentInputs && quality == _lastAttachmentQuality) {
+            _cachedAttachmentItems
+        } else {
+            attachments.map {
                 AttachmentItem(
                     id = it.uri.toString(),
                     uri = it.uri,
@@ -223,8 +270,33 @@ class ChatViewModel @Inject constructor(
                     quality = quality,
                     caption = it.caption
                 )
-            },
-            attachmentWarning = ui.attachmentWarning?.let { warning ->
+            }.also {
+                _cachedAttachmentItems = it
+                _lastAttachmentInputs = attachments
+                _lastAttachmentQuality = quality
+            }
+        }
+
+        // Memoized MessagePreview transformation - only rebuild if reply target changed
+        val replyPreview = relevant.replyToMessage?.let { msg ->
+            if (msg.guid == _lastReplyMessageGuid && _cachedReplyPreview != null) {
+                _cachedReplyPreview
+            } else {
+                MessagePreview.fromMessageUiModel(msg).also {
+                    _cachedReplyPreview = it
+                    _lastReplyMessageGuid = msg.guid
+                }
+            }
+        } ?: run {
+            _cachedReplyPreview = null
+            _lastReplyMessageGuid = null
+            null
+        }
+
+        ComposerState(
+            text = text,
+            attachments = attachmentItems,
+            attachmentWarning = relevant.attachmentWarning?.let { warning ->
                 ComposerAttachmentWarning(
                     message = warning.message,
                     isError = warning.isError,
@@ -232,15 +304,17 @@ class ChatViewModel @Inject constructor(
                     affectedUri = warning.affectedUri
                 )
             },
-            replyToMessage = ui.replyToMessage?.let { MessagePreview.fromMessageUiModel(it) },
-            sendMode = ui.currentSendMode,
-            isSending = ui.isSending,
-            smsInputBlocked = ui.smsInputBlocked,
-            isLocalSmsChat = ui.isLocalSmsChat || ui.isInSmsFallbackMode,
+            replyToMessage = replyPreview,
+            sendMode = relevant.currentSendMode,
+            isSending = relevant.isSending,
+            smsInputBlocked = relevant.smsInputBlocked,
+            isLocalSmsChat = relevant.isLocalSmsChat || relevant.isInSmsFallbackMode,
             currentImageQuality = quality,
             activePanel = panel
         )
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ComposerState())
+    }
+        .distinctUntilChanged()  // Final gate: skip UI emissions when ComposerState structurally unchanged
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ComposerState())
 
     fun onComposerEvent(event: ComposerEvent) {
         when (event) {
@@ -2043,7 +2117,14 @@ class ChatViewModel @Inject constructor(
         val iMessageReactions = messages.filter { it.isReaction }
         val regularMessages = messages.filter { !it.isReaction }
 
-        val reactionsByMessage = iMessageReactions.groupBy { it.associatedMessageGuid }
+        // Group reactions by associated message GUID
+        // Note: associatedMessageGuid may have "p:X/" prefix (e.g., "p:0/MESSAGE_GUID")
+        // Strip the prefix to match against plain message GUIDs
+        val reactionsByMessage = iMessageReactions.groupBy { reaction ->
+            reaction.associatedMessageGuid?.let { guid ->
+                if (guid.contains("/")) guid.substringAfter("/") else guid
+            }
+        }
 
         // Batch load all attachments in a single query
         val allAttachments = attachmentRepository.getAttachmentsForMessages(
@@ -2592,20 +2673,67 @@ class ChatViewModel @Inject constructor(
         }
 
         val isRemoving = tapback in message.myReactions
+        Log.d(TAG, "toggleReaction: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
 
         viewModelScope.launch {
-            if (isRemoving) {
+            // OPTIMISTIC UPDATE: Immediately show the reaction in UI
+            val optimisticUpdateApplied = pagingController.updateMessageLocally(messageGuid) { currentMessage ->
+                val newMyReactions = if (isRemoving) {
+                    currentMessage.myReactions - tapback
+                } else {
+                    currentMessage.myReactions + tapback
+                }
+
+                val newReactions = if (isRemoving) {
+                    // Remove my reaction from the list
+                    currentMessage.reactions.filter { !(it.tapback == tapback && it.isFromMe) }.toStable()
+                } else {
+                    // Add my reaction to the list
+                    (currentMessage.reactions + ReactionUiModel(
+                        tapback = tapback,
+                        isFromMe = true,
+                        senderName = null // Will be filled in on refresh from DB
+                    )).toStable()
+                }
+
+                currentMessage.copy(
+                    myReactions = newMyReactions,
+                    reactions = newReactions
+                )
+            }
+
+            if (optimisticUpdateApplied) {
+                Log.d(TAG, "toggleReaction: optimistic update applied for $messageGuid")
+            }
+
+            // Call API in background (fire and forget with rollback on failure)
+            // Pass selectedMessageText - required by BlueBubbles server for reaction matching
+            val messageText = message.text ?: ""
+            val result = if (isRemoving) {
                 messageSendingService.removeReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
-                    reaction = tapback.apiName
+                    reaction = tapback.apiName,
+                    selectedMessageText = messageText
                 )
             } else {
                 messageSendingService.sendReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
-                    reaction = tapback.apiName
+                    reaction = tapback.apiName,
+                    selectedMessageText = messageText
                 )
+            }
+
+            result.onSuccess {
+                Log.d(TAG, "toggleReaction: API success for $messageGuid")
+                // Refresh from database to get the canonical server state
+                // This ensures our optimistic update is replaced with the real data
+                pagingController.updateMessage(messageGuid)
+            }.onFailure { error ->
+                Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back optimistic update", error)
+                // ROLLBACK: Revert to database state (which doesn't have the reaction)
+                pagingController.updateMessage(messageGuid)
             }
         }
     }

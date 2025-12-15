@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Cloud
 import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -183,11 +184,13 @@ fun SettingsCard(
  * - Shake animation when disabled row is tapped (prevents "dead click" confusion)
  * - Actionable subtitles with tappable links
  * - Loading state support for async operations
+ * - Contextual help via info button
  *
  * @param onDisabledClick Called when user taps a disabled row. Use to show snackbar/toast explaining why.
  * @param subtitleAction Optional action text appended to subtitle as a tappable link (e.g., "Tap to fix")
  * @param onSubtitleActionClick Called when the subtitle action link is tapped
  * @param isLoading When true, shows loading indicator instead of trailing content
+ * @param onInfoClick When provided, shows an info icon that triggers this callback (for contextual help)
  */
 @Composable
 fun SettingsMenuItem(
@@ -201,6 +204,7 @@ fun SettingsMenuItem(
     subtitleAction: String? = null,
     onSubtitleActionClick: (() -> Unit)? = null,
     isLoading: Boolean = false,
+    onInfoClick: (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     val haptic = LocalHapticFeedback.current
@@ -302,7 +306,35 @@ fun SettingsMenuItem(
                     )
                 }
             }
-            else -> trailingContent
+            onInfoClick != null || trailingContent != null -> {
+                {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        // Info button for contextual help
+                        if (onInfoClick != null) {
+                            IconButton(
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onInfoClick()
+                                },
+                                modifier = Modifier.size(40.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Info,
+                                    contentDescription = "More info",
+                                    modifier = Modifier.size(20.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        // Original trailing content (e.g., switch)
+                        trailingContent?.invoke()
+                    }
+                }
+            }
+            else -> null
         },
         modifier = modifier
             .graphicsLayer { translationX = shakeOffset.value }

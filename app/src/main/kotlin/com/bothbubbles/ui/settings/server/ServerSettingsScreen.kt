@@ -278,6 +278,13 @@ fun ServerSettingsContent(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                            if (!result.success && result.error != null) {
+                                Text(
+                                    text = result.error,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
                         }
                         IconButton(onClick = { viewModel.clearTestResult() }) {
                             Icon(Icons.Default.Close, contentDescription = "Dismiss")

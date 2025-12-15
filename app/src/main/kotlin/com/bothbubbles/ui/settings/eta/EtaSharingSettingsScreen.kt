@@ -45,8 +45,10 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.bothbubbles.data.repository.AutoShareRule
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -190,6 +192,68 @@ fun EtaSharingSettingsContent(
                     onValueChange = onChangeThresholdChanged,
                     valueRange = 2f..15f,
                     steps = 12
+                )
+            }
+
+            // Auto-share rules section
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Dialog state
+            var showAddRuleDialog by remember { mutableStateOf(false) }
+            var editingRule by remember { mutableStateOf<AutoShareRule?>(null) }
+            val availableContacts by viewModel.availableContacts.collectAsStateWithLifecycle()
+            val isLoadingContacts by viewModel.isLoadingContacts.collectAsStateWithLifecycle()
+
+            AutoShareRulesSection(
+                rules = uiState.autoShareRules,
+                onAddRule = {
+                    viewModel.loadAvailableContacts()
+                    editingRule = null
+                    showAddRuleDialog = true
+                },
+                onEditRule = { rule ->
+                    viewModel.loadAvailableContacts()
+                    editingRule = rule
+                    showAddRuleDialog = true
+                },
+                onDeleteRule = { rule ->
+                    viewModel.deleteAutoShareRule(rule)
+                },
+                onToggleRule = { rule, enabled ->
+                    viewModel.toggleAutoShareRule(rule, enabled)
+                }
+            )
+
+            // Add/Edit rule dialog
+            if (showAddRuleDialog) {
+                AddAutoShareRuleDialog(
+                    existingRule = editingRule,
+                    availableContacts = availableContacts,
+                    isLoading = isLoadingContacts,
+                    onSave = { destinationName, keywords, locationType, recipients ->
+                        if (editingRule != null) {
+                            viewModel.updateAutoShareRule(
+                                ruleId = editingRule!!.id,
+                                destinationName = destinationName,
+                                keywords = keywords,
+                                locationType = locationType,
+                                recipients = recipients
+                            )
+                        } else {
+                            viewModel.createAutoShareRule(
+                                destinationName = destinationName,
+                                keywords = keywords,
+                                locationType = locationType,
+                                recipients = recipients
+                            )
+                        }
+                        showAddRuleDialog = false
+                        editingRule = null
+                    },
+                    onDismiss = {
+                        showAddRuleDialog = false
+                        editingRule = null
+                    }
                 )
             }
         }

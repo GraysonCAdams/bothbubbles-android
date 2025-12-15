@@ -126,27 +126,61 @@ class ServerSettingsViewModel @Inject constructor(
                         )
                     }
                 } else {
+                    val errorMessage = when (response.code()) {
+                        401 -> "Authentication failed - check your password"
+                        403 -> "Access forbidden - server rejected the request"
+                        404 -> "Server endpoint not found - check server version"
+                        500 -> "Server internal error"
+                        502 -> "Bad gateway - check if BlueBubbles server is running"
+                        503 -> "Server unavailable - BlueBubbles may be starting up"
+                        else -> "Server returned HTTP ${response.code()}"
+                    }
                     _uiState.update {
                         it.copy(
                             isTesting = false,
                             testResult = ConnectionTestResult(
                                 success = false,
-                                error = "Server returned ${response.code()}"
+                                error = errorMessage
                             )
                         )
                     }
                 }
             } catch (e: Exception) {
+                val errorMessage = getConnectionErrorMessage(e)
                 _uiState.update {
                     it.copy(
                         isTesting = false,
                         testResult = ConnectionTestResult(
                             success = false,
-                            error = e.message
+                            error = errorMessage
                         )
                     )
                 }
             }
+        }
+    }
+
+    private fun getConnectionErrorMessage(e: Exception): String {
+        return when {
+            e is java.net.UnknownHostException ->
+                "Cannot resolve server address - check the URL or your internet connection"
+            e is java.net.ConnectException ->
+                "Cannot connect to server - verify the server is running and the port is correct"
+            e is java.net.SocketTimeoutException ->
+                "Connection timed out - server may be unreachable or too slow"
+            e is javax.net.ssl.SSLHandshakeException ->
+                "SSL certificate error - check HTTPS settings or try HTTP"
+            e is javax.net.ssl.SSLException ->
+                "SSL connection error - ${e.message ?: "check server HTTPS configuration"}"
+            e.cause is java.net.UnknownHostException ->
+                "Cannot resolve server address - check the URL or your internet connection"
+            e.cause is java.net.ConnectException ->
+                "Cannot connect to server - verify the server is running and the port is correct"
+            e.cause is java.net.SocketTimeoutException ->
+                "Connection timed out - server may be unreachable or too slow"
+            e.message?.contains("CLEARTEXT", ignoreCase = true) == true ->
+                "HTTP blocked by Android - use HTTPS or enable cleartext in server settings"
+            else -> e.message ?: "Unknown connection error"
         }
     }
 

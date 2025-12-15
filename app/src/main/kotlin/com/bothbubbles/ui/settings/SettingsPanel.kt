@@ -1,6 +1,8 @@
 package com.bothbubbles.ui.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -61,6 +63,7 @@ import com.bothbubbles.ui.settings.notifications.NotificationSettingsContent
 import com.bothbubbles.ui.settings.server.ServerSettingsContent
 import com.bothbubbles.ui.settings.sms.SmsBackupContent
 import com.bothbubbles.ui.settings.sms.SmsSettingsContent
+import com.bothbubbles.ui.settings.sms.SmsSettingsViewModel
 import com.bothbubbles.ui.settings.spam.SpamSettingsContent
 import com.bothbubbles.ui.settings.swipe.SwipeSettingsContent
 import com.bothbubbles.ui.settings.sync.SyncSettingsContent
@@ -221,7 +224,8 @@ fun SettingsPanel(
                 },
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(padding),
+                    // Apply swipe offset for visual feedback during edge swipe
+                    .offset { IntOffset(swipeOffset.value.roundToInt(), 0) },
                 label = "settings_page_transition"
             ) { page ->
                 when (page) {
@@ -323,7 +327,7 @@ fun SettingsPanel(
                         ExportPanelContent()
                     }
                     SettingsPanelPage.Sms -> {
-                        SmsSettingsContent(
+                        SmsPanelContent(
                             onBackupRestoreClick = {
                                 isForward.value = true
                                 navigator.navigateTo(SettingsPanelPage.SmsBackup)
@@ -367,6 +371,7 @@ fun SettingsPanel(
                     }
                 }
             }
+            }  // Close Box
         }
     }
 }
@@ -453,4 +458,35 @@ private fun ExportPanelContent(
         }
         ExportProgress.Idle -> { /* No dialog */ }
     }
+}
+
+/**
+ * SMS panel content wrapper with permission launchers.
+ * Wraps SmsSettingsContent with required permission request launchers.
+ */
+@Composable
+private fun SmsPanelContent(
+    onBackupRestoreClick: () -> Unit,
+    viewModel: SmsSettingsViewModel = hiltViewModel()
+) {
+    // Permission request launcher
+    val permissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { _ ->
+        viewModel.onPermissionsResult()
+    }
+
+    // Default SMS app launcher
+    val defaultSmsLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.onDefaultSmsAppResult()
+    }
+
+    SmsSettingsContent(
+        viewModel = viewModel,
+        onBackupRestoreClick = onBackupRestoreClick,
+        onRequestPermissions = { permissionLauncher.launch(viewModel.getMissingPermissions()) },
+        onRequestDefaultSmsApp = { defaultSmsLauncher.launch(viewModel.getDefaultSmsAppIntent()) }
+    )
 }

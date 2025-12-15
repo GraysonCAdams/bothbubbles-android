@@ -786,6 +786,50 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 35 to 36: Add auto_share_rules and auto_share_recipients tables
+     * for automatic ETA sharing when navigating to saved destinations.
+     *
+     * Features:
+     * - Users can define destination rules with keywords for matching
+     * - Each rule can have multiple recipients to auto-share ETA with
+     * - Tracks consecutive trigger days for privacy reminders
+     */
+    val MIGRATION_35_36 = object : Migration(35, 36) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Create auto_share_rules table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS auto_share_rules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    destination_name TEXT NOT NULL,
+                    keywords TEXT NOT NULL,
+                    location_type TEXT NOT NULL DEFAULT 'custom',
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                    last_triggered_at INTEGER DEFAULT NULL,
+                    consecutive_trigger_days INTEGER NOT NULL DEFAULT 0,
+                    last_trigger_date INTEGER DEFAULT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_share_rules_enabled ON auto_share_rules(enabled)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_share_rules_destination_name ON auto_share_rules(destination_name)")
+
+            // Create auto_share_recipients table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS auto_share_recipients (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    rule_id INTEGER NOT NULL,
+                    chat_guid TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    added_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                    FOREIGN KEY (rule_id) REFERENCES auto_share_rules(id) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_share_recipients_rule_id ON auto_share_recipients(rule_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_share_recipients_chat_guid ON auto_share_recipients(chat_guid)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -825,6 +869,7 @@ object DatabaseMigrations {
         MIGRATION_31_32,
         MIGRATION_32_33,
         MIGRATION_33_34,
-        MIGRATION_34_35
+        MIGRATION_34_35,
+        MIGRATION_35_36
     )
 }

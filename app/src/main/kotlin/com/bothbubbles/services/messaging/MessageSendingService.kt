@@ -294,23 +294,32 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         reaction: String, // e.g., "love", "like", "dislike", "laugh", "emphasize", "question"
+        selectedMessageText: String?,
         partIndex: Int
     ): Result<MessageEntity> = safeCall {
+        Log.d(TAG, "sendReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
+
         val response = api.sendReaction(
             SendReactionRequest(
                 chatGuid = chatGuid,
                 selectedMessageGuid = messageGuid,
+                selectedMessageText = selectedMessageText ?: "",
                 reaction = reaction,
                 partIndex = partIndex
             )
         )
 
+        Log.d(TAG, "sendReaction: response code=${response.code()}, isSuccessful=${response.isSuccessful}")
+
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
+            Log.e(TAG, "sendReaction: failed - code=${response.code()}, message=${body?.message}")
             throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to send reaction")
         }
 
         val reactionMessage = body.data ?: throw NetworkError.ServerError(response.code(), "No reaction returned")
+        Log.d(TAG, "sendReaction: success - reactionGuid=${reactionMessage.guid}")
+
         val entity = reactionMessage.toEntity(chatGuid)
         messageDao.insertMessage(entity)
 
@@ -327,14 +336,18 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         reaction: String,
+        selectedMessageText: String?,
         partIndex: Int
     ): Result<Unit> = safeCall {
+        Log.d(TAG, "removeReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
+
         // In iMessage, sending the same reaction again removes it
         val removeReaction = "-$reaction" // Prefix with - to remove
         api.sendReaction(
             SendReactionRequest(
                 chatGuid = chatGuid,
                 selectedMessageGuid = messageGuid,
+                selectedMessageText = selectedMessageText ?: "",
                 reaction = removeReaction,
                 partIndex = partIndex
             )
@@ -952,19 +965,34 @@ class MessageSendingService @Inject constructor(
 
     /**
      * Sync attachments for an outbound message after server confirms upload.
+     *
+     * IMPORTANT: Preserves localPath from temp attachments to prevent UI flicker.
+     * This ensures the image stays visible while transitioning from temp to server GUID.
      */
     private suspend fun syncOutboundAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
-        // Delete any temp attachments that were created for immediate display
+        if (messageDto.attachments.isNullOrEmpty()) return
+
+        // Get temp attachments BEFORE deleting so we can preserve localPath
+        val tempAttachments = tempMessageGuid?.let { tempGuid ->
+            attachmentDao.getAttachmentsForMessage(tempGuid)
+        } ?: emptyList()
+
+        // Build a map of temp attachment localPaths by index for matching
+        val tempLocalPaths = tempAttachments.mapNotNull { it.localPath }
+
+        // Delete temp attachments now that we've captured their paths
         tempMessageGuid?.let { tempGuid ->
             attachmentDao.deleteAttachmentsForMessage(tempGuid)
         }
 
-        if (messageDto.attachments.isNullOrEmpty()) return
-
         val serverAddress = settingsDataStore.serverAddress.first()
 
-        messageDto.attachments.forEach { attachmentDto ->
+        messageDto.attachments.forEachIndexed { index, attachmentDto ->
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
+
+            // Preserve local path from temp attachment if available
+            // This prevents the UI from showing an empty bubble while waiting for download
+            val preservedLocalPath = tempLocalPaths.getOrNull(index)
 
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,
@@ -981,6 +1009,7 @@ class MessageSendingService @Inject constructor(
                 hasLivePhoto = attachmentDto.hasLivePhoto,
                 isSticker = attachmentDto.isSticker,
                 webUrl = webUrl,
+                localPath = preservedLocalPath, // Preserve local path for seamless UI
                 transferState = TransferState.UPLOADED.name,
                 transferProgress = 1f
             )

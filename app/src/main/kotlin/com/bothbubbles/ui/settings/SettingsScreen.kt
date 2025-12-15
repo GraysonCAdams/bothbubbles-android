@@ -19,6 +19,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.services.socket.ConnectionState
+import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus
 import com.bothbubbles.ui.settings.components.MessagingSectionHeader
@@ -300,11 +301,25 @@ fun SettingsContent(
             val isDisconnected = uiState.connectionState == ConnectionState.DISCONNECTED ||
                     uiState.connectionState == ConnectionState.ERROR
 
+            // State for Private API help sheet
+            var showPrivateApiHelp by remember { mutableStateOf(false) }
+
+            // Show help bottom sheet
+            if (showPrivateApiHelp) {
+                PrivateApiHelpSheet(
+                    onDismiss = { showPrivateApiHelp = false },
+                    onLearnMore = {
+                        // Could open a URL in browser
+                        showPrivateApiHelp = false
+                    }
+                )
+            }
+
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 // Private API toggle - uses icon switch for emphasis
-                // Enhanced with: shake on disabled click, loading state, actionable error subtitle
+                // Enhanced with: shake on disabled click, loading state, actionable error subtitle, contextual help
                 SettingsMenuItem(
                     icon = Icons.Default.VpnKey,
                     title = "Enable Private API",
@@ -327,6 +342,8 @@ fun SettingsContent(
                     },
                     enabled = uiState.isServerConfigured && !isConnecting,
                     isLoading = isConnecting,
+                    // Info button opens help sheet
+                    onInfoClick = { showPrivateApiHelp = true },
                     // Shake + snackbar when tapping disabled row
                     onDisabledClick = {
                         if (!uiState.isServerConfigured) {
@@ -611,4 +628,140 @@ private fun SoundThemePickerDialog(
             }
         }
     )
+}
+
+/**
+ * Help bottom sheet explaining the Private API feature.
+ * Provides context on what it enables and requirements.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun PrivateApiHelpSheet(
+    onDismiss: () -> Unit,
+    onLearnMore: () -> Unit = {}
+) {
+    val sheetState = rememberModalBottomSheetState()
+
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = MaterialTheme.colorScheme.surface
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp)
+                .padding(bottom = 32.dp)
+        ) {
+            // Title
+            Text(
+                text = "What is Private API?",
+                style = MaterialTheme.typography.headlineSmall,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Description
+            Text(
+                text = "The Private API enables advanced iMessage features by accessing macOS system frameworks on your BlueBubbles server.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Features section
+            Text(
+                text = "Enables:",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val features = listOf(
+                "Typing indicators",
+                "Read receipts",
+                "Message reactions (tapbacks)",
+                "Reply to specific messages",
+                "Message editing & unsend",
+                "Scheduled sends"
+            )
+
+            features.forEach { feature ->
+                Row(
+                    modifier = Modifier.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Check,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.tertiary
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = feature,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Requirements section
+            Text(
+                text = "Requirements:",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.error
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val requirements = listOf(
+                "SIP (System Integrity Protection) disabled on Mac",
+                "BlueBubbles server configured for Private API",
+                "macOS 11 (Big Sur) or later recommended"
+            )
+
+            requirements.forEach { requirement ->
+                Row(
+                    modifier = Modifier.padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = requirement,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Action buttons
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onLearnMore) {
+                    Text("Learn more")
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                Button(onClick = onDismiss) {
+                    Text("Got it")
+                }
+            }
+        }
+    }
 }

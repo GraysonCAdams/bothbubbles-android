@@ -32,6 +32,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FlashAuto
 import androidx.compose.material.icons.filled.FlashOff
 import androidx.compose.material.icons.filled.FlashOn
+import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -121,7 +123,7 @@ fun InAppCameraScreen(
                 context.contentResolver.delete(uri, null, null)
                 capturedPhotoUri = null
             },
-            onSend = {
+            onAttach = {
                 onPhotoTaken(uri)
             }
         )
@@ -374,7 +376,7 @@ private fun CameraPreview(
 private fun PhotoPreviewScreen(
     photoUri: Uri,
     onRetake: () -> Unit,
-    onSend: () -> Unit
+    onAttach: () -> Unit
 ) {
     val context = LocalContext.current
 
@@ -394,7 +396,7 @@ private fun PhotoPreviewScreen(
             contentScale = ContentScale.Fit
         )
 
-        // Bottom action bar
+        // Bottom action bar with MD3 button hierarchy
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
@@ -405,30 +407,38 @@ private fun PhotoPreviewScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                // Retake button
-                OutlinedButton(
+                // Secondary action: Retake - uses TextButton per MD3 hierarchy
+                TextButton(
                     onClick = onRetake,
-                    colors = ButtonDefaults.outlinedButtonColors(
+                    colors = ButtonDefaults.textButtonColors(
                         contentColor = Color.White
-                    ),
-                    modifier = Modifier.weight(1f)
+                    )
                 ) {
+                    Icon(
+                        Icons.Rounded.Refresh,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text("Retake")
                 }
 
-                Spacer(modifier = Modifier.width(16.dp))
-
-                // Send button
+                // Primary action: Attach - uses filled Button per MD3 hierarchy
                 Button(
-                    onClick = onSend,
+                    onClick = onAttach,
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MaterialTheme.colorScheme.primary
-                    ),
-                    modifier = Modifier.weight(1f)
+                    )
                 ) {
-                    Text("Send")
+                    Icon(
+                        Icons.Rounded.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Attach")
                 }
             }
         }

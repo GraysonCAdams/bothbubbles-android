@@ -303,11 +303,22 @@ interface MessageDao {
     /**
      * Get reactions for a list of messages.
      * Used by RoomMessageDataSource to attach reactions to their parent messages.
+     *
+     * Note: iMessage stores associated_message_guid with a part prefix like "p:0/GUID".
+     * This query handles both formats:
+     * - Direct GUID match (e.g., "ABC123")
+     * - Prefixed GUID match (e.g., "p:0/ABC123" -> extracts "ABC123")
      */
     @Query("""
         SELECT * FROM messages
-        WHERE associated_message_guid IN (:messageGuids)
-        AND is_reaction = 1
+        WHERE is_reaction = 1
+        AND (
+            associated_message_guid IN (:messageGuids)
+            OR (
+                associated_message_guid LIKE 'p:%/%'
+                AND SUBSTR(associated_message_guid, INSTR(associated_message_guid, '/') + 1) IN (:messageGuids)
+            )
+        )
     """)
     suspend fun getReactionsForMessages(messageGuids: List<String>): List<MessageEntity>
 

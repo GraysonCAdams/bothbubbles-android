@@ -2,6 +2,9 @@ package com.bothbubbles.services.eta
 
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.AutoShareRecipient
+import com.bothbubbles.data.repository.AutoShareRule
+import com.bothbubbles.data.repository.AutoShareRuleRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,7 +27,8 @@ import kotlin.math.abs
 @Singleton
 class EtaSharingManager @Inject constructor(
     private val pendingMessageRepository: PendingMessageRepository,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val autoShareRuleRepository: AutoShareRuleRepository
 ) {
     companion object {
         private const val TAG = "EtaSharingManager"
@@ -49,6 +53,15 @@ class EtaSharingManager @Inject constructor(
     // Terminal state tracking to prevent "arrived" spam loop
     private var arrivedSentTimestamp: Long = 0
     private var lastKnownDestination: String? = null
+
+    // Auto-share tracking
+    private var autoShareCheckedForSession: Boolean = false
+    private var activeAutoShareSessions: MutableList<EtaSharingSession> = mutableListOf()
+    private var triggeredAutoShareRule: AutoShareRule? = null
+
+    // Auto-share state observable
+    private val _autoShareState = MutableStateFlow<AutoShareState>(AutoShareState.Inactive)
+    val autoShareState: StateFlow<AutoShareState> = _autoShareState.asStateFlow()
 
     /**
      * Start sharing ETA with a recipient
@@ -104,6 +117,7 @@ class EtaSharingManager @Inject constructor(
      * Handle a new ETA update from navigation
      */
     fun onEtaUpdate(etaData: ParsedEtaData) {
+        val wasNavigationActive = _isNavigationActive.value
         val currentState = _state.value
         _state.value = currentState.copy(
             currentEta = etaData,
@@ -111,8 +125,24 @@ class EtaSharingManager @Inject constructor(
         )
         _isNavigationActive.value = true
 
-        val session = currentState.session ?: return
-        if (!currentState.isSharing) return
+        // Check for auto-share rules when navigation starts (not already checked)
+        if (!autoShareCheckedForSession && etaData.destination != null) {
+            autoShareCheckedForSession = true
+            scope.launch {
+                checkAutoShareRules(etaData)
+            }
+        }
+
+        // Handle auto-share sessions (multi-recipient)
+        if (activeAutoShareSessions.isNotEmpty()) {
+            scope.launch {
+                processAutoShareUpdate(etaData)
+            }
+        }
+
+        // Handle manual single-recipient session
+        val session = currentState.session
+        if (session == null || !currentState.isSharing) return
 
         // Terminal state check: If we already sent "arrived" for this destination,
         // don't send any more updates until destination changes or cooldown expires
@@ -272,6 +302,16 @@ class EtaSharingManager @Inject constructor(
         val currentState = _state.value
         _state.value = currentState.copy(isNavigationActive = false)
 
+        // Reset auto-share session check for next navigation
+        autoShareCheckedForSession = false
+
+        // Handle auto-share sessions
+        if (activeAutoShareSessions.isNotEmpty()) {
+            scope.launch {
+                handleAutoShareNavigationStopped(currentState.currentEta)
+            }
+        }
+
         // If we were sharing, determine if this was arrival or cancellation
         if (currentState.isSharing && currentState.session != null) {
             val session = currentState.session
@@ -298,6 +338,179 @@ class EtaSharingManager @Inject constructor(
                     stopSharing(sendFinalMessage = false)
                 }
             }
+        }
+    }
+
+    // ===== Auto-Share Logic =====
+
+    /**
+     * Check for matching auto-share rules when navigation starts.
+     * If a match is found, automatically start sharing with all configured recipients.
+     */
+    private suspend fun checkAutoShareRules(etaData: ParsedEtaData) {
+        val destination = etaData.destination ?: return
+
+        // Check if ETA sharing is enabled
+        if (!settingsDataStore.etaSharingEnabled.first()) {
+            Log.d(TAG, "Auto-share: ETA sharing disabled, skipping")
+            return
+        }
+
+        Log.d(TAG, "Auto-share: Checking rules for destination '$destination'")
+
+        val matchingRule = autoShareRuleRepository.findMatchingRule(destination)
+        if (matchingRule == null) {
+            Log.d(TAG, "Auto-share: No matching rule found")
+            return
+        }
+
+        Log.d(TAG, "Auto-share: Matched rule '${matchingRule.destinationName}' with ${matchingRule.recipients.size} recipients")
+
+        // Record trigger and start auto-sharing
+        autoShareRuleRepository.recordRuleTrigger(matchingRule.id)
+        triggeredAutoShareRule = matchingRule
+
+        // Create sessions for all recipients
+        activeAutoShareSessions = matchingRule.recipients.map { recipient ->
+            EtaSharingSession(
+                recipientGuid = recipient.chatGuid,
+                recipientDisplayName = recipient.displayName,
+                destination = destination,
+                lastEtaMinutes = etaData.etaMinutes,
+                lastMessageType = EtaMessageType.INITIAL
+            )
+        }.toMutableList()
+
+        // Update auto-share state
+        val recipientNames = matchingRule.recipients.map { it.displayName }
+        _autoShareState.value = AutoShareState.Triggered(
+            ruleName = matchingRule.destinationName,
+            recipientNames = recipientNames
+        )
+
+        // Send initial messages to all recipients
+        for (session in activeAutoShareSessions) {
+            val message = buildInitialMessage(etaData)
+            Log.d(TAG, "Auto-share: Sending initial message to ${session.recipientDisplayName}")
+
+            pendingMessageRepository.queueMessage(
+                chatGuid = session.recipientGuid,
+                text = message
+            ).onSuccess {
+                Log.d(TAG, "Auto-share: Initial message sent to ${session.recipientDisplayName}")
+            }.onFailure { e ->
+                Log.e(TAG, "Auto-share: Failed to send to ${session.recipientDisplayName}", e)
+            }
+        }
+
+        // Update state to active
+        _autoShareState.value = AutoShareState.Active(
+            rule = matchingRule,
+            recipientNames = recipientNames,
+            destination = destination
+        )
+
+        Log.d(TAG, "Auto-share: Started sharing with ${recipientNames.joinToString()}")
+    }
+
+    /**
+     * Process ETA update for all active auto-share sessions.
+     */
+    private suspend fun processAutoShareUpdate(etaData: ParsedEtaData) {
+        if (activeAutoShareSessions.isEmpty()) return
+
+        val updatedSessions = mutableListOf<EtaSharingSession>()
+
+        for (session in activeAutoShareSessions) {
+            val messageType = determineUpdateType(session, etaData)
+
+            if (messageType != null) {
+                val message = when (messageType) {
+                    EtaMessageType.INITIAL -> buildInitialMessage(etaData)
+                    EtaMessageType.DESTINATION_CHANGE -> buildDestinationChangeMessage(etaData)
+                    EtaMessageType.CHANGE -> buildChangeMessage(etaData, session.lastEtaMinutes)
+                    EtaMessageType.ARRIVING_SOON -> buildArrivingSoonMessage(etaData)
+                    EtaMessageType.ARRIVED -> buildArrivedMessage(etaData.destination ?: session.destination)
+                }
+
+                Log.d(TAG, "Auto-share: Sending $messageType to ${session.recipientDisplayName}")
+
+                pendingMessageRepository.queueMessage(
+                    chatGuid = session.recipientGuid,
+                    text = message
+                )
+
+                // Update session state
+                val updatedSession = session.copy(
+                    lastSentTime = System.currentTimeMillis(),
+                    lastEtaMinutes = etaData.etaMinutes,
+                    updateCount = session.updateCount + 1,
+                    destination = etaData.destination ?: session.destination,
+                    lastMessageType = messageType
+                )
+                updatedSessions.add(updatedSession)
+            } else {
+                updatedSessions.add(session)
+            }
+        }
+
+        activeAutoShareSessions = updatedSessions
+    }
+
+    /**
+     * Handle navigation stopped for auto-share sessions.
+     */
+    private suspend fun handleAutoShareNavigationStopped(lastEta: ParsedEtaData?) {
+        if (activeAutoShareSessions.isEmpty()) return
+
+        val wasNearDestination = activeAutoShareSessions.firstOrNull()?.let {
+            it.lastEtaMinutes <= ARRIVING_SOON_THRESHOLD
+        } ?: false
+
+        for (session in activeAutoShareSessions) {
+            val message = if (wasNearDestination) {
+                buildArrivedMessage(session.destination)
+            } else {
+                buildCancelledMessage()
+            }
+
+            Log.d(TAG, "Auto-share: Sending ${if (wasNearDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName}")
+
+            pendingMessageRepository.queueMessage(
+                chatGuid = session.recipientGuid,
+                text = message
+            )
+        }
+
+        // Clear auto-share state
+        activeAutoShareSessions.clear()
+        triggeredAutoShareRule = null
+        _autoShareState.value = AutoShareState.Inactive
+
+        Log.d(TAG, "Auto-share: Session ended")
+    }
+
+    /**
+     * Manually stop auto-sharing (e.g., user dismisses notification).
+     */
+    fun stopAutoSharing(sendFinalMessage: Boolean = true) {
+        if (activeAutoShareSessions.isEmpty()) return
+
+        scope.launch {
+            if (sendFinalMessage) {
+                for (session in activeAutoShareSessions) {
+                    pendingMessageRepository.queueMessage(
+                        chatGuid = session.recipientGuid,
+                        text = buildCancelledMessage()
+                    )
+                }
+            }
+
+            activeAutoShareSessions.clear()
+            triggeredAutoShareRule = null
+            _autoShareState.value = AutoShareState.Inactive
+
+            Log.d(TAG, "Auto-share: Manually stopped")
         }
     }
 
@@ -463,4 +676,22 @@ class EtaSharingManager @Inject constructor(
         Log.d(TAG, "[DEBUG] Resetting terminal state")
         clearTerminalState()
     }
+}
+
+/**
+ * State for auto-share tracking.
+ */
+sealed class AutoShareState {
+    data object Inactive : AutoShareState()
+
+    data class Active(
+        val rule: AutoShareRule,
+        val recipientNames: List<String>,
+        val destination: String?
+    ) : AutoShareState()
+
+    data class Triggered(
+        val ruleName: String,
+        val recipientNames: List<String>
+    ) : AutoShareState()
 }

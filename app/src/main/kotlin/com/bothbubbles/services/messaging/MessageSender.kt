@@ -52,21 +52,25 @@ interface MessageSender {
 
     /**
      * Send a reaction/tapback.
+     * @param selectedMessageText The text of the message being reacted on (required by BlueBubbles server)
      */
     suspend fun sendReaction(
         chatGuid: String,
         messageGuid: String,
         reaction: String,
+        selectedMessageText: String? = null,
         partIndex: Int = 0
     ): Result<MessageEntity>
 
     /**
      * Remove a reaction.
+     * @param selectedMessageText The text of the message being reacted on (required by BlueBubbles server)
      */
     suspend fun removeReaction(
         chatGuid: String,
         messageGuid: String,
         reaction: String,
+        selectedMessageText: String? = null,
         partIndex: Int = 0
     ): Result<Unit>
 

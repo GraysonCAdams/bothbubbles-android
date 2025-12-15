@@ -12,9 +12,9 @@ Based on the architecture in `UX_SETTINGS_PANEL.md`, the following improvements 
 | Disabled Row Interaction (shake + snackbar) | **Implemented** |
 | Connecting State (loading spinner)          | **Implemented** |
 | Actionable Error States (tappable links)    | **Implemented** |
+| Gesture Navigation                          | **Implemented** |
+| Contextual Help                             | **Implemented** |
 | Search Functionality                        | Planned         |
-| Gesture Navigation                          | Planned         |
-| Contextual Help                             | Planned         |
 | Reset to Default                            | Planned         |
 
 ---
@@ -34,9 +34,37 @@ Row(verticalAlignment = Alignment.CenterVertically) {
 }
 ```
 
-### Gesture Navigation
+### Gesture Navigation ✅ IMPLEMENTED
 
-Ensure **edge-to-edge swipe gestures** are supported for navigation. Users expect to swipe from the left edge to go back, rather than reaching for the top-left arrow button.
+**Solution:** Added edge-swipe gesture support in `SettingsPanel.kt`:
+
+- **Edge Detection:** Swipe must start within 20dp of left edge
+- **Threshold:** 100dp horizontal distance to trigger navigation
+- **Visual Feedback:** Content follows finger during swipe
+- **Only When Navigable:** Gesture only active when `navigator.canGoBack()` is true
+
+```kotlin
+Box(
+    modifier = Modifier
+        .pointerInput(navigator.canGoBack()) {
+            detectHorizontalDragGestures(
+                onDragStart = { offset ->
+                    // Only start if within left edge (20dp)
+                    if (offset.x > edgeWidthPx) return@detectHorizontalDragGestures
+                },
+                onDragEnd = {
+                    if (swipeOffset.value > swipeThresholdPx) {
+                        navigator.navigateBack()
+                    }
+                    swipeOffset.animateTo(0f)
+                },
+                onHorizontalDrag = { _, dragAmount ->
+                    swipeOffset.snapTo((swipeOffset.value + dragAmount).coerceAtLeast(0f))
+                }
+            )
+        }
+)
+```
 
 ---
 
@@ -64,11 +92,58 @@ Ensure **edge-to-edge swipe gestures** are supported for navigation. Users expec
 
 ## 3. Feature Management & Help
 
-### Contextual Help
+### Contextual Help ✅ IMPLEMENTED
 
-For complex toggles like "Private API," the subtitle is helpful but limited.
+**Solution:** Added `onInfoClick` parameter to `SettingsMenuItem` and `PrivateApiHelpSheet` bottom sheet.
 
-- **Improvement:** Add a "Help" or "Info" icon next to the toggle that opens a bottom sheet or dialog explaining _exactly_ what the feature does and the risks/benefits involved.
+**SettingsMenuItem Enhancement:**
+
+```kotlin
+SettingsMenuItem(
+    icon = Icons.Default.VpnKey,
+    title = "Enable Private API",
+    subtitle = "Enables typing indicators, reactions, and more",
+    onInfoClick = { showPrivateApiHelp = true },  // Shows info icon
+    // ... other params
+)
+```
+
+**Help Bottom Sheet (`PrivateApiHelpSheet`):**
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│                   What is Private API?                         │
+├────────────────────────────────────────────────────────────────┤
+│  The Private API enables advanced iMessage features by         │
+│  accessing macOS system frameworks on your BlueBubbles server. │
+│                                                                │
+│  Enables:                                                      │
+│  ✓ Typing indicators                                           │
+│  ✓ Read receipts                                               │
+│  ✓ Message reactions (tapbacks)                                │
+│  ✓ Reply to specific messages                                  │
+│  ✓ Message editing & unsend                                    │
+│  ✓ Scheduled sends                                             │
+│                                                                │
+│  Requirements:                                                 │
+│  ⚠ SIP (System Integrity Protection) disabled on Mac          │
+│  ⚠ BlueBubbles server configured for Private API              │
+│  ⚠ macOS 11 (Big Sur) or later recommended                    │
+│                                                                │
+│                         [Learn more]  [Got it]                 │
+└────────────────────────────────────────────────────────────────┘
+```
+
+**Info Icon Placement:**
+
+The info icon appears to the left of the trailing content (switch):
+
+```
+┌────────────────────────────────────────────────────────────────┐
+│  🔑  Enable Private API                     [ℹ]      [Toggle]  │
+│      Advanced iMessage features enabled                        │
+└────────────────────────────────────────────────────────────────┘
+```
 
 ### Undo/Reset Actions
 

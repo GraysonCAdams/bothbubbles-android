@@ -1,9 +1,15 @@
 package com.bothbubbles.ui.chat.components
 
 import android.net.Uri
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
@@ -23,6 +29,7 @@ import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -44,6 +51,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.bothbubbles.data.model.PendingAttachmentInput
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -94,6 +102,14 @@ fun ReorderableAttachmentStrip(
         ) { index, attachment ->
             val isBeingDragged = index == draggedIndex && isDragging
 
+            // Track visibility for entrance animation
+            var isVisible by remember { mutableStateOf(false) }
+            LaunchedEffect(attachment.uri) {
+                // Small delay to trigger entrance animation
+                delay(50)
+                isVisible = true
+            }
+
             // Animate scale and elevation for dragged item
             val scale by animateFloatAsState(
                 targetValue = if (isBeingDragged) 1.1f else 1f,
@@ -109,91 +125,104 @@ fun ReorderableAttachmentStrip(
             // Calculate horizontal offset for dragged item
             val offsetX = if (isBeingDragged) dragOffset else 0f
 
-            Box(
-                modifier = Modifier
-                    .zIndex(if (isBeingDragged) 1f else 0f)
-                    .offset { IntOffset(offsetX.roundToInt(), 0) }
-                    .scale(scale)
-                    .shadow(elevation, RoundedCornerShape(12.dp))
-                    .pointerInput(attachment.uri) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                draggedIndex = index
-                                isDragging = true
-                                dragOffset = 0f
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffset += dragAmount.x
-
-                                // Calculate target index based on drag offset
-                                val itemWidthPx = itemWidth.toPx()
-                                val offsetItems = (dragOffset / itemWidthPx).roundToInt()
-                                val targetIndex = (draggedIndex + offsetItems)
-                                    .coerceIn(0, workingItems.lastIndex)
-
-                                // Swap items if target changed
-                                if (targetIndex != draggedIndex && targetIndex in workingItems.indices) {
-                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                    workingItems = workingItems.toMutableList().apply {
-                                        val item = removeAt(draggedIndex)
-                                        add(targetIndex, item)
-                                    }
-                                    // Reset offset and update dragged index
-                                    dragOffset -= (targetIndex - draggedIndex) * itemWidthPx
-                                    draggedIndex = targetIndex
-                                }
-                            },
-                            onDragEnd = {
-                                isDragging = false
-                                dragOffset = 0f
-                                // Notify parent of reorder
-                                if (workingItems != attachments) {
-                                    onReorder(workingItems)
-                                }
-                                draggedIndex = -1
-                            },
-                            onDragCancel = {
-                                isDragging = false
-                                dragOffset = 0f
-                                workingItems = attachments // Reset to original
-                                draggedIndex = -1
-                            }
-                        )
-                    }
-            ) {
-                AttachmentPreview(
-                    uri = attachment.uri,
-                    onRemove = { onRemove(attachment.uri) },
-                    onEdit = { onEdit(attachment.uri) },
-                    caption = attachment.caption
+            // MD3 AnimatedVisibility for smooth item entrance
+            AnimatedVisibility(
+                visible = isVisible,
+                enter = fadeIn(tween(200)) + scaleIn(
+                    initialScale = 0.8f,
+                    animationSpec = tween(200)
+                ),
+                exit = fadeOut(tween(150)) + scaleOut(
+                    targetScale = 0.8f,
+                    animationSpec = tween(150)
                 )
+            ) {
+                Box(
+                    modifier = Modifier
+                        .zIndex(if (isBeingDragged) 1f else 0f)
+                        .offset { IntOffset(offsetX.roundToInt(), 0) }
+                        .scale(scale)
+                        .shadow(elevation, MaterialTheme.shapes.medium)
+                        .pointerInput(attachment.uri) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = {
+                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    draggedIndex = index
+                                    isDragging = true
+                                    dragOffset = 0f
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffset += dragAmount.x
 
-                // Show drag handle indicator when dragging
-                if (isBeingDragged) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color.Black.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center
-                    ) {
+                                    // Calculate target index based on drag offset
+                                    val itemWidthPx = itemWidth.toPx()
+                                    val offsetItems = (dragOffset / itemWidthPx).roundToInt()
+                                    val targetIndex = (draggedIndex + offsetItems)
+                                        .coerceIn(0, workingItems.lastIndex)
+
+                                    // Swap items if target changed
+                                    if (targetIndex != draggedIndex && targetIndex in workingItems.indices) {
+                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        workingItems = workingItems.toMutableList().apply {
+                                            val item = removeAt(draggedIndex)
+                                            add(targetIndex, item)
+                                        }
+                                        // Reset offset and update dragged index
+                                        dragOffset -= (targetIndex - draggedIndex) * itemWidthPx
+                                        draggedIndex = targetIndex
+                                    }
+                                },
+                                onDragEnd = {
+                                    isDragging = false
+                                    dragOffset = 0f
+                                    // Notify parent of reorder
+                                    if (workingItems != attachments) {
+                                        onReorder(workingItems)
+                                    }
+                                    draggedIndex = -1
+                                },
+                                onDragCancel = {
+                                    isDragging = false
+                                    dragOffset = 0f
+                                    workingItems = attachments // Reset to original
+                                    draggedIndex = -1
+                                }
+                            )
+                        }
+                ) {
+                    AttachmentPreview(
+                        uri = attachment.uri,
+                        onRemove = { onRemove(attachment.uri) },
+                        onEdit = { onEdit(attachment.uri) },
+                        caption = attachment.caption
+                    )
+
+                    // Show drag handle indicator when dragging
+                    if (isBeingDragged) {
                         Box(
                             modifier = Modifier
-                                .size(32.dp)
-                                .background(
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
-                                    CircleShape
-                                ),
+                                .fillMaxSize()
+                                .clip(MaterialTheme.shapes.medium)
+                                .background(Color.Black.copy(alpha = 0.1f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.DragHandle,
-                                contentDescription = "Drag to reorder",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .size(32.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                        CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.DragHandle,
+                                    contentDescription = "Drag to reorder",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
                         }
                     }
                 }

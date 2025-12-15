@@ -412,21 +412,20 @@ The current hierarchy requires users to navigate through multiple pages to find 
 
 ---
 
-### 2. Gesture Navigation
+### 2. Gesture Navigation ✅ IMPLEMENTED
 
-**Current:** Users must tap the back arrow or use system back.
-
-**Proposal:** Support swipe-from-left-edge gesture to go back.
+**Solution:** Added edge-swipe gesture support for back navigation.
 
 | Gesture | Action |
 |---------|--------|
 | Swipe from left edge (20dp) | Navigate back within panel |
 | Swipe right on content area | No action (avoid conflicts with scrolling) |
 
-**Implementation Notes:**
-- Use `Modifier.pointerInput` with edge detection
-- Threshold: 100dp horizontal distance
-- Preview animation: partial page reveal during gesture
+**Implementation Details:**
+- Edge detection: 20dp from left edge
+- Threshold: 100dp horizontal distance to trigger
+- Visual feedback: Content follows finger during swipe
+- Uses `Modifier.pointerInput` with `detectHorizontalDragGestures`
 
 ---
 
@@ -470,11 +469,9 @@ The Material3 Surface component also provides built-in ripple feedback on press.
 
 ---
 
-### 5. Contextual Help for Technical Features
+### 5. Contextual Help for Technical Features ✅ IMPLEMENTED
 
-**Issue:** Complex features like "Private API" need more explanation than a subtitle provides.
-
-**Proposal:** Add info button that opens a help bottom sheet:
+**Solution:** Added `onInfoClick` parameter to `SettingsMenuItem` and `PrivateApiHelpSheet` bottom sheet.
 
 ```
 ┌────────────────────────────────────────────────────────────────┐
@@ -497,8 +494,10 @@ The Material3 Surface component also provides built-in ripple feedback on press.
 └────────────────────────────────────────────────────────────────┘
 ```
 
-**Settings requiring help:**
-- Private API
+**Implemented for:**
+- Private API toggle (via `PrivateApiHelpSheet`)
+
+**Settings that could benefit from help (future):**
 - Message categorization (ML-based)
 - Spam protection algorithms
 - ETA sharing (notification access)
@@ -546,7 +545,7 @@ The Material3 Surface component also provides built-in ripple feedback on press.
 | A11y: Badge icons | High (compliance) | Low | P0 | **Implemented** |
 | A11y: Touch targets | High (compliance) | Low | P0 | **Implemented** |
 | Interactive affordance | Medium | Low | P1 | **Implemented** |
-| Gesture navigation | Medium | Medium | P1 | Planned |
-| Contextual help | Medium | Medium | P2 | Planned |
+| Gesture navigation | Medium | Medium | P1 | **Implemented** |
+| Contextual help | Medium | Medium | P2 | **Implemented** |
 | Settings search | High | High | P2 | Planned |
 | Reset to default | Low | Medium | P3 | Planned |
