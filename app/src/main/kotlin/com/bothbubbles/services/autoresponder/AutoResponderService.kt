@@ -3,6 +3,7 @@ package com.bothbubbles.services.autoresponder
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.SmsRepository
@@ -19,11 +20,19 @@ import javax.inject.Singleton
  * When someone sends you an SMS but is also registered on iMessage, this sends
  * them an iMessage explaining how to add your email to their contacts so future
  * messages go through iMessage instead of SMS.
+ *
+ * The auto-responder only triggers if:
+ * - The incoming message is via SMS (not iMessage)
+ * - The user has NOT already replied to this sender via iMessage
+ *
+ * This ensures we don't send the auto-response to people the user is already
+ * actively messaging via iMessage from their phone.
  */
 @Singleton
 class AutoResponderService @Inject constructor(
     private val autoRespondedSenderDao: AutoRespondedSenderDao,
     private val chatDao: ChatDao,
+    private val messageDao: MessageDao,
     private val messageSendingService: MessageSendingService,
     private val iMessageAvailabilityService: IMessageAvailabilityService,
     private val androidContactsService: AndroidContactsService,
@@ -72,20 +81,32 @@ class AutoResponderService @Inject constructor(
             return false
         }
 
-        // 5. Already responded to this SENDER? (persists even if chat deleted)
+        // 5. Only respond to SMS messages (not iMessage)
+        if (chat?.isSmsChat != true) {
+            Log.d(TAG, "Chat is not SMS, skipping auto-responder")
+            return false
+        }
+
+        // 6. Skip if user has already replied via iMessage to this sender
+        if (messageDao.hasOutboundIMessageToAddress(senderAddress)) {
+            Log.d(TAG, "User already replied via iMessage to $senderAddress, skipping")
+            return false
+        }
+
+        // 7. Already responded to this SENDER? (persists even if chat deleted)
         if (autoRespondedSenderDao.get(senderAddress) != null) {
             Log.d(TAG, "Already auto-responded to sender: $senderAddress")
             return false
         }
 
-        // 6. Check iMessage availability (only respond if sender can receive iMessage)
+        // 8. Check iMessage availability (only respond if sender can receive iMessage)
         val availabilityResult = iMessageAvailabilityService.checkAvailability(senderAddress)
         if (availabilityResult.isFailure || availabilityResult.getOrNull() != true) {
             Log.d(TAG, "Sender not iMessage registered: $senderAddress")
             return false
         }
 
-        // 7. Check filter mode
+        // 9. Check filter mode
         val filter = settingsDataStore.autoResponderFilter.first()
         val passesFilter = when (filter) {
             "everyone" -> true
@@ -98,7 +119,7 @@ class AutoResponderService @Inject constructor(
             return false
         }
 
-        // 8. Check rate limit (default 10/hour)
+        // 10. Check rate limit (default 10/hour)
         val limit = settingsDataStore.autoResponderRateLimit.first()
         val oneHourAgo = System.currentTimeMillis() - 3600_000
         val recentCount = autoRespondedSenderDao.countSince(oneHourAgo)
@@ -107,7 +128,7 @@ class AutoResponderService @Inject constructor(
             return false
         }
 
-        // 9. Build and send message (using stored alias preference)
+        // 11. Build and send message (using stored alias preference)
         val recommendedAlias = settingsDataStore.autoResponderRecommendedAlias.first()
             .takeIf { it.isNotBlank() }
         val message = buildMessage(recommendedAlias)

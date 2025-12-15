@@ -202,6 +202,7 @@ class ChatViewModel @Inject constructor(
     private val _attachmentQuality = MutableStateFlow(AttachmentQuality.STANDARD)
 
     private val _activePanel = MutableStateFlow(ComposerPanel.None)
+    val activePanel: StateFlow<ComposerPanel> = _activePanel.asStateFlow()
 
     // ============================================================================
     // COMPOSER STATE OPTIMIZATION
@@ -1801,9 +1802,15 @@ class ChatViewModel @Inject constructor(
 
         // Bridge sparse messages to uiState.messages for backwards compatibility with ChatScreen
         // TODO: Phase 4 will update ChatScreen to use sparseMessages directly
+        //
+        // PHASE 2 OPTIMIZATION: Run list transformation on background thread
+        // The toList() operation sorts keys and iterates the map - O(N log N) + O(N).
+        // At 5000+ messages, this can take >16ms and cause frame drops.
+        // flowOn(Dispatchers.Default) moves this work off the main thread.
         viewModelScope.launch {
             pagingController.messages
                 .map { sparseList -> sparseList.toList() }
+                .flowOn(Dispatchers.Default)  // CRITICAL: Run toList() on background thread
                 .conflate()
                 .collect { messageModels ->
                     val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")

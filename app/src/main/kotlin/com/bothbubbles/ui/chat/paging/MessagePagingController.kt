@@ -3,6 +3,7 @@ package com.bothbubbles.ui.chat.paging
 import android.util.Log
 import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import java.util.BitSet
 
 /**
@@ -353,36 +355,57 @@ class MessagePagingController(
         }
     }
 
+    /**
+     * PHASE 2 OPTIMIZATION: Position shifting runs on background thread.
+     *
+     * When new messages arrive, all existing positions shift by N. This is O(N)
+     * where N = number of loaded messages. At 5000+ messages, this can take >16ms.
+     *
+     * Strategy:
+     * 1. Snapshot current data under mutex (fast)
+     * 2. Build new data structures on Dispatchers.Default (O(N), off main thread)
+     * 3. Atomic swap under mutex (fast)
+     */
     private suspend fun shiftPositions(shiftBy: Int) {
+        // Step 1: Quick snapshot under mutex
+        val snapshotData: Map<Int, MessageUiModel>
+        val totalSize: Int
         stateMutex.withLock {
             // Increment generation FIRST to invalidate ALL in-flight loads immediately
             state.generation++
+            snapshotData = sparseData.toMap()
+            totalSize = state.totalSize
+            // Clear active load jobs - their positions are now invalid
+            activeLoadJobs.clear()
+        }
 
-            // Create new shifted maps
-            val newSparseData = mutableMapOf<Int, MessageUiModel>()
-            val newGuidToPosition = mutableMapOf<String, Int>()
+        // Step 2: Build new data structures on background thread (O(N) work)
+        val (newSparseData, newGuidToPosition, newLoadStatus) = withContext(Dispatchers.Default) {
+            val newSparse = mutableMapOf<Int, MessageUiModel>()
+            val newGuids = mutableMapOf<String, Int>()
 
-            sparseData.forEach { (oldPosition, model) ->
+            snapshotData.forEach { (oldPosition, model) ->
                 val newPosition = oldPosition + shiftBy
-                if (newPosition >= 0 && newPosition < state.totalSize) {
-                    newSparseData[newPosition] = model
-                    newGuidToPosition[model.guid] = newPosition
+                if (newPosition >= 0 && newPosition < totalSize) {
+                    newSparse[newPosition] = model
+                    newGuids[model.guid] = newPosition
                 }
             }
 
-            // Update BitSet
-            val newLoadStatus = MessagePagingHelpers.shiftBitSet(loadStatus, shiftBy, state.totalSize)
+            // BitSet shifting
+            val newStatus = MessagePagingHelpers.shiftBitSet(loadStatus, shiftBy, totalSize)
 
-            // Atomic swap - all three data structures updated together under lock
+            Triple(newSparse, newGuids, newStatus)
+        }
+
+        // Step 3: Atomic swap under mutex (fast)
+        stateMutex.withLock {
             sparseData.clear()
             sparseData.putAll(newSparseData)
             guidToPosition.clear()
             guidToPosition.putAll(newGuidToPosition)
             loadStatus.clear()
             loadStatus.or(newLoadStatus)
-
-            // Clear active load jobs - their positions are now invalid
-            activeLoadJobs.clear()
 
             Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy (generation=${state.generation})")
 

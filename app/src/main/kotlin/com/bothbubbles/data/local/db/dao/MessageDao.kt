@@ -490,6 +490,24 @@ interface MessageDao {
     suspend fun deleteAllMessages()
 
     /**
+     * Check if the user has sent any iMessage to a specific address.
+     * Used by auto-responder to avoid sending if user already replied via iMessage.
+     *
+     * @param address The recipient's phone number or email
+     * @return true if user has sent at least one iMessage to this address
+     */
+    @Query("""
+        SELECT EXISTS(
+            SELECT 1 FROM messages
+            WHERE chat_guid LIKE 'iMessage;-;%' || :address || '%'
+            AND is_from_me = 1
+            AND date_deleted IS NULL
+            LIMIT 1
+        )
+    """)
+    suspend fun hasOutboundIMessageToAddress(address: String): Boolean
+
+    /**
      * Delete all messages from BlueBubbles server (iMessage).
      * Keeps local SMS/MMS messages intact.
      * Use this when disconnecting from the server.

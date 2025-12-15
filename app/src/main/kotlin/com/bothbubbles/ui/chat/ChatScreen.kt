@@ -155,7 +155,7 @@ import com.bothbubbles.ui.components.dialogs.VCardOptionsDialog
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
 import com.bothbubbles.ui.components.common.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.MessageListSkeleton
-import com.bothbubbles.ui.components.common.staggeredEntrance
+import com.bothbubbles.ui.components.common.newMessageEntrance
 import com.bothbubbles.ui.effects.EffectPickerSheet
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.modifiers.materialAttentionHighlight
@@ -338,6 +338,10 @@ fun ChatScreen(
 
     // Track revealed invisible ink messages (resets when leaving chat)
     var revealedInvisibleInkMessages by remember { mutableStateOf(setOf<String>()) }
+
+    // Track messages that have been animated (prevents re-animation on recompose)
+    // Messages present during initial load are added immediately
+    val animatedMessageGuids = remember { mutableSetOf<String>() }
 
     // Tapback menu state
     var selectedMessageForTapback by remember { mutableStateOf<MessageUiModel?>(null) }
@@ -647,9 +651,10 @@ fun ChatScreen(
     }
 
     // Load featured GIFs when GIF panel opens
-    val composerPanelState by viewModel.composerState.collectAsState()
-    LaunchedEffect(composerPanelState.activePanel) {
-        if (composerPanelState.activePanel == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
+    // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
+    val activePanelState by viewModel.activePanel.collectAsStateWithLifecycle()
+    LaunchedEffect(activePanelState) {
+        if (activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
             viewModel.loadFeaturedGifs()
         }
     }
@@ -818,35 +823,33 @@ fun ChatScreen(
                 // Unified input area with animated content transitions
                 val composerState by viewModel.composerState.collectAsStateWithLifecycle()
 
-                // Compute adjusted composer state with voice recording state from local variables
-                val adjustedComposerState = remember(
-                    composerState,
-                    isRecording,
-                    isPreviewingVoiceMemo,
-                    recordingDuration,
-                    amplitudeHistory,
-                    isNoiseCancellationEnabled,
-                    isPlayingVoiceMemo,
-                    playbackPosition,
-                    recordingFile
-                ) {
-                    composerState.copy(
-                        inputMode = when {
-                            isRecording -> ComposerInputMode.VOICE_RECORDING
-                            isPreviewingVoiceMemo -> ComposerInputMode.VOICE_PREVIEW
-                            else -> ComposerInputMode.TEXT
-                        },
-                        recordingState = if (isRecording || isPreviewingVoiceMemo) {
-                            RecordingState(
-                                durationMs = recordingDuration,
-                                amplitudeHistory = amplitudeHistory,
-                                isNoiseCancellationEnabled = isNoiseCancellationEnabled,
-                                playbackPositionMs = playbackPosition,
-                                isPlaying = isPlayingVoiceMemo,
-                                recordedUri = recordingFile?.toUri()
+                // PHASE 3 OPTIMIZATION: Use derivedStateOf for recording state
+                // The old approach with remember(vararg keys) created a NEW ComposerState
+                // every time ANY key changed (recording duration updates 10x/sec).
+                // derivedStateOf only triggers recomposition when the RESULT changes structurally.
+                //
+                // The base composerState from ViewModel already has distinctUntilChanged(),
+                // so we only need to optimize the recording state merge here.
+                val adjustedComposerState by remember {
+                    derivedStateOf {
+                        // Only merge recording state when actively recording/previewing
+                        if (isRecording || isPreviewingVoiceMemo) {
+                            composerState.copy(
+                                inputMode = if (isRecording) ComposerInputMode.VOICE_RECORDING else ComposerInputMode.VOICE_PREVIEW,
+                                recordingState = RecordingState(
+                                    durationMs = recordingDuration,
+                                    amplitudeHistory = amplitudeHistory,
+                                    isNoiseCancellationEnabled = isNoiseCancellationEnabled,
+                                    playbackPositionMs = playbackPosition,
+                                    isPlaying = isPlayingVoiceMemo,
+                                    recordedUri = recordingFile?.toUri()
+                                )
                             )
-                        } else null
-                    )
+                        } else {
+                            // Fast path: no recording, just use base state
+                            composerState.copy(inputMode = ComposerInputMode.TEXT)
+                        }
+                    }
                 }
 
                 ChatComposer(
@@ -1247,6 +1250,17 @@ fun ChatScreen(
                 }
             }
 
+            // When initial load completes, mark all current messages as "already animated"
+            // This ensures only NEW messages that arrive after this point will animate
+            LaunchedEffect(initialLoadComplete) {
+                if (initialLoadComplete) {
+                    uiState.messages.forEach { message ->
+                        animatedMessageGuids.add(message.guid)
+                    }
+                    android.util.Log.d("MessageAnim", "Initial load complete - marked ${uiState.messages.size} messages as already animated")
+                }
+            }
+
             when {
                 // Show skeleton only after 500ms delay and only if still loading
                 !initialLoadComplete && showDelayedLoader -> {
@@ -1346,7 +1360,7 @@ fun ChatScreen(
                         // Spam safety banner - shows at the bottom when chat is marked as spam
                         // Since reverseLayout=true, adding at start puts it at visual bottom
                         if (uiState.isSpam) {
-                            item(key = "spam_safety_banner") {
+                            item(key = "spam_safety_banner", contentType = ContentType.BANNER) {
                                 SpamSafetyBanner(
                                     onMarkAsSafe = { viewModel.markAsSafe() }
                                 )
@@ -1356,7 +1370,7 @@ fun ChatScreen(
                         // Typing indicator - shows when someone is typing
                         // Since reverseLayout=true, adding at start puts it at visual bottom
                         if (uiState.isTyping) {
-                            item(key = "typing_indicator") {
+                            item(key = "typing_indicator", contentType = ContentType.TYPING_INDICATOR) {
                                 TypingIndicator(
                                     modifier = Modifier.padding(top = 6.dp)
                                 )
@@ -1366,7 +1380,25 @@ fun ChatScreen(
                         itemsIndexed(
                             items = uiState.messages,
                             key = { _, message -> message.guid },
-                            contentType = { _, message -> if (message.isFromMe) 1 else 0 }
+                            // PHASE 4 OPTIMIZATION: Stable content types for efficient view recycling
+                            // Compose uses contentType to group items with similar layouts.
+                            // Items with the same contentType can reuse each other's compositions.
+                            // More granular types = better recycling for heterogeneous lists.
+                            contentType = { _, message ->
+                                when {
+                                    // Reactions are invisible but still in list
+                                    message.isReaction -> ContentType.REACTION
+                                    // Placed stickers overlap messages (special layout)
+                                    message.isPlacedSticker -> ContentType.STICKER
+                                    // Messages with attachments have different layout than text-only
+                                    message.attachments.isNotEmpty() ->
+                                        if (message.isFromMe) ContentType.OUTGOING_WITH_ATTACHMENT
+                                        else ContentType.INCOMING_WITH_ATTACHMENT
+                                    // Simple text messages
+                                    message.isFromMe -> ContentType.OUTGOING_TEXT
+                                    else -> ContentType.INCOMING_TEXT
+                                }
+                            }
                         ) { index, message ->
                             // Enable tapback for server-origin messages with content
                             // Server-origin = IMESSAGE or SERVER_SMS (from BlueBubbles server)
@@ -1445,15 +1477,51 @@ fun ChatScreen(
                             // Check if this message should be highlighted (from notification deep-link)
                             val isHighlighted = uiState.highlightedMessageGuid == message.guid
 
+                            // PHASE 1 FIX: Animation reliability - lifecycle-aware state mutation
+                            // Problem: Compose can run composition multiple times before drawing a frame.
+                            // If we mutate animatedMessageGuids during composition, the animation gets
+                            // cancelled before the user sees it ("Heisenbug").
+                            //
+                            // Solution: Check state without mutating during composition, then use
+                            // LaunchedEffect to mutate only after successful commit to UI tree.
+
+                            // 1. Check state without mutating it (stable across recompositions)
+                            val isAlreadyAnimated = remember(message.guid) {
+                                message.guid in animatedMessageGuids
+                            }
+                            val shouldAnimateEntrance = initialLoadComplete && !isAlreadyAnimated
+
+                            // 2. Mutate state only AFTER successful composition via LaunchedEffect
+                            // This guarantees the animation has started before we mark it as "seen"
+                            if (shouldAnimateEntrance) {
+                                LaunchedEffect(message.guid) {
+                                    // Small delay to ensure animation system has picked up the start value
+                                    delay(16)
+                                    animatedMessageGuids.add(message.guid)
+                                }
+                            }
+
+                            // DEBUG: Log animation decision for newest messages
+                            if (index < 3) {
+                                android.util.Log.d("MessageAnim",
+                                    "guid=${message.guid.takeLast(8)} index=$index " +
+                                    "initialLoadComplete=$initialLoadComplete " +
+                                    "isAlreadyAnimated=$isAlreadyAnimated " +
+                                    "shouldAnimate=$shouldAnimateEntrance"
+                                )
+                            }
+
                             Column(
                                 modifier = Modifier
                                     .zIndex(if (message.isPlacedSticker) 1f else 0f)  // Stickers render on top
                                     .alpha(stickerFadeAlpha)
                                     .offset(y = stickerOverlapOffset)
                                     .padding(top = topPadding)
-                                    // Messages appear instantly in groups as they're fetched
-                                    // No entrance animation - only new incoming messages via socket should animate
-                                    .staggeredEntrance(index = index, enabled = false)
+                                    // Animate new messages sliding up with a subtle bounce
+                                    .newMessageEntrance(
+                                        shouldAnimate = shouldAnimateEntrance,
+                                        isFromMe = message.isFromMe
+                                    )
                                     // PERF: Use snap() instead of spring animations to reduce frame drops
                                     // during rapid scrolling and message updates (reactions, delivery status)
                                     .animateItem(
@@ -1584,7 +1652,7 @@ fun ChatScreen(
                         // Loading more indicator - shows skeleton bubbles at top when loading older messages
                         // Since reverseLayout=true, adding at end puts it at visual top
                         if (uiState.isLoadingMore) {
-                            item(key = "loading_more") {
+                            item(key = "loading_more", contentType = ContentType.LOADING_SKELETON) {
                                 Column(
                                     modifier = Modifier.padding(vertical = 8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1599,7 +1667,7 @@ fun ChatScreen(
                         // Since reverseLayout=true, adding at end puts it at visual top
                         // Acts as soft scroll boundary while fetch is in progress
                         if (isLoadingFromServer && uiState.messages.isNotEmpty()) {
-                            item(key = "loading_more_indicator") {
+                            item(key = "loading_more_indicator", contentType = ContentType.LOADING_SKELETON) {
                                 LoadingMoreIndicator()
                             }
                         }
@@ -1607,7 +1675,7 @@ fun ChatScreen(
                         // Syncing indicator - shows skeleton bubbles at top while fetching messages
                         // Since reverseLayout=true, adding at end puts it at visual top
                         if (uiState.isSyncingMessages && uiState.messages.isNotEmpty()) {
-                            item(key = "sync_skeleton") {
+                            item(key = "sync_skeleton", contentType = ContentType.LOADING_SKELETON) {
                                 Column(
                                     modifier = Modifier.padding(vertical = 8.dp),
                                     verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1950,5 +2018,31 @@ fun ChatScreen(
             viewModel.updateTutorialState(TutorialState.COMPLETED)
         }
     )
+}
+
+/**
+ * Content types for LazyColumn item recycling optimization.
+ *
+ * Compose uses contentType to group items with similar layouts. Items with
+ * the same contentType can efficiently reuse each other's compositions,
+ * reducing allocation and layout overhead during scrolling.
+ *
+ * These types are stable integers (not strings) for efficient comparison.
+ *
+ * Message content types (0-5) are the most impactful since messages are repeated.
+ * Static items (6+) are singletons but included for completeness.
+ */
+private object ContentType {
+    // Message types (high frequency, benefit most from recycling)
+    const val INCOMING_TEXT = 0
+    const val OUTGOING_TEXT = 1
+    const val INCOMING_WITH_ATTACHMENT = 2
+    const val OUTGOING_WITH_ATTACHMENT = 3
+    const val STICKER = 4
+    const val REACTION = 5
+    // Static items (low frequency, minimal recycling benefit)
+    const val TYPING_INDICATOR = 6
+    const val LOADING_SKELETON = 7
+    const val BANNER = 8
 }
 

@@ -6,6 +6,8 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
+import androidx.room.withTransaction
+import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -91,6 +93,7 @@ data class UploadProgress(
 @Singleton
 class MessageSendingService @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val database: BothBubblesDatabase,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val attachmentDao: AttachmentDao,
@@ -556,42 +559,46 @@ class MessageSendingService @Inject constructor(
 
         if (!isRetry) {
             // First attempt - create temporary message for immediate UI feedback
-            val tempMessage = MessageEntity(
-                guid = tempGuid,
-                chatGuid = chatGuid,
-                text = text.ifBlank { null },
-                subject = subject,
-                dateCreated = System.currentTimeMillis(),
-                isFromMe = true,
-                hasAttachments = true,
-                threadOriginatorGuid = replyToGuid,
-                expressiveSendStyleId = effectId,
-                messageSource = MessageSource.IMESSAGE.name
-            )
-            messageDao.insertMessage(tempMessage)
-
-            // Create temporary attachment records for immediate display
-            attachments.forEachIndexed { index, input ->
-                val uri = input.uri
-                val tempAttGuid = tempAttachmentGuids[index]
-
-                val mimeType = context.contentResolver.getType(uri) ?: "application/octet-stream"
-                val fileName = getFileName(uri) ?: "attachment"
-                val (width, height) = getMediaDimensions(uri, mimeType)
-
-                val tempAttachment = AttachmentEntity(
-                    guid = tempAttGuid,
-                    messageGuid = tempGuid,
-                    mimeType = mimeType,
-                    transferName = fileName,
-                    isOutgoing = true,
-                    localPath = uri.toString(),
-                    width = width,
-                    height = height,
-                    transferState = TransferState.UPLOADING.name,
-                    transferProgress = 0f
+            database.withTransaction {
+                val tempMessage = MessageEntity(
+                    guid = tempGuid,
+                    chatGuid = chatGuid,
+                    text = text.ifBlank { null },
+                    subject = subject,
+                    dateCreated = System.currentTimeMillis(),
+                    isFromMe = true,
+                    hasAttachments = true,
+                    threadOriginatorGuid = replyToGuid,
+                    expressiveSendStyleId = effectId,
+                    messageSource = MessageSource.IMESSAGE.name
                 )
-                attachmentDao.insertAttachment(tempAttachment)
+                messageDao.insertMessage(tempMessage)
+
+                // Create temporary attachment records for immediate display
+                attachments.forEachIndexed { index, input ->
+                    val uri = input.uri
+                    val tempAttGuid = tempAttachmentGuids[index]
+
+                    val mimeType = input.mimeType.takeIf { !it.isNullOrBlank() }
+                        ?: context.contentResolver.getType(uri)
+                        ?: "application/octet-stream"
+                    val fileName = getFileName(uri) ?: "attachment"
+                    val (width, height) = getMediaDimensions(uri, mimeType)
+
+                    val tempAttachment = AttachmentEntity(
+                        guid = tempAttGuid,
+                        messageGuid = tempGuid,
+                        mimeType = mimeType,
+                        transferName = fileName,
+                        isOutgoing = true,
+                        localPath = uri.toString(),
+                        width = width,
+                        height = height,
+                        transferState = TransferState.UPLOADING.name,
+                        transferProgress = 0f
+                    )
+                    attachmentDao.insertAttachment(tempAttachment)
+                }
             }
         } else {
             Log.d(TAG, "Retry detected for tempGuid=$tempGuid, reusing existing temp records")
@@ -680,9 +687,18 @@ class MessageSendingService @Inject constructor(
             // Once we have a server response, the message was sent successfully
             // Wrap post-send operations so failures don't cause duplicate sends on retry
             try {
+                // CRITICAL: Fetch temp attachments BEFORE replaceGuid!
+                // If the socket event already created a message with serverMessage.guid,
+                // replaceGuid will DELETE the temp message, which CASCADE DELETES temp attachments.
+                // We must capture localPaths before that happens.
+                val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
+                val preservedLocalPaths = tempAttachments.mapNotNull { att ->
+                    att.localPath?.takeUnless { it.contains("/pending_attachments/") }
+                }
+
                 messageDao.replaceGuid(tempGuid, serverMessage.guid)
                 // Sync attachments from the server response to local database
-                syncOutboundAttachments(serverMessage, tempMessageGuid = tempGuid)
+                syncOutboundAttachments(serverMessage, preservedLocalPaths)
             } catch (e: Exception) {
                 // Log but don't throw - message was sent, these are non-critical cleanup ops
                 Log.w(TAG, "Non-critical error after successful send: ${e.message}")
@@ -966,33 +982,26 @@ class MessageSendingService @Inject constructor(
     /**
      * Sync attachments for an outbound message after server confirms upload.
      *
-     * IMPORTANT: Preserves localPath from temp attachments to prevent UI flicker.
-     * This ensures the image stays visible while transitioning from temp to server GUID.
+     * IMPORTANT: The caller must fetch and pass preservedLocalPaths BEFORE calling replaceGuid(),
+     * because replaceGuid() may cascade-delete temp attachments if the socket event already
+     * created a message with the server GUID.
+     *
+     * @param messageDto The server response containing attachment metadata
+     * @param preservedLocalPaths Local file paths from temp attachments, fetched before cascade delete
      */
-    private suspend fun syncOutboundAttachments(messageDto: MessageDto, tempMessageGuid: String? = null) {
+    private suspend fun syncOutboundAttachments(
+        messageDto: MessageDto,
+        preservedLocalPaths: List<String> = emptyList()
+    ) {
         if (messageDto.attachments.isNullOrEmpty()) return
-
-        // Get temp attachments BEFORE deleting so we can preserve localPath
-        val tempAttachments = tempMessageGuid?.let { tempGuid ->
-            attachmentDao.getAttachmentsForMessage(tempGuid)
-        } ?: emptyList()
-
-        // Build a map of temp attachment localPaths by index for matching
-        val tempLocalPaths = tempAttachments.mapNotNull { it.localPath }
-
-        // Delete temp attachments now that we've captured their paths
-        tempMessageGuid?.let { tempGuid ->
-            attachmentDao.deleteAttachmentsForMessage(tempGuid)
-        }
 
         val serverAddress = settingsDataStore.serverAddress.first()
 
         messageDto.attachments.forEachIndexed { index, attachmentDto ->
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 
-            // Preserve local path from temp attachment if available
-            // This prevents the UI from showing an empty bubble while waiting for download
-            val preservedLocalPath = tempLocalPaths.getOrNull(index)
+            // Use pre-fetched local path if available (already filtered for pending_attachments)
+            val preservedLocalPath = preservedLocalPaths.getOrNull(index)
 
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,

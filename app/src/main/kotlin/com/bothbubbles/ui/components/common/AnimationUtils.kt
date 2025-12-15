@@ -211,6 +211,78 @@ fun Modifier.staggeredEntrance(
 }
 
 /**
+ * Modifier for animating new messages as they appear in the chat.
+ *
+ * Only animates when:
+ * - shouldAnimate is true (message is new and hasn't been seen)
+ * - Message slides up and fades in from the bottom
+ *
+ * For sent messages: appears right after hitting send
+ * For received messages: appears when arriving via socket
+ *
+ * @param shouldAnimate Whether this message should animate (new, unseen message)
+ * @param isFromMe Whether this is an outgoing message (affects animation direction)
+ */
+@Composable
+fun Modifier.newMessageEntrance(
+    shouldAnimate: Boolean,
+    isFromMe: Boolean = false
+): Modifier {
+    // Skip animation entirely when not needed
+    if (!shouldAnimate) return this
+
+    var hasAppeared by remember { mutableStateOf(false) }
+
+    // DEBUG: Log animation state
+    android.util.Log.d("MessageAnim", "newMessageEntrance: shouldAnimate=$shouldAnimate hasAppeared=$hasAppeared isFromMe=$isFromMe")
+
+    LaunchedEffect(Unit) {
+        android.util.Log.d("MessageAnim", "newMessageEntrance: LaunchedEffect starting animation")
+        // Small delay to ensure smooth rendering
+        delay(16)
+        hasAppeared = true
+        android.util.Log.d("MessageAnim", "newMessageEntrance: hasAppeared set to true")
+    }
+
+    val alpha by animateFloatAsState(
+        targetValue = if (hasAppeared) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = MotionTokens.Duration.MEDIUM_1,
+            easing = MotionTokens.Easing.EmphasizedDecelerate
+        ),
+        label = "newMessageAlpha"
+    )
+
+    // Slide up from below (positive = down, so we start positive and animate to 0)
+    // In reversed LazyColumn, new messages appear at the "bottom" visually
+    val translationY by animateFloatAsState(
+        targetValue = if (hasAppeared) 0f else 40f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioLowBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "newMessageTranslation"
+    )
+
+    // Subtle scale for outgoing messages (sent by user)
+    val scale by animateFloatAsState(
+        targetValue = if (hasAppeared) 1f else if (isFromMe) 0.92f else 0.96f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "newMessageScale"
+    )
+
+    return this.graphicsLayer {
+        this.alpha = alpha
+        this.translationY = translationY
+        this.scaleX = scale
+        this.scaleY = scale
+    }
+}
+
+/**
  * Preset enter/exit transitions for popups and menus
  */
 object PopupTransitions {

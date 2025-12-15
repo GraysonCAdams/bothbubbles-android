@@ -1,5 +1,7 @@
 package com.bothbubbles.ui.components.attachment
 
+import android.net.Uri
+import java.io.File
 import android.view.ViewGroup
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -1659,7 +1661,30 @@ private fun BorderlessImageAttachment(
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.localPath ?: attachment.webUrl
+        val path = attachment.localPath
+        if (path != null) {
+            // Check if file exists (if it's a file path or file URI)
+            // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
+            val file = try {
+                if (path.startsWith("file://")) {
+                    File(Uri.parse(path).path ?: "")
+                } else if (path.startsWith("/")) {
+                    File(path)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null
+            }
+
+            if (file != null && !file.exists()) {
+                attachment.webUrl // Fallback if file missing
+            } else {
+                path // Use local path (it exists or is a content URI we can't easily check)
+            }
+        } else {
+            attachment.webUrl
+        }
     }
 
     // Calculate aspect ratio for proper sizing
@@ -1796,7 +1821,30 @@ private fun BorderlessGifAttachment(
     val imageUrl = if (attachment.isSticker) {
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
-        attachment.localPath ?: attachment.webUrl
+        val path = attachment.localPath
+        if (path != null) {
+            // Check if file exists (if it's a file path or file URI)
+            // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
+            val file = try {
+                if (path.startsWith("file://")) {
+                    File(Uri.parse(path).path ?: "")
+                } else if (path.startsWith("/")) {
+                    File(path)
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                null
+            }
+
+            if (file != null && !file.exists()) {
+                attachment.webUrl // Fallback if file missing
+            } else {
+                path // Use local path (it exists or is a content URI we can't easily check)
+            }
+        } else {
+            attachment.webUrl
+        }
     }
 
     // Calculate aspect ratio for proper sizing

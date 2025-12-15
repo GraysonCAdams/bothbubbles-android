@@ -137,9 +137,78 @@ SELECT * FROM messages WHERE guid LIKE 'temp-%';
 
 ---
 
-## Potential Fixes
+## Implemented Fixes
 
-### Option 1: Prevent Race via Deduplication
+### Fix 1: Atomic Message + Attachment Creation (MessageSendingService.kt)
+
+Wrapped temp message and attachment creation in a database transaction to ensure they're visible together:
+
+```kotlin
+database.withTransaction {
+    messageDao.insertMessage(tempMessage)
+    attachments.forEachIndexed { index, input ->
+        attachmentDao.insertAttachment(tempAttachment)
+    }
+}
+```
+
+### Fix 2: Preserve localPath Before Cascade Delete (MessageSendingService.kt) ✓ CRITICAL
+
+Fetch temp attachments BEFORE `replaceGuid()` can cascade-delete them:
+
+```kotlin
+// CRITICAL: Fetch temp attachments BEFORE replaceGuid!
+val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
+val preservedLocalPaths = tempAttachments.mapNotNull { att ->
+    att.localPath?.takeUnless { it.contains("/pending_attachments/") }
+}
+
+messageDao.replaceGuid(tempGuid, serverMessage.guid)
+syncOutboundAttachments(serverMessage, preservedLocalPaths)
+```
+
+### Fix 3: Skip pending_attachments Paths (MessageSendingService.kt)
+
+Don't preserve paths pointing to temporary pending files that get deleted after upload:
+
+```kotlin
+att.localPath?.takeUnless { it.contains("/pending_attachments/") }
+```
+
+### Fix 4: Use Provided MIME Type (MessageSendingService.kt)
+
+Trust the caller's MIME type over potentially unreliable `contentResolver`:
+
+```kotlin
+val mimeType = input.mimeType.takeIf { !it.isNullOrBlank() }
+    ?: context.contentResolver.getType(uri)
+    ?: "application/octet-stream"
+```
+
+### Fix 5: Segment All Attachments (MessageSegment.kt)
+
+Ensure messages with any attachment type go through segmentation (not just images/videos):
+
+```kotlin
+val hasAttachments = message.attachments.isNotEmpty()
+return hasAttachments || hasLinkPreview
+```
+
+### Fix 6: Self-Healing Thumbnails (AttachmentContent.kt)
+
+Check if local file exists before using it, fallback to webUrl:
+
+```kotlin
+val file = if (path.startsWith("file://")) File(Uri.parse(path).path)
+           else if (path.startsWith("/")) File(path) else null
+if (file != null && !file.exists()) attachment.webUrl else path
+```
+
+---
+
+## Alternative Approaches (Not Implemented)
+
+### Option A: Socket-Side Deduplication
 
 Modify `handleIncomingMessage` to check for temp messages by matching on:
 - Same `chatGuid`
@@ -150,31 +219,14 @@ Modify `handleIncomingMessage` to check for temp messages by matching on:
 // Before inserting, check if we have a pending temp message
 val tempMessage = messageDao.findTempMessageForOutbound(chatGuid, messageDto.dateCreated)
 if (tempMessage != null) {
-    // This is our sent message coming back - update it instead of creating new
     messageDao.replaceGuid(tempMessage.guid, messageDto.guid)
     return tempMessage.copy(guid = messageDto.guid)
 }
 ```
 
-### Option 2: Preserve localPath Before Cascade
+### Option B: Copy File to Permanent Location
 
-Move localPath preservation to BEFORE `replaceGuid`:
-
-```kotlin
-// Get temp attachments BEFORE replaceGuid might cascade delete them
-val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
-val tempLocalPaths = tempAttachments.mapNotNull { it.localPath }
-
-// Now safe to replace
-messageDao.replaceGuid(tempGuid, serverMessage.guid)
-
-// Sync with preserved paths
-syncOutboundAttachments(serverMessage, preservedLocalPaths = tempLocalPaths)
-```
-
-### Option 3: Copy File to Permanent Location
-
-Instead of storing `content://` URIs (which expire), copy the file to app storage during send:
+Instead of storing `content://` URIs (which expire), copy the file to app storage:
 
 ```kotlin
 val permanentPath = copyToAppStorage(uri)
