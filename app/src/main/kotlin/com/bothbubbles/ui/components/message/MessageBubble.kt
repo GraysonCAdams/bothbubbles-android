@@ -93,6 +93,13 @@ fun MessageBubble(
         UrlParsingUtils.getFirstUrl(message.text)
     }
 
+    // PERFORMANCE TRACKING: Log when a temporary message is actually composed
+    if (message.guid.startsWith("temp-")) {
+        androidx.compose.runtime.SideEffect {
+            android.util.Log.d("MessageBubble", "⏱️ [RENDER] MessageBubble composed for ${message.guid}")
+        }
+    }
+
     // Check if this message needs segmented rendering
     // (has media attachments OR has link preview with text)
     val needsSegmentation = remember(message, firstUrl) {

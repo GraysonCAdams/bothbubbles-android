@@ -155,6 +155,7 @@ class ChatSendDelegate @Inject constructor(
 
             // Queue message for offline-first delivery via WorkManager
             val queueStart = System.currentTimeMillis()
+            Log.d(TAG, "⏱️ [DELEGATE] calling queueMessage: +${System.currentTimeMillis() - sendStartTime}ms")
             pendingMessageRepository.queueMessage(
                 chatGuid = chatGuid,
                 text = trimmedText,
@@ -164,13 +165,12 @@ class ChatSendDelegate @Inject constructor(
                 deliveryMode = deliveryMode
             ).fold(
                 onSuccess = { localId ->
-                    Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: ${System.currentTimeMillis() - queueStart}ms")
-                    Log.d(TAG, "⏱️ [DELEGATE] TOTAL from call: ${System.currentTimeMillis() - sendStartTime}ms")
+                    Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
                     Log.d(TAG, "Message queued successfully: $localId")
                     PerformanceProfiler.end(sendId, "queued")
 
                     // Notify for optimistic UI insertion
-                    Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback: ${System.currentTimeMillis() - sendStartTime}ms")
+                    Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback: +${System.currentTimeMillis() - sendStartTime}ms")
                     onQueued?.invoke(
                         QueuedMessageInfo(
                             guid = localId,
