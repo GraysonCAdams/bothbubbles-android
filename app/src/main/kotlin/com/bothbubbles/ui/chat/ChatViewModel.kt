@@ -8,11 +8,7 @@ import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
-import androidx.work.workDataOf
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
-import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -35,7 +31,6 @@ import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.MessagePreview
 import com.bothbubbles.ui.chat.composer.ComposerAttachmentWarning
 import com.bothbubbles.data.repository.HandleRepository
-import com.bothbubbles.data.repository.ScheduledMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
@@ -64,7 +59,6 @@ import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sound.SoundManager
-import com.bothbubbles.services.scheduled.ScheduledMessageWorker
 import com.bothbubbles.services.sync.CounterpartSyncService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.components.message.AttachmentUiModel
@@ -87,9 +81,11 @@ import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendModeManager
 import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
+import com.bothbubbles.ui.chat.delegates.ChatScheduledMessageDelegate
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
 import com.bothbubbles.ui.chat.delegates.QueuedMessageInfo
 import com.bothbubbles.ui.chat.state.EffectsState
+import com.bothbubbles.ui.chat.state.ScheduledMessagesState
 import com.bothbubbles.ui.chat.state.OperationsState
 import com.bothbubbles.ui.chat.state.SearchState
 import com.bothbubbles.ui.chat.state.SendState
@@ -111,7 +107,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
@@ -131,8 +126,6 @@ class ChatViewModel @Inject constructor(
     private val vCardService: VCardService,
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val scheduledMessageRepository: ScheduledMessageRepository,
-    private val workManager: WorkManager,
     private val handleRepository: HandleRepository,
     private val activeConversationManager: ActiveConversationManager,
     private val api: BothBubblesApi,
@@ -154,6 +147,7 @@ class ChatViewModel @Inject constructor(
     private val composerDelegate: ChatComposerDelegate,
     private val messageListDelegate: ChatMessageListDelegate,
     private val sendModeManager: ChatSendModeManager,
+    private val scheduledMessageDelegate: ChatScheduledMessageDelegate,
     private val messageSendingService: MessageSendingService,
     // Sync integrity services
     private val counterpartSyncService: CounterpartSyncService,
@@ -164,10 +158,7 @@ class ChatViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "ChatViewModel"
-        private const val AVAILABILITY_CHECK_COOLDOWN = 5 * 60 * 1000L // 5 minutes
-        private const val SERVER_STABILITY_PERIOD_MS = 30_000L // 30 seconds stable before allowing iMessage
-        private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
-        private const val FLIP_FLOP_THRESHOLD = 3 // 3+ state changes = unstable server
+        // Send mode constants moved to ChatSendModeManager
     }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -215,6 +206,9 @@ class ChatViewModel @Inject constructor(
 
     // Thread state - owned by ChatThreadDelegate, exposed directly to ChatScreen
     val threadState: StateFlow<ThreadState> get() = threadDelegate.state
+
+    // Scheduled messages state - owned by ChatScheduledMessageDelegate, exposed directly to ChatScreen
+    val scheduledMessagesState: StateFlow<ScheduledMessagesState> get() = scheduledMessageDelegate.state
 
     // Separate flow for messages - delegated to messageListDelegate
     val messagesState: StateFlow<StableList<MessageUiModel>> get() = messageListDelegate.messagesState
@@ -315,16 +309,7 @@ class ChatViewModel @Inject constructor(
     private var draftSaveJob: Job? = null
     private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
 
-    // iMessage availability checking state
-    private var serverConnectedSince: Long? = null // Timestamp when server became connected
-    private var iMessageAvailabilityCheckJob: Job? = null
-    private var smsFallbackJob: Job? = null // Delayed SMS fallback on disconnect (debounced)
-    private val smsFallbackDelayMs = 3000L // Wait 3 seconds before falling back to SMS
-    // Track connection state changes for flip/flop detection
-    // Only counts transitions between CONNECTED and DISCONNECTED/RECONNECTING (not initial connection)
-    private val connectionStateChanges = mutableListOf<Long>()
-    private var previousConnectionState: ConnectionState? = null
-    private var hasEverConnected = false
+    // iMessage availability/send mode state is now managed by ChatSendModeManager
 
     // PERF: Search debounce - cancels previous search when new query arrives
     private var searchJob: Job? = null
@@ -348,9 +333,6 @@ class ChatViewModel @Inject constructor(
     // Thread scroll event - exposed from delegate for ChatScreen to collect
     val scrollToGuid: SharedFlow<String> get() = threadDelegate.scrollToGuid
 
-    // iMessage availability check cooldown (per-session, resets on ViewModel creation)
-    private var lastAvailabilityCheck: Long = 0
-
     init {
         // Initialize delegates
         sendDelegate.initialize(chatGuid, viewModelScope)
@@ -361,6 +343,7 @@ class ChatViewModel @Inject constructor(
         syncDelegate.initialize(chatGuid, viewModelScope)
         effectsDelegate.initialize(viewModelScope)
         threadDelegate.initialize(viewModelScope, mergedChatGuids)
+        scheduledMessageDelegate.initialize(chatGuid, viewModelScope)
         composerDelegate.initialize(
             scope = viewModelScope,
             uiState = _uiState,
@@ -764,354 +747,79 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Check if iMessage is available for this chat and auto-exit fallback mode if so.
-     * Only checks if:
-     * 1. Chat is in SMS fallback due to IMESSAGE_FAILED reason
-     * 2. Cooldown has passed (5 minutes)
-     * 3. Server is connected
+     * Observe ChatSendModeManager's state flows and forward to _uiState.
+     * This keeps send mode, availability, and toggle state in sync with the delegate.
      */
-    private fun checkAndMaybeExitFallback() {
-        val fallbackReason = chatFallbackTracker.getFallbackReason(chatGuid)
-
-        // Only check for IMESSAGE_FAILED fallback, not server disconnected or user requested
-        if (fallbackReason != FallbackReason.IMESSAGE_FAILED) return
-
-        val now = System.currentTimeMillis()
-        if (now - lastAvailabilityCheck < AVAILABILITY_CHECK_COOLDOWN) {
-            Log.d(TAG, "Skipping availability check - cooldown not passed")
-            return
-        }
-        lastAvailabilityCheck = now
-
+    private fun observeSendModeManagerState() {
+        // Observe current send mode
         viewModelScope.launch {
-            // Get the primary address from chat identifier or first participant
-            val address = _uiState.value.participantPhone
-            if (address.isNullOrBlank()) {
-                Log.d(TAG, "No address found for availability check")
-                return@launch
-            }
-
-            // Only check if server is connected
-            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
-                Log.d(TAG, "Server not connected, skipping availability check")
-                return@launch
-            }
-
-            try {
-                Log.d(TAG, "Checking iMessage availability for $address")
-                val response = api.checkIMessageAvailability(address)
-                if (response.isSuccessful && response.body()?.data?.available == true) {
-                    Log.d(TAG, "iMessage now available for $address, exiting fallback mode")
-                    chatFallbackTracker.exitFallbackMode(chatGuid)
-                    syncDelegate.setSmsFallbackMode(isInFallback = false, reason = null)
-                } else {
-                    Log.d(TAG, "iMessage still unavailable for $address")
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Failed to check iMessage availability", e)
+            sendModeManager.currentSendMode.collect { mode ->
+                _uiState.update { it.copy(currentSendMode = mode) }
             }
         }
-    }
 
-    private fun observeConnectionState() {
+        // Observe contact iMessage availability
         viewModelScope.launch {
-            socketService.connectionState.collect { state ->
-                val isConnected = state == ConnectionState.CONNECTED
-                syncDelegate.setServerConnected(isConnected)
-
-                // Track flip/flops: only count transitions AFTER the first successful connection
-                // This avoids counting initial DISCONNECTED → CONNECTING → CONNECTED as flip/flops
-                val now = System.currentTimeMillis()
-                val wasConnected = previousConnectionState == ConnectionState.CONNECTED
-                val stateActuallyChanged = previousConnectionState != null && previousConnectionState != state
-
-                if (hasEverConnected && stateActuallyChanged && (wasConnected || isConnected)) {
-                    // Only count transitions between CONNECTED and non-CONNECTED states
-                    connectionStateChanges.add(now)
-                }
-
-                // Prune old entries outside the 1-minute window
-                connectionStateChanges.removeAll { it < now - FLIP_FLOP_WINDOW_MS }
-                Log.d(TAG, "DEBUG: Connection state changed to $state (prev=$previousConnectionState), flip/flop count in last minute: ${connectionStateChanges.size}")
-
-                // Update tracking state
-                if (isConnected) {
-                    hasEverConnected = true
-                }
-                previousConnectionState = state
-
-                if (isConnected) {
-                    // Cancel any pending SMS fallback since we're connected again
-                    smsFallbackJob?.cancel()
-                    smsFallbackJob = null
-
-                    // Track when server became connected for stability check
-                    if (serverConnectedSince == null) {
-                        serverConnectedSince = System.currentTimeMillis()
-                    }
-
-                    // Restore iMessage mode for iMessage chats that were auto-switched to SMS on disconnect
-                    val currentState = _uiState.value
-                    val shouldBeIMessage = currentState.isIMessageChat && !currentState.isLocalSmsChat
-                    val wasAutoSwitchedToSms = currentState.currentSendMode == ChatSendMode.SMS && !currentState.sendModeManuallySet
-
-                    if (shouldBeIMessage && wasAutoSwitchedToSms) {
-                        if (isServerStable()) {
-                            // Server is stable, restore iMessage mode immediately
-                            Log.d(TAG, "DEBUG: Server reconnected (stable), restoring iMessage mode")
-                            _uiState.update { it.copy(currentSendMode = ChatSendMode.IMESSAGE) }
-                        } else {
-                            // Server is unstable, schedule check after stability period
-                            scheduleIMessageModeCheck()
-                        }
-                    }
-                } else {
-                    // Server disconnected - reset stability tracking
-                    serverConnectedSince = null
-                    iMessageAvailabilityCheckJob?.cancel()
-
-                    // Only switch to SMS for non-iMessage-only chats
-                    // iMessage group chats (iMessage;+;...) can ONLY be iMessage - no SMS fallback
-                    // Email addresses can ONLY be iMessage - no SMS fallback
-                    val isIMessageGroup = chatGuid.startsWith("iMessage;+;", ignoreCase = true)
-                    val isEmailChat = _uiState.value.participantPhone?.contains("@") == true
-                    val isIMessageOnly = isIMessageGroup || isEmailChat
-
-                    if (!isIMessageOnly) {
-                        // Schedule SMS fallback after delay (debounced to avoid flicker on brief disconnects)
-                        smsFallbackJob?.cancel()
-                        smsFallbackJob = viewModelScope.launch {
-                            Log.d(TAG, "DEBUG: Server disconnected, scheduling SMS fallback in ${smsFallbackDelayMs}ms")
-                            delay(smsFallbackDelayMs)
-                            Log.d(TAG, "DEBUG: SMS fallback delay elapsed, switching to SMS")
-                            _uiState.update { currentState ->
-                                currentState.copy(currentSendMode = ChatSendMode.SMS)
-                            }
-                        }
-                    } else {
-                        Log.d(TAG, "DEBUG: Server disconnected, keeping iMessage mode (iMessage-only chat: group=$isIMessageGroup, email=$isEmailChat)")
-                    }
-                }
+            sendModeManager.contactIMessageAvailable.collect { available ->
+                _uiState.update { it.copy(contactIMessageAvailable = available) }
             }
         }
-    }
 
-    /**
-     * Schedule a check to switch to iMessage mode after server stability period.
-     */
-    private fun scheduleIMessageModeCheck() {
-        iMessageAvailabilityCheckJob?.cancel()
-        iMessageAvailabilityCheckJob = viewModelScope.launch {
-            // Wait for server to be stable for required period
-            delay(SERVER_STABILITY_PERIOD_MS)
-
-            // Verify server is still connected
-            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
-                return@launch
-            }
-
-            // Check if contact supports iMessage
-            val contactAvailable = _uiState.value.contactIMessageAvailable
-            if (contactAvailable == true) {
-                _uiState.update { it.copy(currentSendMode = ChatSendMode.IMESSAGE) }
-                Log.d(TAG, "Switched to iMessage mode after ${SERVER_STABILITY_PERIOD_MS}ms stability")
-            }
-        }
-    }
-
-    /**
-     * Check iMessage availability for the current chat's contact(s).
-     * Called when chat opens - re-checks if cache is from previous session.
-     */
-    private fun checkIMessageAvailability() {
-        // Skip for ALL group chats - availability check only makes sense for 1-on-1 chats
-        // Group chat type (iMessage vs SMS) is determined by GUID prefix, not individual availability
-        val currentState = _uiState.value
-        Log.d(TAG, "DEBUG checkIMessageAvailability: chatGuid=$chatGuid, isLocalSmsChat=${currentState.isLocalSmsChat}, isGroup=${currentState.isGroup}, isIMessageChat=${currentState.isIMessageChat}, participantPhone=${currentState.participantPhone}, currentSendMode=${currentState.currentSendMode}")
-        if (currentState.isGroup) {
-            Log.d(TAG, "Skipping iMessage check: group chat (isIMessage=${currentState.isIMessageChat})")
-            return
-        }
-
-        val participantPhone = currentState.participantPhone ?: run {
-            Log.w(TAG, "DEBUG: participantPhone is null, cannot check availability")
-            return
-        }
-
-        // For existing iMessage 1-on-1 chats with phone numbers:
-        // iMessage is already working (chat exists), and SMS is possible (has phone number).
-        // Enable toggle immediately - no need to wait for availability check.
-        val isEmailAddress = participantPhone.contains("@")
-        if (currentState.isIMessageChat && !currentState.isGroup && !isEmailAddress) {
-            Log.d(TAG, "iMessage chat with phone number - enabling SMS toggle immediately")
-            _uiState.update { state ->
-                state.copy(
-                    contactIMessageAvailable = true,
-                    canToggleSendMode = true,
-                    showSendModeRevealAnimation = !state.sendModeManuallySet
-                )
-            }
-            initTutorialIfNeeded()
-            return // No need for availability check - we know both options work
-        }
-
-        Log.d(TAG, "Starting iMessage availability check for: $participantPhone")
-
+        // Observe checking state
         viewModelScope.launch {
-            _uiState.update { it.copy(isCheckingIMessageAvailability = true) }
+            sendModeManager.isCheckingIMessageAvailability.collect { isChecking ->
+                _uiState.update { it.copy(isCheckingIMessageAvailability = isChecking) }
+            }
+        }
 
-            try {
-                // Check if cache is from previous session (needs re-check on app restart)
-                val needsRecheck = iMessageAvailabilityService.isCacheFromPreviousSession(participantPhone)
-                Log.d(TAG, "DEBUG: needsRecheck=$needsRecheck for $participantPhone")
+        // Observe toggle availability
+        viewModelScope.launch {
+            sendModeManager.canToggleSendMode.collect { canToggle ->
+                _uiState.update { it.copy(canToggleSendMode = canToggle) }
+            }
+        }
 
-                val result = iMessageAvailabilityService.checkAvailability(
-                    address = participantPhone,
-                    forceRecheck = needsRecheck
-                )
+        // Observe reveal animation state
+        viewModelScope.launch {
+            sendModeManager.showSendModeRevealAnimation.collect { showReveal ->
+                _uiState.update { it.copy(showSendModeRevealAnimation = showReveal) }
+            }
+        }
 
-                val serverStable = isServerStable()
-                Log.d(TAG, "DEBUG: serverStable=$serverStable, serverConnectedSince=$serverConnectedSince")
+        // Observe manually set state
+        viewModelScope.launch {
+            sendModeManager.sendModeManuallySet.collect { manuallySet ->
+                _uiState.update { it.copy(sendModeManuallySet = manuallySet) }
+            }
+        }
 
-                // Email addresses can ONLY be iMessage - no stability check needed, no SMS fallback
-                val isEmailAddress = participantPhone.contains("@")
+        // Observe SMS input blocked state
+        viewModelScope.launch {
+            sendModeManager.smsInputBlocked.collect { blocked ->
+                _uiState.update { it.copy(smsInputBlocked = blocked) }
+            }
+        }
 
-                result.fold(
-                    onSuccess = { available ->
-                        // Determine send mode based on availability and stability
-                        val newMode = when {
-                            // Email addresses can ONLY be iMessage
-                            isEmailAddress -> ChatSendMode.IMESSAGE
-                            // iMessage available and server stable - use iMessage
-                            available && serverStable -> ChatSendMode.IMESSAGE
-                            // iMessage available but server not stable - keep current mode (wait for stability)
-                            available -> _uiState.value.currentSendMode
-                            // iMessage NOT available - use SMS
-                            else -> ChatSendMode.SMS
-                        }
-                        Log.d(TAG, "DEBUG: iMessage availability result for $participantPhone: available=$available, serverStable=$serverStable, isEmail=$isEmailAddress, newMode=$newMode")
-
-                        // Check if toggle is available (both modes supported, not email-only)
-                        val canToggle = available && !isEmailAddress && !_uiState.value.isGroup
-                        Log.d(TAG, "DEBUG: canToggleSendMode=$canToggle")
-
-                        // Check if SMS should be blocked when falling back to SMS mode
-                        // Block if iMessage not available AND SMS not properly activated
-                        val isDefaultSmsApp = smsPermissionHelper.isDefaultSmsApp()
-                        val smsEnabled = settingsDataStore.smsEnabled.first()
-                        val shouldBlockSms = !available && !isEmailAddress && (!isDefaultSmsApp || !smsEnabled)
-                        Log.d(TAG, "DEBUG: shouldBlockSms=$shouldBlockSms (isDefaultSmsApp=$isDefaultSmsApp, smsEnabled=$smsEnabled)")
-
-                        _uiState.update { state ->
-                            state.copy(
-                                contactIMessageAvailable = available,
-                                isCheckingIMessageAvailability = false,
-                                currentSendMode = newMode,
-                                canToggleSendMode = canToggle,
-                                // Show reveal animation if toggle is available and not already shown
-                                showSendModeRevealAnimation = canToggle && !state.sendModeManuallySet,
-                                // Block SMS input if iMessage unavailable and SMS not activated
-                                smsInputBlocked = shouldBlockSms
-                            )
-                        }
-                        // Initialize tutorial if toggle just became available
-                        if (canToggle) {
-                            initTutorialIfNeeded()
-                        }
-                        // If available but server not yet stable, the scheduled check will handle it
-                    },
-                    onFailure = { e ->
-                        Log.w(TAG, "DEBUG: iMessage availability check FAILED for $participantPhone: ${e.message}, isEmail=$isEmailAddress", e)
-                        // For email addresses, default to iMessage even on failure (no SMS fallback)
-                        val newMode = if (isEmailAddress) ChatSendMode.IMESSAGE else _uiState.value.currentSendMode
-                        Log.d(TAG, "DEBUG: Setting mode to $newMode after failure (isEmail=$isEmailAddress)")
-                        _uiState.update { state ->
-                            state.copy(
-                                contactIMessageAvailable = if (isEmailAddress) true else null,
-                                isCheckingIMessageAvailability = false,
-                                currentSendMode = newMode
-                            )
-                        }
-                        Log.d(TAG, "DEBUG: After failure update, currentSendMode=${_uiState.value.currentSendMode}")
-                    }
-                )
-            } catch (e: Exception) {
-                Log.e(TAG, "DEBUG: Unexpected error checking iMessage availability: ${e.message}", e)
-                _uiState.update { it.copy(isCheckingIMessageAvailability = false) }
+        // Observe tutorial state
+        viewModelScope.launch {
+            sendModeManager.tutorialState.collect { tutorial ->
+                _uiState.update { it.copy(tutorialState = tutorial) }
             }
         }
     }
 
-    /**
-     * Check if server connection is stable.
-     * Server is considered stable if there are fewer than 3 connection state changes in the last minute.
-     * If unstable (3+ flip/flops), we also require 30 seconds of continuous connection.
-     */
-    private fun isServerStable(): Boolean {
-        val now = System.currentTimeMillis()
-        // Prune old entries outside the 1-minute window
-        connectionStateChanges.removeAll { it < now - FLIP_FLOP_WINDOW_MS }
-
-        // If fewer than threshold flip/flops, server is stable
-        if (connectionStateChanges.size < FLIP_FLOP_THRESHOLD) {
-            Log.d(TAG, "DEBUG isServerStable: true (flip/flop count ${connectionStateChanges.size} < $FLIP_FLOP_THRESHOLD)")
-            return true
-        }
-
-        // Server has been flapping - require 30 seconds of continuous connection
-        val connectedSince = serverConnectedSince ?: return false
-        val stableFor = now - connectedSince
-        val isStable = stableFor >= SERVER_STABILITY_PERIOD_MS
-        Log.d(TAG, "DEBUG isServerStable: $isStable (flapping detected, connected for ${stableFor}ms, need ${SERVER_STABILITY_PERIOD_MS}ms)")
-        return isStable
-    }
+    // Connection state observation and iMessage availability checking are now handled by ChatSendModeManager
 
     /**
      * Manually switch send mode (for UI toggle).
-     * Only allows switching to iMessage if contact supports it and server is stable.
+     * Delegates to ChatSendModeManager for validation and state management.
      *
      * @param mode The target send mode
      * @param persist Whether to persist the choice to the database (default true)
      * @return true if the switch was successful, false otherwise
      */
     fun setSendMode(mode: ChatSendMode, persist: Boolean = true): Boolean {
-        if (mode == ChatSendMode.IMESSAGE) {
-            // Validate before switching to iMessage
-            if (_uiState.value.contactIMessageAvailable != true) {
-                Log.w(TAG, "Cannot switch to iMessage: contact doesn't support it")
-                return false
-            }
-            if (!isServerStable()) {
-                Log.w(TAG, "Cannot switch to iMessage: server not stable yet")
-                return false
-            }
-        }
-
-        _uiState.update {
-            it.copy(
-                currentSendMode = mode,
-                sendModeManuallySet = persist
-            )
-        }
-        Log.d(TAG, "Send mode changed to: $mode (persist=$persist)")
-
-        // Persist to database if requested
-        if (persist) {
-            viewModelScope.launch {
-                try {
-                    chatRepository.updatePreferredSendMode(
-                        chatGuid = chatGuid,
-                        mode = mode.name.lowercase(),
-                        manuallySet = true
-                    )
-                    Log.d(TAG, "Persisted send mode preference: $mode for chat $chatGuid")
-                } catch (e: Exception) {
-                    Log.e(TAG, "Failed to persist send mode preference", e)
-                }
-            }
-        }
-
-        return true
+        return sendModeManager.setSendMode(mode, persist)
     }
 
     /**
@@ -1119,39 +827,36 @@ class ChatViewModel @Inject constructor(
      * Returns true if the toggle was successful.
      */
     fun tryToggleSendMode(): Boolean {
-        val currentMode = _uiState.value.currentSendMode
-        val newMode = if (currentMode == ChatSendMode.SMS) ChatSendMode.IMESSAGE else ChatSendMode.SMS
-        return setSendMode(newMode, persist = true)
+        return sendModeManager.tryToggleSendMode()
     }
 
     /**
      * Check if send mode toggle is currently available.
      */
     fun canToggleSendMode(): Boolean {
-        val state = _uiState.value
-        return state.canToggleSendMode &&
-                state.contactIMessageAvailable == true &&
-                !state.isGroup &&
-                isServerStable()
+        return sendModeManager.canToggleSendModeNow()
     }
 
     /**
      * Mark the send mode reveal animation as shown.
      */
     fun markRevealAnimationShown() {
-        _uiState.update { it.copy(showSendModeRevealAnimation = false) }
+        sendModeManager.markRevealAnimationShown()
     }
 
     /**
      * Initialize tutorial state based on whether user has completed it before.
+     * Note: This is still needed here for the init block callback.
      */
-    fun initTutorialIfNeeded() {
+    private fun initTutorialIfNeeded() {
+        // Tutorial state is now managed by sendModeManager
+        // This method is called from the init callback when toggle becomes available
         if (!_uiState.value.canToggleSendMode) return
 
         viewModelScope.launch {
             settingsDataStore.hasCompletedSendModeTutorial.first().let { completed ->
                 if (!completed) {
-                    _uiState.update { it.copy(tutorialState = TutorialState.STEP_1_SWIPE_UP) }
+                    sendModeManager.updateTutorialState(TutorialState.STEP_1_SWIPE_UP)
                 }
             }
         }
@@ -1159,35 +864,19 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Update tutorial state after user completes a step.
+     * Delegates to ChatSendModeManager.
      */
     fun updateTutorialState(newState: TutorialState) {
-        _uiState.update { it.copy(tutorialState = newState) }
-
-        // If completed, persist to settings
-        if (newState == TutorialState.COMPLETED) {
-            viewModelScope.launch {
-                settingsDataStore.setHasCompletedSendModeTutorial(true)
-            }
-        }
+        sendModeManager.updateTutorialState(newState)
     }
 
     /**
      * Handle successful toggle during tutorial.
      * Progresses the tutorial state appropriately.
+     * Delegates to ChatSendModeManager.
      */
     fun onTutorialToggleSuccess() {
-        when (_uiState.value.tutorialState) {
-            TutorialState.STEP_1_SWIPE_UP -> {
-                _uiState.update { it.copy(tutorialState = TutorialState.STEP_2_SWIPE_BACK) }
-            }
-            TutorialState.STEP_2_SWIPE_BACK -> {
-                _uiState.update { it.copy(tutorialState = TutorialState.COMPLETED) }
-                viewModelScope.launch {
-                    settingsDataStore.setHasCompletedSendModeTutorial(true)
-                }
-            }
-            else -> { /* No action needed */ }
-        }
+        sendModeManager.onTutorialToggleSuccess()
     }
 
     private fun syncMessages() {
@@ -2170,51 +1859,39 @@ class ChatViewModel @Inject constructor(
     fun triggerScreenEffect(message: MessageUiModel) = effectsDelegate.triggerScreenEffect(message)
     fun onScreenEffectCompleted() = effectsDelegate.onScreenEffectCompleted()
 
-    // ===== Scheduled Messages =====
+    // ===== Scheduled Messages (delegated to ChatScheduledMessageDelegate) =====
 
     /**
      * Schedule a message to be sent at a later time.
-     *
-     * Note: This uses client-side scheduling with WorkManager.
-     * The phone must be on and have network connectivity for the message to send.
+     * Delegated to ChatScheduledMessageDelegate.
      */
-    fun scheduleMessage(text: String, attachments: List<PendingAttachmentInput>, sendAt: Long) {
-        viewModelScope.launch {
-            // Convert attachments to JSON array string (extract URIs from PendingAttachmentInput)
-            val attachmentUrisJson = if (attachments.isNotEmpty()) {
-                attachments.joinToString(",", "[", "]") { "\"${it.uri}\"" }
-            } else {
-                null
-            }
+    fun scheduleMessage(text: String, attachments: List<PendingAttachmentInput>, sendAt: Long) =
+        scheduledMessageDelegate.scheduleMessage(text, attachments, sendAt)
 
-            // Create scheduled message entity
-            val scheduledMessage = ScheduledMessageEntity(
-                chatGuid = chatGuid,
-                text = text.ifBlank { null },
-                attachmentUris = attachmentUrisJson,
-                scheduledAt = sendAt
-            )
+    /**
+     * Cancel a scheduled message.
+     * Delegated to ChatScheduledMessageDelegate.
+     */
+    fun cancelScheduledMessage(id: Long) = scheduledMessageDelegate.cancelScheduledMessage(id)
 
-            // Insert into database
-            val id = scheduledMessageRepository.insert(scheduledMessage)
+    /**
+     * Update the scheduled time for a message.
+     * Delegated to ChatScheduledMessageDelegate.
+     */
+    fun updateScheduledTime(id: Long, newSendAt: Long) = scheduledMessageDelegate.updateScheduledTime(id, newSendAt)
 
-            // Calculate delay
-            val delay = sendAt - System.currentTimeMillis()
+    /**
+     * Delete a scheduled message from the database.
+     * Delegated to ChatScheduledMessageDelegate.
+     */
+    fun deleteScheduledMessage(id: Long) = scheduledMessageDelegate.deleteScheduledMessage(id)
 
-            // Schedule WorkManager job
-            val workRequest = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
-                .setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS)
-                .setInputData(
-                    workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_MESSAGE_ID to id)
-                )
-                .build()
-
-            workManager.enqueue(workRequest)
-
-            // Save the work request ID for potential cancellation
-            scheduledMessageRepository.updateWorkRequestId(id, workRequest.id.toString())
-        }
-    }
+    /**
+     * Retry a failed scheduled message.
+     * Delegated to ChatScheduledMessageDelegate.
+     */
+    fun retryScheduledMessage(id: Long, newSendAt: Long = System.currentTimeMillis()) =
+        scheduledMessageDelegate.retryScheduledMessage(id, newSendAt)
 
     // ===== ETA Sharing =====
 

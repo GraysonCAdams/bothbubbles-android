@@ -109,6 +109,7 @@ import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.chat.components.AttachmentPreview
+import com.bothbubbles.ui.chat.components.ChatBackground
 import com.bothbubbles.ui.chat.components.ChatInputArea
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.EtaSharingBanner
@@ -771,12 +772,8 @@ fun ChatScreen(
     val topBarHeightDp = with(density) { topBarHeightPx.toDp() }
     val bottomBarHeightDp = with(density) { bottomBarHeightPx.toDp() }
 
-    android.util.Log.d("PerfTrace", "⏱️ [layout] Before Box @ ${System.currentTimeMillis()}")
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    android.util.Log.d("PerfTrace", "⏱️ [layout] Before ChatBackground @ ${System.currentTimeMillis()}")
+    ChatBackground {
         // PERF FIX: Use Box with overlapping layout instead of Scaffold
         // Scaffold's SubcomposeLayout has O(N) overhead when comparing lambda closures
         // that capture the messages list. This Box approach avoids SubcomposeLayout entirely.
