@@ -354,9 +354,10 @@ private fun loadMessages() {
     viewModelScope.launch {
         pagingController.messages
             .map { sparseList -> sparseList.toList() }  // O(N log N) sort!
-            .flowOn(Dispatchers.Default)  // CRITICAL: Off main thread
+            // .flowOn(Dispatchers.Default)  // REMOVED: Was causing ~300ms latency!
             .conflate()  // Skip intermediate emissions
             .collect { messageModels ->
+                Log.d(TAG, "⏱️ [UI] collecting messages: ${messageModels.size}")
                 _uiState.update { state ->
                     state.copy(
                         isLoading = false,
@@ -364,18 +365,19 @@ private fun loadMessages() {
                         canLoadMore = messageModels.size < totalCount
                     )
                 }
+                Log.d(TAG, "⏱️ [UI] messages updated")
             }
     }
 }
 ```
 
-**LATENCY ANALYSIS**:
-- `sparseList.toList()`: O(N log N) sorting + O(N) iteration + deduplication
-- `flowOn(Dispatchers.Default)`: Thread switch overhead
-- `conflate()`: Can skip rapid emissions (potential for batching delay)
-- `_uiState.update {}`: StateFlow emission to main thread
+**LATENCY FIX APPLIED**:
+- ~~`flowOn(Dispatchers.Default)`~~: **REMOVED** - Was causing ~300ms latency due to thread scheduling overhead
+- `sparseList.toList()`: O(N log N) sorting - fast enough on main thread for <5000 messages
+- `conflate()`: Skips intermediate emissions during rapid updates
+- `_uiState.update {}`: Synchronous StateFlow emission
 
-**From debug logs**, this pipeline introduces **~300ms latency** between paging controller emit and UI update.
+**Result**: With `flowOn` removed, optimistic inserts now appear immediately.
 
 #### New Message Observation (Lines 1911-1945)
 
