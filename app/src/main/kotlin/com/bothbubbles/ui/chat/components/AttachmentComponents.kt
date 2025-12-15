@@ -56,7 +56,7 @@ fun AttachmentPreview(
 
     Box(
         modifier = modifier
-            .size(80.dp)
+            .size(100.dp)
             .clip(RoundedCornerShape(12.dp))
             .then(
                 if (onClick != null) {
@@ -81,7 +81,7 @@ fun AttachmentPreview(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(32.dp)
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
@@ -99,7 +99,7 @@ fun AttachmentPreview(
             color = Color.White,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 6.dp, bottom = 4.dp)
+                .padding(start = 8.dp, bottom = 6.dp)
         )
 
         // Video duration badge at bottom right (for videos)
@@ -107,7 +107,7 @@ fun AttachmentPreview(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 6.dp, bottom = 4.dp),
+                    .padding(end = 8.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -115,7 +115,7 @@ fun AttachmentPreview(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(14.dp)
                 )
                 Text(
                     text = fileInfo.durationFormatted,
@@ -131,8 +131,8 @@ fun AttachmentPreview(
                 onClick = onEdit,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .size(24.dp)
+                    .padding(6.dp)
+                    .size(28.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.6f),
                         shape = CircleShape
@@ -142,7 +142,7 @@ fun AttachmentPreview(
                     Icons.Default.Edit,
                     contentDescription = "Edit attachment",
                     tint = Color.White,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -152,8 +152,8 @@ fun AttachmentPreview(
             onClick = onRemove,
             modifier = Modifier
                 .align(Alignment.TopEnd)
-                .padding(4.dp)
-                .size(24.dp)
+                .padding(6.dp)
+                .size(28.dp)
                 .background(
                     color = Color.Black.copy(alpha = 0.6f),
                     shape = CircleShape
@@ -163,7 +163,7 @@ fun AttachmentPreview(
                 Icons.Default.Close,
                 contentDescription = "Remove attachment",
                 tint = Color.White,
-                modifier = Modifier.size(16.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
     }

@@ -1,6 +1,8 @@
 package com.bothbubbles.ui.chat.composer.components
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
@@ -10,6 +12,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,14 +21,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
@@ -36,24 +42,45 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.bothbubbles.ui.chat.composer.AttachmentItem
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
+import kotlin.math.roundToInt
+
+/** Size of attachment thumbnails - larger than before for better visibility */
+private val AttachmentThumbnailSize = 100.dp
+
+/** Item width including spacing for drag calculations */
+private val ItemWidthWithSpacing = 108.dp // 100dp item + 8dp spacing
 
 /**
  * Attachment thumbnail row for the chat composer.
  *
  * Displays staged attachments as horizontally scrollable thumbnails with:
+ * - Drag-and-drop reordering via long-press gesture
  * - Remove button on each thumbnail
  * - Edit button for images
  * - Upload progress indicator
@@ -65,11 +92,11 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
  * ┌──────────────────────────────────────────────────────────────┐
  * │ 2 attachments                              [HD ▼] Clear All  │
  * ├──────────────────────────────────────────────────────────────┤
- * │ ┌──────┐ ┌──────┐                                            │
- * │ │ [X]  │ │ [X]  │                                            │
- * │ │      │ │      │                                            │
- * │ │ 2.3MB│ │ ▶ 15s│                                            │
- * │ └──────┘ └──────┘                                            │
+ * │ ┌────────┐ ┌────────┐                                        │
+ * │ │ [✎][X]│ │ [✎][X]│  ← Long-press to drag and reorder       │
+ * │ │        │ │        │                                        │
+ * │ │ 2.3MB  │ │ ▶ 15s  │                                        │
+ * │ └────────┘ └────────┘                                        │
  * └──────────────────────────────────────────────────────────────┘
  * ```
  *
@@ -77,6 +104,7 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
  * @param onRemove Callback when the remove button is tapped on an attachment
  * @param onEdit Callback when the edit button is tapped on an image (optional)
  * @param onRetry Callback when the retry button is tapped on a failed upload
+ * @param onReorder Callback when attachments are reordered via drag-and-drop
  * @param onClearAll Callback to clear all attachments
  * @param onQualityClick Callback to open quality selection sheet
  * @param currentQuality Current quality setting label (optional)
@@ -88,6 +116,7 @@ fun AttachmentThumbnailRow(
     onRemove: (AttachmentItem) -> Unit,
     onEdit: ((AttachmentItem) -> Unit)? = null,
     onRetry: ((AttachmentItem) -> Unit)? = null,
+    onReorder: ((List<AttachmentItem>) -> Unit)? = null,
     onClearAll: (() -> Unit)? = null,
     onQualityClick: (() -> Unit)? = null,
     currentQuality: String? = null,
@@ -95,6 +124,16 @@ fun AttachmentThumbnailRow(
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
     val hasImages = attachments.any { it.isImage }
+    val hapticFeedback = LocalHapticFeedback.current
+    val listState = rememberLazyListState()
+
+    // Drag state
+    var draggedIndex by remember { mutableIntStateOf(-1) }
+    var dragOffset by remember { mutableFloatStateOf(0f) }
+    var isDragging by remember { mutableStateOf(false) }
+
+    // Working copy of items for reordering
+    var workingItems by remember(attachments) { mutableStateOf(attachments) }
 
     AnimatedContent(
         targetState = attachments.isNotEmpty(),
@@ -161,30 +200,135 @@ fun AttachmentThumbnailRow(
                     }
                 }
 
-                // Attachment thumbnails
+                // Attachment thumbnails with drag-and-drop reordering
                 LazyRow(
+                    state = listState,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp)
                 ) {
-                    items(
-                        items = attachments,
-                        key = { it.id }
-                    ) { attachment ->
-                        AttachmentThumbnail(
-                            attachment = attachment,
-                            onRemove = { onRemove(attachment) },
-                            onEdit = if (attachment.isImage && onEdit != null) {
-                                { onEdit(attachment) }
-                            } else null,
-                            onRetry = if (attachment.hasError && onRetry != null) {
-                                { onRetry(attachment) }
-                            } else null,
-                            modifier = Modifier.animateItem(
-                                fadeInSpec = tween(ComposerMotionTokens.Duration.NORMAL),
-                                fadeOutSpec = tween(ComposerMotionTokens.Duration.FAST),
-                                placementSpec = spring(dampingRatio = 0.8f)
-                            )
+                    itemsIndexed(
+                        items = workingItems,
+                        key = { _, item -> item.id }
+                    ) { index, attachment ->
+                        val isBeingDragged = index == draggedIndex && isDragging
+
+                        // Animate scale and elevation for dragged item
+                        val scale by animateFloatAsState(
+                            targetValue = if (isBeingDragged) 1.08f else 1f,
+                            animationSpec = spring(),
+                            label = "scale"
                         )
+                        val elevation by animateDpAsState(
+                            targetValue = if (isBeingDragged) 8.dp else 0.dp,
+                            animationSpec = spring(),
+                            label = "elevation"
+                        )
+
+                        // Calculate horizontal offset for dragged item
+                        val offsetX = if (isBeingDragged) dragOffset else 0f
+
+                        Box(
+                            modifier = Modifier
+                                .zIndex(if (isBeingDragged) 1f else 0f)
+                                .offset { IntOffset(offsetX.roundToInt(), 0) }
+                                .scale(scale)
+                                .shadow(elevation, RoundedCornerShape(12.dp))
+                                .then(
+                                    if (onReorder != null && attachments.size > 1) {
+                                        Modifier.pointerInput(attachment.id) {
+                                            detectDragGesturesAfterLongPress(
+                                                onDragStart = {
+                                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    draggedIndex = index
+                                                    isDragging = true
+                                                    dragOffset = 0f
+                                                },
+                                                onDrag = { change, dragAmount ->
+                                                    change.consume()
+                                                    dragOffset += dragAmount.x
+
+                                                    // Calculate target index based on drag offset
+                                                    val itemWidthPx = ItemWidthWithSpacing.toPx()
+                                                    val offsetItems = (dragOffset / itemWidthPx).roundToInt()
+                                                    val targetIndex = (draggedIndex + offsetItems)
+                                                        .coerceIn(0, workingItems.lastIndex)
+
+                                                    // Swap items if target changed
+                                                    if (targetIndex != draggedIndex && targetIndex in workingItems.indices) {
+                                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                        workingItems = workingItems.toMutableList().apply {
+                                                            val item = removeAt(draggedIndex)
+                                                            add(targetIndex, item)
+                                                        }
+                                                        // Reset offset and update dragged index
+                                                        dragOffset -= (targetIndex - draggedIndex) * itemWidthPx
+                                                        draggedIndex = targetIndex
+                                                    }
+                                                },
+                                                onDragEnd = {
+                                                    isDragging = false
+                                                    dragOffset = 0f
+                                                    // Notify parent of reorder
+                                                    if (workingItems != attachments) {
+                                                        onReorder(workingItems)
+                                                    }
+                                                    draggedIndex = -1
+                                                },
+                                                onDragCancel = {
+                                                    isDragging = false
+                                                    dragOffset = 0f
+                                                    workingItems = attachments // Reset to original
+                                                    draggedIndex = -1
+                                                }
+                                            )
+                                        }
+                                    } else Modifier
+                                )
+                                .animateItem(
+                                    fadeInSpec = tween(ComposerMotionTokens.Duration.NORMAL),
+                                    fadeOutSpec = tween(ComposerMotionTokens.Duration.FAST),
+                                    placementSpec = spring(dampingRatio = 0.8f)
+                                )
+                        ) {
+                            AttachmentThumbnail(
+                                attachment = attachment,
+                                onRemove = { onRemove(attachment) },
+                                onEdit = if (attachment.isImage && onEdit != null) {
+                                    { onEdit(attachment) }
+                                } else null,
+                                onRetry = if (attachment.hasError && onRetry != null) {
+                                    { onRetry(attachment) }
+                                } else null
+                            )
+
+                            // Show drag handle indicator when dragging
+                            if (isBeingDragged) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color.Black.copy(alpha = 0.1f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(36.dp)
+                                            .background(
+                                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f),
+                                                CircleShape
+                                            ),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            Icons.Default.DragHandle,
+                                            contentDescription = "Drag to reorder",
+                                            tint = MaterialTheme.colorScheme.onPrimary,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -207,7 +351,7 @@ private fun AttachmentThumbnail(
 
     Box(
         modifier = modifier
-            .size(ComposerMotionTokens.Dimension.AttachmentRowHeight)
+            .size(AttachmentThumbnailSize)
             .clip(RoundedCornerShape(12.dp))
     ) {
         // Thumbnail image
@@ -226,7 +370,7 @@ private fun AttachmentThumbnail(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .height(28.dp)
+                .height(32.dp)
                 .background(
                     brush = Brush.verticalGradient(
                         colors = listOf(
@@ -248,7 +392,7 @@ private fun AttachmentThumbnail(
             color = Color.White,
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .padding(start = 6.dp, bottom = 4.dp)
+                .padding(start = 8.dp, bottom = 6.dp)
         )
 
         // Video duration badge
@@ -256,7 +400,7 @@ private fun AttachmentThumbnail(
             Row(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(end = 6.dp, bottom = 4.dp),
+                    .padding(end = 8.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
@@ -264,7 +408,7 @@ private fun AttachmentThumbnail(
                     imageVector = Icons.Default.PlayArrow,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(12.dp)
+                    modifier = Modifier.size(14.dp)
                 )
             }
         }
@@ -280,13 +424,13 @@ private fun AttachmentThumbnail(
                 if (attachment.uploadProgress != null) {
                     CircularProgressIndicator(
                         progress = { attachment.uploadProgress },
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                         color = Color.White,
                         trackColor = Color.White.copy(alpha = 0.3f)
                     )
                 } else {
                     CircularProgressIndicator(
-                        modifier = Modifier.size(32.dp),
+                        modifier = Modifier.size(36.dp),
                         color = Color.White,
                         trackColor = Color.White.copy(alpha = 0.3f)
                     )
@@ -307,7 +451,7 @@ private fun AttachmentThumbnail(
                     imageVector = Icons.Default.Refresh,
                     contentDescription = "Retry upload",
                     tint = Color.White,
-                    modifier = Modifier.size(32.dp)
+                    modifier = Modifier.size(36.dp)
                 )
             }
         }
@@ -318,8 +462,8 @@ private fun AttachmentThumbnail(
                 onClick = onEdit,
                 modifier = Modifier
                     .align(Alignment.TopStart)
-                    .padding(4.dp)
-                    .size(24.dp)
+                    .padding(6.dp)
+                    .size(28.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.6f),
                         shape = CircleShape
@@ -329,7 +473,7 @@ private fun AttachmentThumbnail(
                     Icons.Default.Edit,
                     contentDescription = "Edit attachment",
                     tint = Color.White,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier.size(16.dp)
                 )
             }
         }
@@ -340,8 +484,8 @@ private fun AttachmentThumbnail(
                 onClick = onRemove,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(24.dp)
+                    .padding(6.dp)
+                    .size(28.dp)
                     .background(
                         color = Color.Black.copy(alpha = 0.6f),
                         shape = CircleShape
@@ -351,7 +495,7 @@ private fun AttachmentThumbnail(
                     Icons.Default.Close,
                     contentDescription = "Remove attachment",
                     tint = Color.White,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }

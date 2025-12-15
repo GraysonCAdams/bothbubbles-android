@@ -80,7 +80,7 @@ fun ReorderableAttachmentStrip(
     var workingItems by remember(attachments) { mutableStateOf(attachments) }
 
     // Item width for calculating swap positions
-    val itemWidth = 88.dp // 80dp item + 8dp spacing
+    val itemWidth = 108.dp // 100dp item + 8dp spacing
 
     LazyRow(
         modifier = modifier,

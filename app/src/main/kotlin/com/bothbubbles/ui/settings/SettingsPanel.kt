@@ -2,6 +2,7 @@ package com.bothbubbles.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -9,7 +10,10 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -28,9 +32,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.settings.about.AboutContent
@@ -139,6 +149,51 @@ fun SettingsPanel(
             // Determine if navigation is forward or backward for animation direction
             val isForward = remember { mutableStateOf(true) }
 
+            // Swipe gesture state for edge-swipe back navigation
+            val scope = rememberCoroutineScope()
+            val density = LocalDensity.current
+            val swipeOffset = remember { Animatable(0f) }
+            val swipeThresholdPx = with(density) { 100.dp.toPx() }
+            val edgeWidthPx = with(density) { 20.dp.toPx() }
+
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding)
+                    .pointerInput(navigator.canGoBack()) {
+                        if (!navigator.canGoBack()) return@pointerInput
+
+                        detectHorizontalDragGestures(
+                            onDragStart = { offset ->
+                                // Only start drag if starting from left edge
+                                if (offset.x > edgeWidthPx) return@detectHorizontalDragGestures
+                            },
+                            onDragEnd = {
+                                scope.launch {
+                                    if (swipeOffset.value > swipeThresholdPx) {
+                                        // Swipe threshold reached - navigate back
+                                        isForward.value = false
+                                        navigator.navigateBack()
+                                    }
+                                    // Animate back to 0
+                                    swipeOffset.animateTo(0f)
+                                }
+                            },
+                            onDragCancel = {
+                                scope.launch {
+                                    swipeOffset.animateTo(0f)
+                                }
+                            },
+                            onHorizontalDrag = { _, dragAmount ->
+                                scope.launch {
+                                    // Only allow positive (rightward) drags
+                                    val newValue = (swipeOffset.value + dragAmount).coerceAtLeast(0f)
+                                    swipeOffset.snapTo(newValue)
+                                }
+                            }
+                        )
+                    }
+            ) {
             AnimatedContent(
                 targetState = navigator.currentPage,
                 transitionSpec = {

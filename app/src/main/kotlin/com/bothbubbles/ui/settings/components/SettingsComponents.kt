@@ -1,13 +1,16 @@
 package com.bothbubbles.ui.settings.components
 
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.keyframes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -22,6 +25,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,10 +35,16 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.services.socket.ConnectionState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * Profile header section matching Google Messages design.
@@ -168,6 +178,16 @@ fun SettingsCard(
 /**
  * Individual settings menu item matching Google Messages design.
  * Features a simple icon, title, subtitle, and optional trailing content.
+ *
+ * Enhanced UX features:
+ * - Shake animation when disabled row is tapped (prevents "dead click" confusion)
+ * - Actionable subtitles with tappable links
+ * - Loading state support for async operations
+ *
+ * @param onDisabledClick Called when user taps a disabled row. Use to show snackbar/toast explaining why.
+ * @param subtitleAction Optional action text appended to subtitle as a tappable link (e.g., "Tap to fix")
+ * @param onSubtitleActionClick Called when the subtitle action link is tapped
+ * @param isLoading When true, shows loading indicator instead of trailing content
  */
 @Composable
 fun SettingsMenuItem(
@@ -177,38 +197,129 @@ fun SettingsMenuItem(
     modifier: Modifier = Modifier,
     subtitle: String? = null,
     enabled: Boolean = true,
+    onDisabledClick: (() -> Unit)? = null,
+    subtitleAction: String? = null,
+    onSubtitleActionClick: (() -> Unit)? = null,
+    isLoading: Boolean = false,
     trailingContent: @Composable (() -> Unit)? = null
 ) {
     val haptic = LocalHapticFeedback.current
+    val scope = rememberCoroutineScope()
+
+    // Shake animation state for disabled click feedback
+    val shakeOffset = remember { Animatable(0f) }
+
+    fun triggerShake() {
+        scope.launch {
+            shakeOffset.animateTo(
+                targetValue = 0f,
+                animationSpec = keyframes {
+                    durationMillis = 300
+                    0f at 0
+                    -8f at 50
+                    8f at 100
+                    -6f at 150
+                    6f at 200
+                    -3f at 250
+                    0f at 300
+                }
+            )
+        }
+    }
+
     ListItem(
         headlineContent = {
             Text(
                 text = title,
-                style = MaterialTheme.typography.bodyLarge
+                style = MaterialTheme.typography.bodyLarge,
+                color = if (enabled) {
+                    MaterialTheme.colorScheme.onSurface
+                } else {
+                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                }
             )
         },
-        supportingContent = subtitle?.let {
+        supportingContent = if (subtitle != null || subtitleAction != null) {
             {
-                Text(
-                    text = it,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                if (subtitleAction != null && onSubtitleActionClick != null) {
+                    // Actionable subtitle with tappable link
+                    val annotatedText = buildAnnotatedString {
+                        if (subtitle != null) {
+                            append(subtitle)
+                            append(" ")
+                        }
+                        pushStringAnnotation(tag = "action", annotation = "action")
+                        withStyle(
+                            SpanStyle(
+                                color = MaterialTheme.colorScheme.primary,
+                                textDecoration = TextDecoration.Underline
+                            )
+                        ) {
+                            append(subtitleAction)
+                        }
+                        pop()
+                    }
+                    ClickableText(
+                        text = annotatedText,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        ),
+                        onClick = { offset ->
+                            annotatedText.getStringAnnotations(tag = "action", start = offset, end = offset)
+                                .firstOrNull()?.let {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSubtitleActionClick()
+                                }
+                        }
+                    )
+                } else if (subtitle != null) {
+                    Text(
+                        text = subtitle,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
-        },
+        } else null,
         leadingContent = {
             Icon(
                 imageVector = icon,
                 contentDescription = null,
                 modifier = Modifier.size(24.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = if (enabled) {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                }
             )
         },
-        trailingContent = trailingContent,
-        modifier = modifier.clickable(enabled = enabled, onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-            onClick()
-        }),
+        trailingContent = when {
+            isLoading -> {
+                {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+            else -> trailingContent
+        },
+        modifier = modifier
+            .graphicsLayer { translationX = shakeOffset.value }
+            .clickable(
+                enabled = true, // Always enabled for click handling
+                onClick = {
+                    if (enabled && !isLoading) {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onClick()
+                    } else if (!enabled && onDisabledClick != null) {
+                        // Trigger shake + callback for disabled state
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        triggerShake()
+                        onDisabledClick()
+                    }
+                }
+            ),
         colors = ListItemDefaults.colors(
             containerColor = Color.Transparent
         )

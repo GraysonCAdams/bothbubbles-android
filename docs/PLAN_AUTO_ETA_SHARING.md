@@ -423,17 +423,21 @@ Prevent spam if navigation rapidly starts/stops?
 
 ---
 
-## Questions for Review
+## Design Decisions (Reviewed)
 
-1. **Destination sources**: Should we pull Home/Work from Google/device contacts, or let user manually enter?
+1. **Destination sources**: Manual entry for V1. User enters the string they expect to see (e.g., "Home"). Phase 2 could scrape from contact card.
 
-2. **Rule priority**: If manual share conflicts with auto-share, which takes precedence?
+2. **Rule priority**: Manual wins but coexists. If user manually shares with Bob and auto-share triggers for Alice, both receive updates. No double messages to same recipient.
 
-3. **Disable per-session**: Should "Stop" disable just this session or the entire rule?
+3. **Disable per-session**: Per-session only. "Stop" kills current session, NOT the rule. User must go to Settings to disable rule permanently.
 
-4. **Initial message wording**: Should auto-share messages differ from manual? e.g., "📍 Heading home! ETA: 15 min" vs "📍 On my way to Home!"
+4. **Initial message wording**: Distinct for auto-share: "📍 Automatically sharing my ETA to Home!" - lets recipient know user didn't manually type this.
 
-5. **Recipient limits**: Should we limit number of recipients per rule? (Suggest: 5 max)
+5. **Recipient limits**: 5 max per rule (suggested).
+
+6. **Keyword matching**: Allow multiple keywords per destination (e.g., "Home" OR "123 Main St" triggers same rule). Normalize strings before matching.
+
+7. **Privacy reminder**: After 5 consecutive days of auto-sharing to same person, show subtle reminder toast.
 
 ---
 

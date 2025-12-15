@@ -131,10 +131,29 @@ fun SettingsContent(
     onAboutClick: () -> Unit,
     viewModel: SettingsViewModel
 ) {
-    LazyColumn(
-        modifier = modifier,
-        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
-    ) {
+    // Snackbar host state for disabled click feedback
+    val snackbarHostState = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+
+    // Helper to show snackbar with optional action
+    fun showDisabledSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
+        scope.launch {
+            val result = snackbarHostState.showSnackbar(
+                message = message,
+                actionLabel = actionLabel,
+                duration = SnackbarDuration.Short
+            )
+            if (result == SnackbarResult.ActionPerformed && onAction != null) {
+                onAction()
+            }
+        }
+    }
+
+    Box(modifier = modifier) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+        ) {
         // Quick Actions Card
         item {
             SettingsCard(
@@ -276,46 +295,94 @@ fun SettingsContent(
         }
 
         item {
+            // Determine if we're in a connecting/loading state
+            val isConnecting = uiState.connectionState == ConnectionState.CONNECTING
+            val isDisconnected = uiState.connectionState == ConnectionState.DISCONNECTED ||
+                    uiState.connectionState == ConnectionState.ERROR
+
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 // Private API toggle - uses icon switch for emphasis
+                // Enhanced with: shake on disabled click, loading state, actionable error subtitle
                 SettingsMenuItem(
                     icon = Icons.Default.VpnKey,
                     title = "Enable Private API",
                     subtitle = when {
                         !uiState.isServerConfigured -> "Configure server to enable"
+                        isConnecting -> "Connecting to server..."
+                        isDisconnected -> "Server disconnected."
                         uiState.enablePrivateApi -> "Advanced iMessage features enabled"
                         else -> "Enables typing indicators, reactions, and more"
                     },
+                    // Actionable link when disconnected
+                    subtitleAction = if (isDisconnected && uiState.isServerConfigured) "Tap to reconnect" else null,
+                    onSubtitleActionClick = if (isDisconnected && uiState.isServerConfigured) {
+                        { viewModel.reconnect() }
+                    } else null,
                     onClick = {
-                        if (uiState.isServerConfigured) {
+                        if (uiState.isServerConfigured && !isConnecting) {
                             viewModel.setEnablePrivateApi(!uiState.enablePrivateApi)
                         }
                     },
-                    enabled = uiState.isServerConfigured,
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.enablePrivateApi && uiState.isServerConfigured,
-                            onCheckedChange = { viewModel.setEnablePrivateApi(it) },
-                            enabled = uiState.isServerConfigured
-                        )
-                    }
+                    enabled = uiState.isServerConfigured && !isConnecting,
+                    isLoading = isConnecting,
+                    // Shake + snackbar when tapping disabled row
+                    onDisabledClick = {
+                        if (!uiState.isServerConfigured) {
+                            showDisabledSnackbar(
+                                message = "Configure iMessage server first",
+                                actionLabel = "Configure",
+                                onAction = onServerSettingsClick
+                            )
+                        }
+                    },
+                    trailingContent = if (!isConnecting) {
+                        {
+                            SettingsSwitch(
+                                checked = uiState.enablePrivateApi && uiState.isServerConfigured,
+                                onCheckedChange = { viewModel.setEnablePrivateApi(it) },
+                                enabled = uiState.isServerConfigured && !isConnecting
+                            )
+                        }
+                    } else null
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Send typing indicators toggle
+                // Enhanced with: shake on disabled click, dependency explanation
                 SettingsMenuItem(
                     icon = Icons.Default.Keyboard,
                     title = "Send typing indicators",
-                    subtitle = if (!uiState.isServerConfigured) "Configure server to enable" else "Let others know when you're typing",
+                    subtitle = when {
+                        !uiState.isServerConfigured -> "Configure server to enable"
+                        !uiState.enablePrivateApi -> "Enable Private API first"
+                        else -> "Let others know when you're typing"
+                    },
                     onClick = {
                         if (uiState.isServerConfigured && uiState.enablePrivateApi) {
                             viewModel.setSendTypingIndicators(!uiState.sendTypingIndicators)
                         }
                     },
                     enabled = uiState.isServerConfigured && uiState.enablePrivateApi,
+                    // Shake + snackbar when tapping disabled row
+                    onDisabledClick = {
+                        when {
+                            !uiState.isServerConfigured -> {
+                                showDisabledSnackbar(
+                                    message = "Configure iMessage server first",
+                                    actionLabel = "Configure",
+                                    onAction = onServerSettingsClick
+                                )
+                            }
+                            !uiState.enablePrivateApi -> {
+                                showDisabledSnackbar(
+                                    message = "Enable Private API to use this feature"
+                                )
+                            }
+                        }
+                    },
                     trailingContent = {
                         SettingsSwitch(
                             checked = uiState.sendTypingIndicators && uiState.enablePrivateApi && uiState.isServerConfigured,
@@ -489,6 +556,13 @@ fun SettingsContent(
                 )
             }
         }
+        }
+
+        // Snackbar host for disabled click feedback
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 

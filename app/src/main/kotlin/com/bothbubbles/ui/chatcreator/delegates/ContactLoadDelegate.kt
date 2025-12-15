@@ -175,7 +175,7 @@ class ContactLoadDelegate @Inject constructor(
             val groupChatModels = groupChats.map { it.toGroupChatUiModel() }
 
             // Return all data
-            ContactsData(recent, grouped, favorites, groupChatModels, query)
+            ContactsData(recent, grouped, favorites, groupChatModels, query, hasPermission)
         }.collect { data ->
             emit(data)
         }

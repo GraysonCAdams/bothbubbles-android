@@ -60,6 +60,7 @@ class ChatCreatorViewModel @Inject constructor(
                         groupedContacts = contactsData.grouped,
                         favoriteContacts = contactsData.favorites,
                         groupChats = contactsData.groupChats,
+                        hasContactsPermission = contactsData.hasContactsPermission,
                         isLoading = false
                     )
                 }
@@ -324,4 +325,18 @@ class ChatCreatorViewModel @Inject constructor(
      */
     val isGroupMode: Boolean
         get() = _uiState.value.mode == ChatCreatorMode.GROUP
+
+    /**
+     * Refresh contacts permission status and reload contacts if permission was granted.
+     * Called when user returns from system settings.
+     */
+    fun refreshContactsPermission() {
+        val hasPermission = contactLoadDelegate.hasContactsPermission()
+        if (hasPermission && !_uiState.value.hasContactsPermission) {
+            // Permission was just granted, reload contacts
+            loadContacts()
+        } else {
+            _uiState.update { it.copy(hasContactsPermission = hasPermission) }
+        }
+    }
 }

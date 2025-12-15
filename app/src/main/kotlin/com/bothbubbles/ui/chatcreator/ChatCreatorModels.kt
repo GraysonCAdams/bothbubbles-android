@@ -38,6 +38,7 @@ data class ChatCreatorUiState(
     val selectedRecipients: List<SelectedRecipient> = emptyList(),
     val isLoading: Boolean = false,
     val isCheckingAvailability: Boolean = false,
+    val hasContactsPermission: Boolean = true,  // Assume granted until checked
     val manualAddressEntry: ManualAddressEntry? = null,
     val error: String? = null,
     val createdChatGuid: String? = null,

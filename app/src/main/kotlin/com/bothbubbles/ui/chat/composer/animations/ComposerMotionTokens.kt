@@ -164,8 +164,8 @@ object ComposerMotionTokens {
         /** Size of inline action buttons (emoji, camera) */
         val ActionButtonSize: Dp = 32.dp
 
-        /** Height of attachment thumbnail row */
-        val AttachmentRowHeight: Dp = 80.dp
+        /** Size of attachment thumbnails (larger for better button visibility) */
+        val AttachmentRowHeight: Dp = 100.dp
 
         /** Height of smart reply chip row */
         val SmartReplyRowHeight: Dp = 48.dp

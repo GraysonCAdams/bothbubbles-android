@@ -162,12 +162,13 @@ fun ChatComposer(
                 onDismiss = { onEvent(ComposerEvent.DismissReply) }
             )
 
-            // Attachment thumbnails row
+            // Attachment thumbnails row with drag-and-drop reordering
             if (state.inputMode == ComposerInputMode.TEXT) {
                 AttachmentThumbnailRow(
                     attachments = state.attachments,
                     onRemove = { onEvent(ComposerEvent.RemoveAttachment(it)) },
                     onEdit = { onEvent(ComposerEvent.EditAttachment(it)) },
+                    onReorder = { reorderedList -> onEvent(ComposerEvent.ReorderAttachments(reorderedList)) },
                     onClearAll = { onEvent(ComposerEvent.ClearAllAttachments) },
                     onQualityClick = { onEvent(ComposerEvent.OpenQualitySheet) },
                     currentQuality = state.currentImageQuality.name.lowercase()
