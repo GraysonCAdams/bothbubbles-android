@@ -5,6 +5,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.ui.chat.MessageTransformationUtils.normalizeAddress
 import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
+import com.bothbubbles.ui.chat.state.ThreadState
 import com.bothbubbles.ui.components.message.ThreadChain
 import com.bothbubbles.ui.util.toStable
 import kotlinx.coroutines.CoroutineScope
@@ -14,6 +15,7 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -30,11 +32,14 @@ class ChatThreadDelegate @Inject constructor(
     private lateinit var scope: CoroutineScope
     private lateinit var mergedChatGuids: List<String>
 
-    // Thread overlay state
-    private val _threadOverlayState = MutableStateFlow<ThreadChain?>(null)
-    val threadOverlayState: StateFlow<ThreadChain?> = _threadOverlayState.asStateFlow()
+    // ============================================================================
+    // CONSOLIDATED THREAD STATE
+    // Single StateFlow containing all thread-related state for reduced recompositions.
+    // ============================================================================
+    private val _state = MutableStateFlow(ThreadState())
+    val state: StateFlow<ThreadState> = _state.asStateFlow()
 
-    // Scroll-to-message event
+    // Scroll-to-message event (SharedFlow for one-time events, not state)
     private val _scrollToGuid = MutableSharedFlow<String>()
     val scrollToGuid: SharedFlow<String> = _scrollToGuid.asSharedFlow()
 
@@ -75,7 +80,7 @@ class ChatThreadDelegate @Inject constructor(
                 !isPlacedSticker
             }
 
-            _threadOverlayState.value = ThreadChain(
+            val threadChain = ThreadChain(
                 originMessage = origin?.toUiModel(
                     attachments = allAttachments[origin.guid].orEmpty(),
                     handleIdToName = handleIdToName,
@@ -91,6 +96,7 @@ class ChatThreadDelegate @Inject constructor(
                     )
                 }.toStable()
             )
+            _state.update { it.copy(threadOverlay = threadChain) }
         }
     }
 
@@ -98,7 +104,7 @@ class ChatThreadDelegate @Inject constructor(
      * Dismiss the thread overlay.
      */
     fun dismissThreadOverlay() {
-        _threadOverlayState.value = null
+        _state.update { it.copy(threadOverlay = null) }
     }
 
     /**
@@ -108,6 +114,16 @@ class ChatThreadDelegate @Inject constructor(
     fun scrollToMessage(guid: String) {
         scope.launch {
             dismissThreadOverlay()
+            _scrollToGuid.emit(guid)
+        }
+    }
+
+    /**
+     * Emit a scroll event without dismissing overlays.
+     * Used for search highlighting and other non-thread-overlay scrolls.
+     */
+    fun emitScrollEvent(guid: String) {
+        scope.launch {
             _scrollToGuid.emit(guid)
         }
     }

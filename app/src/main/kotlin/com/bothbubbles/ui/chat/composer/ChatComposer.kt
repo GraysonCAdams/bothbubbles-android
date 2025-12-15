@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.chat.components.ExpandedRecordingPanel
 import com.bothbubbles.ui.chat.components.PreviewContent
+import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.components.SendButton
 import com.bothbubbles.ui.chat.components.VoiceMemoButton
 import com.bothbubbles.ui.chat.composer.components.AttachmentThumbnailRow
@@ -424,13 +425,13 @@ private fun ActionButton(
                             else -> onEvent(ComposerEvent.Send)
                         }
                     },
-                    onLongPress = {
+                    onLongClick = {
                         if (state.inputMode == ComposerInputMode.TEXT) {
                             onEvent(ComposerEvent.SendLongPress)
                         }
                     },
                     isSending = state.isSending && state.inputMode == ComposerInputMode.TEXT,
-                    isSmsMode = state.isSmsMode,
+                    sendMode = if (state.isSmsMode) ChatSendMode.SMS else ChatSendMode.IMESSAGE,
                     isMmsMode = state.isMmsMode && state.inputMode == ComposerInputMode.TEXT,
                     showEffectHint = !state.isSmsMode && state.inputMode == ComposerInputMode.TEXT
                 )

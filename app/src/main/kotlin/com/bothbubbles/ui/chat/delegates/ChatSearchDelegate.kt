@@ -3,6 +3,7 @@ package com.bothbubbles.ui.chat.delegates
 import androidx.compose.runtime.Immutable
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.ui.chat.state.SearchState
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.util.text.TextNormalization
 import kotlinx.coroutines.CoroutineScope
@@ -12,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -44,25 +46,13 @@ class ChatSearchDelegate @Inject constructor(
     private var searchJob: Job? = null
     private var databaseSearchJob: Job? = null
 
-    // Search state
-    private val _isSearchActive = MutableStateFlow(false)
-    val isSearchActive: StateFlow<Boolean> = _isSearchActive.asStateFlow()
-
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
-
-    private val _searchMatchIndices = MutableStateFlow<List<Int>>(emptyList())
-    val searchMatchIndices: StateFlow<List<Int>> = _searchMatchIndices.asStateFlow()
-
-    private val _currentSearchMatchIndex = MutableStateFlow(-1)
-    val currentSearchMatchIndex: StateFlow<Int> = _currentSearchMatchIndex.asStateFlow()
-
-    // Database search state
-    private val _isSearchingDatabase = MutableStateFlow(false)
-    val isSearchingDatabase: StateFlow<Boolean> = _isSearchingDatabase.asStateFlow()
-
-    private val _databaseResults = MutableStateFlow<List<SearchResult>>(emptyList())
-    val databaseResults: StateFlow<List<SearchResult>> = _databaseResults.asStateFlow()
+    // ============================================================================
+    // CONSOLIDATED SEARCH STATE
+    // Single StateFlow containing all search-related state for reduced recompositions.
+    // ChatScreen collects this directly instead of individual flows.
+    // ============================================================================
+    private val _state = MutableStateFlow(SearchState())
+    val state: StateFlow<SearchState> = _state.asStateFlow()
 
     /**
      * Initialize the delegate.
@@ -75,12 +65,17 @@ class ChatSearchDelegate @Inject constructor(
      * Activate search mode.
      */
     fun activateSearch() {
-        _isSearchActive.value = true
-        _searchQuery.value = ""
-        _searchMatchIndices.value = emptyList()
-        _currentSearchMatchIndex.value = -1
-        _databaseResults.value = emptyList()
-        _isSearchingDatabase.value = false
+        _state.update {
+            SearchState(
+                isActive = true,
+                query = "",
+                matchIndices = emptyList(),
+                currentMatchIndex = -1,
+                isSearchingDatabase = false,
+                databaseResults = emptyList(),
+                showResultsSheet = false
+            )
+        }
     }
 
     /**
@@ -89,12 +84,7 @@ class ChatSearchDelegate @Inject constructor(
     fun closeSearch() {
         searchJob?.cancel()
         databaseSearchJob?.cancel()
-        _isSearchActive.value = false
-        _searchQuery.value = ""
-        _searchMatchIndices.value = emptyList()
-        _currentSearchMatchIndex.value = -1
-        _databaseResults.value = emptyList()
-        _isSearchingDatabase.value = false
+        _state.update { SearchState() }
     }
 
     /**
@@ -114,13 +104,15 @@ class ChatSearchDelegate @Inject constructor(
         databaseSearchJob?.cancel()
 
         // Update query immediately for responsive UI
-        _searchQuery.value = query
+        _state.update { it.copy(query = query) }
 
         if (query.isBlank()) {
-            _searchMatchIndices.value = emptyList()
-            _currentSearchMatchIndex.value = -1
-            _databaseResults.value = emptyList()
-            _isSearchingDatabase.value = false
+            _state.update { it.copy(
+                matchIndices = emptyList(),
+                currentMatchIndex = -1,
+                databaseResults = emptyList(),
+                isSearchingDatabase = false
+            )}
             return
         }
 
@@ -133,8 +125,10 @@ class ChatSearchDelegate @Inject constructor(
                 if (matchesQuery(message, normalizedQuery)) index else null
             }
 
-            _searchMatchIndices.value = matchIndices
-            _currentSearchMatchIndex.value = if (matchIndices.isNotEmpty()) 0 else -1
+            _state.update { it.copy(
+                matchIndices = matchIndices,
+                currentMatchIndex = if (matchIndices.isNotEmpty()) 0 else -1
+            )}
 
             // 2. Async database search (with additional delay to prioritize local results)
             if (chatGuids.isNotEmpty()) {
@@ -176,18 +170,18 @@ class ChatSearchDelegate @Inject constructor(
         databaseSearchJob = scope.launch {
             delay(DATABASE_SEARCH_DELAY_MS) // Give local search time to show first
 
-            _isSearchingDatabase.value = true
+            _state.update { it.copy(isSearchingDatabase = true) }
 
             try {
                 val results = withContext(Dispatchers.IO) {
                     searchDatabase(query, chatGuids, loadedMessages)
                 }
-                _databaseResults.value = results
+                _state.update { it.copy(databaseResults = results) }
             } catch (e: Exception) {
                 // Log error but don't crash - database search is optional
-                _databaseResults.value = emptyList()
+                _state.update { it.copy(databaseResults = emptyList()) }
             } finally {
-                _isSearchingDatabase.value = false
+                _state.update { it.copy(isSearchingDatabase = false) }
             }
         }
     }
@@ -308,32 +302,46 @@ class ChatSearchDelegate @Inject constructor(
      * Navigate to previous search match.
      */
     fun navigateSearchUp() {
-        val matchIndices = _searchMatchIndices.value
-        if (matchIndices.isEmpty()) return
+        val currentState = _state.value
+        if (currentState.matchIndices.isEmpty()) return
 
-        val currentIndex = _currentSearchMatchIndex.value
+        val currentIndex = currentState.currentMatchIndex
         val newIndex = if (currentIndex <= 0) {
-            matchIndices.size - 1
+            currentState.matchIndices.size - 1
         } else {
             currentIndex - 1
         }
-        _currentSearchMatchIndex.value = newIndex
+        _state.update { it.copy(currentMatchIndex = newIndex) }
     }
 
     /**
      * Navigate to next search match.
      */
     fun navigateSearchDown() {
-        val matchIndices = _searchMatchIndices.value
-        if (matchIndices.isEmpty()) return
+        val currentState = _state.value
+        if (currentState.matchIndices.isEmpty()) return
 
-        val currentIndex = _currentSearchMatchIndex.value
-        val newIndex = if (currentIndex >= matchIndices.size - 1) {
+        val currentIndex = currentState.currentMatchIndex
+        val newIndex = if (currentIndex >= currentState.matchIndices.size - 1) {
             0
         } else {
             currentIndex + 1
         }
-        _currentSearchMatchIndex.value = newIndex
+        _state.update { it.copy(currentMatchIndex = newIndex) }
+    }
+
+    /**
+     * Show the search results bottom sheet.
+     */
+    fun showResultsSheet() {
+        _state.update { it.copy(showResultsSheet = true) }
+    }
+
+    /**
+     * Hide the search results bottom sheet.
+     */
+    fun hideResultsSheet() {
+        _state.update { it.copy(showResultsSheet = false) }
     }
 
     /**

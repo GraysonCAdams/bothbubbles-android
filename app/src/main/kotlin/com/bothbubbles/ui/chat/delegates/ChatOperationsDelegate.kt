@@ -8,6 +8,7 @@ import android.provider.ContactsContract
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
+import com.bothbubbles.ui.chat.state.OperationsState
 import com.bothbubbles.util.error.AppError
 import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
@@ -15,6 +16,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -31,24 +33,12 @@ class ChatOperationsDelegate @Inject constructor(
     private lateinit var chatGuid: String
     private lateinit var scope: CoroutineScope
 
-    // Operation state
-    private val _isArchived = MutableStateFlow(false)
-    val isArchived: StateFlow<Boolean> = _isArchived.asStateFlow()
-
-    private val _isStarred = MutableStateFlow(false)
-    val isStarred: StateFlow<Boolean> = _isStarred.asStateFlow()
-
-    private val _chatDeleted = MutableStateFlow(false)
-    val chatDeleted: StateFlow<Boolean> = _chatDeleted.asStateFlow()
-
-    private val _showSubjectField = MutableStateFlow(false)
-    val showSubjectField: StateFlow<Boolean> = _showSubjectField.asStateFlow()
-
-    private val _isReportedToCarrier = MutableStateFlow(false)
-    val isReportedToCarrier: StateFlow<Boolean> = _isReportedToCarrier.asStateFlow()
-
-    private val _operationError = MutableStateFlow<AppError?>(null)
-    val operationError: StateFlow<AppError?> = _operationError.asStateFlow()
+    // ============================================================================
+    // CONSOLIDATED OPERATIONS STATE
+    // Single StateFlow containing all operations-related state for reduced recompositions.
+    // ============================================================================
+    private val _state = MutableStateFlow(OperationsState())
+    val state: StateFlow<OperationsState> = _state.asStateFlow()
 
     /**
      * Initialize the delegate.
@@ -64,11 +54,15 @@ class ChatOperationsDelegate @Inject constructor(
     fun updateState(
         isArchived: Boolean,
         isStarred: Boolean,
+        isSpam: Boolean,
         isReportedToCarrier: Boolean
     ) {
-        _isArchived.value = isArchived
-        _isStarred.value = isStarred
-        _isReportedToCarrier.value = isReportedToCarrier
+        _state.update { it.copy(
+            isArchived = isArchived,
+            isStarred = isStarred,
+            isSpam = isSpam,
+            isReportedToCarrier = isReportedToCarrier
+        )}
     }
 
     /**
@@ -78,10 +72,10 @@ class ChatOperationsDelegate @Inject constructor(
         scope.launch {
             chatRepository.setArchived(chatGuid, true).handle(
                 onSuccess = {
-                    _isArchived.value = true
+                    _state.update { it.copy(isArchived = true) }
                 },
                 onError = { appError ->
-                    _operationError.value = appError
+                    _state.update { it.copy(operationError = appError) }
                 }
             )
         }
@@ -94,10 +88,10 @@ class ChatOperationsDelegate @Inject constructor(
         scope.launch {
             chatRepository.setArchived(chatGuid, false).handle(
                 onSuccess = {
-                    _isArchived.value = false
+                    _state.update { it.copy(isArchived = false) }
                 },
                 onError = { appError ->
-                    _operationError.value = appError
+                    _state.update { it.copy(operationError = appError) }
                 }
             )
         }
@@ -107,14 +101,14 @@ class ChatOperationsDelegate @Inject constructor(
      * Toggle starred status.
      */
     fun toggleStarred() {
-        val currentStarred = _isStarred.value
+        val currentStarred = _state.value.isStarred
         scope.launch {
             chatRepository.setStarred(chatGuid, !currentStarred).handle(
                 onSuccess = {
-                    _isStarred.value = !currentStarred
+                    _state.update { it.copy(isStarred = !currentStarred) }
                 },
                 onError = { appError ->
-                    _operationError.value = appError
+                    _state.update { it.copy(operationError = appError) }
                 }
             )
         }
@@ -127,10 +121,10 @@ class ChatOperationsDelegate @Inject constructor(
         scope.launch {
             chatRepository.deleteChat(chatGuid).handle(
                 onSuccess = {
-                    _chatDeleted.value = true
+                    _state.update { it.copy(chatDeleted = true) }
                 },
                 onError = { appError ->
-                    _operationError.value = appError
+                    _state.update { it.copy(operationError = appError) }
                 }
             )
         }
@@ -140,7 +134,7 @@ class ChatOperationsDelegate @Inject constructor(
      * Toggle subject field visibility.
      */
     fun toggleSubjectField() {
-        _showSubjectField.value = !_showSubjectField.value
+        _state.update { it.copy(showSubjectField = !it.showSubjectField) }
     }
 
     /**
@@ -168,7 +162,7 @@ class ChatOperationsDelegate @Inject constructor(
         scope.launch {
             val result = spamReportingService.reportToCarrier(chatGuid)
             if (result is SpamReportingService.ReportResult.Success) {
-                _isReportedToCarrier.value = true
+                _state.update { it.copy(isReportedToCarrier = true) }
             }
         }
         return true
@@ -180,7 +174,7 @@ class ChatOperationsDelegate @Inject constructor(
     fun checkReportedToCarrier() {
         scope.launch {
             val isReported = spamReportingService.isReportedToCarrier(chatGuid)
-            _isReportedToCarrier.value = isReported
+            _state.update { it.copy(isReportedToCarrier = isReported) }
         }
     }
 
@@ -236,7 +230,9 @@ class ChatOperationsDelegate @Inject constructor(
             )
             true
         } catch (e: Exception) {
-            _operationError.value = ValidationError.InvalidInput("contact", "Failed to block: ${e.message ?: "unknown error"}")
+            _state.update { it.copy(
+                operationError = ValidationError.InvalidInput("contact", "Failed to block: ${e.message ?: "unknown error"}")
+            )}
             false
         }
     }
@@ -257,6 +253,6 @@ class ChatOperationsDelegate @Inject constructor(
      * Clear operation error.
      */
     fun clearError() {
-        _operationError.value = null
+        _state.update { it.copy(operationError = null) }
     }
 }

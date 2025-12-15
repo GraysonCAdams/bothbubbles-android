@@ -9,12 +9,17 @@ import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.ui.chat.ChatSendMode
+import com.bothbubbles.ui.chat.PendingMessage
+import com.bothbubbles.ui.chat.QueuedMessageUiModel
+import com.bothbubbles.ui.chat.state.SendState
+import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -80,20 +85,13 @@ class ChatSendDelegate @Inject constructor(
     private val typingDebounceMs = 3000L
     private val typingCooldownMs = 500L
 
-    // Reply state
-    private val _replyingToGuid = MutableStateFlow<String?>(null)
-    val replyingToGuid: StateFlow<String?> = _replyingToGuid.asStateFlow()
-
-    // Forwarding state
-    private val _isForwarding = MutableStateFlow(false)
-    val isForwarding: StateFlow<Boolean> = _isForwarding.asStateFlow()
-
-    private val _forwardSuccess = MutableStateFlow(false)
-    val forwardSuccess: StateFlow<Boolean> = _forwardSuccess.asStateFlow()
-
-    // Error state
-    private val _sendError = MutableStateFlow<String?>(null)
-    val sendError: StateFlow<String?> = _sendError.asStateFlow()
+    // ============================================================================
+    // CONSOLIDATED SEND STATE
+    // Single StateFlow containing all send-related state for reduced recompositions.
+    // ChatScreen collects this directly instead of individual flows.
+    // ============================================================================
+    private val _state = MutableStateFlow(SendState())
+    val state: StateFlow<SendState> = _state.asStateFlow()
 
     /**
      * Initialize the delegate with the chat context.
@@ -138,11 +136,11 @@ class ChatSendDelegate @Inject constructor(
         scope.launch {
             Log.d(TAG, "⏱️ [DELEGATE] coroutine START: +${System.currentTimeMillis() - sendStartTime}ms, thread: ${Thread.currentThread().name}")
             val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
-            val replyToGuid = _replyingToGuid.value
+            val replyToGuid = _state.value.replyingToGuid
 
             // Clear UI state immediately for responsive feel
             onClearInput()
-            _replyingToGuid.value = null
+            _state.update { it.copy(replyingToGuid = null) }
             onDraftCleared()
             Log.d(TAG, "⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
 
@@ -199,7 +197,7 @@ class ChatSendDelegate @Inject constructor(
                     },
                     onFailure = { e ->
                         Log.e(TAG, "Failed to queue message", e)
-                        _sendError.value = "Failed to queue message: ${e.message}"
+                        _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                         PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
                         // TODO: We should probably remove the optimistic message here if DB failed
                     }
@@ -244,7 +242,7 @@ class ChatSendDelegate @Inject constructor(
                 },
                 onFailure = { e ->
                     Log.e(TAG, "Failed to queue message via $deliveryMode", e)
-                    _sendError.value = "Failed to queue message: ${e.message}"
+                    _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                 }
             )
         }
@@ -254,14 +252,14 @@ class ChatSendDelegate @Inject constructor(
      * Set the message to reply to (for swipe-to-reply).
      */
     fun setReplyTo(messageGuid: String) {
-        _replyingToGuid.value = messageGuid
+        _state.update { it.copy(replyingToGuid = messageGuid) }
     }
 
     /**
      * Clear the reply state.
      */
     fun clearReply() {
-        _replyingToGuid.value = null
+        _state.update { it.copy(replyingToGuid = null) }
     }
 
     /**
@@ -281,7 +279,7 @@ class ChatSendDelegate @Inject constructor(
             messageSendingService.retryAsSms(messageGuid).fold(
                 onSuccess = { /* Message was successfully sent via SMS */ },
                 onFailure = { e ->
-                    _sendError.value = e.message
+                    _state.update { it.copy(sendError = e.message) }
                 }
             )
         }
@@ -292,16 +290,14 @@ class ChatSendDelegate @Inject constructor(
      */
     fun forwardMessage(messageGuid: String, targetChatGuid: String) {
         scope.launch {
-            _isForwarding.value = true
+            _state.update { it.copy(isForwarding = true) }
             messageSendingService.forwardMessage(messageGuid, targetChatGuid).fold(
                 onSuccess = {
-                    _isForwarding.value = false
-                    _forwardSuccess.value = true
+                    _state.update { it.copy(isForwarding = false, forwardSuccess = true) }
                     soundManager.playSendSound()
                 },
                 onFailure = { e ->
-                    _isForwarding.value = false
-                    _sendError.value = "Failed to forward: ${e.message}"
+                    _state.update { it.copy(isForwarding = false, sendError = "Failed to forward: ${e.message}") }
                 }
             )
         }
@@ -318,14 +314,88 @@ class ChatSendDelegate @Inject constructor(
      * Clear the forward success flag.
      */
     fun clearForwardSuccess() {
-        _forwardSuccess.value = false
+        _state.update { it.copy(forwardSuccess = false) }
     }
 
     /**
      * Clear the send error.
      */
     fun clearSendError() {
-        _sendError.value = null
+        _state.update { it.copy(sendError = null) }
+    }
+
+    // ============================================================================
+    // STATE UPDATE METHODS (called by ChatViewModel to update send-related state)
+    // ============================================================================
+
+    /**
+     * Update isSending state.
+     */
+    fun setIsSending(isSending: Boolean) {
+        _state.update { it.copy(isSending = isSending) }
+    }
+
+    /**
+     * Update send progress (0.0 to 1.0).
+     */
+    fun setSendProgress(progress: Float) {
+        _state.update { it.copy(sendProgress = progress) }
+    }
+
+    /**
+     * Update pending messages list.
+     */
+    fun updatePendingMessages(messages: List<PendingMessage>) {
+        _state.update { it.copy(pendingMessages = messages.toStable()) }
+    }
+
+    /**
+     * Add a pending message.
+     */
+    fun addPendingMessage(message: PendingMessage) {
+        _state.update { state ->
+            val updated = state.pendingMessages.toMutableList()
+            updated.add(message)
+            state.copy(pendingMessages = updated.toStable())
+        }
+    }
+
+    /**
+     * Remove a pending message by GUID.
+     */
+    fun removePendingMessage(guid: String) {
+        _state.update { state ->
+            val updated = state.pendingMessages.filterNot { it.tempGuid == guid }
+            state.copy(pendingMessages = updated.toStable())
+        }
+    }
+
+    /**
+     * Update a pending message's progress.
+     */
+    fun updatePendingMessageProgress(guid: String, progress: Float) {
+        _state.update { state ->
+            val updated = state.pendingMessages.map { msg ->
+                if (msg.tempGuid == guid) msg.copy(progress = progress) else msg
+            }
+            state.copy(pendingMessages = updated.toStable())
+        }
+    }
+
+    /**
+     * Update queued messages list from database observer.
+     */
+    fun updateQueuedMessages(messages: List<QueuedMessageUiModel>) {
+        _state.update { it.copy(queuedMessages = messages.toStable()) }
+    }
+
+    /**
+     * Calculate aggregate progress from pending messages.
+     */
+    fun calculateAggregateProgress(): Float {
+        val pending = _state.value.pendingMessages
+        if (pending.isEmpty()) return 0f
+        return pending.sumOf { it.progress.toDouble() }.toFloat() / pending.size
     }
 
     // ===== Typing Indicator Management =====

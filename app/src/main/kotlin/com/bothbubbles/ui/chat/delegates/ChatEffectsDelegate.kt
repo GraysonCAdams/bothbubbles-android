@@ -1,12 +1,15 @@
 package com.bothbubbles.ui.chat.delegates
 
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.ui.chat.state.EffectsState
+import com.bothbubbles.ui.chat.state.ScreenEffectData
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.effects.MessageEffect
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -20,17 +23,14 @@ class ChatEffectsDelegate @Inject constructor(
 
     private lateinit var scope: CoroutineScope
 
-    // Screen effect state and queue
-    data class ScreenEffectState(
-        val effect: MessageEffect.Screen,
-        val messageGuid: String,
-        val messageText: String?
-    )
+    // ============================================================================
+    // CONSOLIDATED EFFECTS STATE
+    // Single StateFlow containing all effects-related state for reduced recompositions.
+    // ============================================================================
+    private val _state = MutableStateFlow(EffectsState())
+    val state: StateFlow<EffectsState> = _state.asStateFlow()
 
-    private val _activeScreenEffect = MutableStateFlow<ScreenEffectState?>(null)
-    val activeScreenEffect: StateFlow<ScreenEffectState?> = _activeScreenEffect.asStateFlow()
-
-    private val screenEffectQueue = mutableListOf<ScreenEffectState>()
+    private val screenEffectQueue = mutableListOf<ScreenEffectData>()
     private var isPlayingScreenEffect = false
 
     /**
@@ -55,8 +55,8 @@ class ChatEffectsDelegate @Inject constructor(
      */
     fun triggerScreenEffect(message: MessageUiModel) {
         val effect = MessageEffect.fromStyleId(message.expressiveSendStyleId) as? MessageEffect.Screen ?: return
-        val state = ScreenEffectState(effect, message.guid, message.text)
-        screenEffectQueue.add(state)
+        val effectData = ScreenEffectData(effect, message.guid, message.text)
+        screenEffectQueue.add(effectData)
         if (!isPlayingScreenEffect) playNextScreenEffect()
     }
 
@@ -64,13 +64,13 @@ class ChatEffectsDelegate @Inject constructor(
      * Called when a screen effect animation completes.
      */
     fun onScreenEffectCompleted() {
-        val state = _activeScreenEffect.value
-        if (state != null) {
+        val effectData = _state.value.activeScreenEffect
+        if (effectData != null) {
             scope.launch {
-                messageRepository.markEffectPlayed(state.messageGuid)
+                messageRepository.markEffectPlayed(effectData.messageGuid)
             }
         }
-        _activeScreenEffect.value = null
+        _state.update { it.copy(activeScreenEffect = null) }
         isPlayingScreenEffect = false
         playNextScreenEffect()
     }
@@ -82,9 +82,22 @@ class ChatEffectsDelegate @Inject constructor(
         val next = screenEffectQueue.removeFirstOrNull()
         if (next != null) {
             isPlayingScreenEffect = true
-            _activeScreenEffect.value = next
+            _state.update { it.copy(activeScreenEffect = next) }
         } else {
             isPlayingScreenEffect = false
         }
+    }
+
+    // Settings update methods
+    fun setAutoPlayEffects(enabled: Boolean) {
+        _state.update { it.copy(autoPlayEffects = enabled) }
+    }
+
+    fun setReplayOnScroll(enabled: Boolean) {
+        _state.update { it.copy(replayOnScroll = enabled) }
+    }
+
+    fun setReduceMotion(enabled: Boolean) {
+        _state.update { it.copy(reduceMotion = enabled) }
     }
 }

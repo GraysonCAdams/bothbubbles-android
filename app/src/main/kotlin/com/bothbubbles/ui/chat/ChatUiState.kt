@@ -5,7 +5,6 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.AttachmentQuality
-import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
@@ -13,70 +12,60 @@ import com.bothbubbles.util.error.AppError
 
 /**
  * Main UI state for the chat screen.
+ *
+ * NOTE: This state has been refactored. Domain-specific state is now managed by delegates:
+ * - SendState (ChatSendDelegate): isSending, sendProgress, pendingMessages, queuedMessages,
+ *   replyingToGuid, isForwarding, forwardSuccess, sendError
+ * - SearchState (ChatSearchDelegate): isActive, query, matchIndices, currentMatchIndex,
+ *   isSearchingDatabase, databaseResults, showResultsSheet
+ * - OperationsState (ChatOperationsDelegate): isArchived, isStarred, chatDeleted, showSubjectField,
+ *   isSpam, isReportedToCarrier, operationError
+ * - SyncState (ChatSyncDelegate): isTyping, isServerConnected, isSyncing, isInSmsFallbackMode,
+ *   fallbackReason, lastSyncTime
+ * - EffectsState (ChatEffectsDelegate): activeScreenEffect, autoPlayEffects, replayOnScroll, reduceMotion
+ * - ThreadState (ChatThreadDelegate): threadOverlay
+ *
+ * ChatUiState now contains only shared/chat-identity fields that don't fit cleanly into a delegate.
  */
 @Stable
 data class ChatUiState(
+    // Chat metadata
     val chatTitle: String = "",
     val isGroup: Boolean = false,
     val avatarPath: String? = null,
     val participantNames: StableList<String> = emptyList<String>().toStable(),
     val participantAvatarPaths: StableList<String?> = emptyList<String?>().toStable(),
+    // Loading state
     val isLoading: Boolean = true,
     val isLoadingMore: Boolean = false,
     val isSyncingMessages: Boolean = false,
-    val isSending: Boolean = false,
-    val isSendingWithAttachments: Boolean = false, // True if current send includes attachments
-    val sendProgress: Float = 0f, // 0.0 to 1.0 progress for uploads
-    val pendingMessages: StableList<PendingMessage> = emptyList<PendingMessage>().toStable(), // Track multiple pending sends (in-memory)
-    val queuedMessages: StableList<QueuedMessageUiModel> = emptyList<QueuedMessageUiModel>().toStable(), // Persisted pending messages from offline queue
     val canLoadMore: Boolean = true,
+    // Messages (now in separate messagesState flow)
     val messages: StableList<MessageUiModel> = emptyList<MessageUiModel>().toStable(),
-    val isTyping: Boolean = false,
+    // Error handling
     val error: String? = null,
     val appError: AppError? = null, // Structured error for UI display with retry support
+    // Chat type
     val isLocalSmsChat: Boolean = false,
     val smsInputBlocked: Boolean = false, // True if SMS chat but not default SMS app
     val isIMessageChat: Boolean = false,
+    // Attachments
     val attachmentCount: Int = 0,
-    // Menu-related state
-    val isArchived: Boolean = false,
-    val isStarred: Boolean = false,
-    val showSubjectField: Boolean = false,
+    // Participant info (for contacts/block actions)
     val participantPhone: String? = null,
-    val chatDeleted: Boolean = false,
     // Unsaved sender banner
     val showSaveContactBanner: Boolean = false,
     val unsavedSenderAddress: String? = null,
     val inferredSenderName: String? = null, // Inferred name from self-introduction (for add contact pre-fill)
-    // Inline search state
-    val isSearchActive: Boolean = false,
-    val searchQuery: String = "",
-    val searchMatchIndices: List<Int> = emptyList(),
-    val currentSearchMatchIndex: Int = -1,
-    // Database search state (for "View All" results)
-    val isSearchingDatabase: Boolean = false,
-    val databaseSearchResultCount: Int = 0, // Total results from database search
-    val showSearchResultsSheet: Boolean = false, // Whether to show the "View All" bottom sheet
     // Highlighted message (from notification deep-link or search jump)
     val highlightedMessageGuid: String? = null,
-    // SMS fallback mode
-    val isInSmsFallbackMode: Boolean = false,
-    val isServerConnected: Boolean = true,
-    val fallbackReason: FallbackReason? = null,
-    // Spam detection
-    val isSpam: Boolean = false,
-    val isReportedToCarrier: Boolean = false,
     // Attachment Quality
     val attachmentQuality: AttachmentQuality = AttachmentQuality.STANDARD,
     val rememberQuality: Boolean = false,
-    // Message forwarding
-    val isForwarding: Boolean = false,
-    val forwardSuccess: Boolean = false,
     // Snooze
     val isSnoozed: Boolean = false,
     val snoozeUntil: Long? = null,
-    // Reply state
-    val replyingToGuid: String? = null,
+    // Reply state (derived from sendState.replyingToGuid)
     val replyToMessage: MessageUiModel? = null, // Message being replied to (for composer preview)
     // iMessage availability for send mode
     val currentSendMode: ChatSendMode = ChatSendMode.SMS, // Default to SMS until availability confirmed

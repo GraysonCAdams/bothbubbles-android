@@ -4,10 +4,16 @@ import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
+import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.ui.chat.state.SyncState
 import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -35,6 +41,34 @@ class ChatSyncDelegate @Inject constructor(
 
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
+
+    // ============================================================================
+    // CONSOLIDATED SYNC STATE
+    // Single StateFlow containing all sync-related state for reduced recompositions.
+    // ============================================================================
+    private val _state = MutableStateFlow(SyncState())
+    val state: StateFlow<SyncState> = _state.asStateFlow()
+
+    // State update methods (called by ChatViewModel or external observers)
+    fun setTyping(isTyping: Boolean) {
+        _state.update { it.copy(isTyping = isTyping) }
+    }
+
+    fun setServerConnected(isConnected: Boolean) {
+        _state.update { it.copy(isServerConnected = isConnected) }
+    }
+
+    fun setSyncing(isSyncing: Boolean) {
+        _state.update { it.copy(isSyncing = isSyncing) }
+    }
+
+    fun setSmsFallbackMode(isInFallback: Boolean, reason: FallbackReason? = null) {
+        _state.update { it.copy(isInSmsFallbackMode = isInFallback, fallbackReason = reason) }
+    }
+
+    fun updateLastSyncTime() {
+        _state.update { it.copy(lastSyncTime = System.currentTimeMillis()) }
+    }
 
     /**
      * Initialize the delegate.

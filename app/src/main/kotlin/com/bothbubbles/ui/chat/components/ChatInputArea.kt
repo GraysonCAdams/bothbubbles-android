@@ -23,10 +23,8 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,12 +40,9 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -60,7 +55,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Mic
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
@@ -70,8 +64,6 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -82,9 +74,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -491,47 +481,18 @@ fun ChatInputArea(
                                         }
                                     }
 
-                                    TextField(
+                                    ComposerTextField(
                                         value = text,
-                                        onValueChange = { if (!smsInputBlocked) onTextChange(it) },
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .then(
-                                                if (smsInputBlocked) {
-                                                    Modifier.clickable { onSmsInputBlockedClick() }
-                                                } else Modifier
-                                            ),
+                                        onValueChange = onTextChange,
+                                        modifier = Modifier.weight(1f),
+                                        placeholder = getPlaceholderForSendMode(
+                                            sendMode = currentSendMode,
+                                            isBlocked = smsInputBlocked
+                                        ),
                                         enabled = !smsInputBlocked,
                                         readOnly = smsInputBlocked,
-                                        placeholder = {
-                                            Text(
-                                                text = if (smsInputBlocked) {
-                                                    "Not default SMS app"
-                                                } else {
-                                                    stringResource(
-                                                        // Use currentSendMode for placeholder text
-                                                        if (isSmsMode) R.string.message_placeholder_text
-                                                        else R.string.message_placeholder_imessage
-                                                    )
-                                                },
-                                                color = inputColors.inputPlaceholder.copy(
-                                                    alpha = if (smsInputBlocked) 0.5f else 1f
-                                                )
-                                            )
-                                        },
-                                        colors = TextFieldDefaults.colors(
-                                            focusedContainerColor = Color.Transparent,
-                                            unfocusedContainerColor = Color.Transparent,
-                                            disabledContainerColor = Color.Transparent,
-                                            focusedIndicatorColor = Color.Transparent,
-                                            unfocusedIndicatorColor = Color.Transparent,
-                                            disabledIndicatorColor = Color.Transparent,
-                                            focusedTextColor = inputColors.inputText,
-                                            unfocusedTextColor = inputColors.inputText,
-                                            disabledTextColor = inputColors.inputText.copy(alpha = 0.5f),
-                                            cursorColor = MaterialTheme.colorScheme.primary
-                                        ),
-                                        maxLines = 4
+                                        inputColors = inputColors,
+                                        onDisabledClick = if (smsInputBlocked) onSmsInputBlockedClick else null
                                     )
 
                                     // Emoji icon button
@@ -643,13 +604,13 @@ fun ChatInputArea(
                                 } else {
                                     // Fall back to regular send button for preview or when toggle not available
                                     SendButton(
+                                        isSending = isSending && mode == InputMode.NORMAL,
+                                        sendMode = currentSendMode,
                                         onClick = when (mode) {
                                             InputMode.PREVIEW -> onPreviewSend
                                             else -> onSendClick
                                         },
-                                        onLongPress = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
-                                        isSending = isSending && mode == InputMode.NORMAL,
-                                        isSmsMode = isSmsMode,
+                                        onLongClick = if (mode == InputMode.NORMAL) onSendLongPress else { {} },
                                         isMmsMode = isMmsMode && mode == InputMode.NORMAL,
                                         showEffectHint = !isSmsMode && mode == InputMode.NORMAL
                                     )
@@ -1006,126 +967,12 @@ internal fun PreviewContent(
     }
 }
 
-/**
- * MD3 Squircle corner radius for the send button.
- * Uses 16dp to match FAB styling per Material Design 3 guidelines.
- */
-private val SendButtonCornerRadius = 16.dp
+// SendButton is now extracted to SendButton.kt
 
 /**
- * Send button with protocol-based coloring and MD3 squircle shape.
- * Green background for SMS/MMS, blue for iMessage.
- * Long press opens the effect picker for iMessage.
- *
- * MD3 Features:
- * - Squircle shape (rounded rectangle with 16dp radius)
- * - Mode-specific icon badging for accessibility
- * - Harmonized theme colors
+ * Corner radius constant for VoiceMemoButton (matches SendButton).
  */
-@Composable
-internal fun SendButton(
-    onClick: () -> Unit,
-    onLongPress: () -> Unit = {},
-    isSending: Boolean,
-    isSmsMode: Boolean,
-    isMmsMode: Boolean,
-    showEffectHint: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    // Protocol-based coloring using theme colors (harmonized with dynamic color)
-    val bubbleColors = BothBubblesTheme.bubbleColors
-    val containerColor by animateColorAsState(
-        targetValue = if (isSmsMode) bubbleColors.sendButtonSms else bubbleColors.sendButtonIMessage,
-        animationSpec = tween(150, easing = FastOutSlowInEasing),
-        label = "sendButtonColor"
-    )
-    val contentColor = Color.White
-
-    // Press feedback animation
-    var isPressed by remember { mutableStateOf(false) }
-    val scale by animateFloatAsState(
-        targetValue = if (isPressed && !isSending) 0.88f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessHigh
-        ),
-        label = "sendButtonScale"
-    )
-
-    val haptic = LocalHapticFeedback.current
-
-    Box(
-        modifier = modifier
-            .height(40.dp)
-            .aspectRatio(1f)
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
-            }
-            .clip(RoundedCornerShape(SendButtonCornerRadius))
-            .background(
-                if (isSending) containerColor.copy(alpha = 0.38f) else containerColor
-            )
-            .pointerInput(!isSending) {
-                if (!isSending) {
-                    detectTapGestures(
-                        onPress = {
-                            isPressed = true
-                            tryAwaitRelease()
-                            isPressed = false
-                        },
-                        onTap = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            onClick()
-                        },
-                        onLongPress = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onLongPress()
-                        }
-                    )
-                }
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        if (isSending) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                strokeWidth = 2.dp,
-                color = contentColor
-            )
-        } else {
-            if (isMmsMode) {
-                // Show MMS label below icon for SMS mode
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = stringResource(R.string.send_message),
-                        tint = contentColor,
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = "MMS",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = contentColor,
-                        fontSize = 8.sp
-                    )
-                }
-            } else {
-                // SMS mode or iMessage mode: Just show the send icon
-                // The green/blue button color already indicates the mode
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = stringResource(R.string.send_message),
-                    tint = contentColor,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-    }
-}
+private val VoiceMemoButtonCornerRadius = 16.dp
 
 /**
  * Voice memo button with soundwave icon and MD3 squircle shape.
@@ -1161,7 +1008,7 @@ internal fun VoiceMemoButton(
         modifier = modifier
             .height(40.dp)
             .aspectRatio(1.3f)
-            .clip(RoundedCornerShape(SendButtonCornerRadius))
+            .clip(RoundedCornerShape(VoiceMemoButtonCornerRadius))
             .background(containerColor)
             .then(
                 if (isDisabled) Modifier else Modifier.pointerInput(Unit) {
@@ -1216,65 +1063,7 @@ internal fun VoiceMemoButton(
 // Preview Functions
 // ====================
 
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Send Button - iMessage")
-@Composable
-private fun SendButtonIMessagePreview() {
-    com.bothbubbles.ui.preview.PreviewWrapper {
-        Box(modifier = Modifier.height(40.dp).padding(8.dp)) {
-            SendButton(
-                onClick = {},
-                isSending = false,
-                isSmsMode = false,
-                isMmsMode = false
-            )
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Send Button - SMS")
-@Composable
-private fun SendButtonSmsPreview() {
-    com.bothbubbles.ui.preview.PreviewWrapper {
-        Box(modifier = Modifier.height(40.dp).padding(8.dp)) {
-            SendButton(
-                onClick = {},
-                isSending = false,
-                isSmsMode = true,
-                isMmsMode = false
-            )
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Send Button - MMS")
-@Composable
-private fun SendButtonMmsPreview() {
-    com.bothbubbles.ui.preview.PreviewWrapper {
-        Box(modifier = Modifier.height(40.dp).padding(8.dp)) {
-            SendButton(
-                onClick = {},
-                isSending = false,
-                isSmsMode = true,
-                isMmsMode = true
-            )
-        }
-    }
-}
-
-@androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Send Button - Sending")
-@Composable
-private fun SendButtonSendingPreview() {
-    com.bothbubbles.ui.preview.PreviewWrapper {
-        Box(modifier = Modifier.height(40.dp).padding(8.dp)) {
-            SendButton(
-                onClick = {},
-                isSending = true,
-                isSmsMode = false,
-                isMmsMode = false
-            )
-        }
-    }
-}
+// SendButton previews are now in SendButton.kt
 
 @androidx.compose.ui.tooling.preview.Preview(showBackground = true, name = "Voice Memo Button - iMessage")
 @Composable

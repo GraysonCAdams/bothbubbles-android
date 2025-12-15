@@ -684,6 +684,7 @@ class MessagePagingController(
             loadedData = sparseData.toMap(),
             loadedRanges = MessagePagingHelpers.computeLoadedRanges(loadStatus, state.totalSize)
         )
+        android.util.Log.d("CascadeDebug", "[EMIT] pagingController._messages: ${list.totalSize} total, ${sparseData.size} loaded, first=${sparseData[0]?.guid?.takeLast(8)}")
         _messages.value = list
     }
 }

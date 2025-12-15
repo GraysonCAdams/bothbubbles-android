@@ -117,6 +117,11 @@ import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
 import com.bothbubbles.ui.chat.components.SearchResultsSheet
 import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
+import com.bothbubbles.ui.chat.state.EffectsState
+import com.bothbubbles.ui.chat.state.OperationsState
+import com.bothbubbles.ui.chat.state.SendState
+import com.bothbubbles.ui.chat.state.SyncState
+import com.bothbubbles.ui.chat.state.ThreadState
 import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
 import com.bothbubbles.ui.chat.components.QualitySelectionSheet
 import com.bothbubbles.ui.chat.components.ReplyPreview
@@ -197,9 +202,76 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val sendState by viewModel.sendState.collectAsStateWithLifecycle()
+    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
+    val operationsState by viewModel.operationsState.collectAsStateWithLifecycle()
+    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
+    val effectsState by viewModel.effectsState.collectAsStateWithLifecycle()
+    val threadState by viewModel.threadState.collectAsStateWithLifecycle()
     val messages by viewModel.messagesState.collectAsStateWithLifecycle()
     val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
+
+    // === CASCADE RECOMPOSITION DEBUGGING ===
+    // Track what changed between recompositions
+    val recomposeCount = remember { mutableIntStateOf(0) }
+    val prevMessagesSize = remember { mutableIntStateOf(-1) }
+    val prevDraftText = remember { mutableStateOf<String?>(null) }
+    val prevIsSending = remember { mutableStateOf<Boolean?>(null) }
+    val prevFirstMsgGuid = remember { mutableStateOf<String?>(null) }
+    val prevSmartReplySize = remember { mutableIntStateOf(-1) }
+    val prevAttachmentCount = remember { mutableIntStateOf(-1) }
+    val prevIsLoading = remember { mutableStateOf<Boolean?>(null) }
+    val prevCanLoadMore = remember { mutableStateOf<Boolean?>(null) }
+    val prevUiStateHash = remember { mutableIntStateOf(0) }
+
+    SideEffect {
+        recomposeCount.intValue++
+        val changes = mutableListOf<String>()
+
+        if (prevMessagesSize.intValue != messages.size) {
+            changes.add("messages.size: ${prevMessagesSize.intValue} → ${messages.size}")
+            prevMessagesSize.intValue = messages.size
+        }
+        if (prevDraftText.value != draftText) {
+            changes.add("draftText: '${prevDraftText.value?.take(10)}' → '${draftText.take(10)}'")
+            prevDraftText.value = draftText
+        }
+        if (prevIsSending.value != sendState.isSending) {
+            changes.add("isSending: ${prevIsSending.value} → ${sendState.isSending}")
+            prevIsSending.value = sendState.isSending
+        }
+        val currentFirstGuid = messages.firstOrNull()?.guid
+        if (prevFirstMsgGuid.value != currentFirstGuid) {
+            changes.add("firstMsgGuid: ${prevFirstMsgGuid.value?.takeLast(8)} → ${currentFirstGuid?.takeLast(8)}")
+            prevFirstMsgGuid.value = currentFirstGuid
+        }
+        if (prevSmartReplySize.intValue != smartReplySuggestions.size) {
+            changes.add("smartReplies: ${prevSmartReplySize.intValue} → ${smartReplySuggestions.size}")
+            prevSmartReplySize.intValue = smartReplySuggestions.size
+        }
+        if (prevAttachmentCount.intValue != uiState.attachmentCount) {
+            changes.add("attachmentCount: ${prevAttachmentCount.intValue} → ${uiState.attachmentCount}")
+            prevAttachmentCount.intValue = uiState.attachmentCount
+        }
+        if (prevIsLoading.value != uiState.isLoading) {
+            changes.add("isLoading: ${prevIsLoading.value} → ${uiState.isLoading}")
+            prevIsLoading.value = uiState.isLoading
+        }
+        if (prevCanLoadMore.value != uiState.canLoadMore) {
+            changes.add("canLoadMore: ${prevCanLoadMore.value} → ${uiState.canLoadMore}")
+            prevCanLoadMore.value = uiState.canLoadMore
+        }
+        // Track if uiState object changed even if tracked fields didn't
+        val currentHash = System.identityHashCode(uiState)
+        if (prevUiStateHash.intValue != currentHash && prevUiStateHash.intValue != 0) {
+            changes.add("uiState.hash: ${prevUiStateHash.intValue} → $currentHash")
+        }
+        prevUiStateHash.intValue = currentHash
+
+        android.util.Log.d("CascadeDebug", "[RECOMPOSE #${recomposeCount.intValue}] ${if (changes.isEmpty()) "NO TRACKED CHANGES" else changes.joinToString(", ")}")
+    }
+    // === END CASCADE DEBUGGING ===
 
     // LRU cached scroll position (for instant restore when re-opening recently viewed chat)
     val cachedScrollPosition by viewModel.cachedScrollPosition.collectAsStateWithLifecycle()
@@ -319,11 +391,11 @@ fun ChatScreen(
     // Quality selection sheet state
     var showQualitySheet by remember { mutableStateOf(false) }
 
-    // Effect settings from ViewModel
-    val autoPlayEffects by viewModel.autoPlayEffects.collectAsStateWithLifecycle()
-    val replayEffectsOnScroll by viewModel.replayEffectsOnScroll.collectAsStateWithLifecycle()
-    val reduceMotion by viewModel.reduceMotion.collectAsStateWithLifecycle()
-    val activeScreenEffectState by viewModel.activeScreenEffect.collectAsStateWithLifecycle()
+    // Effect settings from delegate state
+    val autoPlayEffects = effectsState.autoPlayEffects
+    val replayEffectsOnScroll = effectsState.replayOnScroll
+    val reduceMotion = effectsState.reduceMotion
+    val activeScreenEffectState = effectsState.activeScreenEffect
 
     // Animation control: only animate new messages after initial load completes
     val initialLoadComplete by viewModel.initialLoadComplete.collectAsStateWithLifecycle()
@@ -361,8 +433,8 @@ fun ChatScreen(
     // Track which message is currently being swiped for reply (to hide overlaying stickers)
     var swipingMessageGuid by remember { mutableStateOf<String?>(null) }
 
-    // Thread overlay state
-    val threadOverlayState by viewModel.threadOverlayState.collectAsStateWithLifecycle()
+    // Thread overlay state from delegate
+    val threadOverlayState = threadState.threadOverlay
 
     // Handle scroll-to-message events from thread overlay
     // Uses paging-aware jumpToMessage instead of indexOfFirst for sparse loading support
@@ -626,8 +698,8 @@ fun ChatScreen(
     }
 
     // Handle chat deletion - navigate back
-    LaunchedEffect(uiState.chatDeleted) {
-        if (uiState.chatDeleted) {
+    LaunchedEffect(operationsState.chatDeleted) {
+        if (operationsState.chatDeleted) {
             onBackClick()
         }
     }
@@ -690,15 +762,34 @@ fun ChatScreen(
     // Provide ExoPlayerPool to video composables for pooled player management
     // This limits active video players and auto-evicts oldest when scrolling
     CompositionLocalProvider(LocalExoPlayerPool provides viewModel.exoPlayerPool) {
+
+    // PERF FIX: Track topBar/bottomBar heights for content padding
+    // This avoids SubcomposeLayout which has O(N) overhead with message list
+    var topBarHeightPx by remember { mutableStateOf(0) }
+    var bottomBarHeightPx by remember { mutableStateOf(0) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val topBarHeightDp = with(density) { topBarHeightPx.toDp() }
+    val bottomBarHeightDp = with(density) { bottomBarHeightPx.toDp() }
+
+    android.util.Log.d("PerfTrace", "⏱️ [layout] Before Box @ ${System.currentTimeMillis()}")
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-    Scaffold(
-        containerColor = Color.Transparent,
-        snackbarHost = { SnackbarHost(snackbarHostState) },
-        topBar = {
+        // PERF FIX: Use Box with overlapping layout instead of Scaffold
+        // Scaffold's SubcomposeLayout has O(N) overhead when comparing lambda closures
+        // that capture the messages list. This Box approach avoids SubcomposeLayout entirely.
+
+        android.util.Log.d("PerfTrace", "⏱️ [topBar] START @ ${System.currentTimeMillis()}")
+        // TopBar overlay at top
+        Box(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .onSizeChanged { topBarHeightPx = it.height }
+                .zIndex(1f)
+        ) {
             ChatTopBar(
                 chatTitle = uiState.chatTitle,
                 avatarPath = uiState.avatarPath,
@@ -706,9 +797,9 @@ fun ChatScreen(
                 participantNames = uiState.participantNames,
                 participantAvatarPaths = uiState.participantAvatarPaths,
                 isSnoozed = uiState.isSnoozed,
-                isArchived = uiState.isArchived,
-                isStarred = uiState.isStarred,
-                showSubjectField = uiState.showSubjectField,
+                isArchived = operationsState.isArchived,
+                isStarred = operationsState.isStarred,
+                showSubjectField = operationsState.showSubjectField,
                 isLocalSmsChat = uiState.isLocalSmsChat,
                 onBackClick = {
                     // Clear saved state when user explicitly navigates back
@@ -735,8 +826,18 @@ fun ChatScreen(
                     }
                 }
             )
-        },
-        bottomBar = {
+        }
+        android.util.Log.d("PerfTrace", "⏱️ [topBar] END @ ${System.currentTimeMillis()}")
+
+        android.util.Log.d("PerfTrace", "⏱️ [bottomBar] START @ ${System.currentTimeMillis()}")
+        // BottomBar overlay at bottom
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .onSizeChanged { bottomBarHeightPx = it.height }
+                .zIndex(1f)
+        ) {
             Column(
                 modifier = Modifier
                     .navigationBarsPadding()
@@ -804,7 +905,8 @@ fun ChatScreen(
                 }
 
                 // Reply preview - shows when replying to a message
-                val replyingToGuid = uiState.replyingToGuid
+                // replyingToGuid is now in sendState (owned by ChatSendDelegate)
+                val replyingToGuid = sendState.replyingToGuid
                 val replyingToMessage = remember(replyingToGuid, messages) {
                     replyingToGuid?.let { guid -> messages.find { it.guid == guid } }
                 }
@@ -1028,12 +1130,21 @@ fun ChatScreen(
                 )
             }
         }
-    ) { padding ->
+        android.util.Log.d("PerfTrace", "⏱️ [bottomBar] END @ ${System.currentTimeMillis()}")
+
+        android.util.Log.d("PerfTrace", "⏱️ [content] START @ ${System.currentTimeMillis()}")
+        // Main content area - uses calculated padding for top/bottom bars
+        // This avoids SubcomposeLayout by using pre-measured heights
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(top = topBarHeightDp, bottom = bottomBarHeightDp)
+        ) {
         // Auto-scroll to search result when navigating with smooth animation
         // Uses offset to position the match roughly in the center of the viewport
-        LaunchedEffect(uiState.currentSearchMatchIndex) {
-            if (uiState.currentSearchMatchIndex >= 0 && uiState.searchMatchIndices.isNotEmpty()) {
-                val messageIndex = uiState.searchMatchIndices[uiState.currentSearchMatchIndex]
+        LaunchedEffect(searchState.currentMatchIndex) {
+            if (searchState.currentMatchIndex >= 0 && searchState.matchIndices.isNotEmpty()) {
+                val messageIndex = searchState.matchIndices[searchState.currentMatchIndex]
                 // Calculate offset to roughly center the message
                 // Negative offset moves item down in reversed layout
                 val viewportHeight = listState.layoutInfo.viewportSize.height
@@ -1138,8 +1249,8 @@ fun ChatScreen(
         }
 
         // Auto-scroll when typing indicator appears (if user is within 10% of bottom)
-        LaunchedEffect(uiState.isTyping) {
-            if (uiState.isTyping) {
+        LaunchedEffect(syncState.isTyping) {
+            if (syncState.isTyping) {
                 val layoutInfo = listState.layoutInfo
                 val totalItems = layoutInfo.totalItemsCount
                 // With reverseLayout=true, index 0 = visual bottom
@@ -1174,38 +1285,38 @@ fun ChatScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(padding)
                 .background(MaterialTheme.colorScheme.background)
         ) {
             // Inline search bar with progress indicator and "View All" support
             InlineSearchBar(
-                visible = uiState.isSearchActive,
-                query = uiState.searchQuery,
+                visible = searchState.isActive,
+                query = searchState.query,
                 onQueryChange = viewModel::updateSearchQuery,
                 onClose = viewModel::closeSearch,
                 onNavigateUp = viewModel::navigateSearchUp,
                 onNavigateDown = viewModel::navigateSearchDown,
-                currentMatch = if (uiState.searchMatchIndices.isNotEmpty()) uiState.currentSearchMatchIndex + 1 else 0,
-                totalMatches = uiState.searchMatchIndices.size,
-                isSearchingDatabase = uiState.isSearchingDatabase,
-                databaseResultCount = uiState.databaseSearchResultCount,
+                currentMatch = if (searchState.matchIndices.isNotEmpty()) searchState.currentMatchIndex + 1 else 0,
+                totalMatches = searchState.matchIndices.size,
+                isSearchingDatabase = searchState.isSearchingDatabase,
+                databaseResultCount = searchState.databaseResults.size,
                 onViewAllClick = viewModel::showSearchResultsSheet
             )
 
             // iOS-style sending indicator bar
+            // Send state now managed by ChatSendDelegate for reduced cascade recompositions
             SendingIndicatorBar(
-                isVisible = uiState.isSending,
-                isLocalSmsChat = uiState.isLocalSmsChat || uiState.isInSmsFallbackMode,
-                hasAttachments = uiState.isSendingWithAttachments,
-                progress = uiState.sendProgress,
-                pendingMessages = uiState.pendingMessages
+                isVisible = sendState.isSending,
+                isLocalSmsChat = uiState.isLocalSmsChat || syncState.isInSmsFallbackMode,
+                hasAttachments = sendState.pendingMessages.any { it.hasAttachments },
+                progress = sendState.sendProgress,
+                pendingMessages = sendState.pendingMessages
             )
 
             // SMS fallback mode banner
             SmsFallbackBanner(
-                visible = uiState.isInSmsFallbackMode && !uiState.isLocalSmsChat,
-                fallbackReason = uiState.fallbackReason,
-                isServerConnected = uiState.isServerConnected,
+                visible = syncState.isInSmsFallbackMode && !uiState.isLocalSmsChat,
+                fallbackReason = syncState.fallbackReason,
+                isServerConnected = syncState.isServerConnected,
                 showExitAction = uiState.isIMessageChat,
                 onExitFallback = viewModel::exitSmsFallback
             )
@@ -1366,7 +1477,7 @@ fun ChatScreen(
                         ) {
                         // Spam safety banner - shows at the bottom when chat is marked as spam
                         // Since reverseLayout=true, adding at start puts it at visual bottom
-                        if (uiState.isSpam) {
+                        if (operationsState.isSpam) {
                             item(key = "spam_safety_banner", contentType = ContentType.BANNER) {
                                 SpamSafetyBanner(
                                     onMarkAsSafe = { viewModel.markAsSafe() }
@@ -1376,7 +1487,7 @@ fun ChatScreen(
 
                         // Typing indicator - shows when someone is typing
                         // Since reverseLayout=true, adding at start puts it at visual bottom
-                        if (uiState.isTyping) {
+                        if (syncState.isTyping) {
                             item(key = "typing_indicator", contentType = ContentType.TYPING_INDICATOR) {
                                 TypingIndicator(
                                     modifier = Modifier.padding(top = 6.dp)
@@ -1413,16 +1524,16 @@ fun ChatScreen(
                             // Tapbacks require server connection and private API
                             val canTapback = !message.text.isNullOrBlank() &&
                                 message.isServerOrigin &&
-                                uiState.isServerConnected &&
+                                syncState.isServerConnected &&
                                 !message.guid.startsWith("temp") &&
                                 !message.guid.startsWith("error") &&
                                 !message.hasError
 
                             // Check if this message is a search match or the current match
-                            val isSearchMatch = uiState.isSearchActive && index in uiState.searchMatchIndices
-                            val isCurrentSearchMatch = uiState.isSearchActive &&
-                                uiState.currentSearchMatchIndex >= 0 &&
-                                uiState.searchMatchIndices.getOrNull(uiState.currentSearchMatchIndex) == index
+                            val isSearchMatch = searchState.isActive && index in searchState.matchIndices
+                            val isCurrentSearchMatch = searchState.isActive &&
+                                searchState.currentMatchIndex >= 0 &&
+                                searchState.matchIndices.getOrNull(searchState.currentMatchIndex) == index
 
                             // Check for time gap with next visible message (previous in chronological order)
                             // Since list is reversed, next index = earlier message
@@ -1618,7 +1729,7 @@ fun ChatScreen(
                                             // Block media click if invisible ink not revealed
                                             onMediaClick = if (isInvisibleInk && hasMedia && !isInvisibleInkRevealed) { _ -> } else onMediaClick,
                                             groupPosition = groupPosition,
-                                            searchQuery = if (uiState.isSearchActive) uiState.searchQuery else null,
+                                            searchQuery = if (searchState.isActive) searchState.query else null,
                                             isCurrentSearchMatch = isCurrentSearchMatch,
                                             // Manual download mode: pass callback when auto-download is disabled
                                             onDownloadClick = if (!autoDownloadEnabled) {
@@ -1735,7 +1846,7 @@ fun ChatScreen(
                             canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),
                             canForward = true,
                             // Show reactions only for server-origin messages (iMessage/server SMS)
-                            showReactions = selectedMessageForTapback?.isServerOrigin == true && uiState.isServerConnected,
+                            showReactions = selectedMessageForTapback?.isServerOrigin == true && syncState.isServerConnected,
                             onDismiss = {
                                 selectedMessageForTapback = null
                                 selectedMessageBounds = null
@@ -1780,7 +1891,13 @@ fun ChatScreen(
                 }
             }
         }
-    }
+    } // End of content Box
+
+    // SnackbarHost overlay
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier.align(Alignment.BottomCenter)
+    )
 
     // Screen effect overlay (above all other content) - connected to ViewModel
     ScreenEffectOverlay(
@@ -1848,11 +1965,12 @@ fun ChatScreen(
     )
 
     // Search Results Sheet (for "View All" search results)
+    // Search state is now managed by ChatSearchDelegate
     SearchResultsSheet(
-        visible = uiState.showSearchResultsSheet,
-        results = emptyList(), // TODO: Connect to actual database results when ChatSearchDelegate is fully integrated
-        isSearching = uiState.isSearchingDatabase,
-        query = uiState.searchQuery,
+        visible = searchState.showResultsSheet,
+        results = searchState.databaseResults,
+        isSearching = searchState.isSearchingDatabase,
+        query = searchState.query,
         onResultClick = { result ->
             viewModel.scrollToAndHighlightMessage(result.messageGuid)
             viewModel.hideSearchResultsSheet()
@@ -1900,7 +2018,7 @@ fun ChatScreen(
                 showBlockDialog = false
             },
             onDismiss = { showBlockDialog = false },
-            alreadyReportedToCarrier = uiState.isReportedToCarrier
+            alreadyReportedToCarrier = operationsState.isReportedToCarrier
         )
     }
 
@@ -2006,12 +2124,12 @@ fun ChatScreen(
                 isGroup = chat.isGroup
             )
         },
-        isForwarding = uiState.isForwarding
+        isForwarding = sendState.isForwarding
     )
 
     // Handle forward success
-    LaunchedEffect(uiState.forwardSuccess) {
-        if (uiState.forwardSuccess) {
+    LaunchedEffect(sendState.forwardSuccess) {
+        if (sendState.forwardSuccess) {
             Toast.makeText(context, "Message forwarded", Toast.LENGTH_SHORT).show()
             showForwardDialog = false
             messageToForward = null

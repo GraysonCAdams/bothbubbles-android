@@ -6,8 +6,6 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.Log
-import androidx.room.withTransaction
-import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -18,18 +16,13 @@ import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.ProgressRequestBody
 import com.bothbubbles.data.remote.api.dto.EditMessageRequest
 import com.bothbubbles.data.remote.api.dto.MessageDto
-import com.bothbubbles.data.remote.api.dto.SendMessageRequest
 import com.bothbubbles.data.remote.api.dto.SendReactionRequest
 import com.bothbubbles.data.remote.api.dto.UnsendMessageRequest
-import com.bothbubbles.data.model.AttachmentQuality
-import com.bothbubbles.services.media.ImageCompressor
-import com.bothbubbles.services.media.VideoCompressor
-import com.bothbubbles.services.sms.MmsSendService
+import com.bothbubbles.services.messaging.sender.MessageSenderStrategy
+import com.bothbubbles.services.messaging.sender.SendOptions
 import com.bothbubbles.services.sms.SmsPermissionHelper
-import com.bothbubbles.services.sms.SmsSendService
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.util.error.MessageError
@@ -41,10 +34,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
-import okhttp3.MultipartBody
-import okhttp3.RequestBody.Companion.toRequestBody
-import java.io.File
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -93,19 +82,15 @@ data class UploadProgress(
 @Singleton
 class MessageSendingService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val database: BothBubblesDatabase,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val attachmentDao: AttachmentDao,
     private val api: BothBubblesApi,
-    private val smsSendService: SmsSendService,
-    private val mmsSendService: MmsSendService,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val videoCompressor: VideoCompressor,
-    private val imageCompressor: ImageCompressor
+    private val strategies: Set<@JvmSuppressWildcards MessageSenderStrategy>
 ) : MessageSender {
     companion object {
         private const val TAG = "MessageSendingService"
@@ -127,7 +112,7 @@ class MessageSendingService @Inject constructor(
 
     /**
      * Send a message via the appropriate channel.
-     * This is the primary method for sending messages that auto-selects the delivery mode.
+     * Uses the Strategy Pattern to delegate to the appropriate sender strategy.
      */
     override suspend fun sendUnified(
         chatGuid: String,
@@ -146,42 +131,34 @@ class MessageSendingService @Inject constructor(
             else -> deliveryMode
         }
 
-        return when (actualMode) {
-            MessageDeliveryMode.LOCAL_SMS -> {
-                ensureCarrierReady()?.let { return Result.failure(it) }
-                sendLocalSms(chatGuid, text, subscriptionId)
-            }
-            MessageDeliveryMode.LOCAL_MMS -> {
-                ensureCarrierReady(requireMms = true)?.let { return Result.failure(it) }
+        // Find strategy that can handle this delivery mode
+        val strategy = strategies.firstOrNull { it.canHandle(actualMode) }
+            ?: return Result.failure(
+                IllegalStateException("No strategy found for delivery mode: $actualMode")
+            )
 
-                // Concatenate captions for MMS
-                var messageText = text
-                val captions = attachments.mapNotNull { it.caption }.filter { it.isNotBlank() }
-                if (captions.isNotEmpty()) {
-                     if (messageText.isNotBlank()) messageText += "\n"
-                     messageText += captions.joinToString("\n")
-                }
+        Log.d(TAG, "Using ${strategy::class.simpleName} for $actualMode")
 
-                sendLocalMms(chatGuid, messageText, attachments.map { it.uri }, subject, subscriptionId)
-            }
-            else -> {
-                // iMessage mode - handle attachments via BlueBubbles API
-                if (attachments.isNotEmpty()) {
-                    sendIMessageWithAttachments(chatGuid, text, attachments, replyToGuid, effectId, subject, tempGuid)
-                } else {
-                    sendMessage(chatGuid, text, replyToGuid, effectId, subject, tempGuid)
-                }
-            }
-        }
+        val options = SendOptions(
+            chatGuid = chatGuid,
+            text = text,
+            replyToGuid = replyToGuid,
+            effectId = effectId,
+            subject = subject,
+            attachments = attachments,
+            subscriptionId = subscriptionId,
+            tempGuid = tempGuid
+        )
+
+        return strategy.send(options).toResult()
     }
 
     /**
      * Send a new message via iMessage.
      * If the send fails and autoRetryAsSms is enabled, automatically retries via SMS.
      *
-     * Note: With optimistic UI, the local echo may already exist (created by
-     * PendingMessageRepository.queueMessage). This method reuses the existing
-     * temp message if found, rather than creating a duplicate.
+     * Delegates to sendUnified with IMESSAGE mode, then handles fallback to SMS
+     * if iMessage fails and auto-retry is enabled.
      */
     override suspend fun sendMessage(
         chatGuid: String,
@@ -189,110 +166,46 @@ class MessageSendingService @Inject constructor(
         replyToGuid: String?,
         effectId: String?,
         subject: String?,
-        providedTempGuid: String? // Stable ID for retry idempotency
-    ): Result<MessageEntity> = safeCall {
-        // Use provided tempGuid if available (for retries), otherwise generate new one
-        val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
+        providedTempGuid: String?
+    ): Result<MessageEntity> {
+        // First try iMessage via strategy
+        val result = sendUnified(
+            chatGuid = chatGuid,
+            text = text,
+            replyToGuid = replyToGuid,
+            effectId = effectId,
+            subject = subject,
+            deliveryMode = MessageDeliveryMode.IMESSAGE,
+            tempGuid = providedTempGuid
+        )
 
-        // Check if local echo already exists (created by queueMessage or previous attempt)
-        val existingMessage = messageDao.getMessageByGuid(tempGuid)
-        if (existingMessage != null) {
-            // If GUID was already replaced with server GUID, we wouldn't find it here.
-            // So if we found it, the message still needs to be sent.
-            // Clear any previous error to retry.
-            if (existingMessage.error != 0) {
-                Log.d(TAG, "Retry: clearing error on existing temp message $tempGuid")
-                messageDao.updateErrorStatus(tempGuid, 0)
-            } else {
-                Log.d(TAG, "Using existing local echo for $tempGuid")
-            }
+        if (result.isSuccess) {
+            return result
         }
 
-        // Create temporary message for immediate UI feedback (only if not already created)
-        if (existingMessage == null) {
-            val tempMessage = MessageEntity(
-                guid = tempGuid,
+        // iMessage failed - check if we should auto-retry as SMS
+        val autoRetry = settingsDataStore.autoRetryAsSms.first()
+        val address = extractAddressFromChatGuid(chatGuid)
+        val canFallback = address?.isPhoneNumber() == true
+
+        if (autoRetry && canFallback) {
+            ensureCarrierReadyOrThrow()
+            Log.i(TAG, "iMessage failed, auto-retrying as SMS for chat: $chatGuid")
+
+            // Enter fallback mode for this chat
+            chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.IMESSAGE_FAILED)
+
+            // Retry via local SMS strategy
+            return sendUnified(
                 chatGuid = chatGuid,
                 text = text,
                 subject = subject,
-                dateCreated = System.currentTimeMillis(),
-                isFromMe = true,
-                threadOriginatorGuid = replyToGuid,
-                expressiveSendStyleId = effectId,
-                messageSource = MessageSource.IMESSAGE.name
+                deliveryMode = MessageDeliveryMode.LOCAL_SMS
             )
-            messageDao.insertMessage(tempMessage)
-
-            // Update chat's last message
-            chatDao.updateLastMessage(chatGuid, System.currentTimeMillis(), text)
         }
 
-        // Send to server
-        val response = api.sendMessage(
-            SendMessageRequest(
-                chatGuid = chatGuid,
-                message = text,
-                tempGuid = tempGuid,
-                selectedMessageGuid = replyToGuid,
-                effectId = effectId,
-                subject = subject
-            )
-        )
-
-        val body = response.body()
-        if (!response.isSuccessful || body == null || body.status != 200) {
-            // iMessage send failed - check if we should auto-retry as SMS
-            val autoRetry = settingsDataStore.autoRetryAsSms.first()
-            val address = extractAddressFromChatGuid(chatGuid)
-            val canFallback = address?.isPhoneNumber() == true
-
-            if (autoRetry && canFallback) {
-                ensureCarrierReadyOrThrow()
-                Log.i(TAG, "iMessage failed, auto-retrying as SMS: $tempGuid")
-
-                // Update message source to SMS and clear error
-                messageDao.updateMessageSource(tempGuid, MessageSource.LOCAL_SMS.name)
-                messageDao.updateErrorStatus(tempGuid, 0)
-
-                // Enter fallback mode for this chat
-                chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.IMESSAGE_FAILED)
-
-                // Send via local SMS
-                val smsResult = smsSendService.sendSms(address, text, chatGuid)
-                if (smsResult.isSuccess) {
-                    // Replace the temp message with the SMS message
-                    messageDao.deleteMessage(tempGuid)
-                    return@safeCall smsResult.getOrThrow()
-                } else {
-                    // SMS also failed - mark as failed
-                    messageDao.updateErrorStatus(tempGuid, 1)
-                    throw smsResult.exceptionOrNull() ?: MessageError.SendFailed(tempGuid, "SMS send failed")
-                }
-            } else {
-                // Mark message as failed (no auto-retry)
-                messageDao.updateErrorStatus(tempGuid, 1)
-                throw MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message")
-            }
-        }
-
-        // Replace temp GUID with server GUID
-        val serverMessage = body.data
-        if (serverMessage != null) {
-            // Once we have a server response, the message was sent successfully
-            // Wrap post-send operations so failures don't cause duplicate sends on retry
-            try {
-                messageDao.replaceGuid(tempGuid, serverMessage.guid)
-            } catch (e: Exception) {
-                Log.w(TAG, "Non-critical error replacing GUID after successful send: ${e.message}")
-            }
-            serverMessage.toEntity(chatGuid)
-        } else {
-            // Server didn't return the message, mark as sent
-            messageDao.updateErrorStatus(tempGuid, 0)
-            // Return existing message on retry, or fetch the one we just created
-            existingMessage ?: messageDao.getMessageByGuid(tempGuid)
-                ?: throw MessageError.SendFailed(tempGuid, "Failed to find temp message")
-        }
+        // Return original failure
+        return result
     }
 
     /**
@@ -535,385 +448,6 @@ class MessageSendingService @Inject constructor(
             attachments = attachmentInputs,
             deliveryMode = MessageDeliveryMode.AUTO
         ).getOrThrow()
-    }
-
-    // ===== Private Send Methods =====
-
-    /**
-     * Send a message with attachments via BlueBubbles API.
-     * Uploads attachments first, then sends the text message.
-     *
-     * Note: With optimistic UI, the local echo and attachments may already exist
-     * (created by PendingMessageRepository.queueMessage). This method reuses them
-     * rather than creating duplicates.
-     */
-    private suspend fun sendIMessageWithAttachments(
-        chatGuid: String,
-        text: String,
-        attachments: List<PendingAttachmentInput>,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        subject: String? = null,
-        providedTempGuid: String? = null // Stable ID for retry idempotency
-    ): Result<MessageEntity> = safeCall {
-        // Use provided tempGuid if available (for retries), otherwise generate new one
-        val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
-
-        // Check if local echo already exists (created by queueMessage or previous attempt)
-        val existingMessage = messageDao.getMessageByGuid(tempGuid)
-
-        // Build attachment GUIDs list
-        val tempAttachmentGuids = attachments.indices.map { index -> "$tempGuid-att-$index" }
-
-        if (existingMessage == null) {
-            // No local echo exists - create temporary message for immediate UI feedback
-            database.withTransaction {
-                val tempMessage = MessageEntity(
-                    guid = tempGuid,
-                    chatGuid = chatGuid,
-                    text = text.ifBlank { null },
-                    subject = subject,
-                    dateCreated = System.currentTimeMillis(),
-                    isFromMe = true,
-                    hasAttachments = true,
-                    threadOriginatorGuid = replyToGuid,
-                    expressiveSendStyleId = effectId,
-                    messageSource = MessageSource.IMESSAGE.name
-                )
-                messageDao.insertMessage(tempMessage)
-
-                // Create temporary attachment records for immediate display
-                attachments.forEachIndexed { index, input ->
-                    val uri = input.uri
-                    val tempAttGuid = tempAttachmentGuids[index]
-
-                    val mimeType = input.mimeType.takeIf { !it.isNullOrBlank() }
-                        ?: context.contentResolver.getType(uri)
-                        ?: "application/octet-stream"
-                    val fileName = getFileName(uri) ?: "attachment"
-                    val (width, height) = getMediaDimensions(uri, mimeType)
-
-                    val tempAttachment = AttachmentEntity(
-                        guid = tempAttGuid,
-                        messageGuid = tempGuid,
-                        mimeType = mimeType,
-                        transferName = fileName,
-                        isOutgoing = true,
-                        localPath = uri.toString(),
-                        width = width,
-                        height = height,
-                        transferState = TransferState.UPLOADING.name,
-                        transferProgress = 0f
-                    )
-                    attachmentDao.insertAttachment(tempAttachment)
-                }
-            }
-        } else {
-            // Local echo exists - clear any previous error for retry
-            if (existingMessage.error != 0) {
-                Log.d(TAG, "Retry: clearing error on existing temp message $tempGuid")
-                messageDao.updateErrorStatus(tempGuid, 0)
-            } else {
-                Log.d(TAG, "Using existing local echo for $tempGuid with attachments")
-            }
-        }
-
-        // Update chat's last message
-        chatDao.updateLastMessage(chatGuid, System.currentTimeMillis(), text.ifBlank { "[Attachment]" })
-
-        var lastResponse: MessageDto? = null
-
-        // Get default image quality from settings
-        val defaultQualityStr = settingsDataStore.defaultImageQuality.first()
-        val defaultImageQuality = AttachmentQuality.fromString(defaultQualityStr)
-
-        // Upload each attachment with progress tracking
-        // On retry, skip attachments that were already successfully uploaded
-        val totalAttachments = attachments.size
-        attachments.forEachIndexed { index, input ->
-            val uri = input.uri
-            val tempAttGuid = tempAttachmentGuids[index]
-
-            // Check if this attachment was already uploaded (retry case)
-            val existingAttachment = attachmentDao.getAttachmentByGuid(tempAttGuid)
-            if (existingAttachment?.transferState == TransferState.UPLOADED.name) {
-                Log.d(TAG, "Skipping already-uploaded attachment: $tempAttGuid")
-                return@forEachIndexed
-            }
-
-            val attachmentResult = uploadAttachment(
-                chatGuid = chatGuid,
-                tempGuid = tempAttGuid,
-                uri = uri,
-                attachmentIndex = index,
-                totalAttachments = totalAttachments,
-                imageQuality = defaultImageQuality
-            )
-            if (attachmentResult.isFailure) {
-                // Mark message and attachment as failed
-                val error = attachmentResult.exceptionOrNull() ?: Exception("Failed to upload attachment")
-                val errorState = com.bothbubbles.util.error.AttachmentErrorState.fromException(error)
-                
-                messageDao.updateErrorStatus(tempGuid, 1)
-                attachmentDao.markTransferFailedWithError(tempAttGuid, errorState.type, errorState.userMessage)
-                _uploadProgress.value = null
-                throw error
-            }
-
-            // Mark this attachment as uploaded
-            attachmentDao.markUploaded(tempAttGuid)
-            lastResponse = attachmentResult.getOrNull()
-        }
-
-        // Reset progress after all attachments uploaded
-        _uploadProgress.value = null
-
-        // Send text message if present (including captions)
-        var messageText = text
-        val captions = attachments.mapNotNull { it.caption }.filter { it.isNotBlank() }
-        if (captions.isNotEmpty()) {
-             if (messageText.isNotBlank()) messageText += "\n"
-             messageText += captions.joinToString("\n")
-        }
-
-        if (messageText.isNotBlank()) {
-            val response = api.sendMessage(
-                SendMessageRequest(
-                    chatGuid = chatGuid,
-                    message = messageText,
-                    tempGuid = tempGuid,
-                    selectedMessageGuid = replyToGuid,
-                    effectId = effectId,
-                    subject = subject
-                )
-            )
-
-            val body = response.body()
-            if (!response.isSuccessful || body == null || body.status != 200) {
-                messageDao.updateErrorStatus(tempGuid, 1)
-                throw MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message")
-            }
-            lastResponse = body.data
-        }
-
-        // Replace temp GUID with server GUID if we got one
-        lastResponse?.let { serverMessage ->
-            // Once we have a server response, the message was sent successfully
-            // Wrap post-send operations so failures don't cause duplicate sends on retry
-            try {
-                // CRITICAL: Fetch temp attachments BEFORE replaceGuid!
-                // If the socket event already created a message with serverMessage.guid,
-                // replaceGuid will DELETE the temp message, which CASCADE DELETES temp attachments.
-                // We must capture localPaths before that happens.
-                val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
-                val preservedLocalPaths = tempAttachments.mapNotNull { att ->
-                    att.localPath?.takeUnless { it.contains("/pending_attachments/") }
-                }
-
-                messageDao.replaceGuid(tempGuid, serverMessage.guid)
-                // Sync attachments from the server response to local database
-                syncOutboundAttachments(serverMessage, preservedLocalPaths)
-            } catch (e: Exception) {
-                // Log but don't throw - message was sent, these are non-critical cleanup ops
-                Log.w(TAG, "Non-critical error after successful send: ${e.message}")
-            }
-            serverMessage.toEntity(chatGuid)
-        } ?: run {
-            messageDao.updateErrorStatus(tempGuid, 0)
-            // Return existing message on retry, or fetch it if we just created it
-            existingMessage ?: messageDao.getMessageByGuid(tempGuid)
-                ?: throw MessageError.SendFailed(tempGuid, "Failed to find temp message")
-        }
-    }
-
-    /**
-     * Upload a single attachment to BlueBubbles server with progress tracking.
-     * Videos are compressed before upload if compression is enabled.
-     * Images are compressed according to the quality setting.
-     */
-    private suspend fun uploadAttachment(
-        chatGuid: String,
-        tempGuid: String,
-        uri: Uri,
-        attachmentIndex: Int = 0,
-        totalAttachments: Int = 1,
-        imageQuality: AttachmentQuality = AttachmentQuality.DEFAULT
-    ): Result<MessageDto> = safeCall {
-        val contentResolver = context.contentResolver
-
-        // Get file name from URI
-        var fileName = getFileName(uri) ?: "attachment"
-
-        // Get MIME type
-        var mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
-
-        // Check if this is a video that should be compressed
-        val isVideo = mimeType.startsWith("video/")
-        val shouldCompressVideo = isVideo && settingsDataStore.compressVideosBeforeUpload.first()
-
-        // Check if this is an image that should be compressed
-        val isImage = imageCompressor.isCompressible(mimeType)
-        val shouldCompressImage = isImage && imageQuality != AttachmentQuality.AUTO && imageQuality != AttachmentQuality.ORIGINAL
-
-        val bytes: ByteArray
-        var compressedPath: String? = null
-
-        if (shouldCompressImage) {
-            // Compress image before upload
-            Log.d(TAG, "Compressing image with quality: ${imageQuality.name}")
-
-            val compressionResult = imageCompressor.compress(uri, imageQuality) { progress ->
-                // Report compression progress (0-30% of total upload progress)
-                _uploadProgress.value = UploadProgress(
-                    fileName = fileName,
-                    bytesUploaded = (progress * 30).toLong(),
-                    totalBytes = 100,
-                    attachmentIndex = attachmentIndex,
-                    totalAttachments = totalAttachments
-                )
-            }
-
-            if (compressionResult != null) {
-                compressedPath = compressionResult.path
-                val compressedFile = File(compressedPath)
-                bytes = compressedFile.readBytes()
-
-                // Update MIME type and filename for JPEG output
-                if (compressionResult.path.endsWith(".jpg")) {
-                    mimeType = "image/jpeg"
-                    fileName = fileName.substringBeforeLast('.') + ".jpg"
-                }
-
-                Log.d(TAG, "Image compressed: ${compressionResult.originalSizeBytes / 1024}KB -> ${compressionResult.compressedSizeBytes / 1024}KB (${(compressionResult.compressionRatio * 100).toInt()}% saved)")
-            } else {
-                // Compression failed or skipped, use original
-                Log.w(TAG, "Image compression skipped/failed, using original")
-                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw MessageError.UnsupportedAttachment("unknown")
-            }
-        } else if (shouldCompressVideo) {
-            // Compress video before upload
-            // Get compression quality from settings
-            val qualityStr = settingsDataStore.videoCompressionQuality.first()
-            val quality = when (qualityStr) {
-                "original" -> VideoCompressor.Companion.Quality.ORIGINAL
-                "high" -> VideoCompressor.Companion.Quality.HIGH
-                "medium" -> VideoCompressor.Companion.Quality.MEDIUM
-                "low" -> VideoCompressor.Companion.Quality.LOW
-                else -> VideoCompressor.Companion.Quality.MEDIUM
-            }
-
-            Log.d(TAG, "Compressing video with quality: $qualityStr")
-
-            compressedPath = videoCompressor.compress(uri, quality) { progress ->
-                // Report compression progress (0-50% of total upload progress)
-                _uploadProgress.value = UploadProgress(
-                    fileName = fileName,
-                    bytesUploaded = (progress * 50).toLong(),
-                    totalBytes = 100,
-                    attachmentIndex = attachmentIndex,
-                    totalAttachments = totalAttachments
-                )
-            }
-
-            if (compressedPath != null) {
-                val compressedFile = File(compressedPath)
-                bytes = compressedFile.readBytes()
-                mimeType = "video/mp4"
-                fileName = fileName.substringBeforeLast('.') + ".mp4"
-                Log.d(TAG, "Video compressed: ${compressedFile.length() / 1024} KB")
-            } else {
-                // Compression failed, use original
-                Log.w(TAG, "Video compression failed, using original")
-                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw MessageError.UnsupportedAttachment("unknown")
-            }
-        } else {
-            // Read file bytes directly
-            bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw MessageError.UnsupportedAttachment("unknown")
-        }
-
-        Log.d(TAG, "Uploading attachment: $fileName ($mimeType, ${bytes.size} bytes)")
-
-        // Create progress-tracking request body
-        val baseRequestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
-        val progressRequestBody = ProgressRequestBody(baseRequestBody) { bytesWritten, contentLength ->
-            _uploadProgress.value = UploadProgress(
-                fileName = fileName,
-                bytesUploaded = bytesWritten,
-                totalBytes = contentLength,
-                attachmentIndex = attachmentIndex,
-                totalAttachments = totalAttachments
-            )
-        }
-
-        val filePart = MultipartBody.Part.createFormData("attachment", fileName, progressRequestBody)
-
-        val response = api.sendAttachment(
-            chatGuid = chatGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
-            tempGuid = tempGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
-            name = fileName.toRequestBody("text/plain".toMediaTypeOrNull()),
-            method = "private-api".toRequestBody("text/plain".toMediaTypeOrNull()),
-            attachment = filePart
-        )
-
-        // Clean up compressed file if we created one
-        compressedPath?.let { path ->
-            try {
-                File(path).delete()
-            } catch (e: Exception) {
-                Log.w(TAG, "Failed to delete compressed file: $path", e)
-            }
-        }
-
-        val body = response.body()
-        if (!response.isSuccessful || body == null || body.status != 200) {
-            throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to upload attachment")
-        }
-
-        body.data ?: throw NetworkError.ServerError(response.code(), "No message returned from attachment upload")
-    }
-
-    /**
-     * Send a message via local SMS
-     */
-    private suspend fun sendLocalSms(
-        chatGuid: String,
-        text: String,
-        subscriptionId: Int = -1
-    ): Result<MessageEntity> {
-        // Extract address from chat GUID (format: "sms;-;+1234567890")
-        val address = extractAddressFromChatGuid(chatGuid)
-            ?: return Result.failure(Exception("Invalid chat GUID for SMS"))
-
-        return smsSendService.sendSms(address, text, chatGuid, subscriptionId)
-    }
-
-    /**
-     * Send a message via local MMS
-     */
-    private suspend fun sendLocalMms(
-        chatGuid: String,
-        text: String?,
-        attachments: List<Uri>,
-        subject: String? = null,
-        subscriptionId: Int = -1
-    ): Result<MessageEntity> {
-        // Extract addresses from chat GUID
-        val addresses = extractAddressesFromChatGuid(chatGuid)
-        if (addresses.isEmpty()) {
-            return Result.failure(Exception("Invalid chat GUID for MMS"))
-        }
-
-        return mmsSendService.sendMms(
-            recipients = addresses,
-            text = text,
-            attachments = attachments,
-            chatGuid = chatGuid,
-            subject = subject,
-            subscriptionId = subscriptionId
-        )
     }
 
     // ===== Delivery Mode Determination =====
