@@ -1025,27 +1025,25 @@ suspend fun reEnqueuePendingMessages() {
 ### 9.1 Observed Latency (from Debug Logs)
 
 ```
-12-15 10:58:24.831  sendMessage() CALLED                    T+0ms
-12-15 10:58:24.832  onClearInput                            T+1ms
-12-15 10:58:24.834  sendMessage() returning                 T+3ms
-12-15 10:58:24.890  onQueued callback                       T+59ms
-12-15 10:58:24.890  insertMessageOptimistically CALLED      T+59ms
-12-15 10:58:24.890  emit DONE                               T+59ms (STATE UPDATED)
-12-15 10:58:25.198  [UI] collecting messages                T+367ms (UI RECEIVES)
-12-15 10:58:25.198  messages updated                        T+367ms
+12-15 11:27:19.498  sendMessage() CALLED                    T+0ms
+12-15 11:27:19.500  insertMessageOptimistically CALLED      T+2ms
+12-15 11:27:19.501  emit DONE                               T+3ms (STATE UPDATED)
+12-15 11:27:19.503  [UI] collecting messages                T+5ms (UI RECEIVES)
+12-15 11:27:19.503  messages updated                        T+5ms
+12-15 11:27:19.849  [RENDER] MessageBubble composed         T+351ms (VISUAL)
 ```
 
-**CRITICAL GAP**: **308ms** between paging controller emit and UI collection!
+**CRITICAL GAP**: **346ms** between UI state update and actual composition!
 
 ### 9.2 Latency Breakdown
 
 | Phase | Time | Bottleneck |
 |-------|------|-----------|
 | Send call → coroutine start | ~1ms | None |
-| Coroutine → queueMessage return | ~55ms | File I/O + DB transaction |
-| queueMessage → optimistic emit | ~0ms | Memory only |
-| **Optimistic emit → UI collect** | **~308ms** | **toList() + thread switch + conflate** |
-| UI collect → recomposition | ~0ms | StateFlow emit |
+| Coroutine → queueMessage return | ~18ms | File I/O + DB transaction (Async) |
+| queueMessage → optimistic emit | ~2ms | Memory only |
+| Optimistic emit → UI collect | ~2ms | ✅ Fixed (was 300ms) |
+| **UI collect → recomposition** | **~346ms** | **⚠️ UNRESOLVED RENDER LAG** |
 
 ### 9.3 Initial Fix: Remove flowOn(Dispatchers.Default)
 
@@ -1064,8 +1062,8 @@ Investigation revealed:
 |-------|------|--------|
 | Send tap → optimistic insert | ~0-4ms | ✅ Fixed |
 | Optimistic insert → UI state update | ~0-2ms | ✅ Fixed |
-| UI state update → MessageBubble render | ~0-16ms | ✅ **FIXED** |
-| **Total to visual** | **~0-16ms** | ✅ **INSTANT** |
+| UI state update → MessageBubble render | ~346ms | ❌ **FAILED** |
+| **Total to visual** | **~350ms** | ⚠️ **LAGGY** |
 
 ### 9.5 Complete Fix Summary
 
@@ -1086,10 +1084,10 @@ We systematically dismantled **every layer of latency** in the message sending p
 - **Fix**: Refactored to "Optimistic First" pattern - UI insert BEFORE DB transaction
 - **Result**: queueMessage no longer blocks UI
 
-#### Fix 4: Render Lag (350ms → 0ms) ✅ FINAL FIX
+#### Fix 4: Render Lag (350ms → ???) ⚠️ PARTIAL FIX
 - **Problem**: Monolithic `ChatUiState` (80+ fields) caused cascade recomposition
-- **Root Cause**: Every message update triggered recomposition of ENTIRE ChatScreen
-- **Fix**: Decoupled messages into separate `messagesState` StateFlow
+- **Attempted Fix**: Decoupled messages into separate `messagesState` StateFlow
+- **Result**: Architecture improved, but **350ms lag persists**. The bottleneck is likely within `LazyColumn` layout or `MessageBubble` composition itself, not the state update mechanism.
 
 ### 9.6 Render Lag Fix Details
 
@@ -1100,7 +1098,7 @@ We systematically dismantled **every layer of latency** in the message sending p
 3. **EVERY** composable reading `uiState` recomposed (header, composer, toolbars, etc.)
 4. This caused a 350ms frame drop
 
-**The Solution**:
+**The Solution (Architecture Only)**:
 
 **ChatViewModel.kt**:
 ```kotlin
@@ -1132,8 +1130,7 @@ LazyColumn(...) {
 **Impact**:
 - ✅ Adding a message only triggers LazyColumn to update
 - ✅ Header, composer, toolbars do NOT recompose
-- ✅ Reduced recomposition scope from ~50+ composables to ~5-10
-- ✅ 350ms render lag eliminated
+- ❌ **350ms lag remains**: The delay occurs *after* `messages` updates but *before* `MessageBubble` composes. This suggests the cost is in the `LazyColumn` diffing/layout or the `MessageBubble` itself.
 
 ### 9.7 Optimization Status
 
@@ -1142,7 +1139,7 @@ LazyColumn(...) {
 | Scheduling delay | 900ms from launch() | Synchronous insert | ✅ DONE |
 | Thread switching | 300ms from flowOn() | Removed flowOn() | ✅ DONE |
 | DB blocking | 50ms from transaction | Optimistic First pattern | ✅ DONE |
-| Render lag | 350ms from ChatUiState | Separate messagesState | ✅ DONE |
+| Render lag | 350ms from ChatUiState | Separate messagesState | ❌ **FAILED** |
 
 ### 9.8 Future Optimization Opportunities
 

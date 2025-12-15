@@ -856,7 +856,7 @@ class ChatViewModel @Inject constructor(
     private fun observeSmartReplies() {
         viewModelScope.launch {
             _messagesState
-                .distinctUntilChanged()
+                // StateFlow already guarantees distinct values, no need for distinctUntilChanged()
                 .debounce(500)  // Wait for conversation to settle
                 .collect { messages ->
                     val suggestions = smartReplyService.getSuggestions(messages, maxSuggestions = 3)
