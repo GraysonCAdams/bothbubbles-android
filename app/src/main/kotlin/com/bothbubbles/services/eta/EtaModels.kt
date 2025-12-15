@@ -4,11 +4,10 @@ package com.bothbubbles.services.eta
  * Types of ETA messages that can be sent
  */
 enum class EtaMessageType {
-    INITIAL,            // "On my way to..."
-    DESTINATION_CHANGE, // "Change of plans! Now heading to..."
+    INITIAL,            // "On my way! ETA: X min"
     CHANGE,             // "ETA Update: Now X min..."
     ARRIVING_SOON,      // "Almost there!..."
-    ARRIVED             // "I've arrived..."
+    ARRIVED             // "I've arrived!"
 }
 
 /**
@@ -43,7 +42,6 @@ data class ParsedEtaData(
 data class EtaSharingSession(
     val recipientGuid: String,
     val recipientDisplayName: String,
-    val destination: String?,
     val startedAt: Long = System.currentTimeMillis(),
     val lastSentTime: Long = 0,
     val lastEtaMinutes: Int = 0,

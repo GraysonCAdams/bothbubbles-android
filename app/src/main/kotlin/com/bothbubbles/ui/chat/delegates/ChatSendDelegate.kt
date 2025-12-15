@@ -19,6 +19,18 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
+ * Data for optimistic UI insertion when a message is queued.
+ */
+data class QueuedMessageInfo(
+    val guid: String,
+    val text: String?,
+    val dateCreated: Long,
+    val hasAttachments: Boolean,
+    val replyToGuid: String?,
+    val effectId: String?
+)
+
+/**
  * Delegate that handles all message sending operations for ChatViewModel.
  *
  * Responsibilities:
@@ -102,6 +114,7 @@ class ChatSendDelegate @Inject constructor(
      * @param isLocalSmsChat True if this is a local SMS/MMS chat
      * @param onClearInput Callback to clear input UI state
      * @param onDraftCleared Callback when draft should be cleared from persistence
+     * @param onQueued Callback when message is queued, provides data for optimistic UI insert
      */
     fun sendMessage(
         text: String,
@@ -110,7 +123,8 @@ class ChatSendDelegate @Inject constructor(
         currentSendMode: ChatSendMode,
         isLocalSmsChat: Boolean,
         onClearInput: () -> Unit,
-        onDraftCleared: () -> Unit
+        onDraftCleared: () -> Unit,
+        onQueued: ((QueuedMessageInfo) -> Unit)? = null
     ) {
         val trimmedText = text.trim()
         if (trimmedText.isBlank() && attachments.isEmpty()) return
@@ -118,7 +132,11 @@ class ChatSendDelegate @Inject constructor(
         // Stop typing indicator immediately when sending
         cancelTypingIndicator()
 
+        val sendStartTime = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ [DELEGATE] sendMessage() CALLED on thread: ${Thread.currentThread().name}")
+
         scope.launch {
+            Log.d(TAG, "⏱️ [DELEGATE] coroutine START: +${System.currentTimeMillis() - sendStartTime}ms, thread: ${Thread.currentThread().name}")
             val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
             val replyToGuid = _replyingToGuid.value
 
@@ -126,6 +144,7 @@ class ChatSendDelegate @Inject constructor(
             onClearInput()
             _replyingToGuid.value = null
             onDraftCleared()
+            Log.d(TAG, "⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Determine delivery mode based on chat type and current send mode
             val deliveryMode = determineDeliveryMode(
@@ -135,6 +154,7 @@ class ChatSendDelegate @Inject constructor(
             )
 
             // Queue message for offline-first delivery via WorkManager
+            val queueStart = System.currentTimeMillis()
             pendingMessageRepository.queueMessage(
                 chatGuid = chatGuid,
                 text = trimmedText,
@@ -144,8 +164,24 @@ class ChatSendDelegate @Inject constructor(
                 deliveryMode = deliveryMode
             ).fold(
                 onSuccess = { localId ->
+                    Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: ${System.currentTimeMillis() - queueStart}ms")
+                    Log.d(TAG, "⏱️ [DELEGATE] TOTAL from call: ${System.currentTimeMillis() - sendStartTime}ms")
                     Log.d(TAG, "Message queued successfully: $localId")
                     PerformanceProfiler.end(sendId, "queued")
+
+                    // Notify for optimistic UI insertion
+                    Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback: ${System.currentTimeMillis() - sendStartTime}ms")
+                    onQueued?.invoke(
+                        QueuedMessageInfo(
+                            guid = localId,
+                            text = trimmedText.ifBlank { null },
+                            dateCreated = System.currentTimeMillis(),
+                            hasAttachments = attachments.isNotEmpty(),
+                            replyToGuid = replyToGuid,
+                            effectId = effectId
+                        )
+                    )
+                    Log.d(TAG, "⏱️ [DELEGATE] onQueued callback returned: ${System.currentTimeMillis() - sendStartTime}ms")
 
                     // Play sound for SMS delivery (optimistic)
                     val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS

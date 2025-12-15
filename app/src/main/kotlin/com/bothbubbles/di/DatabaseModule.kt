@@ -6,7 +6,7 @@ import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.DatabaseMigrations
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
-import com.bothbubbles.data.local.db.dao.AutoShareRuleDao
+import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
@@ -162,7 +162,7 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideAutoShareRuleDao(database: BothBubblesDatabase): AutoShareRuleDao {
-        return database.autoShareRuleDao()
+    fun provideAutoShareContactDao(database: BothBubblesDatabase): AutoShareContactDao {
+        return database.autoShareContactDao()
     }
 }

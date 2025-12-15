@@ -85,6 +85,8 @@ import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
+import com.bothbubbles.ui.chat.delegates.QueuedMessageInfo
+import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.ui.chat.paging.MessagePagingController
 import com.bothbubbles.ui.chat.paging.PagingConfig
 import com.bothbubbles.ui.chat.paging.RoomMessageDataSource
@@ -635,7 +637,7 @@ class ChatViewModel @Inject constructor(
                         isNavigationActive = etaState.isNavigationActive,
                         isEtaSharing = etaState.isCurrentlySharing,
                         currentEtaMinutes = etaState.currentEtaMinutes,
-                        etaDestination = etaState.destination
+                        isEtaBannerDismissed = etaState.isBannerDismissed
                     )
                 }
             }
@@ -1810,9 +1812,12 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             pagingController.messages
                 .map { sparseList -> sparseList.toList() }
-                .flowOn(Dispatchers.Default)  // CRITICAL: Run toList() on background thread
+                // .flowOn(Dispatchers.Default)  // REMOVED: Causing ~300ms latency on optimistic inserts. Sorting <5000 items is fast enough on main.
                 .conflate()
                 .collect { messageModels ->
+                    val collectStart = System.currentTimeMillis()
+                    Log.d(TAG, "⏱️ [UI] collecting messages: ${messageModels.size}, thread: ${Thread.currentThread().name}")
+
                     val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
                     _uiState.update { state ->
                         state.copy(
@@ -1822,6 +1827,7 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                     PerformanceProfiler.end(collectId)
+                    Log.d(TAG, "⏱️ [UI] messages updated: +${System.currentTimeMillis() - collectStart}ms")
                 }
         }
 
@@ -2579,19 +2585,27 @@ class ChatViewModel @Inject constructor(
     }
 
     fun sendMessage(effectId: String? = null) {
+        val sendStartTime = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ [SEND] sendMessage() CALLED on thread: ${Thread.currentThread().name}")
+
         val text = _draftText.value.trim()
         val attachments = _pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
+
+        // Capture current state for optimistic UI insert
+        val currentSendMode = _uiState.value.currentSendMode
+        val isLocalSmsChat = _uiState.value.isLocalSmsChat
 
         // Delegate to ChatSendDelegate for the actual send operation
         sendDelegate.sendMessage(
             text = text,
             attachments = attachments,
             effectId = effectId,
-            currentSendMode = _uiState.value.currentSendMode,
-            isLocalSmsChat = _uiState.value.isLocalSmsChat,
+            currentSendMode = currentSendMode,
+            isLocalSmsChat = isLocalSmsChat,
             onClearInput = {
+                Log.d(TAG, "⏱️ [SEND] onClearInput: +${System.currentTimeMillis() - sendStartTime}ms")
                 // Clear UI state immediately for responsive feel
                 _draftText.value = ""
                 _pendingAttachments.value = emptyList()
@@ -2600,13 +2614,49 @@ class ChatViewModel @Inject constructor(
                 }
             },
             onDraftCleared = {
+                Log.d(TAG, "⏱️ [SEND] onDraftCleared: +${System.currentTimeMillis() - sendStartTime}ms")
                 // Clear draft from database
                 draftSaveJob?.cancel()
                 viewModelScope.launch {
                     chatRepository.updateDraftText(chatGuid, null)
                 }
+            },
+            onQueued = { info ->
+                Log.d(TAG, "⏱️ [SEND] onQueued callback START: +${System.currentTimeMillis() - sendStartTime}ms, guid=${info.guid}")
+                // Optimistic UI insert - immediately show the message in the list
+                // This bypasses the paging controller's DB-based shift/reload cycle
+                val messageSource = when {
+                    isLocalSmsChat -> MessageSource.LOCAL_SMS.name
+                    currentSendMode == ChatSendMode.SMS -> MessageSource.LOCAL_SMS.name
+                    else -> MessageSource.IMESSAGE.name
+                }
+
+                val optimisticModel = MessageUiModel(
+                    guid = info.guid,
+                    text = info.text,
+                    subject = null,
+                    dateCreated = info.dateCreated,
+                    formattedTime = formatMessageTime(info.dateCreated),
+                    isFromMe = true,
+                    isSent = false, // Still sending (temp- guid)
+                    isDelivered = false,
+                    isRead = false,
+                    hasError = false,
+                    isReaction = false,
+                    attachments = emptyList<AttachmentUiModel>().toStable(),
+                    senderName = null,
+                    senderAvatarPath = null,
+                    messageSource = messageSource,
+                    expressiveSendStyleId = info.effectId,
+                    threadOriginatorGuid = info.replyToGuid
+                )
+
+                Log.d(TAG, "⏱️ [SEND] calling insertMessageOptimistically: +${System.currentTimeMillis() - sendStartTime}ms")
+                pagingController.insertMessageOptimistically(optimisticModel)
+                Log.d(TAG, "⏱️ [SEND] insertMessageOptimistically returned: +${System.currentTimeMillis() - sendStartTime}ms")
             }
         )
+        Log.d(TAG, "⏱️ [SEND] sendMessage() returning: +${System.currentTimeMillis() - sendStartTime}ms")
     }
 
     /**
@@ -3502,6 +3552,14 @@ class ChatViewModel @Inject constructor(
      */
     fun stopEtaSharing() {
         etaSharingDelegate.stopSharingEta()
+    }
+
+    /**
+     * Dismiss the ETA sharing banner for this navigation session.
+     * Banner will reappear when navigation stops and starts again.
+     */
+    fun dismissEtaBanner() {
+        etaSharingDelegate.dismissBanner()
     }
 }
 

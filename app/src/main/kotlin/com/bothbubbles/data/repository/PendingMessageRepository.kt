@@ -3,6 +3,7 @@ package com.bothbubbles.data.repository
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import androidx.room.withTransaction
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -10,8 +11,16 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import com.bothbubbles.data.local.db.BothBubblesDatabase
+import com.bothbubbles.data.local.db.dao.AttachmentDao
+import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
+import com.bothbubbles.data.local.db.entity.AttachmentEntity
+import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
@@ -19,8 +28,12 @@ import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
+import com.bothbubbles.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.launch
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -43,9 +56,14 @@ import javax.inject.Singleton
 @Singleton
 class PendingMessageRepository @Inject constructor(
     @ApplicationContext private val context: Context,
+    private val database: BothBubblesDatabase,
     private val pendingMessageDao: PendingMessageDao,
     private val pendingAttachmentDao: PendingAttachmentDao,
-    private val attachmentPersistenceManager: AttachmentPersistenceManager
+    private val messageDao: MessageDao,
+    private val attachmentDao: AttachmentDao,
+    private val chatDao: ChatDao,
+    private val attachmentPersistenceManager: AttachmentPersistenceManager,
+    @ApplicationScope private val applicationScope: CoroutineScope
 ) {
     companion object {
         private const val TAG = "PendingMessageRepo"
@@ -59,7 +77,12 @@ class PendingMessageRepository @Inject constructor(
      * The message is immediately written to the database, then a WorkManager job
      * is enqueued to send it when network is available.
      *
-     * @return Local ID of the queued message for UI tracking
+     * **Optimistic UI**: This method creates a local echo in the `messages` table
+     * immediately, so the message bubble appears instantly in the chat without
+     * waiting for WorkManager to start. The bubble will show a "Sending" indicator
+     * until the server confirms receipt.
+     *
+     * @return Local ID (temp GUID) of the queued message for UI tracking
      */
     suspend fun queueMessage(
         chatGuid: String,
@@ -70,37 +93,30 @@ class PendingMessageRepository @Inject constructor(
         attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO
     ): Result<String> = runCatching {
-        val localId = "pending-${UUID.randomUUID()}"
+        val startTime = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ queueMessage START")
 
-        // 1. Create and insert pending message
-        val pendingMessage = PendingMessageEntity(
-            localId = localId,
-            chatGuid = chatGuid,
-            text = text,
-            subject = subject,
-            replyToGuid = replyToGuid,
-            effectId = effectId,
-            deliveryMode = deliveryMode.name,
-            syncStatus = PendingSyncStatus.PENDING.name,
-            createdAt = System.currentTimeMillis()
-        )
-        val messageId = pendingMessageDao.insert(pendingMessage)
-        Log.d(TAG, "Created pending message: $localId (id=$messageId)")
+        // Use "temp-" prefix so MessageEntity.isSent correctly returns false
+        val clientGuid = "temp-${UUID.randomUUID()}"
+        val createdAt = System.currentTimeMillis()
 
-        // 2. Persist attachments if any
-        if (attachments.isNotEmpty()) {
-            val persistedAttachments = attachments.mapIndexedNotNull { index, input ->
+        // Determine message source based on delivery mode
+        val messageSource = inferMessageSource(chatGuid, deliveryMode)
+
+        // Persist attachments to internal storage first (outside transaction for I/O)
+        val attachPersistStart = System.currentTimeMillis()
+        val persistedAttachments = if (attachments.isNotEmpty()) {
+            attachments.mapIndexedNotNull { index, input ->
                 val uri = input.uri
-                val attachmentLocalId = "$localId-att-$index"
+                val attachmentLocalId = "$clientGuid-att-$index"
                 attachmentPersistenceManager.persistAttachment(uri, attachmentLocalId)
                     .onFailure { e ->
                         Log.e(TAG, "Failed to persist attachment: $uri", e)
                     }
                     .getOrNull()
                     ?.let { result ->
-                        PendingAttachmentEntity(
+                        PersistedAttachmentData(
                             localId = attachmentLocalId,
-                            pendingMessageId = messageId,
                             originalUri = uri.toString(),
                             persistedPath = result.persistedPath,
                             fileName = result.fileName,
@@ -111,18 +127,140 @@ class PendingMessageRepository @Inject constructor(
                         )
                     }
             }
-
-            if (persistedAttachments.isNotEmpty()) {
-                pendingAttachmentDao.insertAll(persistedAttachments)
-                Log.d(TAG, "Persisted ${persistedAttachments.size} attachments for $localId")
-            }
+        } else {
+            emptyList()
+        }
+        if (attachments.isNotEmpty()) {
+            Log.d(TAG, "⏱️ Attachment persist: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
         }
 
-        // 3. Enqueue WorkManager job
-        enqueueWorker(messageId, localId)
+        // Use transaction to ensure atomicity: all-or-nothing for DB operations
+        val txStart = System.currentTimeMillis()
+        val messageId = database.withTransaction {
+            // 1. Create pending message (durability/retry engine)
+            val pendingMessage = PendingMessageEntity(
+                localId = clientGuid,
+                chatGuid = chatGuid,
+                text = text,
+                subject = subject,
+                replyToGuid = replyToGuid,
+                effectId = effectId,
+                deliveryMode = deliveryMode.name,
+                syncStatus = PendingSyncStatus.PENDING.name,
+                createdAt = createdAt
+            )
+            val pendingId = pendingMessageDao.insert(pendingMessage)
 
-        localId
+            // 2. Insert pending attachments if any
+            if (persistedAttachments.isNotEmpty()) {
+                val pendingAttachmentEntities = persistedAttachments.map { data ->
+                    PendingAttachmentEntity(
+                        localId = data.localId,
+                        pendingMessageId = pendingId,
+                        originalUri = data.originalUri,
+                        persistedPath = data.persistedPath,
+                        fileName = data.fileName,
+                        mimeType = data.mimeType,
+                        fileSize = data.fileSize,
+                        orderIndex = data.orderIndex,
+                        caption = data.caption
+                    )
+                }
+                pendingAttachmentDao.insertAll(pendingAttachmentEntities)
+            }
+
+            // 3. Create local echo in messages table (instant UI feedback)
+            val localEcho = MessageEntity(
+                guid = clientGuid,
+                chatGuid = chatGuid,
+                text = text,
+                subject = subject,
+                dateCreated = createdAt,
+                isFromMe = true,
+                hasAttachments = persistedAttachments.isNotEmpty(),
+                threadOriginatorGuid = replyToGuid,
+                expressiveSendStyleId = effectId,
+                messageSource = messageSource.name
+            )
+            messageDao.insertMessage(localEcho)
+
+            // 4. Create attachment entities for immediate display
+            persistedAttachments.forEach { data ->
+                val attachmentEntity = AttachmentEntity(
+                    guid = data.localId,
+                    messageGuid = clientGuid,
+                    mimeType = data.mimeType,
+                    transferName = data.fileName,
+                    totalBytes = data.fileSize,
+                    isOutgoing = true,
+                    localPath = Uri.fromFile(File(data.persistedPath)).toString(),
+                    transferState = TransferState.UPLOADING.name,
+                    transferProgress = 0f
+                )
+                attachmentDao.insertAttachment(attachmentEntity)
+            }
+
+            // 5. Update chat's last message for conversation list
+            chatDao.updateLastMessage(
+                chatGuid,
+                createdAt,
+                text ?: if (persistedAttachments.isNotEmpty()) "[Attachment]" else ""
+            )
+
+            pendingId
+        }
+        Log.d(TAG, "⏱️ DB transaction: ${System.currentTimeMillis() - txStart}ms")
+
+        Log.d(TAG, "Created pending message with local echo: $clientGuid (id=$messageId)")
+        if (persistedAttachments.isNotEmpty()) {
+            Log.d(TAG, "Created ${persistedAttachments.size} attachment echoes for $clientGuid")
+        }
+
+        // Enqueue WorkManager job asynchronously - don't block UI update
+        // The message is already in the DB, so UI will update via Room Flow
+        applicationScope.launch {
+            val workerStart = System.currentTimeMillis()
+            enqueueWorker(messageId, clientGuid)
+            Log.d(TAG, "⏱️ WorkManager enqueue (async): ${System.currentTimeMillis() - workerStart}ms")
+        }
+
+        Log.d(TAG, "⏱️ queueMessage TOTAL: ${System.currentTimeMillis() - startTime}ms")
+        clientGuid
     }
+
+    /**
+     * Infer the message source based on chat GUID and delivery mode.
+     */
+    private fun inferMessageSource(chatGuid: String, deliveryMode: MessageDeliveryMode): MessageSource {
+        return when (deliveryMode) {
+            MessageDeliveryMode.LOCAL_SMS -> MessageSource.LOCAL_SMS
+            MessageDeliveryMode.LOCAL_MMS -> MessageSource.LOCAL_MMS
+            MessageDeliveryMode.IMESSAGE -> MessageSource.IMESSAGE
+            MessageDeliveryMode.AUTO -> {
+                // Infer from chat GUID prefix
+                when {
+                    chatGuid.startsWith("sms;-;", ignoreCase = true) -> MessageSource.LOCAL_SMS
+                    chatGuid.startsWith("mms;-;", ignoreCase = true) -> MessageSource.LOCAL_MMS
+                    chatGuid.startsWith("RCS;-;", ignoreCase = true) -> MessageSource.LOCAL_SMS
+                    else -> MessageSource.IMESSAGE
+                }
+            }
+        }
+    }
+
+    /**
+     * Internal data class for persisted attachment info (used during queue transaction).
+     */
+    private data class PersistedAttachmentData(
+        val localId: String,
+        val originalUri: String,
+        val persistedPath: String,
+        val fileName: String,
+        val mimeType: String,
+        val fileSize: Long,
+        val orderIndex: Int,
+        val caption: String?
+    )
 
     /**
      * Enqueue a WorkManager job to send a pending message.
@@ -176,6 +314,7 @@ class PendingMessageRepository @Inject constructor(
 
     /**
      * Cancel a pending message.
+     * Also removes the local echo from the messages table.
      */
     suspend fun cancelMessage(localId: String): Result<Unit> = runCatching {
         val pending = pendingMessageDao.getByLocalId(localId)
@@ -195,8 +334,14 @@ class PendingMessageRepository @Inject constructor(
         val attachments = pendingAttachmentDao.getForMessage(pending.id)
         attachmentPersistenceManager.cleanupAttachments(attachments.map { it.persistedPath })
 
-        // Delete from database (CASCADE will delete attachments)
-        pendingMessageDao.delete(pending.id)
+        // Delete from database (use transaction to ensure atomicity)
+        database.withTransaction {
+            // Delete local echo from messages table (CASCADE will delete attachments)
+            messageDao.deleteMessage(localId)
+
+            // Delete pending message (CASCADE will delete pending attachments)
+            pendingMessageDao.delete(pending.id)
+        }
 
         Log.i(TAG, "Cancelled message: $localId")
     }

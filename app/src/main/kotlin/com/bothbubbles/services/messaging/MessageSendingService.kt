@@ -178,6 +178,10 @@ class MessageSendingService @Inject constructor(
     /**
      * Send a new message via iMessage.
      * If the send fails and autoRetryAsSms is enabled, automatically retries via SMS.
+     *
+     * Note: With optimistic UI, the local echo may already exist (created by
+     * PendingMessageRepository.queueMessage). This method reuses the existing
+     * temp message if found, rather than creating a duplicate.
      */
     override suspend fun sendMessage(
         chatGuid: String,
@@ -190,18 +194,21 @@ class MessageSendingService @Inject constructor(
         // Use provided tempGuid if available (for retries), otherwise generate new one
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
-        // Check if this is a retry (temp message already exists)
+        // Check if local echo already exists (created by queueMessage or previous attempt)
         val existingMessage = messageDao.getMessageByGuid(tempGuid)
         if (existingMessage != null) {
-            Log.d(TAG, "Retry detected for text message tempGuid=$tempGuid, checking if already sent")
-            // If the message was already successfully sent (has no error), return it
-            if (existingMessage.error == 0) {
-                return@safeCall existingMessage
+            // If GUID was already replaced with server GUID, we wouldn't find it here.
+            // So if we found it, the message still needs to be sent.
+            // Clear any previous error to retry.
+            if (existingMessage.error != 0) {
+                Log.d(TAG, "Retry: clearing error on existing temp message $tempGuid")
+                messageDao.updateErrorStatus(tempGuid, 0)
+            } else {
+                Log.d(TAG, "Using existing local echo for $tempGuid")
             }
-            // Otherwise continue to retry sending
         }
 
-        // Create temporary message for immediate UI feedback (only if not retry)
+        // Create temporary message for immediate UI feedback (only if not already created)
         if (existingMessage == null) {
             val tempMessage = MessageEntity(
                 guid = tempGuid,
@@ -218,8 +225,6 @@ class MessageSendingService @Inject constructor(
 
             // Update chat's last message
             chatDao.updateLastMessage(chatGuid, System.currentTimeMillis(), text)
-        } else {
-            Log.d(TAG, "Retry: reusing existing temp message for $tempGuid")
         }
 
         // Send to server
@@ -537,6 +542,10 @@ class MessageSendingService @Inject constructor(
     /**
      * Send a message with attachments via BlueBubbles API.
      * Uploads attachments first, then sends the text message.
+     *
+     * Note: With optimistic UI, the local echo and attachments may already exist
+     * (created by PendingMessageRepository.queueMessage). This method reuses them
+     * rather than creating duplicates.
      */
     private suspend fun sendIMessageWithAttachments(
         chatGuid: String,
@@ -550,15 +559,14 @@ class MessageSendingService @Inject constructor(
         // Use provided tempGuid if available (for retries), otherwise generate new one
         val tempGuid = providedTempGuid ?: "temp-${UUID.randomUUID()}"
 
-        // Check if this is a retry (temp message already exists)
+        // Check if local echo already exists (created by queueMessage or previous attempt)
         val existingMessage = messageDao.getMessageByGuid(tempGuid)
-        val isRetry = existingMessage != null
 
         // Build attachment GUIDs list
         val tempAttachmentGuids = attachments.indices.map { index -> "$tempGuid-att-$index" }
 
-        if (!isRetry) {
-            // First attempt - create temporary message for immediate UI feedback
+        if (existingMessage == null) {
+            // No local echo exists - create temporary message for immediate UI feedback
             database.withTransaction {
                 val tempMessage = MessageEntity(
                     guid = tempGuid,
@@ -601,7 +609,13 @@ class MessageSendingService @Inject constructor(
                 }
             }
         } else {
-            Log.d(TAG, "Retry detected for tempGuid=$tempGuid, reusing existing temp records")
+            // Local echo exists - clear any previous error for retry
+            if (existingMessage.error != 0) {
+                Log.d(TAG, "Retry: clearing error on existing temp message $tempGuid")
+                messageDao.updateErrorStatus(tempGuid, 0)
+            } else {
+                Log.d(TAG, "Using existing local echo for $tempGuid with attachments")
+            }
         }
 
         // Update chat's last message

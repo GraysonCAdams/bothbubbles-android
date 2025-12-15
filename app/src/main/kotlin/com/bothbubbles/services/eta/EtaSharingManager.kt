@@ -1,10 +1,10 @@
 package com.bothbubbles.services.eta
 
 import android.util.Log
+import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.AutoShareRecipient
-import com.bothbubbles.data.repository.AutoShareRule
-import com.bothbubbles.data.repository.AutoShareRuleRepository
+import com.bothbubbles.data.repository.AutoShareContact
+import com.bothbubbles.data.repository.AutoShareContactRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -28,7 +28,8 @@ import kotlin.math.abs
 class EtaSharingManager @Inject constructor(
     private val pendingMessageRepository: PendingMessageRepository,
     private val settingsDataStore: SettingsDataStore,
-    private val autoShareRuleRepository: AutoShareRuleRepository
+    private val featurePreferences: FeaturePreferences,
+    private val autoShareContactRepository: AutoShareContactRepository
 ) {
     companion object {
         private const val TAG = "EtaSharingManager"
@@ -52,12 +53,10 @@ class EtaSharingManager @Inject constructor(
 
     // Terminal state tracking to prevent "arrived" spam loop
     private var arrivedSentTimestamp: Long = 0
-    private var lastKnownDestination: String? = null
 
     // Auto-share tracking
     private var autoShareCheckedForSession: Boolean = false
     private var activeAutoShareSessions: MutableList<EtaSharingSession> = mutableListOf()
-    private var triggeredAutoShareRule: AutoShareRule? = null
 
     // Auto-share state observable
     private val _autoShareState = MutableStateFlow<AutoShareState>(AutoShareState.Inactive)
@@ -72,7 +71,6 @@ class EtaSharingManager @Inject constructor(
         val session = EtaSharingSession(
             recipientGuid = chatGuid,
             recipientDisplayName = displayName,
-            destination = initialEta?.destination,
             lastEtaMinutes = initialEta?.etaMinutes ?: 0,
             lastMessageType = EtaMessageType.INITIAL
         )
@@ -117,7 +115,6 @@ class EtaSharingManager @Inject constructor(
      * Handle a new ETA update from navigation
      */
     fun onEtaUpdate(etaData: ParsedEtaData) {
-        val wasNavigationActive = _isNavigationActive.value
         val currentState = _state.value
         _state.value = currentState.copy(
             currentEta = etaData,
@@ -125,11 +122,11 @@ class EtaSharingManager @Inject constructor(
         )
         _isNavigationActive.value = true
 
-        // Check for auto-share rules when navigation starts (not already checked)
-        if (!autoShareCheckedForSession && etaData.destination != null) {
+        // Check for auto-share contacts when navigation starts (not already checked)
+        if (!autoShareCheckedForSession) {
             autoShareCheckedForSession = true
             scope.launch {
-                checkAutoShareRules(etaData)
+                checkAutoShareContacts(etaData)
             }
         }
 
@@ -144,9 +141,9 @@ class EtaSharingManager @Inject constructor(
         val session = currentState.session
         if (session == null || !currentState.isSharing) return
 
-        // Terminal state check: If we already sent "arrived" for this destination,
-        // don't send any more updates until destination changes or cooldown expires
-        if (isInTerminalState(etaData)) {
+        // Terminal state check: If we already sent "arrived",
+        // don't send any more updates until cooldown expires
+        if (isInTerminalState()) {
             Log.d(TAG, "Ignoring update - in terminal state (arrived already sent)")
             return
         }
@@ -179,15 +176,7 @@ class EtaSharingManager @Inject constructor(
             return EtaMessageType.ARRIVED
         }
 
-        // Priority 2: Check for destination change
-        if (eta.destination != null && session.destination != null &&
-            !isSameDestination(eta.destination, session.destination)
-        ) {
-            Log.d(TAG, "Update type: DESTINATION_CHANGE (${session.destination} → ${eta.destination})")
-            return EtaMessageType.DESTINATION_CHANGE
-        }
-
-        // Priority 3: Check for "arriving soon" (only send once)
+        // Priority 2: Check for "arriving soon" (only send once)
         if (newEtaMinutes <= ARRIVING_SOON_THRESHOLD &&
             session.lastEtaMinutes > ARRIVING_SOON_THRESHOLD &&
             session.lastMessageType != EtaMessageType.ARRIVING_SOON
@@ -196,7 +185,7 @@ class EtaSharingManager @Inject constructor(
             return EtaMessageType.ARRIVING_SOON
         }
 
-        // Priority 4: Significant ETA change (user-configurable threshold)
+        // Priority 3: Significant ETA change (user-configurable threshold)
         if (etaDelta >= changeThreshold) {
             Log.d(TAG, "Update type: CHANGE (delta: $etaDelta min, threshold: $changeThreshold)")
             return EtaMessageType.CHANGE
@@ -207,25 +196,16 @@ class EtaSharingManager @Inject constructor(
     }
 
     /**
-     * Check if we're in terminal state (already sent arrived for this destination)
+     * Check if we're in terminal state (already sent arrived)
      */
-    private fun isInTerminalState(etaData: ParsedEtaData): Boolean {
+    private fun isInTerminalState(): Boolean {
         if (arrivedSentTimestamp == 0L) return false
 
         val timeSinceArrived = System.currentTimeMillis() - arrivedSentTimestamp
 
-        // Reset terminal state if:
-        // 1. Cooldown expired (30 min) - likely a new trip
+        // Reset terminal state if cooldown expired (30 min) - likely a new trip
         if (timeSinceArrived > TERMINAL_STATE_COOLDOWN_MS) {
             Log.d(TAG, "Terminal state expired (cooldown)")
-            clearTerminalState()
-            return false
-        }
-
-        // 2. Destination changed - definitely a new trip
-        // Use fuzzy matching to handle variations like "123 Main St" vs "123 Main Street"
-        if (etaData.destination != null && !isSameDestination(etaData.destination, lastKnownDestination)) {
-            Log.d(TAG, "Terminal state cleared (new destination: ${etaData.destination})")
             clearTerminalState()
             return false
         }
@@ -233,59 +213,13 @@ class EtaSharingManager @Inject constructor(
         return true
     }
 
-    /**
-     * Fuzzy match destinations to handle variations
-     * e.g., "123 Main St" vs "123 Main Street", "Home" vs "home"
-     */
-    private fun isSameDestination(dest1: String?, dest2: String?): Boolean {
-        if (dest1 == null && dest2 == null) return true
-        if (dest1 == null || dest2 == null) return false
-
-        // Normalize: lowercase, remove common abbreviation differences
-        val norm1 = normalizeDestination(dest1)
-        val norm2 = normalizeDestination(dest2)
-
-        // Exact match after normalization
-        if (norm1 == norm2) return true
-
-        // Check if one contains the other (handles partial matches)
-        if (norm1.contains(norm2) || norm2.contains(norm1)) return true
-
-        // Check similarity ratio (Jaccard-like)
-        val words1 = norm1.split(" ").toSet()
-        val words2 = norm2.split(" ").toSet()
-        val intersection = words1.intersect(words2)
-        val union = words1.union(words2)
-
-        if (union.isEmpty()) return false
-        val similarity = intersection.size.toFloat() / union.size
-        return similarity >= 0.6f  // 60% word overlap = same destination
-    }
-
-    private fun normalizeDestination(dest: String): String {
-        return dest.lowercase()
-            .replace("street", "st")
-            .replace("avenue", "ave")
-            .replace("boulevard", "blvd")
-            .replace("drive", "dr")
-            .replace("road", "rd")
-            .replace("lane", "ln")
-            .replace("court", "ct")
-            .replace("place", "pl")
-            .replace(Regex("[.,#]"), "")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
-
-    private fun enterTerminalState(destination: String?) {
+    private fun enterTerminalState() {
         arrivedSentTimestamp = System.currentTimeMillis()
-        lastKnownDestination = destination
-        Log.d(TAG, "Entered terminal state for destination: $destination")
+        Log.d(TAG, "Entered terminal state")
     }
 
     private fun clearTerminalState() {
         arrivedSentTimestamp = 0
-        lastKnownDestination = null
     }
 
     /**
@@ -317,7 +251,7 @@ class EtaSharingManager @Inject constructor(
             val session = currentState.session
             val lastEta = session.lastEtaMinutes
 
-            // If we were close to destination (≤3 min), assume we arrived
+            // If we were close (≤3 min), assume we arrived
             val wasNearDestination = lastEta <= ARRIVING_SOON_THRESHOLD
 
             scope.launch {
@@ -326,14 +260,14 @@ class EtaSharingManager @Inject constructor(
                     // Create a fake ETA for the arrived message
                     val arrivedEta = ParsedEtaData(
                         etaMinutes = 0,
-                        destination = session.destination,
+                        destination = null,
                         distanceText = null,
                         arrivalTimeText = null,
                         navigationApp = currentState.currentEta?.navigationApp ?: NavigationApp.GOOGLE_MAPS
                     )
                     sendMessageForType(session, arrivedEta, EtaMessageType.ARRIVED)
                 } else {
-                    Log.d(TAG, "Navigation stopped far from destination - sending cancelled message")
+                    Log.d(TAG, "Navigation stopped - sending cancelled message")
                     sendStoppedMessage(session)
                     stopSharing(sendFinalMessage = false)
                 }
@@ -344,49 +278,45 @@ class EtaSharingManager @Inject constructor(
     // ===== Auto-Share Logic =====
 
     /**
-     * Check for matching auto-share rules when navigation starts.
-     * If a match is found, automatically start sharing with all configured recipients.
+     * Check auto-share contacts when navigation starts.
+     * If ETA meets minimum threshold, automatically start sharing with all enabled contacts.
      */
-    private suspend fun checkAutoShareRules(etaData: ParsedEtaData) {
-        val destination = etaData.destination ?: return
-
+    private suspend fun checkAutoShareContacts(etaData: ParsedEtaData) {
         // Check if ETA sharing is enabled
         if (!settingsDataStore.etaSharingEnabled.first()) {
             Log.d(TAG, "Auto-share: ETA sharing disabled, skipping")
             return
         }
 
-        Log.d(TAG, "Auto-share: Checking rules for destination '$destination'")
-
-        val matchingRule = autoShareRuleRepository.findMatchingRule(destination)
-        if (matchingRule == null) {
-            Log.d(TAG, "Auto-share: No matching rule found")
+        // Check minimum ETA threshold
+        val minimumEta = featurePreferences.autoShareMinimumEtaMinutes.first()
+        if (etaData.etaMinutes < minimumEta) {
+            Log.d(TAG, "Auto-share: ETA ${etaData.etaMinutes} min below threshold ($minimumEta min), skipping")
             return
         }
 
-        Log.d(TAG, "Auto-share: Matched rule '${matchingRule.destinationName}' with ${matchingRule.recipients.size} recipients")
+        // Get enabled auto-share contacts
+        val contacts = autoShareContactRepository.getEnabled()
+        if (contacts.isEmpty()) {
+            Log.d(TAG, "Auto-share: No enabled contacts configured")
+            return
+        }
 
-        // Record trigger and start auto-sharing
-        autoShareRuleRepository.recordRuleTrigger(matchingRule.id)
-        triggeredAutoShareRule = matchingRule
+        Log.d(TAG, "Auto-share: Starting with ${contacts.size} contacts, ETA: ${etaData.etaMinutes} min")
 
-        // Create sessions for all recipients
-        activeAutoShareSessions = matchingRule.recipients.map { recipient ->
+        // Create sessions for all contacts
+        activeAutoShareSessions = contacts.map { contact ->
             EtaSharingSession(
-                recipientGuid = recipient.chatGuid,
-                recipientDisplayName = recipient.displayName,
-                destination = destination,
+                recipientGuid = contact.chatGuid,
+                recipientDisplayName = contact.displayName,
                 lastEtaMinutes = etaData.etaMinutes,
                 lastMessageType = EtaMessageType.INITIAL
             )
         }.toMutableList()
 
         // Update auto-share state
-        val recipientNames = matchingRule.recipients.map { it.displayName }
-        _autoShareState.value = AutoShareState.Triggered(
-            ruleName = matchingRule.destinationName,
-            recipientNames = recipientNames
-        )
+        val recipientNames = contacts.map { it.displayName }
+        _autoShareState.value = AutoShareState.Active(recipientNames = recipientNames)
 
         // Send initial messages to all recipients
         for (session in activeAutoShareSessions) {
@@ -402,13 +332,6 @@ class EtaSharingManager @Inject constructor(
                 Log.e(TAG, "Auto-share: Failed to send to ${session.recipientDisplayName}", e)
             }
         }
-
-        // Update state to active
-        _autoShareState.value = AutoShareState.Active(
-            rule = matchingRule,
-            recipientNames = recipientNames,
-            destination = destination
-        )
 
         Log.d(TAG, "Auto-share: Started sharing with ${recipientNames.joinToString()}")
     }
@@ -427,10 +350,9 @@ class EtaSharingManager @Inject constructor(
             if (messageType != null) {
                 val message = when (messageType) {
                     EtaMessageType.INITIAL -> buildInitialMessage(etaData)
-                    EtaMessageType.DESTINATION_CHANGE -> buildDestinationChangeMessage(etaData)
                     EtaMessageType.CHANGE -> buildChangeMessage(etaData, session.lastEtaMinutes)
                     EtaMessageType.ARRIVING_SOON -> buildArrivingSoonMessage(etaData)
-                    EtaMessageType.ARRIVED -> buildArrivedMessage(etaData.destination ?: session.destination)
+                    EtaMessageType.ARRIVED -> buildArrivedMessage()
                 }
 
                 Log.d(TAG, "Auto-share: Sending $messageType to ${session.recipientDisplayName}")
@@ -445,7 +367,6 @@ class EtaSharingManager @Inject constructor(
                     lastSentTime = System.currentTimeMillis(),
                     lastEtaMinutes = etaData.etaMinutes,
                     updateCount = session.updateCount + 1,
-                    destination = etaData.destination ?: session.destination,
                     lastMessageType = messageType
                 )
                 updatedSessions.add(updatedSession)
@@ -469,7 +390,7 @@ class EtaSharingManager @Inject constructor(
 
         for (session in activeAutoShareSessions) {
             val message = if (wasNearDestination) {
-                buildArrivedMessage(session.destination)
+                buildArrivedMessage()
             } else {
                 buildCancelledMessage()
             }
@@ -484,7 +405,6 @@ class EtaSharingManager @Inject constructor(
 
         // Clear auto-share state
         activeAutoShareSessions.clear()
-        triggeredAutoShareRule = null
         _autoShareState.value = AutoShareState.Inactive
 
         Log.d(TAG, "Auto-share: Session ended")
@@ -507,7 +427,6 @@ class EtaSharingManager @Inject constructor(
             }
 
             activeAutoShareSessions.clear()
-            triggeredAutoShareRule = null
             _autoShareState.value = AutoShareState.Inactive
 
             Log.d(TAG, "Auto-share: Manually stopped")
@@ -524,10 +443,9 @@ class EtaSharingManager @Inject constructor(
     ) {
         val message = when (messageType) {
             EtaMessageType.INITIAL -> buildInitialMessage(eta)
-            EtaMessageType.DESTINATION_CHANGE -> buildDestinationChangeMessage(eta)
             EtaMessageType.CHANGE -> buildChangeMessage(eta, session.lastEtaMinutes)
             EtaMessageType.ARRIVING_SOON -> buildArrivingSoonMessage(eta)
-            EtaMessageType.ARRIVED -> buildArrivedMessage(eta.destination ?: session.destination)
+            EtaMessageType.ARRIVED -> buildArrivedMessage()
         }
 
         Log.d(TAG, "Sending $messageType message: $message")
@@ -541,14 +459,13 @@ class EtaSharingManager @Inject constructor(
                 lastSentTime = System.currentTimeMillis(),
                 lastEtaMinutes = eta.etaMinutes,
                 updateCount = session.updateCount + 1,
-                destination = eta.destination ?: session.destination,
                 lastMessageType = messageType
             )
             _state.value = _state.value.copy(session = updatedSession)
 
             // Handle terminal state for ARRIVED
             if (messageType == EtaMessageType.ARRIVED) {
-                enterTerminalState(eta.destination)
+                enterTerminalState()
                 stopSharing(sendFinalMessage = false)
             }
         }.onFailure { e ->
@@ -559,29 +476,15 @@ class EtaSharingManager @Inject constructor(
     // ===== Message Builders =====
 
     private fun buildInitialMessage(eta: ParsedEtaData): String {
-        val dest = eta.destination ?: "destination"
         return buildString {
-            append("📍 On my way to $dest!")
-            append("\nETA: ${formatEtaTime(eta.etaMinutes)}")
-            eta.arrivalTimeText?.let { append(" (arriving ~$it)") }
-        }
-    }
-
-    private fun buildDestinationChangeMessage(eta: ParsedEtaData): String {
-        val dest = eta.destination ?: "new destination"
-        return buildString {
-            append("📍 Change of plans!")
-            append("\nNow heading to $dest")
-            append("\nETA: ${formatEtaTime(eta.etaMinutes)}")
+            append("📍 On my way! ETA: ${formatEtaTime(eta.etaMinutes)}")
             eta.arrivalTimeText?.let { append(" (arriving ~$it)") }
         }
     }
 
     private fun buildChangeMessage(eta: ParsedEtaData, previousEta: Int): String {
-        val dest = eta.destination ?: "destination"
         return buildString {
-            append("📍 ETA Update")
-            append("\nNow ${formatEtaTime(eta.etaMinutes)} to $dest")
+            append("📍 ETA Update: Now ${formatEtaTime(eta.etaMinutes)}")
             if (previousEta > 0) {
                 append(" (was ${formatEtaTime(previousEta)})")
             }
@@ -589,17 +492,15 @@ class EtaSharingManager @Inject constructor(
     }
 
     private fun buildArrivingSoonMessage(eta: ParsedEtaData): String {
-        val dest = eta.destination?.let { " at $it" } ?: ""
-        return "📍 Almost there! Arriving$dest in ~${eta.etaMinutes} min"
+        return "📍 Almost there! ~${eta.etaMinutes} min away"
     }
 
-    private fun buildArrivedMessage(destination: String?): String {
-        val dest = destination?.let { " at $it" } ?: ""
-        return "📍 I've arrived$dest!"
+    private fun buildArrivedMessage(): String {
+        return "📍 I've arrived!"
     }
 
     private fun buildCancelledMessage(): String {
-        return "📍 Stopped sharing location"
+        return "📍 Stopped sharing ETA"
     }
 
     /**
@@ -647,12 +548,12 @@ class EtaSharingManager @Inject constructor(
      * Simulate a navigation notification for testing without driving.
      * Only works in debug builds.
      */
-    fun simulateNavigation(etaMinutes: Int, destination: String = "Home") {
-        Log.d(TAG, "[DEBUG] Simulating navigation: $etaMinutes min to $destination")
+    fun simulateNavigation(etaMinutes: Int) {
+        Log.d(TAG, "[DEBUG] Simulating navigation: $etaMinutes min")
 
         val fakeEta = ParsedEtaData(
             etaMinutes = etaMinutes,
-            destination = destination,
+            destination = null,
             distanceText = "${(etaMinutes * 0.8).toInt()} mi",
             arrivalTimeText = null,
             navigationApp = NavigationApp.GOOGLE_MAPS
@@ -685,13 +586,6 @@ sealed class AutoShareState {
     data object Inactive : AutoShareState()
 
     data class Active(
-        val rule: AutoShareRule,
-        val recipientNames: List<String>,
-        val destination: String?
-    ) : AutoShareState()
-
-    data class Triggered(
-        val ruleName: String,
         val recipientNames: List<String>
     ) : AutoShareState()
 }

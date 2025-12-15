@@ -6,11 +6,10 @@ import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.AutoShareRecipient
-import com.bothbubbles.data.repository.AutoShareRule
-import com.bothbubbles.data.repository.AutoShareRuleRepository
-import com.bothbubbles.data.repository.LocationType
+import com.bothbubbles.data.repository.AutoShareContact
+import com.bothbubbles.data.repository.AutoShareContactRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.PhoneContact
 import com.bothbubbles.services.eta.EtaSharingManager
@@ -29,26 +28,28 @@ data class EtaSharingSettingsUiState(
     val enabled: Boolean = false,
     val hasNotificationAccess: Boolean = false,
     val changeThresholdMinutes: Int = 5,
+    val minimumEtaMinutes: Int = 5,
     val isNavigationActive: Boolean = false,
     val isCurrentlySharing: Boolean = false,
     val currentEtaMinutes: Int = 0,
-    val destination: String? = null,
     val isDeveloperMode: Boolean = false,
-    val autoShareRules: List<AutoShareRule> = emptyList()
+    val autoShareContacts: List<AutoShareContact> = emptyList(),
+    val canAddMoreContacts: Boolean = true
 )
 
 @HiltViewModel
 class EtaSharingSettingsViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val settingsDataStore: SettingsDataStore,
+    private val featurePreferences: FeaturePreferences,
     private val etaSharingManager: EtaSharingManager,
-    private val autoShareRuleRepository: AutoShareRuleRepository,
+    private val autoShareContactRepository: AutoShareContactRepository,
     private val contactsService: AndroidContactsService
 ) : ViewModel() {
 
     private val _hasNotificationAccess = MutableStateFlow(checkNotificationAccess())
 
-    // Available contacts for auto-share recipient selection
+    // Available contacts for auto-share selection
     private val _availableContacts = MutableStateFlow<List<PhoneContact>>(emptyList())
     val availableContacts: StateFlow<List<PhoneContact>> = _availableContacts.asStateFlow()
 
@@ -58,25 +59,27 @@ class EtaSharingSettingsViewModel @Inject constructor(
     val uiState: StateFlow<EtaSharingSettingsUiState> = combine(
         settingsDataStore.etaSharingEnabled,
         settingsDataStore.etaChangeThreshold,
+        featurePreferences.autoShareMinimumEtaMinutes,
         _hasNotificationAccess,
         etaSharingManager.isNavigationActive,
         etaSharingManager.state,
         settingsDataStore.developerModeEnabled,
-        autoShareRuleRepository.observeAllRules()
+        autoShareContactRepository.observeAll()
     ) { values: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
-        val etaState = values[4] as? com.bothbubbles.services.eta.EtaState
-        val rules = values[6] as? List<AutoShareRule> ?: emptyList()
+        val etaState = values[5] as? com.bothbubbles.services.eta.EtaState
+        val contacts = values[7] as? List<AutoShareContact> ?: emptyList()
         EtaSharingSettingsUiState(
             enabled = values[0] as? Boolean ?: false,
             changeThresholdMinutes = values[1] as? Int ?: 5,
-            hasNotificationAccess = values[2] as? Boolean ?: false,
-            isNavigationActive = values[3] as? Boolean ?: false,
+            minimumEtaMinutes = values[2] as? Int ?: 5,
+            hasNotificationAccess = values[3] as? Boolean ?: false,
+            isNavigationActive = values[4] as? Boolean ?: false,
             isCurrentlySharing = etaState?.isSharing ?: false,
             currentEtaMinutes = etaState?.currentEta?.etaMinutes ?: 0,
-            destination = etaState?.currentEta?.destination,
-            isDeveloperMode = values[5] as? Boolean ?: false,
-            autoShareRules = rules
+            isDeveloperMode = values[6] as? Boolean ?: false,
+            autoShareContacts = contacts,
+            canAddMoreContacts = contacts.size < AutoShareContactRepository.MAX_CONTACTS
         )
     }.stateIn(
         scope = viewModelScope,
@@ -93,6 +96,12 @@ class EtaSharingSettingsViewModel @Inject constructor(
     fun setChangeThreshold(minutes: Int) {
         viewModelScope.launch {
             settingsDataStore.setEtaChangeThreshold(minutes)
+        }
+    }
+
+    fun setMinimumEtaMinutes(minutes: Int) {
+        viewModelScope.launch {
+            featurePreferences.setAutoShareMinimumEtaMinutes(minutes)
         }
     }
 
@@ -113,10 +122,10 @@ class EtaSharingSettingsViewModel @Inject constructor(
         return android.content.Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
     }
 
-    // ===== Auto-Share Rules =====
+    // ===== Auto-Share Contacts =====
 
     /**
-     * Load available contacts for the recipient picker.
+     * Load available contacts for the contact picker.
      * Only loads contacts with valid phone numbers or emails.
      */
     fun loadAvailableContacts() {
@@ -137,67 +146,36 @@ class EtaSharingSettingsViewModel @Inject constructor(
     }
 
     /**
-     * Create a new auto-share rule.
+     * Add a contact to auto-share list.
+     * Returns false if the contact already exists or max contacts reached.
      */
-    fun createAutoShareRule(
-        destinationName: String,
-        keywords: List<String>,
-        locationType: LocationType,
-        recipients: List<AutoShareRecipient>
-    ) {
+    fun addAutoShareContact(chatGuid: String, displayName: String) {
         viewModelScope.launch {
-            val ruleId = autoShareRuleRepository.createRule(
-                destinationName = destinationName,
-                keywords = keywords,
-                locationType = locationType,
-                recipients = recipients
-            )
-            if (ruleId != null) {
-                Log.d("EtaSettings", "Created auto-share rule: $ruleId")
+            val success = autoShareContactRepository.add(chatGuid, displayName)
+            if (success) {
+                Log.d("EtaSettings", "Added auto-share contact: $displayName")
             } else {
-                Log.w("EtaSettings", "Failed to create auto-share rule")
+                Log.w("EtaSettings", "Failed to add auto-share contact (max reached or duplicate)")
             }
         }
     }
 
     /**
-     * Update an existing auto-share rule.
+     * Toggle enabled state for an auto-share contact.
      */
-    fun updateAutoShareRule(
-        ruleId: Long,
-        destinationName: String,
-        keywords: List<String>,
-        locationType: LocationType,
-        recipients: List<AutoShareRecipient>
-    ) {
+    fun toggleAutoShareContact(contact: AutoShareContact, enabled: Boolean) {
         viewModelScope.launch {
-            val success = autoShareRuleRepository.updateRule(
-                ruleId = ruleId,
-                destinationName = destinationName,
-                keywords = keywords,
-                locationType = locationType,
-                recipients = recipients
-            )
-            Log.d("EtaSettings", "Updated auto-share rule $ruleId: $success")
+            autoShareContactRepository.setEnabled(contact.chatGuid, enabled)
         }
     }
 
     /**
-     * Toggle enabled state for an auto-share rule.
+     * Remove an auto-share contact.
      */
-    fun toggleAutoShareRule(rule: AutoShareRule, enabled: Boolean) {
+    fun removeAutoShareContact(contact: AutoShareContact) {
         viewModelScope.launch {
-            autoShareRuleRepository.setRuleEnabled(rule.id, enabled)
-        }
-    }
-
-    /**
-     * Delete an auto-share rule.
-     */
-    fun deleteAutoShareRule(rule: AutoShareRule) {
-        viewModelScope.launch {
-            autoShareRuleRepository.deleteRule(rule.id)
-            Log.d("EtaSettings", "Deleted auto-share rule: ${rule.id}")
+            autoShareContactRepository.remove(contact.chatGuid)
+            Log.d("EtaSettings", "Removed auto-share contact: ${contact.displayName}")
         }
     }
 
@@ -206,16 +184,15 @@ class EtaSharingSettingsViewModel @Inject constructor(
     /**
      * Simulate starting navigation (for testing)
      */
-    fun debugSimulateNavigation(etaMinutes: Int, destination: String) {
-        etaSharingManager.simulateNavigation(etaMinutes, destination)
+    fun debugSimulateNavigation(etaMinutes: Int) {
+        etaSharingManager.simulateNavigation(etaMinutes)
     }
 
     /**
      * Simulate updating ETA (for testing)
      */
     fun debugUpdateEta(etaMinutes: Int) {
-        val currentDestination = uiState.value.destination ?: "Test Location"
-        etaSharingManager.simulateNavigation(etaMinutes, currentDestination)
+        etaSharingManager.simulateNavigation(etaMinutes)
     }
 
     /**

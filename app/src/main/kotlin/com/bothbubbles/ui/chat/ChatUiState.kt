@@ -96,7 +96,7 @@ data class ChatUiState(
     val isNavigationActive: Boolean = false,
     val isEtaSharing: Boolean = false,
     val currentEtaMinutes: Int = 0,
-    val etaDestination: String? = null
+    val isEtaBannerDismissed: Boolean = false
 )
 
 /**

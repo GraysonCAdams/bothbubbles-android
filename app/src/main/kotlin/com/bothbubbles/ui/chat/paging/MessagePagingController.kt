@@ -55,6 +55,10 @@ class MessagePagingController(
     // Messages in this set should not animate when scrolled back into view
     private val seenMessageGuids = mutableSetOf<String>()
 
+    // Track message GUIDs that were optimistically inserted
+    // Used to prevent redundant shifts/reloads when Room Flow eventually reports the new size
+    private val optimisticallyInsertedGuids = mutableSetOf<String>()
+
     // Internal state
     private val state = PagingState()
 
@@ -266,6 +270,76 @@ class MessagePagingController(
     }
 
     /**
+     * Optimistically insert a new message at position 0.
+     * Used for instant display of sent messages without waiting for Room Flow.
+     *
+     * This bypasses the expensive shiftPositions+loadRange cycle by:
+     * 1. Directly inserting the model at position 0
+     * 2. Shifting existing positions in memory (no DB)
+     * 3. Emitting immediately
+     *
+     * @param model The pre-built MessageUiModel to insert
+     */
+    fun insertMessageOptimistically(model: MessageUiModel) {
+        val insertStart = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ [PAGING] insertMessageOptimistically CALLED: ${model.guid}, thread: ${Thread.currentThread().name}")
+
+        // Check if already inserted (prevent duplicates)
+        if (guidToPosition.containsKey(model.guid)) {
+            Log.d(TAG, "⏱️ [PAGING] SKIPPED - already exists: ${model.guid}")
+            return
+        }
+
+        // Increment generation to invalidate any in-flight loads
+        state.generation++
+
+        // Shift all existing positions by 1 (in memory, no DB)
+        val newSparseData = mutableMapOf<Int, MessageUiModel>()
+        val newGuidToPosition = mutableMapOf<String, Int>()
+
+        sparseData.forEach { (oldPosition, existingModel) ->
+            val newPosition = oldPosition + 1
+            if (newPosition < state.totalSize + 1) {
+                newSparseData[newPosition] = existingModel
+                newGuidToPosition[existingModel.guid] = newPosition
+            }
+        }
+
+        // Insert new message at position 0
+        newSparseData[0] = model
+        newGuidToPosition[model.guid] = 0
+
+        // Update state
+        sparseData.clear()
+        sparseData.putAll(newSparseData)
+        guidToPosition.clear()
+        guidToPosition.putAll(newGuidToPosition)
+
+        // Shift BitSet
+        val newLoadStatus = MessagePagingHelpers.shiftBitSet(loadStatus, 1, state.totalSize + 1)
+        loadStatus.clear()
+        loadStatus.or(newLoadStatus)
+        loadStatus.set(0) // Mark position 0 as loaded
+
+        // Update total size
+        state.totalSize++
+        _totalCount.value = state.totalSize
+
+        // Mark as seen (no entrance animation)
+        seenMessageGuids.add(model.guid)
+
+        // Mark as optimistically inserted
+        optimisticallyInsertedGuids.add(model.guid)
+
+        Log.d(TAG, "⏱️ [PAGING] state updated, calling emit: +${System.currentTimeMillis() - insertStart}ms")
+
+        // Emit immediately
+        emitMessagesLocked()
+
+        Log.d(TAG, "⏱️ [PAGING] emit DONE: +${System.currentTimeMillis() - insertStart}ms, totalSize=${state.totalSize}")
+    }
+
+    /**
      * Force refresh all loaded data.
      * Use sparingly as it reloads everything.
      */
@@ -326,9 +400,17 @@ class MessagePagingController(
 
     private fun onSizeChanged(newSize: Int) {
         val oldSize = state.totalSize
-        if (newSize == oldSize) return
+        if (newSize == oldSize) {
+            // If sizes match, it means our optimistic update (if any) is now consistent with DB
+            if (optimisticallyInsertedGuids.isNotEmpty()) {
+                Log.d(TAG, "onSizeChanged: Size matched ($newSize), clearing ${optimisticallyInsertedGuids.size} optimistic GUIDs")
+                optimisticallyInsertedGuids.clear()
+            }
+            return
+        }
 
-        Log.d(TAG, "Size changed: $oldSize -> $newSize")
+        val sizeChangeTime = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ onSizeChanged: $oldSize -> $newSize")
         state.totalSize = newSize
         _totalCount.value = newSize
 
@@ -339,10 +421,15 @@ class MessagePagingController(
                     val addedCount = newSize - oldSize
 
                     // Shift existing positions (atomic with mutex)
+                    val shiftStart = System.currentTimeMillis()
                     shiftPositions(addedCount)
+                    Log.d(TAG, "⏱️ shiftPositions took: ${System.currentTimeMillis() - shiftStart}ms")
 
                     // Load the new messages at the beginning
+                    val loadStart = System.currentTimeMillis()
                     loadRange(0, minOf(addedCount + config.prefetchDistance, newSize))
+                    Log.d(TAG, "⏱️ loadRange took: ${System.currentTimeMillis() - loadStart}ms")
+                    Log.d(TAG, "⏱️ TOTAL from size change: ${System.currentTimeMillis() - sizeChangeTime}ms")
                 }
                 newSize < oldSize -> {
                     // Messages deleted
@@ -370,9 +457,11 @@ class MessagePagingController(
         // Step 1: Quick snapshot under mutex
         val snapshotData: Map<Int, MessageUiModel>
         val totalSize: Int
+        val expectedGeneration: Long
         stateMutex.withLock {
             // Increment generation FIRST to invalidate ALL in-flight loads immediately
             state.generation++
+            expectedGeneration = state.generation
             snapshotData = sparseData.toMap()
             totalSize = state.totalSize
             // Clear active load jobs - their positions are now invalid
@@ -400,6 +489,11 @@ class MessagePagingController(
 
         // Step 3: Atomic swap under mutex (fast)
         stateMutex.withLock {
+            if (state.generation != expectedGeneration) {
+                Log.w(TAG, "State changed during shiftPositions (gen $expectedGeneration -> ${state.generation}), aborting swap")
+                return@withLock
+            }
+
             sparseData.clear()
             sparseData.putAll(newSparseData)
             guidToPosition.clear()

@@ -112,6 +112,7 @@ import com.bothbubbles.ui.chat.components.AttachmentPreview
 import com.bothbubbles.ui.chat.components.ChatInputArea
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.EtaSharingBanner
+import com.bothbubbles.ui.chat.components.EtaStopSharingLink
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
 import com.bothbubbles.ui.chat.components.SearchResultsSheet
@@ -1231,11 +1232,10 @@ fun ChatScreen(
             EtaSharingBanner(
                 isNavigationActive = uiState.isNavigationActive && uiState.isEtaSharingEnabled,
                 isCurrentlySharing = uiState.isEtaSharing,
+                isDismissed = uiState.isEtaBannerDismissed,
                 currentEtaMinutes = uiState.currentEtaMinutes,
-                destination = uiState.etaDestination,
-                recipientName = uiState.chatTitle,
                 onStartSharing = { viewModel.startEtaSharing() },
-                onStopSharing = { viewModel.stopEtaSharing() }
+                onDismiss = { viewModel.dismissEtaBanner() }
             )
 
             // Delayed loading indicator - only show after 500ms to avoid flash
@@ -1306,6 +1306,12 @@ fun ChatScreen(
                     // 2. Pre-compute the last outgoing message index (first non-reaction from-me message)
                     val lastOutgoingIndex = remember(uiState.messages) {
                         uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
+                    }
+
+                    // 2b. Pre-compute latest ETA message index for showing "Stop Sharing" link
+                    // ETA messages start with 📍 emoji and are from the user
+                    val latestEtaMessageIndex = remember(uiState.messages) {
+                        uiState.messages.indexOfFirst { it.isFromMe && it.text?.startsWith("📍") == true }
                     }
 
                     // 3. PERF: Pre-compute showSenderName for group chats (O(n) once vs O(1) per-item)
@@ -1440,11 +1446,9 @@ fun ChatScreen(
 
                             // iPhone-style delivery indicator: only show on THE last outgoing message
                             // in the entire conversation (not just last in consecutive sequence)
-                            // Don't show indicator while message is still sending (no clock icon)
+                            // Shows: Sending (clock) → Sent (check) → Delivered (double-check) → Read (blue)
                             // PERF: Use pre-computed lastOutgoingIndex instead of O(n) search per item
-                            val showDeliveryIndicator = message.isFromMe &&
-                                index == lastOutgoingIndex &&
-                                (message.isSent || message.hasError)
+                            val showDeliveryIndicator = message.isFromMe && index == lastOutgoingIndex
 
                             // Spacing based on group position:
                             // - SINGLE/FIRST: 6dp top (gap between groups)
@@ -1645,6 +1649,21 @@ fun ChatScreen(
                                     }
 
                                     // Retry bottom sheet is shown at Scaffold level, not per-message
+                                }
+
+                                // Show "Stop Sharing ETA" link under the latest ETA message when sharing
+                                // Placed outside the Box to appear below the bubble, not overlapping it
+                                if (uiState.isEtaSharing && index == latestEtaMessageIndex) {
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.CenterEnd
+                                    ) {
+                                        EtaStopSharingLink(
+                                            isVisible = true,
+                                            onStopSharing = { viewModel.stopEtaSharing() },
+                                            modifier = Modifier.padding(end = 16.dp)
+                                        )
+                                    }
                                 }
                             }
                         }

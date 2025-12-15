@@ -262,3 +262,225 @@ You may ask: _"Is Compose the right choice? Should we use RecyclerView?"_
 3.  **Future Proofing:** Google is actively deprecating the View system. All modern Android libraries are built for Compose first.
 
 The "jank" is not a framework limit; it is a logic bottleneck. By moving the math to the background thread (Phase 2), we unlock the framework's true potential.
+
+---
+
+## Implementation Summary
+
+**Status:** ✅ Fully Implemented (All 4 Phases)
+**Date:** December 2024
+
+### Phase 1: Animation Reliability Fix ✅
+
+**File:** `ChatScreen.kt` (lines 1464-1486)
+
+**Problem:** `animatedMessageGuids.add()` was called during composition, causing animations to be cancelled before they were visible.
+
+**Solution:** Used `remember` to check state without mutating it, then moved mutation to `LaunchedEffect`:
+
+```kotlin
+// 1. Check state without mutating it (stable across recompositions)
+val isAlreadyAnimated = remember(message.guid) {
+    message.guid in animatedMessageGuids
+}
+
+// 2. Mutate state only AFTER successful composition via LaunchedEffect
+if (shouldAnimateEntrance) {
+    LaunchedEffect(message.guid) {
+        delay(16) // Ensure animation system has picked up start value
+        animatedMessageGuids.add(message.guid)
+    }
+}
+```
+
+### Phase 2: Main Thread Offloading ✅
+
+**Files:** `ChatViewModel.kt` (line 1813), `MessagePagingController.kt` (lines 358-415)
+
+**Problem:** O(N) list transformations and position shifting blocked the UI thread.
+
+**Solution 1:** Added `flowOn(Dispatchers.Default)` to the message list transformation:
+
+```kotlin
+pagingController.messages
+    .map { sparseList -> sparseList.toList() }
+    .flowOn(Dispatchers.Default)  // Run toList() on background thread
+    .conflate()
+    .collect { ... }
+```
+
+**Solution 2:** Restructured `shiftPositions()` to use three-step pattern:
+
+1. Quick snapshot under mutex (fast)
+2. Build new data structures on `Dispatchers.Default` (O(N), off main thread)
+3. Atomic swap under mutex (fast)
+
+### Phase 3: Typing Performance (Composer Optimization) ✅
+
+**File:** `ChatScreen.kt` (lines 826-853)
+
+**Problem:** `remember(vararg keys)` created new `ComposerState` every time any key changed (recording duration updates 10x/sec).
+
+**Solution:** Replaced with `derivedStateOf` which only triggers recomposition when the result changes structurally:
+
+```kotlin
+val adjustedComposerState by remember {
+    derivedStateOf {
+        if (isRecording || isPreviewingVoiceMemo) {
+            composerState.copy(inputMode = ..., recordingState = ...)
+        } else {
+            composerState.copy(inputMode = ComposerInputMode.TEXT)
+        }
+    }
+}
+```
+
+### Phase 4: Advanced LazyList Optimizations ✅
+
+**File:** `ChatScreen.kt` (lines 1383-1401, 2023-2048)
+
+**Problem:** All message items used the same content type (0 or 1), limiting view recycling efficiency.
+
+**Solution:** Implemented granular content types for efficient view recycling:
+
+```kotlin
+contentType = { _, message ->
+    when {
+        message.isReaction -> ContentType.REACTION
+        message.isPlacedSticker -> ContentType.STICKER
+        message.attachments.isNotEmpty() ->
+            if (message.isFromMe) ContentType.OUTGOING_WITH_ATTACHMENT
+            else ContentType.INCOMING_WITH_ATTACHMENT
+        message.isFromMe -> ContentType.OUTGOING_TEXT
+        else -> ContentType.INCOMING_TEXT
+    }
+}
+```
+
+Added `ContentType` object with 9 stable integer constants for efficient comparison.
+
+### Files Modified
+
+| File                         | Changes                                                    |
+| ---------------------------- | ---------------------------------------------------------- |
+| `ChatScreen.kt`              | Phase 1, 3, 4 - Animation fix, derivedStateOf, contentType |
+| `ChatViewModel.kt`           | Phase 2 - flowOn(Dispatchers.Default)                      |
+| `MessagePagingController.kt` | Phase 2 - Background thread position shifting              |
+
+### Testing Recommendations
+
+1. **Phase 1:** Send 10 messages rapidly - every message should animate smoothly
+2. **Phase 2:** Scroll rapidly while receiving messages - no frame drops, GPU bars below green line
+3. **Phase 3:** Type quickly - zero input lag, instant character appearance
+4. **Phase 4:** Scroll through mixed content (text, attachments, stickers) - smooth 120fps
+
+---
+
+## Implementation Summary
+
+**Status:** ✅ Fully Implemented (All 4 Phases)
+**Date:** December 2024
+
+### Phase 1: Animation Reliability Fix ✅
+
+**File:** `ChatScreen.kt` (lines 1464-1486)
+
+**Problem:** `animatedMessageGuids.add()` was called during composition, causing animations to be cancelled before they were visible.
+
+**Solution:** Used `remember` to check state without mutating it, then moved mutation to `LaunchedEffect`:
+
+```kotlin
+// 1. Check state without mutating it (stable across recompositions)
+val isAlreadyAnimated = remember(message.guid) {
+    message.guid in animatedMessageGuids
+}
+
+// 2. Mutate state only AFTER successful composition via LaunchedEffect
+if (shouldAnimateEntrance) {
+    LaunchedEffect(message.guid) {
+        delay(16) // Ensure animation system has picked up start value
+        animatedMessageGuids.add(message.guid)
+    }
+}
+```
+
+### Phase 2: Main Thread Offloading ✅
+
+**Files:** `ChatViewModel.kt` (line 1813), `MessagePagingController.kt` (lines 358-415)
+
+**Problem:** O(N) list transformations and position shifting blocked the UI thread.
+
+**Solution 1:** Added `flowOn(Dispatchers.Default)` to the message list transformation:
+
+```kotlin
+pagingController.messages
+    .map { sparseList -> sparseList.toList() }
+    .flowOn(Dispatchers.Default)  // Run toList() on background thread
+    .conflate()
+    .collect { ... }
+```
+
+**Solution 2:** Restructured `shiftPositions()` to use three-step pattern:
+
+1. Quick snapshot under mutex (fast)
+2. Build new data structures on `Dispatchers.Default` (O(N), off main thread)
+3. Atomic swap under mutex (fast)
+
+### Phase 3: Typing Performance (Composer Optimization) ✅
+
+**File:** `ChatScreen.kt` (lines 826-853)
+
+**Problem:** `remember(vararg keys)` created new `ComposerState` every time any key changed (recording duration updates 10x/sec).
+
+**Solution:** Replaced with `derivedStateOf` which only triggers recomposition when the result changes structurally:
+
+```kotlin
+val adjustedComposerState by remember {
+    derivedStateOf {
+        if (isRecording || isPreviewingVoiceMemo) {
+            composerState.copy(inputMode = ..., recordingState = ...)
+        } else {
+            composerState.copy(inputMode = ComposerInputMode.TEXT)
+        }
+    }
+}
+```
+
+### Phase 4: Advanced LazyList Optimizations ✅
+
+**File:** `ChatScreen.kt` (lines 1383-1401, 2023-2048)
+
+**Problem:** All message items used the same content type (0 or 1), limiting view recycling efficiency.
+
+**Solution:** Implemented granular content types for efficient view recycling:
+
+```kotlin
+contentType = { _, message ->
+    when {
+        message.isReaction -> ContentType.REACTION
+        message.isPlacedSticker -> ContentType.STICKER
+        message.attachments.isNotEmpty() ->
+            if (message.isFromMe) ContentType.OUTGOING_WITH_ATTACHMENT
+            else ContentType.INCOMING_WITH_ATTACHMENT
+        message.isFromMe -> ContentType.OUTGOING_TEXT
+        else -> ContentType.INCOMING_TEXT
+    }
+}
+```
+
+Added `ContentType` object with 9 stable integer constants for efficient comparison.
+
+### Files Modified
+
+| File                         | Changes                                                    |
+| ---------------------------- | ---------------------------------------------------------- |
+| `ChatScreen.kt`              | Phase 1, 3, 4 - Animation fix, derivedStateOf, contentType |
+| `ChatViewModel.kt`           | Phase 2 - flowOn(Dispatchers.Default)                      |
+| `MessagePagingController.kt` | Phase 2 - Background thread position shifting              |
+
+### Testing Recommendations
+
+1. **Phase 1:** Send 10 messages rapidly - every message should animate smoothly
+2. **Phase 2:** Scroll rapidly while receiving messages - no frame drops, GPU bars below green line
+3. **Phase 3:** Type quickly - zero input lag, instant character appearance
+4. **Phase 4:** Scroll through mixed content (text, attachments, stickers) - smooth 120fps

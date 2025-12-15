@@ -307,4 +307,5 @@ class NavigationEtaParser @Inject constructor() {
     private fun parseArrivalTime(text: String): String? {
         return ETA_TIME_PATTERN.find(text)?.value
     }
+
 }

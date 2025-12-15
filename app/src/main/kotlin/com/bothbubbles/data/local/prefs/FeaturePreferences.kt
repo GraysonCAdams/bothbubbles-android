@@ -72,6 +72,15 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.ETA_CHANGE_THRESHOLD] ?: 5
     }
 
+    /**
+     * Minimum ETA (in minutes) to trigger auto-sharing.
+     * Prevents auto-sharing for very short trips (e.g., driving around the block).
+     * Default is 5 minutes.
+     */
+    val autoShareMinimumEtaMinutes: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_SHARE_MINIMUM_ETA_MINUTES] ?: 5
+    }
+
     // ===== Android Auto Settings =====
 
     /**
@@ -177,6 +186,12 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setAutoShareMinimumEtaMinutes(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_SHARE_MINIMUM_ETA_MINUTES] = minutes.coerceIn(1, 30)
+        }
+    }
+
     suspend fun setAndroidAutoPrivacyMode(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.ANDROID_AUTO_PRIVACY_MODE] = enabled
@@ -233,6 +248,7 @@ class FeaturePreferences @Inject constructor(
         val ETA_SHARING_ENABLED = booleanPreferencesKey("eta_sharing_enabled")
         val ETA_UPDATE_INTERVAL = intPreferencesKey("eta_update_interval")
         val ETA_CHANGE_THRESHOLD = intPreferencesKey("eta_change_threshold")
+        val AUTO_SHARE_MINIMUM_ETA_MINUTES = intPreferencesKey("auto_share_minimum_eta_minutes")
 
         // Android Auto
         val ANDROID_AUTO_PRIVACY_MODE = booleanPreferencesKey("android_auto_privacy_mode")

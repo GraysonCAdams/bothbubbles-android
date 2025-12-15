@@ -830,6 +830,36 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 36 to 37: Simplify auto-share from destination-based rules
+     * to contact-based auto-sharing.
+     *
+     * Google Maps (and other navigation apps) don't expose the destination in notifications,
+     * so destination-based matching was never functional. This migration:
+     * 1. Creates a simpler auto_share_contacts table (max 5 contacts)
+     * 2. Drops the old auto_share_rules and auto_share_recipients tables
+     *
+     * The minimum ETA threshold is now a global setting in SettingsDataStore.
+     */
+    val MIGRATION_36_37 = object : Migration(36, 37) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Create new simplified auto_share_contacts table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS auto_share_contacts (
+                    chat_guid TEXT PRIMARY KEY NOT NULL,
+                    display_name TEXT NOT NULL,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()}
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_auto_share_contacts_enabled ON auto_share_contacts(enabled)")
+
+            // Drop old tables (recipients first due to foreign key)
+            db.execSQL("DROP TABLE IF EXISTS auto_share_recipients")
+            db.execSQL("DROP TABLE IF EXISTS auto_share_rules")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -870,6 +900,7 @@ object DatabaseMigrations {
         MIGRATION_32_33,
         MIGRATION_33_34,
         MIGRATION_34_35,
-        MIGRATION_35_36
+        MIGRATION_35_36,
+        MIGRATION_36_37
     )
 }

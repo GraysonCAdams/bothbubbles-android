@@ -26,6 +26,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BugReport
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -48,7 +49,6 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import com.bothbubbles.data.repository.AutoShareRule
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -95,6 +95,7 @@ fun EtaSharingSettingsScreen(
             uiState = uiState,
             onEnableChanged = viewModel::setEnabled,
             onChangeThresholdChanged = viewModel::setChangeThreshold,
+            onMinimumEtaChanged = viewModel::setMinimumEtaMinutes,
             onOpenNotificationSettings = {
                 context.startActivity(viewModel.getNotificationAccessSettingsIntent())
             }
@@ -109,6 +110,7 @@ fun EtaSharingSettingsContent(
     uiState: EtaSharingSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     onEnableChanged: (Boolean) -> Unit = viewModel::setEnabled,
     onChangeThresholdChanged: (Int) -> Unit = viewModel::setChangeThreshold,
+    onMinimumEtaChanged: (Int) -> Unit = viewModel::setMinimumEtaMinutes,
     onOpenNotificationSettings: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -137,6 +139,9 @@ fun EtaSharingSettingsContent(
     ) {
         // Info card
         InfoCard()
+
+        // Disclaimer about destination limitation
+        DestinationDisclaimerCard()
 
         // Permission status card
         PermissionStatusCard(
@@ -177,12 +182,57 @@ fun EtaSharingSettingsContent(
                 StatusCard(
                     isSharing = uiState.isCurrentlySharing,
                     isNavigationActive = true,
-                    etaMinutes = uiState.currentEtaMinutes,
-                    destination = uiState.destination
+                    etaMinutes = uiState.currentEtaMinutes
                 )
             }
 
-            // Change threshold (no more periodic updates - only meaningful changes)
+            // Auto-share contacts section
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Dialog state
+            var showAddContactDialog by remember { mutableStateOf(false) }
+            val availableContacts by viewModel.availableContacts.collectAsStateWithLifecycle()
+            val isLoadingContacts by viewModel.isLoadingContacts.collectAsStateWithLifecycle()
+
+            AutoShareContactsSection(
+                contacts = uiState.autoShareContacts,
+                canAddMore = uiState.canAddMoreContacts,
+                onAddContact = {
+                    viewModel.loadAvailableContacts()
+                    showAddContactDialog = true
+                },
+                onRemoveContact = viewModel::removeAutoShareContact,
+                onToggleContact = viewModel::toggleAutoShareContact
+            )
+
+            // Add contact dialog
+            if (showAddContactDialog) {
+                AddAutoShareContactDialog(
+                    availableContacts = availableContacts,
+                    existingContactGuids = uiState.autoShareContacts.map { it.chatGuid }.toSet(),
+                    isLoading = isLoadingContacts,
+                    onSelectContact = { chatGuid, displayName ->
+                        viewModel.addAutoShareContact(chatGuid, displayName)
+                    },
+                    onDismiss = { showAddContactDialog = false }
+                )
+            }
+
+            // Minimum ETA threshold (for auto-share)
+            if (uiState.autoShareContacts.isNotEmpty()) {
+                SettingsSection(title = "Auto-Share Settings") {
+                    IntervalSlider(
+                        label = "Minimum ETA to auto-share: ${uiState.minimumEtaMinutes} min",
+                        description = "Only auto-share for trips longer than this. Prevents spam for quick trips.",
+                        value = uiState.minimumEtaMinutes,
+                        onValueChange = onMinimumEtaChanged,
+                        valueRange = 1f..30f,
+                        steps = 28
+                    )
+                }
+            }
+
+            // Change threshold
             SettingsSection(title = "Update Sensitivity") {
                 IntervalSlider(
                     label = "Notify when ETA changes by ${uiState.changeThresholdMinutes}+ minutes",
@@ -192,68 +242,6 @@ fun EtaSharingSettingsContent(
                     onValueChange = onChangeThresholdChanged,
                     valueRange = 2f..15f,
                     steps = 12
-                )
-            }
-
-            // Auto-share rules section
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Dialog state
-            var showAddRuleDialog by remember { mutableStateOf(false) }
-            var editingRule by remember { mutableStateOf<AutoShareRule?>(null) }
-            val availableContacts by viewModel.availableContacts.collectAsStateWithLifecycle()
-            val isLoadingContacts by viewModel.isLoadingContacts.collectAsStateWithLifecycle()
-
-            AutoShareRulesSection(
-                rules = uiState.autoShareRules,
-                onAddRule = {
-                    viewModel.loadAvailableContacts()
-                    editingRule = null
-                    showAddRuleDialog = true
-                },
-                onEditRule = { rule ->
-                    viewModel.loadAvailableContacts()
-                    editingRule = rule
-                    showAddRuleDialog = true
-                },
-                onDeleteRule = { rule ->
-                    viewModel.deleteAutoShareRule(rule)
-                },
-                onToggleRule = { rule, enabled ->
-                    viewModel.toggleAutoShareRule(rule, enabled)
-                }
-            )
-
-            // Add/Edit rule dialog
-            if (showAddRuleDialog) {
-                AddAutoShareRuleDialog(
-                    existingRule = editingRule,
-                    availableContacts = availableContacts,
-                    isLoading = isLoadingContacts,
-                    onSave = { destinationName, keywords, locationType, recipients ->
-                        if (editingRule != null) {
-                            viewModel.updateAutoShareRule(
-                                ruleId = editingRule!!.id,
-                                destinationName = destinationName,
-                                keywords = keywords,
-                                locationType = locationType,
-                                recipients = recipients
-                            )
-                        } else {
-                            viewModel.createAutoShareRule(
-                                destinationName = destinationName,
-                                keywords = keywords,
-                                locationType = locationType,
-                                recipients = recipients
-                            )
-                        }
-                        showAddRuleDialog = false
-                        editingRule = null
-                    },
-                    onDismiss = {
-                        showAddRuleDialog = false
-                        editingRule = null
-                    }
                 )
             }
         }
@@ -310,6 +298,36 @@ private fun InfoCard() {
                     color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun DestinationDisclaimerCard() {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.Top
+        ) {
+            Icon(
+                imageVector = Icons.Default.Info,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = "We can only share your ETA (arrival time), not your destination. " +
+                    "Navigation apps don't expose this information.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
         }
     }
 }
@@ -427,8 +445,7 @@ private fun BatteryOptimizationCard(
 private fun StatusCard(
     isSharing: Boolean,
     isNavigationActive: Boolean,
-    etaMinutes: Int = 0,
-    destination: String? = null
+    etaMinutes: Int = 0
 ) {
     Surface(
         modifier = Modifier
@@ -473,7 +490,7 @@ private fun StatusCard(
                 )
                 Text(
                     text = if (isSharing) {
-                        "Sharing your arrival time" + (destination?.let { " to $it" } ?: "")
+                        "Sharing your arrival time"
                     } else {
                         "Open a chat to share your ETA"
                     },
@@ -596,7 +613,7 @@ private fun IntervalSlider(
 private fun DebugSection(
     isNavigationActive: Boolean,
     currentEtaMinutes: Int,
-    onSimulateNavigation: (Int, String) -> Unit,
+    onSimulateNavigation: (Int) -> Unit,
     onUpdateEta: (Int) -> Unit,
     onStopNavigation: () -> Unit,
     onResetTerminalState: () -> Unit
@@ -670,7 +687,7 @@ private fun DebugSection(
                     ) {
                         if (!isNavigationActive) {
                             Button(
-                                onClick = { onSimulateNavigation(simulatedEta, "Test Location") },
+                                onClick = { onSimulateNavigation(simulatedEta) },
                                 modifier = Modifier.weight(1f)
                             ) {
                                 Text("Start Nav")

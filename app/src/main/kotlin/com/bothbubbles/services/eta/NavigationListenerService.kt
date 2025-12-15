@@ -136,7 +136,7 @@ class NavigationListenerService : NotificationListenerService() {
         // Parse ETA data
         val etaData = etaParser.parse(sbn)
         if (etaData != null) {
-            Log.d(TAG, "Parsed ETA: ${etaData.etaMinutes} min to ${etaData.destination}")
+            Log.d(TAG, "Parsed ETA: ${etaData.etaMinutes} min")
             etaSharingManager.onEtaUpdate(etaData)
             updateSharingNotificationIfActive(etaData)
 
@@ -214,10 +214,7 @@ class NavigationListenerService : NotificationListenerService() {
             }
 
             val contentTitle = "Navigation Detected"
-            val contentText = buildString {
-                append("ETA: ${formatEtaMinutes(etaData.etaMinutes)}")
-                etaData.destination?.let { append(" to $it") }
-            }
+            val contentText = "ETA: ${formatEtaMinutes(etaData.etaMinutes)}"
 
             // Create start sharing intent
             val startIntent = Intent(EtaSharingReceiver.ACTION_START_SHARING).apply {
