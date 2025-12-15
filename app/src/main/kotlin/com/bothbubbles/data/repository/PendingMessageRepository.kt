@@ -91,13 +91,14 @@ class PendingMessageRepository @Inject constructor(
         replyToGuid: String? = null,
         effectId: String? = null,
         attachments: List<PendingAttachmentInput> = emptyList(),
-        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO
+        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
+        forcedLocalId: String? = null
     ): Result<String> = runCatching {
         val startTime = System.currentTimeMillis()
         Log.d(TAG, "⏱️ queueMessage START")
 
         // Use "temp-" prefix so MessageEntity.isSent correctly returns false
-        val clientGuid = "temp-${UUID.randomUUID()}"
+        val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
 
         // Determine message source based on delivery mode

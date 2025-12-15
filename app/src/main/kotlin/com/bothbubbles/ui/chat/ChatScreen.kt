@@ -197,6 +197,7 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val messages by viewModel.messagesState.collectAsStateWithLifecycle()
     val draftText by viewModel.draftText.collectAsStateWithLifecycle()
     val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
 
@@ -225,8 +226,8 @@ fun ChatScreen(
     var scrollRestored by remember { mutableStateOf(effectiveScrollPosition.first == 0 && effectiveScrollPosition.second == 0) }
 
     // Restore scroll position after messages load (if we have state to restore)
-    LaunchedEffect(uiState.messages.isNotEmpty(), effectiveScrollPosition) {
-        if (!scrollRestored && uiState.messages.isNotEmpty() && (effectiveScrollPosition.first > 0 || effectiveScrollPosition.second > 0)) {
+    LaunchedEffect(messages.isNotEmpty(), effectiveScrollPosition) {
+        if (!scrollRestored && messages.isNotEmpty() && (effectiveScrollPosition.first > 0 || effectiveScrollPosition.second > 0)) {
             // Scroll to restored position after messages have loaded
             listState.scrollToItem(effectiveScrollPosition.first, effectiveScrollPosition.second)
             scrollRestored = true
@@ -389,7 +390,7 @@ fun ChatScreen(
     // Scroll-to-safety: When showing tapback menu, ensure message is visible and centered
     LaunchedEffect(selectedMessageForTapback?.guid) {
         val message = selectedMessageForTapback ?: return@LaunchedEffect
-        val messageIndex = uiState.messages.indexOfFirst { it.guid == message.guid }
+        val messageIndex = messages.indexOfFirst { it.guid == message.guid }
         if (messageIndex < 0) return@LaunchedEffect
 
         // Get current viewport info
@@ -804,8 +805,8 @@ fun ChatScreen(
 
                 // Reply preview - shows when replying to a message
                 val replyingToGuid = uiState.replyingToGuid
-                val replyingToMessage = remember(replyingToGuid, uiState.messages) {
-                    replyingToGuid?.let { guid -> uiState.messages.find { it.guid == guid } }
+                val replyingToMessage = remember(replyingToGuid, messages) {
+                    replyingToGuid?.let { guid -> messages.find { it.guid == guid } }
                 }
 
                 AnimatedVisibility(
@@ -1044,7 +1045,7 @@ fun ChatScreen(
         // Auto-scroll when jumping to a message (from search results or deep link)
         LaunchedEffect(uiState.highlightedMessageGuid) {
             uiState.highlightedMessageGuid?.let { guid ->
-                val index = uiState.messages.indexOfFirst { it.guid == guid }
+                val index = messages.indexOfFirst { it.guid == guid }
                 if (index >= 0) {
                     val viewportHeight = listState.layoutInfo.viewportSize.height
                     val centerOffset = -(viewportHeight / 3)
@@ -1091,8 +1092,8 @@ fun ChatScreen(
 
         // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
         // This ensures tall content like link previews isn't clipped by the keyboard
-        LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
-            val newestGuid = uiState.messages.firstOrNull()?.guid
+        LaunchedEffect(messages.firstOrNull()?.guid) {
+            val newestGuid = messages.firstOrNull()?.guid
             val isNearBottom = listState.firstVisibleItemIndex <= 2
 
             // Skip if no messages yet
@@ -1122,7 +1123,7 @@ fun ChatScreen(
         LaunchedEffect(Unit) {
             viewModel.socketNewMessage.collect { messageGuid ->
                 val isNearBottom = listState.firstVisibleItemIndex <= 2
-                val newestMessage = uiState.messages.firstOrNull { it.guid == messageGuid }
+                val newestMessage = messages.firstOrNull { it.guid == messageGuid }
 
                 // Light haptic feedback for incoming messages (not from me)
                 if (newestMessage?.isFromMe == false) {
@@ -1154,8 +1155,8 @@ fun ChatScreen(
         }
 
         // Detect new messages with screen effects and trigger playback
-        LaunchedEffect(uiState.messages.firstOrNull()?.guid) {
-            val newest = uiState.messages.firstOrNull() ?: return@LaunchedEffect
+        LaunchedEffect(messages.firstOrNull()?.guid) {
+            val newest = messages.firstOrNull() ?: return@LaunchedEffect
             // Skip if already processed this session
             if (newest.guid in processedEffectMessages) return@LaunchedEffect
             // Skip if effects disabled or reduce motion enabled
@@ -1254,10 +1255,10 @@ fun ChatScreen(
             // This ensures only NEW messages that arrive after this point will animate
             LaunchedEffect(initialLoadComplete) {
                 if (initialLoadComplete) {
-                    uiState.messages.forEach { message ->
+                    messages.forEach { message ->
                         animatedMessageGuids.add(message.guid)
                     }
-                    android.util.Log.d("MessageAnim", "Initial load complete - marked ${uiState.messages.size} messages as already animated")
+                    android.util.Log.d("MessageAnim", "Initial load complete - marked ${messages.size} messages as already animated")
                 }
             }
 
@@ -1270,13 +1271,13 @@ fun ChatScreen(
                     )
                 }
                 // Show empty state only when we're CERTAIN there are no messages
-                initialLoadComplete && uiState.messages.isEmpty() -> {
+                initialLoadComplete && messages.isEmpty() -> {
                     EmptyStateMessages(
                         modifier = Modifier.fillMaxSize()
                     )
                 }
                 // Show blank screen while initial load in progress (before 200ms delay)
-                !initialLoadComplete && uiState.messages.isEmpty() -> {
+                !initialLoadComplete && messages.isEmpty() -> {
                     Box(modifier = Modifier.fillMaxSize())
                 }
                 else -> {
@@ -1290,37 +1291,37 @@ fun ChatScreen(
 
                     // PERF: Pre-compute expensive lookups once instead of O(n²) per-item
                     // 1. Map each index to its next visible (non-reaction) message
-                    val nextVisibleMessageMap = remember(uiState.messages) {
+                    val nextVisibleMessageMap = remember(messages) {
                         val map = mutableMapOf<Int, MessageUiModel?>()
                         var lastVisibleMessage: MessageUiModel? = null
                         // Iterate backwards to build the "next visible" lookup
-                        for (i in uiState.messages.indices.reversed()) {
+                        for (i in messages.indices.reversed()) {
                             map[i] = lastVisibleMessage
-                            if (!uiState.messages[i].isReaction) {
-                                lastVisibleMessage = uiState.messages[i]
+                            if (!messages[i].isReaction) {
+                                lastVisibleMessage = messages[i]
                             }
                         }
                         map
                     }
 
                     // 2. Pre-compute the last outgoing message index (first non-reaction from-me message)
-                    val lastOutgoingIndex = remember(uiState.messages) {
-                        uiState.messages.indexOfFirst { it.isFromMe && !it.isReaction }
+                    val lastOutgoingIndex = remember(messages) {
+                        messages.indexOfFirst { it.isFromMe && !it.isReaction }
                     }
 
                     // 2b. Pre-compute latest ETA message index for showing "Stop Sharing" link
                     // ETA messages start with 📍 emoji and are from the user
-                    val latestEtaMessageIndex = remember(uiState.messages) {
-                        uiState.messages.indexOfFirst { it.isFromMe && it.text?.startsWith("📍") == true }
+                    val latestEtaMessageIndex = remember(messages) {
+                        messages.indexOfFirst { it.isFromMe && it.text?.startsWith("📍") == true }
                     }
 
                     // 3. PERF: Pre-compute showSenderName for group chats (O(n) once vs O(1) per-item)
                     // Show when: group chat, incoming message, sender changed from previous (older) message
-                    val showSenderNameMap = remember(uiState.messages, uiState.isGroup) {
+                    val showSenderNameMap = remember(messages, uiState.isGroup) {
                         if (!uiState.isGroup) emptyMap()
                         else {
                             val map = mutableMapOf<Int, Boolean>()
-                            val messages = uiState.messages
+                            val messages = messages
                             for (i in messages.indices) {
                                 val message = messages[i]
                                 val previousMessage = messages.getOrNull(i + 1)
@@ -1334,11 +1335,11 @@ fun ChatScreen(
 
                     // 4. PERF: Pre-compute showAvatar for group chats (O(n) once vs O(1) per-item)
                     // Show on the last (newest) message in a consecutive group from same sender
-                    val showAvatarMap = remember(uiState.messages, uiState.isGroup) {
+                    val showAvatarMap = remember(messages, uiState.isGroup) {
                         if (!uiState.isGroup) emptyMap()
                         else {
                             val map = mutableMapOf<Int, Boolean>()
-                            val messages = uiState.messages
+                            val messages = messages
                             for (i in messages.indices) {
                                 val message = messages[i]
                                 val newerMessage = messages.getOrNull(i - 1)
@@ -1384,7 +1385,7 @@ fun ChatScreen(
                         }
 
                         itemsIndexed(
-                            items = uiState.messages,
+                            items = messages,
                             key = { _, message -> message.guid },
                             // PHASE 4 OPTIMIZATION: Stable content types for efficient view recycling
                             // Compose uses contentType to group items with similar layouts.
@@ -1439,7 +1440,7 @@ fun ChatScreen(
                             // Calculate group position for visual message grouping
                             // In reversed layout: index 0 = newest (bottom), higher index = older (top)
                             val groupPosition = calculateGroupPosition(
-                                messages = uiState.messages,
+                                messages = messages,
                                 index = index,
                                 message = message
                             )
@@ -1685,7 +1686,7 @@ fun ChatScreen(
                         // Loading indicator - shows when fetching older messages from server
                         // Since reverseLayout=true, adding at end puts it at visual top
                         // Acts as soft scroll boundary while fetch is in progress
-                        if (isLoadingFromServer && uiState.messages.isNotEmpty()) {
+                        if (isLoadingFromServer && messages.isNotEmpty()) {
                             item(key = "loading_more_indicator", contentType = ContentType.LOADING_SKELETON) {
                                 LoadingMoreIndicator()
                             }
@@ -1693,7 +1694,7 @@ fun ChatScreen(
 
                         // Syncing indicator - shows skeleton bubbles at top while fetching messages
                         // Since reverseLayout=true, adding at end puts it at visual top
-                        if (uiState.isSyncingMessages && uiState.messages.isNotEmpty()) {
+                        if (uiState.isSyncingMessages && messages.isNotEmpty()) {
                             item(key = "sync_skeleton", contentType = ContentType.LOADING_SKELETON) {
                                 Column(
                                     modifier = Modifier.padding(vertical = 8.dp),

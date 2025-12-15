@@ -153,48 +153,58 @@ class ChatSendDelegate @Inject constructor(
                 hasAttachments = attachments.isNotEmpty()
             )
 
-            // Queue message for offline-first delivery via WorkManager
-            val queueStart = System.currentTimeMillis()
-            Log.d(TAG, "⏱️ [DELEGATE] calling queueMessage: +${System.currentTimeMillis() - sendStartTime}ms")
-            pendingMessageRepository.queueMessage(
-                chatGuid = chatGuid,
-                text = trimmedText,
-                replyToGuid = replyToGuid,
-                effectId = effectId,
-                attachments = attachments,
-                deliveryMode = deliveryMode
-            ).fold(
-                onSuccess = { localId ->
-                    Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
-                    Log.d(TAG, "Message queued successfully: $localId")
-                    PerformanceProfiler.end(sendId, "queued")
+            // OPTIMISTIC INSERTION (Phase 1):
+            // Generate GUID and insert into UI *before* touching the database.
+            // This eliminates the ~50ms DB write latency from the visual feedback loop.
+            val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+            val creationTime = System.currentTimeMillis()
 
-                    // Notify for optimistic UI insertion
-                    Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback: +${System.currentTimeMillis() - sendStartTime}ms")
-                    onQueued?.invoke(
-                        QueuedMessageInfo(
-                            guid = localId,
-                            text = trimmedText.ifBlank { null },
-                            dateCreated = System.currentTimeMillis(),
-                            hasAttachments = attachments.isNotEmpty(),
-                            replyToGuid = replyToGuid,
-                            effectId = effectId
-                        )
-                    )
-                    Log.d(TAG, "⏱️ [DELEGATE] onQueued callback returned: ${System.currentTimeMillis() - sendStartTime}ms")
-
-                    // Play sound for SMS delivery (optimistic)
-                    val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
-                    if (isSmsSend) {
-                        soundManager.playSendSound()
-                    }
-                },
-                onFailure = { e ->
-                    Log.e(TAG, "Failed to queue message", e)
-                    _sendError.value = "Failed to queue message: ${e.message}"
-                    PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
-                }
+            Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback (OPTIMISTIC): +${System.currentTimeMillis() - sendStartTime}ms")
+            onQueued?.invoke(
+                QueuedMessageInfo(
+                    guid = tempGuid,
+                    text = trimmedText.ifBlank { null },
+                    dateCreated = creationTime,
+                    hasAttachments = attachments.isNotEmpty(),
+                    replyToGuid = replyToGuid,
+                    effectId = effectId
+                )
             )
+            Log.d(TAG, "⏱️ [DELEGATE] onQueued callback returned: +${System.currentTimeMillis() - sendStartTime}ms")
+
+            // Queue message for offline-first delivery via WorkManager
+            // CRITICAL: Run on IO dispatcher to prevent blocking the main thread (which delays UI rendering)
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                val queueStart = System.currentTimeMillis()
+                Log.d(TAG, "⏱️ [DELEGATE] calling queueMessage (IO): +${System.currentTimeMillis() - sendStartTime}ms")
+                pendingMessageRepository.queueMessage(
+                    chatGuid = chatGuid,
+                    text = trimmedText,
+                    replyToGuid = replyToGuid,
+                    effectId = effectId,
+                    attachments = attachments,
+                    deliveryMode = deliveryMode,
+                    forcedLocalId = tempGuid // Pass the GUID we already displayed
+                ).fold(
+                    onSuccess = { localId ->
+                        Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
+                        Log.d(TAG, "Message queued successfully: $localId")
+                        PerformanceProfiler.end(sendId, "queued")
+
+                        // Play sound for SMS delivery (optimistic)
+                        val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
+                        if (isSmsSend) {
+                            soundManager.playSendSound()
+                        }
+                    },
+                    onFailure = { e ->
+                        Log.e(TAG, "Failed to queue message", e)
+                        _sendError.value = "Failed to queue message: ${e.message}"
+                        PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
+                        // TODO: We should probably remove the optimistic message here if DB failed
+                    }
+                )
+            }
         }
     }
 

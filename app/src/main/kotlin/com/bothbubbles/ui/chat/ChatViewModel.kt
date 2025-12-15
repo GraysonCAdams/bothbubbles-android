@@ -192,6 +192,10 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
+    // Separate flow for messages to prevent full UI recomposition on message updates
+    private val _messagesState = MutableStateFlow<StableList<MessageUiModel>>(StableList(emptyList()))
+    val messagesState: StateFlow<StableList<MessageUiModel>> = _messagesState.asStateFlow()
+
     // Draft text flow (declared before composerState which depends on it)
     private val _draftText = MutableStateFlow("")
     val draftText: StateFlow<String> = _draftText.asStateFlow()
@@ -851,7 +855,7 @@ class ChatViewModel @Inject constructor(
      */
     private fun observeSmartReplies() {
         viewModelScope.launch {
-            _uiState.map { it.messages }
+            _messagesState
                 .distinctUntilChanged()
                 .debounce(500)  // Wait for conversation to settle
                 .collect { messages ->
@@ -1469,7 +1473,7 @@ class ChatViewModel @Inject constructor(
                     // Messages are now in Room and will be picked up by observeMessagesForChat
                 },
                 onFailure = { e ->
-                    if (_uiState.value.messages.isEmpty()) {
+                    if (_messagesState.value.isEmpty()) {
                         _uiState.update { it.copy(error = "Failed to load SMS messages: ${e.message}") }
                     }
                 }
@@ -1819,10 +1823,16 @@ class ChatViewModel @Inject constructor(
                     Log.d(TAG, "⏱️ [UI] collecting messages: ${messageModels.size}, thread: ${Thread.currentThread().name}")
 
                     val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
+                    
+                    // Update separate messages flow FIRST (triggers list recomposition only)
+                    val stableMessages = messageModels.toStable()
+                    _messagesState.value = stableMessages
+
+                    // Update main UI state (triggers rest of screen)
                     _uiState.update { state ->
                         state.copy(
                             isLoading = false,
-                            messages = messageModels.toStable(),
+                            // messages = stableMessages, // REMOVED: Decoupled to prevent massive recomposition
                             canLoadMore = messageModels.size < pagingController.totalCount.value
                         )
                     }
@@ -1860,7 +1870,7 @@ class ChatViewModel @Inject constructor(
                 Log.d(TAG, "Chat $chatGuid not in local DB, fetching from server first")
                 chatRepository.fetchChat(chatGuid).onFailure { e ->
                     Log.e(TAG, "Failed to fetch chat $chatGuid from server", e)
-                    if (_uiState.value.messages.isEmpty()) {
+                    if (_messagesState.value.isEmpty()) {
                         _uiState.update { it.copy(error = "Failed to load chat: ${e.message}") }
                     }
                     _uiState.update { it.copy(isSyncingMessages = false) }
@@ -1873,7 +1883,7 @@ class ChatViewModel @Inject constructor(
                 limit = 50
             ).onFailure { e ->
                 // Only show error if we have no local messages
-                if (_uiState.value.messages.isEmpty()) {
+                if (_messagesState.value.isEmpty()) {
                     _uiState.update { it.copy(error = e.message) }
                 }
             }
@@ -1975,7 +1985,7 @@ class ChatViewModel @Inject constructor(
                 }
 
                 // Get the timestamp of the newest message we have locally
-                val newestMessage = _uiState.value.messages.firstOrNull()
+                val newestMessage = _messagesState.value.firstOrNull()
                 val afterTimestamp = newestMessage?.dateCreated
 
                 try {
@@ -2026,7 +2036,7 @@ class ChatViewModel @Inject constructor(
                         }
 
                         // Sync recent messages to catch any missed while backgrounded
-                        val newestMessage = _uiState.value.messages.firstOrNull()
+                        val newestMessage = _messagesState.value.firstOrNull()
                         val afterTimestamp = newestMessage?.dateCreated
 
                         try {
@@ -2311,7 +2321,7 @@ class ChatViewModel @Inject constructor(
             lastPreloadTime = now
 
             // Defer preload work to avoid any main thread blocking
-            val messages = _uiState.value.messages
+            val messages = _messagesState.value
             if (messages.isNotEmpty()) {
                 // Update cached attachments only if message count changed
                 if (messages.size != cachedAttachmentsMessageCount) {
@@ -2721,7 +2731,7 @@ class ChatViewModel @Inject constructor(
      * Uses native tapback API via BlueBubbles server.
      */
     fun toggleReaction(messageGuid: String, tapback: Tapback) {
-        val message = _uiState.value.messages.find { it.guid == messageGuid } ?: return
+        val message = _messagesState.value.find { it.guid == messageGuid } ?: return
 
         // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
         // Local SMS/MMS cannot have tapbacks
@@ -2843,13 +2853,13 @@ class ChatViewModel @Inject constructor(
             return
         }
 
-        val oldestMessage = _uiState.value.messages.lastOrNull()
+        val oldestMessage = _messagesState.value.lastOrNull()
         if (oldestMessage == null) {
             Log.d("ChatScroll", "[VM] loadMoreMessages SKIPPED - no messages in list")
             return
         }
 
-        Log.d("ChatScroll", "[VM] >>> STARTING loadMoreMessages: oldestDate=${oldestMessage.dateCreated}, currentMsgCount=${_uiState.value.messages.size}")
+        Log.d("ChatScroll", "[VM] >>> STARTING loadMoreMessages: oldestDate=${oldestMessage.dateCreated}, currentMsgCount=${_messagesState.value.size}")
 
         viewModelScope.launch {
             _uiState.update { it.copy(isLoadingMore = true) }
@@ -3003,7 +3013,7 @@ class ChatViewModel @Inject constructor(
         searchJob = viewModelScope.launch {
             delay(searchDebounceMs)
 
-            val messages = _uiState.value.messages
+            val messages = _messagesState.value
             val normalizedQuery = TextNormalization.normalizeForSearch(query)
 
             // Search with expanded scope: text, subject, attachment filenames
