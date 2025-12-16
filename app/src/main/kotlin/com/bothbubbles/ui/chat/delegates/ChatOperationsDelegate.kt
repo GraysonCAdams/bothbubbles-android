@@ -12,9 +12,7 @@ import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.chat.state.OperationsState
-import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.ui.components.message.Tapback
-import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
 import dagger.assisted.Assisted
@@ -57,7 +55,7 @@ class ChatOperationsDelegate @AssistedInject constructor(
         private const val TAG = "ChatOperationsDelegate"
     }
 
-    private var messageListDelegate: ChatMessageListDelegate? = null
+    // Phase 4: messageListDelegate reference removed - ViewModel coordinates reaction toggling
 
     // ============================================================================
     // CONSOLIDATED OPERATIONS STATE
@@ -346,95 +344,58 @@ class ChatOperationsDelegate @AssistedInject constructor(
         _state.update { it.copy(operationError = null) }
     }
 
-    /**
-     * Set the message list delegate for reaction updates.
-     */
-    fun setMessageListDelegate(messageList: ChatMessageListDelegate) {
-        this.messageListDelegate = messageList
-    }
+    // Phase 4: setMessageListDelegate() removed - ViewModel coordinates reaction toggling
 
     // ============================================================================
     // REACTIONS
+    // Phase 4: toggleReaction now returns result - ViewModel handles optimistic update
     // ============================================================================
 
     /**
-     * Toggle a reaction on a message.
-     * Only works on server-origin messages (IMESSAGE or SERVER_SMS).
-     * Uses native tapback API via BlueBubbles server.
+     * Data class for reaction toggle result.
+     * Phase 4: Returned to ViewModel for coordination of optimistic updates.
      */
-    fun toggleReaction(messageGuid: String, tapback: Tapback) {
-        val messageList = messageListDelegate ?: return
-        val message = messageList.messagesState.value.find { it.guid == messageGuid } ?: return
+    data class ReactionToggleParams(
+        val messageGuid: String,
+        val tapback: Tapback,
+        val isRemoving: Boolean,
+        val messageText: String
+    )
 
-        // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
-        // Local SMS/MMS cannot have tapbacks
-        if (!message.isServerOrigin) {
-            return
-        }
+    /**
+     * Send or remove a reaction on a message.
+     * Phase 4: Does NOT handle optimistic updates - ViewModel coordinates that.
+     * Returns result for ViewModel to decide on refresh/rollback.
+     *
+     * @param messageGuid The message GUID to react to
+     * @param tapback The tapback to toggle
+     * @param isRemoving True if removing the reaction, false if adding
+     * @param messageText The message text (required by BlueBubbles server)
+     * @return Result indicating success or failure
+     */
+    suspend fun sendReactionToggle(
+        messageGuid: String,
+        tapback: Tapback,
+        isRemoving: Boolean,
+        messageText: String
+    ): Result<Unit> {
+        Log.d(TAG, "sendReactionToggle: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
 
-        val isRemoving = tapback in message.myReactions
-        Log.d(TAG, "toggleReaction: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
-
-        scope.launch {
-            // OPTIMISTIC UPDATE: Immediately show the reaction in UI
-            val optimisticUpdateApplied = messageList.updateMessageLocally(messageGuid) { currentMessage ->
-                val newMyReactions = if (isRemoving) {
-                    currentMessage.myReactions - tapback
-                } else {
-                    currentMessage.myReactions + tapback
-                }
-
-                val newReactions = if (isRemoving) {
-                    // Remove my reaction from the list
-                    currentMessage.reactions.filter { !(it.tapback == tapback && it.isFromMe) }.toStable()
-                } else {
-                    // Add my reaction to the list
-                    (currentMessage.reactions + ReactionUiModel(
-                        tapback = tapback,
-                        isFromMe = true,
-                        senderName = null // Will be filled in on refresh from DB
-                    )).toStable()
-                }
-
-                currentMessage.copy(
-                    myReactions = newMyReactions,
-                    reactions = newReactions
-                )
-            }
-
-            if (optimisticUpdateApplied) {
-                Log.d(TAG, "toggleReaction: optimistic update applied for $messageGuid")
-            }
-
-            // Call API in background (fire and forget with rollback on failure)
-            // Pass selectedMessageText - required by BlueBubbles server for reaction matching
-            val messageText = message.text ?: ""
-            val result = if (isRemoving) {
-                messageSender.removeReaction(
-                    chatGuid = chatGuid,
-                    messageGuid = messageGuid,
-                    reaction = tapback.apiName,
-                    selectedMessageText = messageText
-                )
-            } else {
-                messageSender.sendReaction(
-                    chatGuid = chatGuid,
-                    messageGuid = messageGuid,
-                    reaction = tapback.apiName,
-                    selectedMessageText = messageText
-                )
-            }
-
-            result.onSuccess {
-                Log.d(TAG, "toggleReaction: API success for $messageGuid")
-                // Refresh from database to get the canonical server state
-                // This ensures our optimistic update is replaced with the real data
-                messageList.updateMessage(messageGuid)
-            }.onFailure { error ->
-                Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back optimistic update", error)
-                // ROLLBACK: Revert to database state (which doesn't have the reaction)
-                messageList.updateMessage(messageGuid)
-            }
+        return if (isRemoving) {
+            messageSender.removeReaction(
+                chatGuid = chatGuid,
+                messageGuid = messageGuid,
+                reaction = tapback.apiName,
+                selectedMessageText = messageText
+            )
+        } else {
+            // sendReaction returns Result<MessageEntity>, map to Result<Unit>
+            messageSender.sendReaction(
+                chatGuid = chatGuid,
+                messageGuid = messageGuid,
+                reaction = tapback.apiName,
+                selectedMessageText = messageText
+            ).map { }
         }
     }
 }

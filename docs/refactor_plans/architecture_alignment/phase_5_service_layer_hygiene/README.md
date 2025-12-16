@@ -1,8 +1,8 @@
 # Phase 5 — Service Layer Hygiene (Framework vs Pure Logic)
 
-> **Implementation Plan**: See [impl/README.md](impl/README.md) for audit checklists and code examples.
+> **Implementation Plan**: See [impl/README.md](impl/README.md) for audit results and verification.
 >
-> **Status**: Optional but recommended after Phases 2-4 complete.
+> **Status**: ✅ **COMPLETE** (2024-12-16) — Codebase already compliant, no changes needed.
 
 ## Layman's Explanation
 
@@ -53,11 +53,11 @@ class SocketService @Inject constructor(
 
 ## Exit Criteria
 
-- [ ] Framework components are thin (<150 LOC, delegate only)
-- [ ] Singleton services use `@ApplicationContext`
-- [ ] No `GlobalScope` usage in services
-- [ ] Service initialization is safe
-- [ ] Interfaces exist for key singletons
+- [x] Framework components are thin (<150 LOC, delegate only)
+- [x] Singleton services use `@ApplicationContext`
+- [x] No `GlobalScope` usage in services
+- [x] Service initialization is safe (documented order in BothBubblesApp.kt)
+- [x] Interfaces exist for key singletons (MessageSender, SocketConnection, Notifier, IncomingMessageProcessor, SoundPlayer)
 
 ## Risks
 

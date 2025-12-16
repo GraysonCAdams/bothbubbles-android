@@ -22,6 +22,9 @@ import com.bothbubbles.ui.chat.paging.SparseMessageList
 import com.bothbubbles.ui.chat.paging.SyncTrigger
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.Tapback
+import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
@@ -280,6 +283,69 @@ class ChatMessageListDelegate @AssistedInject constructor(
         Log.i(TAG, "[SEND_TRACE] guid=${model.guid}")
         pagingController.insertMessageOptimistically(model)
         Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically END: ${System.currentTimeMillis() - start}ms ──")
+    }
+
+    /**
+     * Insert an optimistic message from QueuedMessageInfo.
+     * Phase 4: Used by ChatViewModel to coordinate the send flow.
+     * Converts QueuedMessageInfo to MessageUiModel and inserts at position 0.
+     */
+    fun insertOptimisticMessage(queuedInfo: QueuedMessageInfo) {
+        val optimisticModel = MessageUiModel(
+            guid = queuedInfo.guid,
+            text = queuedInfo.text,
+            subject = null,
+            dateCreated = queuedInfo.dateCreated,
+            formattedTime = formatMessageTime(queuedInfo.dateCreated),
+            isFromMe = true,
+            isSent = false,
+            isDelivered = false,
+            isRead = false,
+            hasError = false,
+            isReaction = false,
+            attachments = emptyList<AttachmentUiModel>().toStable(),
+            senderName = null,
+            senderAvatarPath = null,
+            messageSource = queuedInfo.messageSource,
+            expressiveSendStyleId = queuedInfo.effectId,
+            threadOriginatorGuid = queuedInfo.replyToGuid
+        )
+        insertMessageOptimistically(optimisticModel)
+    }
+
+    /**
+     * Apply a reaction optimistically to a message.
+     * Phase 4: Used by ChatViewModel to coordinate reaction toggling.
+     *
+     * @param messageGuid The message to update
+     * @param tapback The tapback to toggle
+     * @param isRemoving True if removing the reaction, false if adding
+     */
+    suspend fun applyReactionOptimistically(messageGuid: String, tapback: Tapback, isRemoving: Boolean) {
+        updateMessageLocally(messageGuid) { currentMessage ->
+            val newMyReactions = if (isRemoving) {
+                currentMessage.myReactions - tapback
+            } else {
+                currentMessage.myReactions + tapback
+            }
+
+            val newReactions = if (isRemoving) {
+                // Remove my reaction from the list
+                currentMessage.reactions.filter { !(it.tapback == tapback && it.isFromMe) }.toStable()
+            } else {
+                // Add my reaction to the list
+                (currentMessage.reactions + ReactionUiModel(
+                    tapback = tapback,
+                    isFromMe = true,
+                    senderName = null // Will be filled in on refresh from DB
+                )).toStable()
+            }
+
+            currentMessage.copy(
+                myReactions = newMyReactions,
+                reactions = newReactions
+            )
+        }
     }
 
     /**

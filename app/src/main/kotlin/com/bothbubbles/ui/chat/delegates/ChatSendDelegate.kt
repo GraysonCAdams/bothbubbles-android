@@ -14,9 +14,6 @@ import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.PendingMessage
 import com.bothbubbles.ui.chat.QueuedMessageUiModel
 import com.bothbubbles.ui.chat.state.SendState
-import com.bothbubbles.ui.components.message.AttachmentUiModel
-import com.bothbubbles.ui.components.message.MessageUiModel
-import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
 import dagger.assisted.Assisted
@@ -32,6 +29,7 @@ import kotlinx.coroutines.launch
 
 /**
  * Data for optimistic UI insertion when a message is queued.
+ * Phase 4: Added messageSource to support ViewModel-coordinated optimistic insertion.
  */
 data class QueuedMessageInfo(
     val guid: String,
@@ -39,7 +37,8 @@ data class QueuedMessageInfo(
     val dateCreated: Long,
     val hasAttachments: Boolean,
     val replyToGuid: String?,
-    val effectId: String?
+    val effectId: String?,
+    val messageSource: String = "IMESSAGE"
 )
 
 /**
@@ -77,12 +76,9 @@ class ChatSendDelegate @AssistedInject constructor(
         private const val TAG = "ChatSendDelegate"
     }
 
-    // References to other delegates for full send flow
-    private var messageListDelegate: ChatMessageListDelegate? = null
-    private var composerDelegate: ChatComposerDelegate? = null
-    private var chatInfoDelegate: ChatInfoDelegate? = null
-    private var connectionDelegate: ChatConnectionDelegate? = null
-    private var onDraftCleared: (() -> Unit)? = null
+    // Phase 4: Delegate references removed - ChatViewModel now coordinates all cross-delegate interactions.
+    // The sendCurrentMessage() method has been replaced with queueMessage() which returns QueuedMessageInfo
+    // for the ViewModel to use when inserting optimistic messages.
 
     // Typing indicator state
     private var typingDebounceJob: Job? = null
@@ -107,141 +103,105 @@ class ChatSendDelegate @AssistedInject constructor(
         observeQueuedMessages()
     }
 
-    /**
-     * Set references to other delegates for full send flow.
-     * This enables the delegate to handle optimistic UI insert internally.
-     */
-    fun setDelegates(
-        messageList: ChatMessageListDelegate,
-        composer: ChatComposerDelegate,
-        chatInfo: ChatInfoDelegate,
-        connection: ChatConnectionDelegate,
-        onDraftCleared: () -> Unit
-    ) {
-        this.messageListDelegate = messageList
-        this.composerDelegate = composer
-        this.chatInfoDelegate = chatInfo
-        this.connectionDelegate = connection
-        this.onDraftCleared = onDraftCleared
-    }
+    // Phase 4: setDelegates() removed - ChatViewModel now coordinates all cross-delegate interactions
+    // Phase 4: sendCurrentMessage() removed - use queueMessageForSending() and let ViewModel coordinate
 
     /**
-     * Send the current message from composer with full optimistic UI handling.
-     * This is the preferred method - it handles everything internally:
-     * - Gets text/attachments from composer
-     * - Gets send mode from connection delegate
-     * - Creates and inserts optimistic message
-     * - Clears input and draft
+     * Queue a message for sending and return info for optimistic UI update.
+     * Does NOT interact with other delegates - the ViewModel handles coordination.
+     *
+     * Phase 4: This method replaces the old sendCurrentMessage() which had hidden delegate coupling.
+     * The ViewModel now coordinates: get input → call this → insert optimistic → clear input.
+     *
+     * @return QueuedMessageInfo for the ViewModel to use for optimistic UI insertion
      */
-    fun sendCurrentMessage(effectId: String? = null) {
-        val composer = composerDelegate ?: return
-        val messageList = messageListDelegate ?: return
-        val chatInfo = chatInfoDelegate ?: return
-        val connection = connectionDelegate ?: return
-
-        val text = composer.draftText.value.trim()
-        val attachments = composer.pendingAttachments.value
-
-        if (text.isBlank() && attachments.isEmpty()) return
-
-        val currentSendMode = connection.state.value.currentSendMode
-        val isLocalSmsChat = chatInfo.state.value.isLocalSmsChat
-
-        // Stop typing indicator immediately when sending
-        cancelTypingIndicator()
+    suspend fun queueMessageForSending(
+        text: String,
+        attachments: List<PendingAttachmentInput>,
+        currentSendMode: ChatSendMode,
+        isLocalSmsChat: Boolean,
+        effectId: String? = null
+    ): Result<QueuedMessageInfo> {
+        val trimmedText = text.trim()
+        if (trimmedText.isBlank() && attachments.isEmpty()) {
+            return Result.failure(IllegalArgumentException("Message text and attachments are both empty"))
+        }
 
         val sendStartTime = System.currentTimeMillis()
         Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
-        Log.i(TAG, "[SEND_TRACE] STEP 1: sendCurrentMessage() CALLED at $sendStartTime")
-        Log.i(TAG, "[SEND_TRACE] Text: \"${text.take(50)}${if (text.length > 50) "..." else ""}\"")
+        Log.i(TAG, "[SEND_TRACE] STEP 1: queueMessageForSending() CALLED at $sendStartTime")
+        Log.i(TAG, "[SEND_TRACE] Text: \"${trimmedText.take(50)}${if (trimmedText.length > 50) "..." else ""}\"")
         Log.i(TAG, "[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
 
-        scope.launch {
-            Log.i(TAG, "[SEND_TRACE] STEP 2: Coroutine launched +${System.currentTimeMillis() - sendStartTime}ms")
-            val sendId = PerformanceProfiler.start("Message.send", "${text.take(20)}...")
-            val replyToGuid = _state.value.replyingToGuid
+        val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
+        val replyToGuid = _state.value.replyingToGuid
 
-            // Clear UI state immediately for responsive feel
-            composer.clearInput()
-            _state.update { it.copy(replyingToGuid = null) }
-            onDraftCleared?.invoke()
-            Log.i(TAG, "[SEND_TRACE] STEP 3: UI cleared +${System.currentTimeMillis() - sendStartTime}ms")
+        // Clear reply state (this is internal to send delegate)
+        _state.update { it.copy(replyingToGuid = null) }
 
-            // Determine delivery mode based on chat type and current send mode
-            val deliveryMode = determineDeliveryMode(
-                isLocalSmsChat = isLocalSmsChat,
-                currentSendMode = currentSendMode,
-                hasAttachments = attachments.isNotEmpty()
-            )
+        // Determine delivery mode based on chat type and current send mode
+        val deliveryMode = determineDeliveryMode(
+            isLocalSmsChat = isLocalSmsChat,
+            currentSendMode = currentSendMode,
+            hasAttachments = attachments.isNotEmpty()
+        )
 
-            // OPTIMISTIC INSERTION: Generate GUID and insert into UI before DB
-            val tempGuid = "temp-${java.util.UUID.randomUUID()}"
-            val creationTime = System.currentTimeMillis()
-            Log.i(TAG, "[SEND_TRACE] STEP 4: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
+        // Generate GUID for optimistic UI
+        val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+        val creationTime = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] STEP 2: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
 
-            // Create optimistic message model
-            val messageSource = when {
-                isLocalSmsChat -> MessageSource.LOCAL_SMS.name
-                currentSendMode == ChatSendMode.SMS -> MessageSource.LOCAL_SMS.name
-                else -> MessageSource.IMESSAGE.name
-            }
+        // Determine message source for the optimistic model
+        val messageSource = when {
+            isLocalSmsChat -> MessageSource.LOCAL_SMS.name
+            currentSendMode == ChatSendMode.SMS -> MessageSource.LOCAL_SMS.name
+            else -> MessageSource.IMESSAGE.name
+        }
 
-            val optimisticModel = MessageUiModel(
-                guid = tempGuid,
-                text = text.ifBlank { null },
-                subject = null,
-                dateCreated = creationTime,
-                formattedTime = formatMessageTime(creationTime),
-                isFromMe = true,
-                isSent = false,
-                isDelivered = false,
-                isRead = false,
-                hasError = false,
-                isReaction = false,
-                attachments = emptyList<AttachmentUiModel>().toStable(),
-                senderName = null,
-                senderAvatarPath = null,
-                messageSource = messageSource,
-                expressiveSendStyleId = effectId,
-                threadOriginatorGuid = replyToGuid
-            )
+        // Create info for optimistic UI update (returned to ViewModel)
+        val queuedInfo = QueuedMessageInfo(
+            guid = tempGuid,
+            text = trimmedText.ifBlank { null },
+            dateCreated = creationTime,
+            hasAttachments = attachments.isNotEmpty(),
+            replyToGuid = replyToGuid,
+            effectId = effectId,
+            messageSource = messageSource
+        )
 
-            Log.i(TAG, "[SEND_TRACE] STEP 5: Calling insertMessageOptimistically +${System.currentTimeMillis() - sendStartTime}ms")
-            messageList.insertMessageOptimistically(optimisticModel)
-            Log.i(TAG, "[SEND_TRACE] STEP 6: Optimistic insert DONE +${System.currentTimeMillis() - sendStartTime}ms")
+        // Queue message for offline-first delivery via WorkManager (on IO dispatcher)
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            Log.i(TAG, "[SEND_TRACE] STEP 3: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
+            val queueStart = System.currentTimeMillis()
+            pendingMessageRepository.queueMessage(
+                chatGuid = chatGuid,
+                text = trimmedText,
+                replyToGuid = replyToGuid,
+                effectId = effectId,
+                attachments = attachments,
+                deliveryMode = deliveryMode,
+                forcedLocalId = tempGuid
+            ).fold(
+                onSuccess = { localId ->
+                    Log.i(TAG, "[SEND_TRACE] STEP 4: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
+                    Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                    PerformanceProfiler.end(sendId, "queued")
 
-            // Queue message for offline-first delivery via WorkManager
-            Log.i(TAG, "[SEND_TRACE] STEP 7: Switching to IO dispatcher +${System.currentTimeMillis() - sendStartTime}ms")
-            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                Log.i(TAG, "[SEND_TRACE] STEP 8: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
-                val queueStart = System.currentTimeMillis()
-                pendingMessageRepository.queueMessage(
-                    chatGuid = chatGuid,
-                    text = text,
-                    replyToGuid = replyToGuid,
-                    effectId = effectId,
-                    attachments = attachments,
-                    deliveryMode = deliveryMode,
-                    forcedLocalId = tempGuid
-                ).fold(
-                    onSuccess = { localId ->
-                        Log.i(TAG, "[SEND_TRACE] STEP 9: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
-                        Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
-                        PerformanceProfiler.end(sendId, "queued")
-
-                        // Play sound for SMS delivery (optimistic)
-                        val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
-                        if (isSmsSend) {
-                            soundPlayer.playSendSound()
-                        }
-                    },
-                    onFailure = { e ->
-                        Log.e(TAG, "[SEND_TRACE] STEP 9: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
-                        _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
-                        PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
+                    // Play sound for SMS delivery (optimistic)
+                    val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
+                    if (isSmsSend) {
+                        soundPlayer.playSendSound()
                     }
-                )
-            }
+
+                    Result.success(queuedInfo)
+                },
+                onFailure = { e ->
+                    Log.e(TAG, "[SEND_TRACE] STEP 4: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
+                    _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
+                    PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
+                    Result.failure(e)
+                }
+            )
         }
     }
 

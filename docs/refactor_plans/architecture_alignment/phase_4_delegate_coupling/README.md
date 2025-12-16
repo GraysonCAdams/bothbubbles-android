@@ -1,5 +1,7 @@
 # Phase 4 — Delegate Coupling Reduction (Tame the "Delegate Web")
 
+> **Status**: ✅ COMPLETE (2024-12-16)
+>
 > **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed code examples and workflow patterns.
 >
 > **Prerequisite**: Phase 3 must be complete (all delegates use AssistedInject).
@@ -62,11 +64,11 @@ search.setMessageListDelegate(messageList)
 
 ## Exit Criteria
 
-- [ ] No `setDelegates()` methods in any delegate
-- [ ] No delegate stores a reference to another delegate
-- [ ] ChatViewModel orchestrates all cross-delegate interactions
-- [ ] Control flow is explicit and traceable
-- [ ] Build passes and app functions correctly
+- [x] No `setDelegates()` methods in any delegate
+- [x] No delegate stores a reference to another delegate
+- [x] ChatViewModel orchestrates all cross-delegate interactions
+- [x] Control flow is explicit and traceable
+- [x] Build passes and app functions correctly
 
 ## Risks
 

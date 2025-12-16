@@ -414,8 +414,8 @@ fun ChatScreen(
                 onStopSharingEta = viewModel.etaSharing::stopSharingEta,
                 onDismissEtaBanner = viewModel.etaSharing::dismissBanner,
                 onExitSmsFallback = viewModel::exitSmsFallback,
-                // Wave 3G: Uses new single-param overload that gets messages internally
-                onSearchQueryChange = viewModel.search::updateSearchQuery,
+                // Phase 4: ViewModel coordinates search with messages from messageList
+                onSearchQueryChange = viewModel::updateSearchQuery,
                 onCloseSearch = viewModel.search::closeSearch,
                 onNavigateSearchUp = viewModel.search::navigateSearchUp,
                 onNavigateSearchDown = viewModel.search::navigateSearchDown,

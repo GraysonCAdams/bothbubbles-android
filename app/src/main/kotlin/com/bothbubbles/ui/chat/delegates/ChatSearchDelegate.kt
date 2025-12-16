@@ -57,8 +57,7 @@ class ChatSearchDelegate @AssistedInject constructor(
     private var searchJob: Job? = null
     private var databaseSearchJob: Job? = null
 
-    // Cross-delegate references (set after initialization)
-    private var messageListDelegate: ChatMessageListDelegate? = null
+    // Phase 4: messageListDelegate reference removed - ViewModel provides messages for search
 
     // ============================================================================
     // CONSOLIDATED SEARCH STATE
@@ -68,13 +67,7 @@ class ChatSearchDelegate @AssistedInject constructor(
     private val _state = MutableStateFlow(SearchState())
     val state: StateFlow<SearchState> = _state.asStateFlow()
 
-    /**
-     * Set cross-delegate references for internal message lookup.
-     * Called by ChatViewModel after all delegates are initialized.
-     */
-    fun setMessageListDelegate(messageListDelegate: ChatMessageListDelegate) {
-        this.messageListDelegate = messageListDelegate
-    }
+    // Phase 4: setMessageListDelegate() removed - ViewModel provides messages via updateSearchQuery(query, messages)
 
     /**
      * Activate search mode.
@@ -104,31 +97,12 @@ class ChatSearchDelegate @AssistedInject constructor(
 
     /**
      * Update search query and perform hybrid search.
-     * Uses internal message list delegate lookup for stable callback references.
+     * Phase 4: ViewModel provides messages for search - no internal delegate lookup.
      *
      * @param query The search query
+     * @param messages Currently loaded messages in memory (provided by ViewModel)
      */
-    fun updateSearchQuery(query: String) {
-        val messages = messageListDelegate?.messagesState?.value ?: emptyList()
-        updateSearchQueryInternal(query, messages, chatGuids)
-    }
-
-    /**
-     * Update search query and perform hybrid search.
-     *
-     * @param query The search query
-     * @param messages Currently loaded messages in memory
-     * @param chatGuids List of chat GUIDs to search within (for merged conversations)
-     */
-    @Deprecated(
-        message = "Use updateSearchQuery(query) instead for stable callbacks",
-        replaceWith = ReplaceWith("updateSearchQuery(query)")
-    )
-    fun updateSearchQuery(
-        query: String,
-        messages: List<MessageUiModel>,
-        chatGuids: List<String> = emptyList()
-    ) {
+    fun updateSearchQuery(query: String, messages: List<MessageUiModel>) {
         updateSearchQueryInternal(query, messages, chatGuids)
     }
 

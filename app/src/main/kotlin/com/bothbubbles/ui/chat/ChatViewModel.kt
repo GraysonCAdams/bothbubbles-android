@@ -203,20 +203,10 @@ class ChatViewModel @Inject constructor(
         // Phase 3: Delegates are now "born ready" via AssistedInject
         // No initialize() calls needed - delegates self-initialize in their init blocks
 
-        // Set delegate references for full send flow (enables optimistic UI in delegate)
-        send.setDelegates(
-            messageList = messageList,
-            composer = composer,
-            chatInfo = chatInfo,
-            connection = connection,
-            onDraftCleared = { composer.clearDraftFromDatabase() }
-        )
-
-        // Set delegate references for operations (enables reaction toggling in delegate)
-        operations.setMessageListDelegate(messageList)
-
-        // Set delegate references for search (enables internal message lookup for stable callbacks)
-        search.setMessageListDelegate(messageList)
+        // Phase 4: setDelegates() calls removed - ChatViewModel now coordinates all cross-delegate interactions
+        // - sendMessage() coordinates: get input → queue message → insert optimistic → clear input
+        // - toggleReaction() coordinates: get message → optimistic update → API call → refresh/rollback
+        // - search uses updateSearchQuery(query, messages) with messages from messageList
 
         // Observe effect settings and update delegate
         viewModelScope.launch {
@@ -569,14 +559,58 @@ class ChatViewModel @Inject constructor(
 
     // ============================================================================
     // SEND MESSAGE
+    // Phase 4: ViewModel coordinates the entire send flow (ADR 0001)
     // ============================================================================
 
     /**
      * Send the current message with optional effect.
-     * Fully delegated to ChatSendDelegate which handles optimistic UI internally.
+     * Phase 4: ViewModel coordinates the entire send flow:
+     * 1. Get input from composer
+     * 2. Get send mode from connection
+     * 3. Cancel typing indicator
+     * 4. Clear composer input immediately for responsive feel
+     * 5. Queue message (returns info for optimistic UI)
+     * 6. Insert optimistic message into message list
+     * 7. Clear draft from database
      */
     fun sendMessage(effectId: String? = null) {
-        send.sendCurrentMessage(effectId)
+        // Step 1: Get input from composer
+        val text = composer.draftText.value.trim()
+        val attachments = composer.pendingAttachments.value
+
+        if (text.isBlank() && attachments.isEmpty()) return
+
+        // Step 2: Get send mode and chat info
+        val currentSendMode = connection.state.value.currentSendMode
+        val isLocalSmsChat = chatInfo.state.value.isLocalSmsChat
+
+        // Step 3: Cancel typing indicator immediately
+        send.cancelTypingIndicator()
+
+        // Step 4: Clear composer input immediately for responsive feel
+        composer.clearInput()
+
+        viewModelScope.launch {
+            // Step 5: Queue message and get info for optimistic UI
+            val result = send.queueMessageForSending(
+                text = text,
+                attachments = attachments,
+                currentSendMode = currentSendMode,
+                isLocalSmsChat = isLocalSmsChat,
+                effectId = effectId
+            )
+
+            result.onSuccess { queuedInfo ->
+                // Step 6: Insert optimistic message using QueuedMessageInfo
+                messageList.insertOptimisticMessage(queuedInfo)
+
+                // Step 7: Clear draft from database
+                composer.clearDraftFromDatabase()
+            }.onFailure { error ->
+                Log.e(TAG, "Failed to queue message", error)
+                // Error state is updated by ChatSendDelegate
+            }
+        }
     }
 
     /**
@@ -595,10 +629,59 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Toggle a reaction on a message.
-     * Delegated to ChatOperationsDelegate.
+     * Phase 4: ViewModel coordinates the entire reaction flow:
+     * 1. Find message and check if server-origin
+     * 2. Apply optimistic update to message list
+     * 3. Call API via operations delegate
+     * 4. On success: refresh message from database
+     * 5. On failure: rollback optimistic update by refreshing from database
      */
     fun toggleReaction(messageGuid: String, tapback: Tapback) {
-        operations.toggleReaction(messageGuid, tapback)
+        // Step 1: Find message and validate
+        val message = messageList.messagesState.value.find { it.guid == messageGuid } ?: return
+
+        // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
+        if (!message.isServerOrigin) return
+
+        val isRemoving = tapback in message.myReactions
+        val messageText = message.text ?: ""
+
+        viewModelScope.launch {
+            // Step 2: Apply optimistic update to message list
+            messageList.applyReactionOptimistically(messageGuid, tapback, isRemoving)
+
+            // Step 3: Call API via operations delegate
+            val result = operations.sendReactionToggle(
+                messageGuid = messageGuid,
+                tapback = tapback,
+                isRemoving = isRemoving,
+                messageText = messageText
+            )
+
+            // Step 4/5: Refresh from database (canonical state) on both success and failure
+            // Success: Get the real server data
+            // Failure: Rollback the optimistic update
+            result.onSuccess {
+                Log.d(TAG, "toggleReaction: API success for $messageGuid")
+                messageList.updateMessage(messageGuid)
+            }.onFailure { error ->
+                Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back", error)
+                messageList.updateMessage(messageGuid)
+            }
+        }
+    }
+
+    // ============================================================================
+    // SEARCH
+    // Phase 4: ViewModel coordinates search by providing messages from messageList
+    // ============================================================================
+
+    /**
+     * Update search query.
+     * Phase 4: ViewModel coordinates by providing messages from messageList.
+     */
+    fun updateSearchQuery(query: String) {
+        search.updateSearchQuery(query, messageList.messagesState.value)
     }
 
     // Stage 3: Passthrough methods removed - access delegates directly:
@@ -607,7 +690,7 @@ class ChatViewModel @Inject constructor(
     // - viewModel.operations.archiveChat(), unarchiveChat(), toggleStarred(), deleteChat(), toggleSubjectField()
     // - viewModel.operations.getAddToContactsIntent(), getGoogleMeetIntent(), getWhatsAppCallIntent(), getHelpIntent()
     // - viewModel.operations.blockContact(), isWhatsAppAvailable(), markAsSafe(), reportAsSpam(), reportToCarrier()
-    // - viewModel.search.activateSearch(), closeSearch(), updateSearchQuery(), navigateSearchUp/Down(), showResultsSheet()
+    // - viewModel.search.activateSearch(), closeSearch(), navigateSearchUp/Down(), showResultsSheet()
     // - viewModel.scheduledMessages.scheduleMessage(), cancelScheduledMessage(), updateScheduledTime(), deleteScheduledMessage()
     // - viewModel.etaSharing.startSharingEta(), stopSharingEta(), dismissBanner()
 
