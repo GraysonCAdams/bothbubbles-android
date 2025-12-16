@@ -4,7 +4,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
-import com.bothbubbles.data.remote.api.dto.ChatDto
+import com.bothbubbles.core.network.api.dto.ChatDto
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow

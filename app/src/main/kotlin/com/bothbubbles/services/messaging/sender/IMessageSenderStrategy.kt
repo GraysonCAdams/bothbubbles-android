@@ -18,10 +18,10 @@ import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.ProgressRequestBody
-import com.bothbubbles.data.remote.api.dto.MessageDto
-import com.bothbubbles.data.remote.api.dto.SendMessageRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.ProgressRequestBody
+import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.SendMessageRequest
 import com.bothbubbles.services.media.ImageCompressor
 import com.bothbubbles.services.media.VideoCompressor
 import com.bothbubbles.services.messaging.MessageDeliveryMode
@@ -409,10 +409,11 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     private suspend fun syncOutboundAttachments(messageDto: MessageDto, preservedLocalPaths: List<String>) {
-        if (messageDto.attachments.isNullOrEmpty()) return
+        val attachments = messageDto.attachments
+        if (attachments.isNullOrEmpty()) return
         val serverAddress = settingsDataStore.serverAddress.first()
 
-        messageDto.attachments.forEachIndexed { index, attachmentDto ->
+        attachments.forEachIndexed { index, attachmentDto ->
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,

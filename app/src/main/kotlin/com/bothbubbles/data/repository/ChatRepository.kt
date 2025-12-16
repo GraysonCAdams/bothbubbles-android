@@ -7,7 +7,7 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton

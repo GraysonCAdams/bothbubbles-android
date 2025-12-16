@@ -5,7 +5,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.ActiveConversationManager

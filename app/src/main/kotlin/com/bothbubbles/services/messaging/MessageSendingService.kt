@@ -10,11 +10,11 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.PendingAttachmentInput
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.EditMessageRequest
-import com.bothbubbles.data.remote.api.dto.MessageDto
-import com.bothbubbles.data.remote.api.dto.SendReactionRequest
-import com.bothbubbles.data.remote.api.dto.UnsendMessageRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.EditMessageRequest
+import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.SendReactionRequest
+import com.bothbubbles.core.network.api.dto.UnsendMessageRequest
 import com.bothbubbles.services.messaging.sender.MessageSenderStrategy
 import com.bothbubbles.services.messaging.sender.SendOptions
 import com.bothbubbles.services.sms.SmsPermissionHelper

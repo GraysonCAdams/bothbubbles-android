@@ -4,8 +4,8 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
 import timber.log.Timber
-import com.bothbubbles.data.remote.api.TenorApi
-import com.bothbubbles.data.remote.api.TenorGif
+import com.bothbubbles.core.network.api.TenorApi
+import com.bothbubbles.core.network.api.TenorGif
 import com.bothbubbles.ui.chat.composer.panels.GifItem
 import com.bothbubbles.ui.chat.composer.panels.GifPickerState
 import dagger.hilt.android.qualifiers.ApplicationContext

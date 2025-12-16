@@ -8,9 +8,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.CreateChatRequest
-import com.bothbubbles.data.remote.api.dto.UpdateChatRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.CreateChatRequest
+import com.bothbubbles.core.network.api.dto.UpdateChatRequest
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -142,8 +142,9 @@ class GroupSetupViewModel @Inject constructor(
                         )
 
                         val body = response.body()
-                        if (response.isSuccessful && body?.data != null) {
-                            val chatGuid = body.data.guid
+                        val chatData = body?.data
+                        if (response.isSuccessful && chatData != null) {
+                            val chatGuid = chatData.guid
 
                             // Update group name if provided
                             if (groupName != null) {

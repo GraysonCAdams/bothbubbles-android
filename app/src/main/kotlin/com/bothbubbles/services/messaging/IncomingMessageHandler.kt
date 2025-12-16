@@ -10,7 +10,7 @@ import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.services.nameinference.NameInferenceService
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -102,11 +102,12 @@ class IncomingMessageHandler @Inject constructor(
             attachmentDao.deleteAttachmentsForMessage(tempGuid)
         }
 
-        if (messageDto.attachments.isNullOrEmpty()) return
+        val attachments = messageDto.attachments
+        if (attachments.isNullOrEmpty()) return
 
         val serverAddress = settingsDataStore.serverAddress.first()
 
-        messageDto.attachments.forEach { attachmentDto ->
+        attachments.forEach { attachmentDto ->
             // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 

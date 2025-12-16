@@ -2,7 +2,7 @@ package com.bothbubbles.ui.chat.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.imessage.IMessageAvailabilityService
 import com.bothbubbles.services.messaging.ChatFallbackTracker

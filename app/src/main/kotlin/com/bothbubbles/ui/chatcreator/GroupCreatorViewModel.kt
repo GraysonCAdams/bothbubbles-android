@@ -7,8 +7,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.CreateChatRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.CreateChatRequest
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -359,11 +359,12 @@ class GroupCreatorViewModel @Inject constructor(
                         )
 
                         val body = response.body()
-                        if (response.isSuccessful && body?.data != null) {
+                        val chatData = body?.data
+                        if (response.isSuccessful && chatData != null) {
                             _uiState.update {
                                 it.copy(
                                     isLoading = false,
-                                    createdChatGuid = body.data.guid
+                                    createdChatGuid = chatData.guid
                                 )
                             }
                         } else {

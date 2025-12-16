@@ -10,8 +10,8 @@ import com.bothbubbles.data.local.db.dao.AttachmentWithDate
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.services.media.ThumbnailManager
 import com.bothbubbles.util.GifProcessor
 import com.bothbubbles.util.NetworkConfig
@@ -140,11 +140,12 @@ class AttachmentRepository @Inject constructor(
             attachmentDao.deleteAttachmentsForMessage(tempGuid)
         }
 
-        if (messageDto.attachments.isNullOrEmpty()) return
+        val attachments = messageDto.attachments
+        if (attachments.isNullOrEmpty()) return
 
         val serverAddress = settingsDataStore.serverAddress.first()
 
-        messageDto.attachments.forEach { attachmentDto ->
+        attachments.forEach { attachmentDto ->
             // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 

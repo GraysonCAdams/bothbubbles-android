@@ -7,9 +7,9 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.SyncSource
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.MessageDto
-import com.bothbubbles.data.remote.api.dto.MessageQueryRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageQueryRequest
 import com.bothbubbles.services.sync.SyncRangeTracker
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoff

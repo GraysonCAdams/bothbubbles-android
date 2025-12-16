@@ -7,7 +7,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository

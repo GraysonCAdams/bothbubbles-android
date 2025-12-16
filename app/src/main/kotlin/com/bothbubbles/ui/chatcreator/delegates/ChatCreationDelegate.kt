@@ -2,8 +2,8 @@ package com.bothbubbles.ui.chatcreator.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.CreateChatRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.CreateChatRequest
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.GroupChatUiModel
@@ -58,8 +58,9 @@ class ChatCreationDelegate @Inject constructor(
             )
 
             val body = response.body()
-            if (response.isSuccessful && body?.data != null) {
-                val chatGuid = body.data.guid
+            val chatData = body?.data
+            if (response.isSuccessful && chatData != null) {
+                val chatGuid = chatData.guid
                 _createdChatGuid.value = chatGuid
                 ChatCreationResult.Success(chatGuid)
             } else {
@@ -117,9 +118,10 @@ class ChatCreationDelegate @Inject constructor(
                 )
 
                 val body = response.body()
-                Timber.d("createChat response: code=${response.code()}, message=${body?.message}, data=${body?.data}")
-                if (response.isSuccessful && body?.data != null) {
-                    val chatGuid = body.data.guid
+                val chatData = body?.data
+                Timber.d("createChat response: code=${response.code()}, message=${body?.message}, data=$chatData")
+                if (response.isSuccessful && chatData != null) {
+                    val chatGuid = chatData.guid
                     Timber.d("iMessage chat created: $chatGuid")
                     _createdChatGuid.value = chatGuid
                     ChatCreationResult.Success(chatGuid)

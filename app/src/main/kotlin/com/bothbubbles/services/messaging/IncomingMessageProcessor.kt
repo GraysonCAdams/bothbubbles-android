@@ -1,7 +1,7 @@
 package com.bothbubbles.services.messaging
 
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageDto
 
 /**
  * Interface for processing incoming messages from the server.

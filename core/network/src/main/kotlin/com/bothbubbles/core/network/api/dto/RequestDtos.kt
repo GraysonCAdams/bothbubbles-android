@@ -1,4 +1,4 @@
-package com.bothbubbles.data.remote.api.dto
+package com.bothbubbles.core.network.api.dto
 
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass

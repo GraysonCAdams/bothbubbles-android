@@ -2,9 +2,9 @@ package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.remote.api.BothBubblesApi
-import com.bothbubbles.data.remote.api.dto.ChatDto
-import com.bothbubbles.data.remote.api.dto.ChatQueryRequest
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.ChatDto
+import com.bothbubbles.core.network.api.dto.ChatQueryRequest
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoff
 import com.bothbubbles.util.retryWithRateLimitAwareness

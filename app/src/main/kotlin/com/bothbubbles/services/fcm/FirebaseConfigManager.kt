@@ -3,7 +3,7 @@ package com.bothbubbles.services.fcm
 import android.content.Context
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.google.android.gms.common.ConnectionResult
 import com.google.android.gms.common.GoogleApiAvailability
 import com.google.firebase.FirebaseApp

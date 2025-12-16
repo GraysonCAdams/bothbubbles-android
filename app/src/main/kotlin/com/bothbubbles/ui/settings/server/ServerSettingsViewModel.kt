@@ -3,7 +3,7 @@ package com.bothbubbles.ui.settings.server
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import dagger.hilt.android.lifecycle.HiltViewModel

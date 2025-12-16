@@ -1,7 +1,7 @@
 package com.bothbubbles.services.socket
 
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.sound.SoundManager
 import com.squareup.moshi.Moshi

@@ -1,6 +1,6 @@
 package com.bothbubbles.data.repository
 
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import javax.inject.Inject
 import javax.inject.Singleton
 

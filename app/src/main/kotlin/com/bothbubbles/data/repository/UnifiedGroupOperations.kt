@@ -4,7 +4,7 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
-import com.bothbubbles.data.remote.api.dto.ChatDto
+import com.bothbubbles.core.network.api.dto.ChatDto
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import javax.inject.Inject

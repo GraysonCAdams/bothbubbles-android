@@ -1,6 +1,6 @@
-package com.bothbubbles.data.remote.api
+package com.bothbubbles.core.network.api
 
-import com.bothbubbles.data.remote.api.dto.*
+import com.bothbubbles.core.network.api.dto.*
 import okhttp3.MultipartBody
 import okhttp3.RequestBody
 import retrofit2.Response

@@ -19,6 +19,8 @@ BothBubbles is a complete native rewrite of BlueBubbles for Android. Unlike the 
 
 **SMS/MMS fallback.** Set BothBubbles as your default SMS app to unify all messaging. When your server is offline or a recipient doesn't have iMessage, messages automatically route through your carrier.
 
+**On RCS:** We don't support RCS because [Google doesn't allow third-party apps to access it](#why-no-rcs). Should Google ever open the APIs, RCS integration would be straightforward—our architecture already handles multiple message transports. RCS would slot in as another layer: iMessage → RCS → SMS/MMS, giving you the richest available protocol for each conversation.
+
 ---
 
 ## Features
@@ -41,11 +43,11 @@ BothBubbles is a complete native rewrite of BlueBubbles for Android. Unlike the 
 
 ### Smart Features
 
-- **Smart Reply** — On-device ML suggestions for quick responses
+- **Smart Reply** — On-device ML suggestions for quick responses (Google ML Kit)
 - **Message Categorization** — Auto-sort transactions, deliveries, promotions
-- **Auto-Responder** — Automatic replies when you're unavailable
+- **iMessage Redirect** — Auto-reply to SMS senders who have iMessage, prompting them to text you there instead
 - **Quick Reply Templates** — Customizable message shortcuts
-- **ETA Sharing** — Share navigation progress with contacts automatically
+- **ETA Sharing** — Automatically send updates to contacts when navigating with Google Maps or Waze
 - **Spam Detection** — Identify and filter unwanted messages
 
 ### Organization
@@ -73,79 +75,121 @@ BothBubbles is a complete native rewrite of BlueBubbles for Android. Unlike the 
 - **Link previews** — Rich previews for shared URLs
 - **Media gallery** — Browse all shared media per conversation
 
+### Privacy
+
+- **Open source** — Full codebase is auditable; no hidden data collection
+- **Your server, your data** — Messages sync through your own Mac, not our servers
+- **iMessage E2EE** — End-to-end encrypted via Apple's infrastructure
+- **On-device ML** — Smart reply runs locally via Google ML Kit, not in the cloud
+- **No ads, no tracking** — We don't monetize your data
+
+**Being honest about limitations:**
+- iMessage encryption is Apple's—we're a client, not the protocol
+- SMS/MMS messages are inherently unencrypted (carrier limitation)
+- Your BlueBubbles server must be reachable over the internet (we recommend HTTPS)
+- Google ML Kit runs on-device but is still Google's library
+
 ---
 
 ## Comparison with Other Apps
 
-An honest look at how BothBubbles compares to popular Android messaging apps:
+An honest look at how BothBubbles compares to other messaging apps:
 
-| Feature | BothBubbles | Google Messages | Samsung Messages | Pulse SMS | Textra |
-|---------|:-----------:|:---------------:|:----------------:|:---------:|:------:|
-| **iMessage support** | Yes | No | No | No | No |
-| **SMS/MMS** | Yes | Yes | Yes | Yes | Yes |
-| **RCS** | No* | Yes | Yes | No | No |
-| **Open source** | Yes | No | No | No | No |
-| **Native Android (Kotlin)** | Yes | Yes | Yes | Partial | Partial |
-| **Material Design 3** | Yes | Yes | Partial | No | No |
-| **Set as default SMS app** | Yes | Yes | Yes | Yes | Yes |
-| **Tapback reactions** | Yes | Emoji only | Emoji only | No | Emoji only |
-| **Read receipts** | Yes | RCS only | RCS only | No | No |
-| **Typing indicators** | Yes | RCS only | RCS only | No | No |
-| **Message effects** | Yes | No | No | No | No |
-| **End-to-end encryption** | Yes** | RCS only | RCS only | No | No |
-| **Cross-device sync** | Yes | Limited | Samsung only | Yes | No |
-| **Scheduled messages** | Yes | Yes | Yes | Yes | Yes |
-| **Smart reply** | Yes | Yes | Yes | No | No |
-| **Auto-responder** | Yes | No | No | Yes | No |
-| **Android Auto** | Yes | Yes | Yes | Limited | Limited |
-| **Backup/export** | Yes | Limited | Limited | Yes | Limited |
-| **No ads** | Yes | Yes | Yes | Paid | Paid |
-| **No subscription** | Yes | Yes | Yes | Optional | One-time |
+| Feature | BothBubbles | BlueBubbles | Google Messages | Fossify SMS |
+|---------|:-----------:|:-----------:|:---------------:|:-----------:|
+| **iMessage support** | ✅ | ✅ | ❌ | ❌ |
+| **SMS/MMS** | ✅ | ✅ | ✅ | ✅ |
+| **RCS** | ❌* | ❌* | ✅ | ❌ |
+| **Platforms** | Android | Android, iOS, Windows, Linux, Web | Android | Android |
+| **Open source** | ✅ | ✅ | ❌ | ✅ |
+| **Framework** | Native Kotlin | Flutter | Native | Native Kotlin |
+| **Material Design 3** | ✅ | 🔶 | ✅ | ✅ |
+| **Set as default SMS app** | ✅ | ✅ | ✅ | ✅ |
+| **Tapback reactions** | ✅ | ✅ | 🔶 | ❌ |
+| **Read receipts** | ✅ | ✅ | 🔶 | ❌ |
+| **Typing indicators** | ✅ | ✅ | 🔶 | ❌ |
+| **Message effects** | ✅ | ✅ | ❌ | ❌ |
+| **End-to-end encryption** | ✅** | ✅** | 🔶 | ❌ |
+| **Scheduled messages** | ✅ | ✅ | ✅ | ✅ |
+| **Smart reply (ML)** | ✅ | ❌ | ✅ | ❌ |
+| **Android Auto** | ✅ | ✅ | ✅ | ❌ |
+| **Backup/export** | ✅ | ✅ | 🔶 | ✅ |
+| **No ads** | ✅ | ✅ | ✅ | ✅ |
+| **Free** | ✅ | ✅ | ✅ | ✅ |
 
-**Legend:** Yes = Full support | Partial = Limited functionality | No = Not available
+✅ = Full support · 🔶 = Limited (RCS only, partial, etc.) · ❌ = Not available
 
 \* See [Why No RCS?](#why-no-rcs) below
 \** Via iMessage's encryption when using BlueBubbles server
 
-### Where BothBubbles Excels
+### BothBubbles vs BlueBubbles
 
-- **Only option for iMessage on Android** with full feature parity
-- **True fallback system** — iMessage when possible, SMS when not
-- **Privacy-focused** — Open source, no data collection, your server
-- **Power user features** — ETA sharing, categorization, auto-responder
+Both apps connect to the same BlueBubbles server for iMessage. The difference is in implementation:
+
+| | BothBubbles | BlueBubbles |
+|---|-------------|-------------|
+| **Framework** | Native Kotlin + Jetpack Compose | Flutter (Dart) |
+| **Platforms** | Android only | Android, iOS, Windows, Linux, Web |
+| **Performance** | Native Android rendering | Cross-platform Skia rendering |
+| **UI toolkit** | Android's native Material 3 components | Flutter's Material 3 widgets (cross-platform reimplementation) |
+| **Material You** | System-level dynamic color | Via `dynamic_color` package |
+| **Smart features** | ML-powered smart reply, categorization | Basic |
+| **Best for** | Android users wanting native experience | Users needing cross-platform access |
+
+> **Technical note:** Both apps use Material 3, but BothBubbles uses Android's actual Jetpack Compose components (native widgets, system animations, platform conventions), while BlueBubbles uses Flutter's cross-platform Material implementation rendered via Skia. Same design language, different rendering engines.
+
+> **Use them together!** BothBubbles doesn't replace BlueBubbles—it complements it. Use BothBubbles as your native Android messaging app, and keep using BlueBubbles on your desktop, laptop, tablet, or browser. They all connect to the same server and stay in sync.
 
 ### Where Others May Be Better
 
-- **RCS messaging** — If you primarily message other Android users, Google Messages' RCS support offers a similar experience to iMessage
-- **Simplicity** — If you just need basic texting, stock apps have less setup
-- **No Mac required** — iMessage features require running BlueBubbles Server on a Mac
+- **RCS messaging** — If you primarily message Android users, Google Messages' RCS offers similar features to iMessage without requiring a Mac
+- **Simplicity** — If you just need basic texting, stock apps require no setup
+
+---
+
+## Why iMessage Still Matters in 2025
+
+Even with iOS 18's RCS support, iMessage remains superior for most users in iPhone-dominant markets.
+
+### The Hard Numbers
+
+| Metric | Value | Source |
+|--------|:-----:|--------|
+| iPhone market share (Japan) | **~70%** | [World Population Review](https://worldpopulationreview.com/country-rankings/iphone-market-share-by-country) |
+| iPhone market share (USA) | **55-60%** | [DemandSage](https://www.demandsage.com/iphone-user-statistics/) |
+| iPhone market share (UK) | **~57%** | [World Population Review](https://worldpopulationreview.com/country-rankings/iphone-market-share-by-country) |
+| iPhones on iOS 18+ (required for RCS) | **68%** | [Apple via TechCrunch](https://techcrunch.com/2025/01/24/ios-18-hits-68-adoption-across-iphones-per-new-apple-figures/) |
+
+**What 68% actually means for RCS:**
+- **32% of iPhone users** can't receive your RCS messages at all—they fall back to SMS
+- In a group chat with 5 iPhone users, there's a **~85% chance** at least one is on iOS 17 or older
+- **One non-RCS participant breaks the entire group**—everyone falls back to MMS (no reactions, no typing indicators, compressed media)
+
+**With iMessage via BlueBubbles, you reach 100% of iPhone users**—not just the 68% on iOS 18+. Group chats stay rich for everyone.
+
+### iMessage vs Apple's RCS
+
+Apple's RCS implementation is [deliberately limited](https://www.pocket-lint.com/ios-18-rcs-rollout-issues/):
+
+| Feature | iMessage | Apple's RCS |
+|---------|:--------:|:-----------:|
+| End-to-end encryption | ✅ | ❌ |
+| Edit sent messages | ✅ | ❌ |
+| Reply in group threads | ✅ | ❌ |
+| Message effects | ✅ | ❌ |
+| Blue bubbles | ✅ | ❌ |
+| Works on any iOS version | ✅ | ❌ (iOS 18+) |
+| Works on all in-flight WiFi | ✅ | [🔶](https://www.t-mobile.com/support/coverage/t-mobile-in-flight-connections-on-us) |
+
+RCS stays green. The social distinction persists.
 
 ---
 
 ## Why No RCS?
 
-**TL;DR:** Google doesn't allow third-party apps to use RCS. This isn't a technical limitation—it's a policy decision by Google.
+**TL;DR:** Google [hid the RCS APIs](https://9to5google.com/2019/02/22/android-q-rcs-api-delay/) in 2019 and [restricted them to OEMs](https://9to5google.com/2019/07/30/android-rcs-apis-oems-not-third-party-apps/). Third-party apps cannot implement RCS—even as the default SMS app.
 
-### The Full Story
-
-In 2019, Google was developing public RCS APIs for Android that would have allowed any messaging app to support RCS. This would have been great for users and developers alike. However, [Google changed course and hid these APIs](https://9to5google.com/2019/02/22/android-q-rcs-api-delay/) before Android Q's release.
-
-The commit message read: *"This feature is punted from Android Q."*
-
-Since then, [RCS APIs have remained restricted](https://9to5google.com/2019/07/30/android-rcs-apis-oems-not-third-party-apps/) to Google's own apps and select OEM partners (like Samsung for their wearable features). The code explicitly checks package names and signatures before granting access.
-
-**What this means:**
-- Only Google Messages can use RCS on most Android devices
-- Third-party developers cannot implement RCS, regardless of technical capability
-- Even being the default SMS app doesn't grant RCS access
-- This is unlikely to change given Google's continued investment in Google Messages
-
-**Our approach:**
-- We support what we can: SMS, MMS, and iMessage (via BlueBubbles)
-- iMessage actually offers a richer experience than RCS (effects, better encryption)
-- For Android-to-Android messaging, we recommend using Google Messages for RCS
-
-For more details, see: [Android RCS APIs for OEMs, not third-party apps](https://9to5google.com/2019/07/30/android-rcs-apis-oems-not-third-party-apps/)
+We support what we can: iMessage (via BlueBubbles), SMS, and MMS. For Android-to-Android RCS, use Google Messages alongside BothBubbles.
 
 ---
 
@@ -216,10 +260,14 @@ BothBubbles follows Clean Architecture with MVVM, built for maintainability and 
 | Architecture | MVVM + Clean Architecture |
 | DI | Hilt |
 | Database | Room |
-| Network | Retrofit + OkHttp + Moshi |
-| Real-time | Socket.IO |
+| Network | Socket.IO + FCM + REST (see below) |
 | Background | WorkManager |
 | Navigation | Compose Navigation (type-safe) |
+
+**Why 3 network layers?** BlueBubbles server push can be unreliable, so we use redundant channels:
+1. **Socket.IO** — Real-time messages when connected
+2. **FCM** — Push notifications when backgrounded or socket drops
+3. **REST polling** — Fallback sync every 2s if socket is quiet, plus periodic background sync
 
 ---
 

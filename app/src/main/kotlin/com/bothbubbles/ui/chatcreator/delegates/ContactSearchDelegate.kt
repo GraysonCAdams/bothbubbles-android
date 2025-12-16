@@ -2,7 +2,7 @@ package com.bothbubbles.ui.chatcreator.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.socket.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection

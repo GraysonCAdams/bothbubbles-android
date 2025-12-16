@@ -1,4 +1,4 @@
-package com.bothbubbles.data.remote.api
+package com.bothbubbles.core.network.api
 
 import okhttp3.MediaType
 import okhttp3.RequestBody

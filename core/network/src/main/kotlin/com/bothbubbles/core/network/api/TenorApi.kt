@@ -1,4 +1,4 @@
-package com.bothbubbles.data.remote.api
+package com.bothbubbles.core.network.api
 
 import retrofit2.http.GET
 import retrofit2.http.Query

@@ -1,7 +1,7 @@
 package com.bothbubbles.services.socket
 
 import timber.log.Timber
-import com.bothbubbles.data.remote.api.dto.MessageDto
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.squareup.moshi.Moshi
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.flow.MutableSharedFlow

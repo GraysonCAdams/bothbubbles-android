@@ -4,7 +4,7 @@ import timber.log.Timber
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.remote.api.BothBubblesApi
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.autoresponder.AutoResponderService
 import dagger.hilt.android.lifecycle.HiltViewModel

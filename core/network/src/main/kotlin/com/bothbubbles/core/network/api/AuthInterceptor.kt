@@ -1,14 +1,8 @@
-package com.bothbubbles.data.remote.api
+package com.bothbubbles.core.network.api
 
-import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.core.network.AuthCredentialsProvider
 import timber.log.Timber
-import com.bothbubbles.di.ApplicationScope
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.launchIn
-import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
@@ -24,8 +18,7 @@ import javax.inject.Inject
  * on app startup while not blocking OkHttp's network threads unnecessarily.
  */
 class AuthInterceptor @Inject constructor(
-    private val settingsDataStore: SettingsDataStore,
-    @ApplicationScope private val applicationScope: CoroutineScope
+    private val credentialsProvider: AuthCredentialsProvider
 ) : Interceptor {
 
     private data class CachedCredentials(
@@ -37,26 +30,6 @@ class AuthInterceptor @Inject constructor(
     private val _credentials = MutableStateFlow(CachedCredentials())
     private val _initialized = MutableStateFlow(false)
 
-    init {
-        // Combine all settings flows and update cache atomically
-        combine(
-            settingsDataStore.serverAddress,
-            settingsDataStore.guidAuthKey,
-            settingsDataStore.customHeaders
-        ) { address, authKey, headers ->
-            CachedCredentials(
-                serverAddress = address,
-                authKey = authKey,
-                customHeaders = headers
-            )
-        }
-        .onEach { credentials ->
-            _credentials.value = credentials
-            _initialized.value = true
-        }
-        .launchIn(applicationScope)
-    }
-
     override fun intercept(chain: Interceptor.Chain): Response {
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url
@@ -67,7 +40,7 @@ class AuthInterceptor @Inject constructor(
             return chain.proceed(originalRequest)
         }
 
-        // Get credentials, waiting for initialization if needed
+        // Get credentials (blocking call on OkHttp thread)
         val credentials = getCredentialsBlocking()
         val serverAddress = credentials.serverAddress
         val authKey = credentials.authKey
@@ -124,14 +97,12 @@ class AuthInterceptor @Inject constructor(
     }
 
     /**
-     * Get credentials, waiting for initialization if needed.
-     * Uses bounded timeout to prevent indefinite blocking.
+     * Get credentials, refreshing from provider.
      *
      * This runBlocking is acceptable because:
      * 1. We're already on OkHttp's background thread pool
      * 2. We need synchronous response for the interceptor
      * 3. We have bounded timeout (3 seconds max)
-     * 4. DataStore guarantees first emission (stored value or default)
      */
     private fun getCredentialsBlocking(): CachedCredentials {
         // Fast path: already initialized
@@ -139,16 +110,33 @@ class AuthInterceptor @Inject constructor(
             return _credentials.value
         }
 
-        // Slow path: wait for initialization with timeout
+        // Slow path: fetch from provider with timeout
         return runBlocking {
             withTimeoutOrNull(INIT_TIMEOUT_MS) {
-                _initialized.first { it }
-                _credentials.value
+                val serverAddress = credentialsProvider.getServerAddress()
+                val authKey = credentialsProvider.getAuthKey()
+                val customHeaders = credentialsProvider.getCustomHeaders()
+
+                val credentials = CachedCredentials(
+                    serverAddress = serverAddress,
+                    authKey = authKey,
+                    customHeaders = customHeaders
+                )
+                _credentials.value = credentials
+                _initialized.value = true
+                credentials
             } ?: run {
                 Timber.w("Credentials initialization timed out")
                 _credentials.value
             }
         }
+    }
+
+    /**
+     * Clear cached credentials (call when settings change)
+     */
+    fun invalidateCache() {
+        _initialized.value = false
     }
 
     companion object {

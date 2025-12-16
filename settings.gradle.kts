@@ -28,3 +28,4 @@ include(":app")
 
 // Core modules (Phase 6 modularization)
 include(":core:model")
+include(":core:network")
