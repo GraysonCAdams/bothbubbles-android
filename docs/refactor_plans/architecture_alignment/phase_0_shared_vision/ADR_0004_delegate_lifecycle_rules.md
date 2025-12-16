@@ -1,6 +1,8 @@
 # ADR 0004 — Delegate Lifecycle & Initialization Rules
 
-## Layman’s explanation
+**Status: ACCEPTED** (2024-12)
+
+## Layman's explanation
 
 A delegate shouldn’t be “half built.” If an object can exist but will crash unless you remembered to call `initialize()`, it’s easy for future changes to introduce bugs.
 

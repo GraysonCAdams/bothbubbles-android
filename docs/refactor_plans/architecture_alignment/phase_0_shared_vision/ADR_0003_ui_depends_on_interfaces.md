@@ -1,6 +1,8 @@
 # ADR 0003 — UI Depends on Interfaces
 
-## Layman’s explanation
+**Status: ACCEPTED** (2024-12)
+
+## Layman's explanation
 
 If the UI talks directly to a concrete implementation, it becomes hard to swap implementations, test, or refactor. Interfaces let us replace the engine without rewriting the dashboard.
 

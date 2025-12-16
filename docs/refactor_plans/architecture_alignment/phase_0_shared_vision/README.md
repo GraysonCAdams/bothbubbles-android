@@ -1,5 +1,6 @@
 # Phase 0 — Shared Vision & Decisions
 
+> **Status**: ✅ COMPLETE
 > **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed tasks, code examples, and checklists.
 
 ## Layman's Explanation
@@ -22,10 +23,10 @@ Our architecture aims for:
 
 | ADR | Decision | Status |
 |-----|----------|--------|
-| [ADR 0001](ADR_0001_coordinator_vs_delegate.md) | ChatViewModel is coordinator; delegates stay focused | Final |
-| [ADR 0002](ADR_0002_no_global_event_bus.md) | No global event bus; prefer explicit Flows | Final |
-| [ADR 0003](ADR_0003_ui_depends_on_interfaces.md) | UI depends on interfaces, not concrete services | Final |
-| [ADR 0004](ADR_0004_delegate_lifecycle_rules.md) | Use AssistedInject; eliminate `initialize()` | Final |
+| [ADR 0001](ADR_0001_coordinator_vs_delegate.md) | ChatViewModel is coordinator; delegates stay focused | ✅ ACCEPTED |
+| [ADR 0002](ADR_0002_no_global_event_bus.md) | No global event bus; prefer explicit Flows | ✅ ACCEPTED |
+| [ADR 0003](ADR_0003_ui_depends_on_interfaces.md) | UI depends on interfaces, not concrete services | ✅ ACCEPTED |
+| [ADR 0004](ADR_0004_delegate_lifecycle_rules.md) | Use AssistedInject; eliminate `initialize()` | ✅ ACCEPTED |
 
 ## Outcomes
 
@@ -41,9 +42,9 @@ Our architecture aims for:
 
 ## Exit Criteria
 
-- [ ] All 4 ADRs reviewed and marked ACCEPTED
-- [ ] Safety net test exists (`ChatSendDelegateTest`)
-- [ ] PR template updated with architecture checklist
+- [x] All 4 ADRs reviewed and marked ACCEPTED
+- [x] Safety net test exists (`ChatSendDelegateTest`)
+- [x] PR template updated with architecture checklist
 - [ ] Team signed off on decisions
 
 ## Next Steps

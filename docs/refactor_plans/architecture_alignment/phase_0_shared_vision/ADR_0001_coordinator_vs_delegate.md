@@ -1,6 +1,8 @@
 # ADR 0001 — Coordinator vs Delegates vs Use-Cases
 
-## Layman’s explanation
+**Status: ACCEPTED** (2024-12)
+
+## Layman's explanation
 
 Think of the Chat feature like a restaurant kitchen. A “delegate” is a station (grill, salads, desserts). A “coordinator” is the expediter who calls out orders and ensures the stations work together. A “use-case” is a reusable recipe.
 

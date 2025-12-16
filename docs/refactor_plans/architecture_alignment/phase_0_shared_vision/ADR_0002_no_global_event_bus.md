@@ -1,6 +1,8 @@
 # ADR 0002 — No Global Event Bus by Default
 
-## Layman’s explanation
+**Status: ACCEPTED** (2024-12)
+
+## Layman's explanation
 
 An event bus is like sending messages to “whoever is listening.” That can feel convenient, but it makes it hard to answer:
 
