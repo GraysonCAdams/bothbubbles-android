@@ -1,6 +1,9 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
+import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.data.local.db.entity.PendingMessageEntity
+import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
@@ -12,6 +15,9 @@ import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.PendingMessage
 import com.bothbubbles.ui.chat.QueuedMessageUiModel
 import com.bothbubbles.ui.chat.state.SendState
+import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
 import kotlinx.coroutines.CoroutineScope
@@ -78,6 +84,13 @@ class ChatSendDelegate @Inject constructor(
     private lateinit var chatGuid: String
     private lateinit var scope: CoroutineScope
 
+    // References to other delegates for full send flow
+    private var messageListDelegate: ChatMessageListDelegate? = null
+    private var composerDelegate: ChatComposerDelegate? = null
+    private var chatInfoDelegate: ChatInfoDelegate? = null
+    private var connectionDelegate: ChatConnectionDelegate? = null
+    private var onDraftCleared: (() -> Unit)? = null
+
     // Typing indicator state
     private var typingDebounceJob: Job? = null
     private var isCurrentlyTyping = false
@@ -100,6 +113,173 @@ class ChatSendDelegate @Inject constructor(
     fun initialize(chatGuid: String, scope: CoroutineScope) {
         this.chatGuid = chatGuid
         this.scope = scope
+
+        // Observe upload progress from MessageSendingService
+        observeUploadProgress()
+
+        // Observe queued messages from database
+        observeQueuedMessages()
+    }
+
+    /**
+     * Set references to other delegates for full send flow.
+     * This enables the delegate to handle optimistic UI insert internally.
+     */
+    fun setDelegates(
+        messageList: ChatMessageListDelegate,
+        composer: ChatComposerDelegate,
+        chatInfo: ChatInfoDelegate,
+        connection: ChatConnectionDelegate,
+        onDraftCleared: () -> Unit
+    ) {
+        this.messageListDelegate = messageList
+        this.composerDelegate = composer
+        this.chatInfoDelegate = chatInfo
+        this.connectionDelegate = connection
+        this.onDraftCleared = onDraftCleared
+    }
+
+    /**
+     * Send the current message from composer with full optimistic UI handling.
+     * This is the preferred method - it handles everything internally:
+     * - Gets text/attachments from composer
+     * - Gets send mode from connection delegate
+     * - Creates and inserts optimistic message
+     * - Clears input and draft
+     */
+    fun sendCurrentMessage(effectId: String? = null) {
+        val composer = composerDelegate ?: return
+        val messageList = messageListDelegate ?: return
+        val chatInfo = chatInfoDelegate ?: return
+        val connection = connectionDelegate ?: return
+
+        val text = composer.draftText.value.trim()
+        val attachments = composer.pendingAttachments.value
+
+        if (text.isBlank() && attachments.isEmpty()) return
+
+        val currentSendMode = connection.state.value.currentSendMode
+        val isLocalSmsChat = chatInfo.state.value.isLocalSmsChat
+
+        // Stop typing indicator immediately when sending
+        cancelTypingIndicator()
+
+        val sendStartTime = System.currentTimeMillis()
+        Log.d(TAG, "⏱️ [DELEGATE] sendCurrentMessage() CALLED")
+
+        scope.launch {
+            val sendId = PerformanceProfiler.start("Message.send", "${text.take(20)}...")
+            val replyToGuid = _state.value.replyingToGuid
+
+            // Clear UI state immediately for responsive feel
+            composer.clearInput()
+            _state.update { it.copy(replyingToGuid = null) }
+            onDraftCleared?.invoke()
+            Log.d(TAG, "⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
+
+            // Determine delivery mode based on chat type and current send mode
+            val deliveryMode = determineDeliveryMode(
+                isLocalSmsChat = isLocalSmsChat,
+                currentSendMode = currentSendMode,
+                hasAttachments = attachments.isNotEmpty()
+            )
+
+            // OPTIMISTIC INSERTION: Generate GUID and insert into UI before DB
+            val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+            val creationTime = System.currentTimeMillis()
+
+            // Create optimistic message model
+            val messageSource = when {
+                isLocalSmsChat -> MessageSource.LOCAL_SMS.name
+                currentSendMode == ChatSendMode.SMS -> MessageSource.LOCAL_SMS.name
+                else -> MessageSource.IMESSAGE.name
+            }
+
+            val optimisticModel = MessageUiModel(
+                guid = tempGuid,
+                text = text.ifBlank { null },
+                subject = null,
+                dateCreated = creationTime,
+                formattedTime = formatMessageTime(creationTime),
+                isFromMe = true,
+                isSent = false,
+                isDelivered = false,
+                isRead = false,
+                hasError = false,
+                isReaction = false,
+                attachments = emptyList<AttachmentUiModel>().toStable(),
+                senderName = null,
+                senderAvatarPath = null,
+                messageSource = messageSource,
+                expressiveSendStyleId = effectId,
+                threadOriginatorGuid = replyToGuid
+            )
+
+            Log.d(TAG, "⏱️ [DELEGATE] inserting optimistic message: +${System.currentTimeMillis() - sendStartTime}ms")
+            messageList.insertMessageOptimistically(optimisticModel)
+            Log.d(TAG, "⏱️ [DELEGATE] optimistic insert done: +${System.currentTimeMillis() - sendStartTime}ms")
+
+            // Queue message for offline-first delivery via WorkManager
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                pendingMessageRepository.queueMessage(
+                    chatGuid = chatGuid,
+                    text = text,
+                    replyToGuid = replyToGuid,
+                    effectId = effectId,
+                    attachments = attachments,
+                    deliveryMode = deliveryMode,
+                    forcedLocalId = tempGuid
+                ).fold(
+                    onSuccess = { localId ->
+                        Log.d(TAG, "Message queued successfully: $localId")
+                        PerformanceProfiler.end(sendId, "queued")
+
+                        // Play sound for SMS delivery (optimistic)
+                        val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
+                        if (isSmsSend) {
+                            soundManager.playSendSound()
+                        }
+                    },
+                    onFailure = { e ->
+                        Log.e(TAG, "Failed to queue message", e)
+                        _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
+                        PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
+                    }
+                )
+            }
+        }
+    }
+
+    /**
+     * Observe upload progress from MessageSendingService for determinate progress bar.
+     * Updates the first pending message with attachments and recalculates aggregate progress.
+     * Progress is managed by this delegate's SendState.
+     */
+    private fun observeUploadProgress() {
+        scope.launch {
+            messageSendingService.uploadProgress.collect { progress ->
+                if (progress != null) {
+                    // Calculate individual message progress (0.0 to 1.0)
+                    val attachmentBase = progress.attachmentIndex.toFloat() / progress.totalAttachments
+                    val currentProgress = progress.progress / progress.totalAttachments
+                    val messageProgress = attachmentBase + currentProgress
+
+                    // Update pending message progress
+                    val currentState = _state.value
+                    val pendingList = currentState.pendingMessages.toList()
+                    val attachmentIndex = pendingList.indexOfFirst { it.hasAttachments }
+                    if (attachmentIndex >= 0) {
+                        updatePendingMessageProgress(
+                            pendingList[attachmentIndex].tempGuid,
+                            messageProgress
+                        )
+                    }
+                    // Update aggregate progress
+                    setSendProgress(calculateAggregateProgress())
+                }
+                // Don't reset progress to 0 when progress is null - let completion handlers manage that
+            }
+        }
     }
 
     /**
@@ -396,6 +576,65 @@ class ChatSendDelegate @Inject constructor(
         val pending = _state.value.pendingMessages
         if (pending.isEmpty()) return 0f
         return pending.sumOf { it.progress.toDouble() }.toFloat() / pending.size
+    }
+
+    // ===== Queued Message Management =====
+
+    /**
+     * Observe queued messages from the database for offline-first UI.
+     * These are messages that have been queued for sending but not yet delivered.
+     */
+    private fun observeQueuedMessages() {
+        scope.launch {
+            pendingMessageRepository.observePendingForChat(chatGuid)
+                .collect { pending ->
+                    updateQueuedMessages(pending.map { it.toQueuedUiModel() })
+                }
+        }
+    }
+
+    /**
+     * Retry a failed queued message.
+     */
+    fun retryQueuedMessage(localId: String) {
+        scope.launch {
+            pendingMessageRepository.retryMessage(localId)
+                .onFailure { e ->
+                    Log.e(TAG, "Failed to retry message: $localId", e)
+                    _state.update { it.copy(sendError = "Failed to retry: ${e.message}") }
+                }
+        }
+    }
+
+    /**
+     * Cancel a queued message.
+     */
+    fun cancelQueuedMessage(localId: String) {
+        scope.launch {
+            pendingMessageRepository.cancelMessage(localId)
+                .onFailure { e ->
+                    Log.e(TAG, "Failed to cancel message: $localId", e)
+                    _state.update { it.copy(sendError = "Failed to cancel: ${e.message}") }
+                }
+        }
+    }
+
+    /**
+     * Convert PendingMessageEntity to UI model.
+     */
+    private fun PendingMessageEntity.toQueuedUiModel(): QueuedMessageUiModel {
+        return QueuedMessageUiModel(
+            localId = localId,
+            text = text,
+            hasAttachments = false, // TODO: Check attachments table
+            syncStatus = try {
+                PendingSyncStatus.valueOf(syncStatus)
+            } catch (e: Exception) {
+                PendingSyncStatus.PENDING
+            },
+            errorMessage = errorMessage,
+            createdAt = createdAt
+        )
     }
 
     // ===== Typing Indicator Management =====

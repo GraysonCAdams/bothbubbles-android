@@ -15,17 +15,103 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.chat.state.ChatInfoState
+import com.bothbubbles.ui.chat.state.OperationsState
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.common.GroupAvatar
 import com.bothbubbles.util.PhoneNumberFormatter
 
 /**
- * Top app bar for the chat screen.
+ * Top app bar for the chat screen using decomposed state objects.
  * Displays chat title, avatar, and action buttons (video call, overflow menu).
+ *
+ * This is the preferred signature for Stage 2B refactoring - UI components
+ * should request specific state objects instead of the monolithic ChatUiState.
+ *
+ * @param infoState Chat metadata from ChatInfoDelegate
+ * @param operationsState Operations state from ChatOperationsDelegate
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatTopBar(
+    infoState: ChatInfoState,
+    operationsState: OperationsState,
+    onBackClick: () -> Unit,
+    onDetailsClick: () -> Unit,
+    onVideoCallClick: () -> Unit,
+    onMenuAction: (ChatMenuAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ChatTopBarContent(
+        chatTitle = infoState.chatTitle,
+        avatarPath = infoState.avatarPath,
+        isGroup = infoState.isGroup,
+        participantNames = infoState.participantNames,
+        participantAvatarPaths = infoState.participantAvatarPaths,
+        isSnoozed = infoState.isSnoozed,
+        isArchived = operationsState.isArchived,
+        isStarred = operationsState.isStarred,
+        showSubjectField = operationsState.showSubjectField,
+        isLocalSmsChat = infoState.isLocalSmsChat,
+        onBackClick = onBackClick,
+        onDetailsClick = onDetailsClick,
+        onVideoCallClick = onVideoCallClick,
+        onMenuAction = onMenuAction,
+        modifier = modifier
+    )
+}
+
+/**
+ * Top app bar for the chat screen.
+ * Displays chat title, avatar, and action buttons (video call, overflow menu).
+ *
+ * @deprecated Use the overload accepting ChatInfoState and OperationsState for better
+ * state isolation and reduced recomposition scope.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ChatTopBar(
+    chatTitle: String,
+    avatarPath: String?,
+    isGroup: Boolean,
+    participantNames: List<String>,
+    participantAvatarPaths: List<String?>,
+    isSnoozed: Boolean,
+    isArchived: Boolean,
+    isStarred: Boolean,
+    showSubjectField: Boolean,
+    isLocalSmsChat: Boolean,
+    onBackClick: () -> Unit,
+    onDetailsClick: () -> Unit,
+    onVideoCallClick: () -> Unit,
+    onMenuAction: (ChatMenuAction) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    ChatTopBarContent(
+        chatTitle = chatTitle,
+        avatarPath = avatarPath,
+        isGroup = isGroup,
+        participantNames = participantNames,
+        participantAvatarPaths = participantAvatarPaths,
+        isSnoozed = isSnoozed,
+        isArchived = isArchived,
+        isStarred = isStarred,
+        showSubjectField = showSubjectField,
+        isLocalSmsChat = isLocalSmsChat,
+        onBackClick = onBackClick,
+        onDetailsClick = onDetailsClick,
+        onVideoCallClick = onVideoCallClick,
+        onMenuAction = onMenuAction,
+        modifier = modifier
+    )
+}
+
+/**
+ * Internal implementation of ChatTopBar content.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ChatTopBarContent(
     chatTitle: String,
     avatarPath: String?,
     isGroup: Boolean,

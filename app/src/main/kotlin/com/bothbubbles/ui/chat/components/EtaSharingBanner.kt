@@ -41,8 +41,36 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate.EtaSharingUiState
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
+
+/**
+ * Simplified ETA sharing banner using decomposed state object.
+ * Shown at the top of the chat screen when navigation is detected.
+ *
+ * This is the preferred signature for Stage 2B refactoring - UI components
+ * should request specific state objects instead of individual parameters.
+ *
+ * @param etaState ETA sharing state from ChatEtaSharingDelegate
+ */
+@Composable
+fun EtaSharingBanner(
+    etaState: EtaSharingUiState,
+    onStartSharing: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    EtaSharingBannerContent(
+        isNavigationActive = etaState.isNavigationActive && etaState.isEnabled,
+        isCurrentlySharing = etaState.isCurrentlySharing,
+        isDismissed = etaState.isBannerDismissed,
+        currentEtaMinutes = etaState.currentEtaMinutes,
+        onStartSharing = onStartSharing,
+        onDismiss = onDismiss,
+        modifier = modifier
+    )
+}
 
 /**
  * Simplified ETA sharing banner shown at the top of the chat screen when navigation is detected.
@@ -52,9 +80,35 @@ import kotlin.math.roundToInt
  * - Swipe-to-dismiss in any direction (safe for driving)
  * - Shows just "ETA: X min" + "Share ETA" button
  * - Only shown when not currently sharing (when sharing, use EtaStopSharingLink instead)
+ *
+ * @deprecated Use the overload accepting EtaSharingUiState for better state isolation.
  */
 @Composable
 fun EtaSharingBanner(
+    isNavigationActive: Boolean,
+    isCurrentlySharing: Boolean,
+    isDismissed: Boolean,
+    currentEtaMinutes: Int,
+    onStartSharing: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    EtaSharingBannerContent(
+        isNavigationActive = isNavigationActive,
+        isCurrentlySharing = isCurrentlySharing,
+        isDismissed = isDismissed,
+        currentEtaMinutes = currentEtaMinutes,
+        onStartSharing = onStartSharing,
+        onDismiss = onDismiss,
+        modifier = modifier
+    )
+}
+
+/**
+ * Internal implementation of EtaSharingBanner content.
+ */
+@Composable
+private fun EtaSharingBannerContent(
     isNavigationActive: Boolean,
     isCurrentlySharing: Boolean,
     isDismissed: Boolean,

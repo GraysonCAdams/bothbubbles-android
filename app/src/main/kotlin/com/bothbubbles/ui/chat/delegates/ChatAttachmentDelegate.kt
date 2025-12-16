@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.media.AttachmentPreloader
@@ -42,7 +43,8 @@ import javax.inject.Inject
 class ChatAttachmentDelegate @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
-    private val attachmentPreloader: AttachmentPreloader
+    private val attachmentPreloader: AttachmentPreloader,
+    private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
         private const val TAG = "ChatAttachmentDelegate"
@@ -63,6 +65,10 @@ class ChatAttachmentDelegate @Inject constructor(
     private val _refreshTrigger = MutableStateFlow(0)
     val refreshTrigger: StateFlow<Int> = _refreshTrigger.asStateFlow()
 
+    // Whether to use auto-download mode (true) or manual download mode (false)
+    private val _autoDownloadEnabled = MutableStateFlow(true)
+    val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
+
     /**
      * Initialize the delegate with the chat context.
      * Must be called before any download operations.
@@ -82,6 +88,24 @@ class ChatAttachmentDelegate @Inject constructor(
 
         // Observe download completions
         observeDownloadCompletions()
+
+        // Observe auto-download setting
+        observeAutoDownloadSetting()
+    }
+
+    /**
+     * Observe the auto-download setting and trigger downloads when chat is opened.
+     */
+    private fun observeAutoDownloadSetting() {
+        scope.launch {
+            settingsDataStore.autoDownloadAttachments.collect { autoDownload ->
+                _autoDownloadEnabled.value = autoDownload
+                if (autoDownload) {
+                    // Auto-download pending attachments for this chat
+                    downloadPendingAttachments()
+                }
+            }
+        }
     }
 
     /**

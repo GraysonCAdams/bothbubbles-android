@@ -2,6 +2,24 @@
 
 This file provides guidance to Claude Code for working with this repository.
 
+## Documentation System
+
+**Every directory has a README.md** with detailed documentation including:
+- Purpose and file descriptions
+- Architecture diagrams
+- Required patterns and code examples
+- Best practices
+
+**When exploring the codebase**, read the README.md in the relevant directory first. The READMEs provide context-specific guidance that supplements this file.
+
+Key READMEs:
+- `app/src/main/kotlin/com/bothbubbles/README.md` - Root package overview
+- `app/src/main/kotlin/com/bothbubbles/data/README.md` - Data layer
+- `app/src/main/kotlin/com/bothbubbles/services/README.md` - Services layer
+- `app/src/main/kotlin/com/bothbubbles/ui/README.md` - UI layer
+- `app/src/main/kotlin/com/bothbubbles/di/README.md` - Dependency injection
+- `app/schemas/README.md` - Database migrations
+
 ## Project Overview
 
 BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that connects to a BlueBubbles server for iMessage functionality, with optional SMS/MMS support as a fallback.

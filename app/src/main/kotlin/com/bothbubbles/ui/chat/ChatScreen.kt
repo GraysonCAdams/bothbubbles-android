@@ -117,7 +117,9 @@ import com.bothbubbles.ui.chat.components.EtaStopSharingLink
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.InputMode
 import com.bothbubbles.ui.chat.components.SearchResultsSheet
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate.EtaSharingUiState
 import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
+import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.chat.state.EffectsState
 import com.bothbubbles.ui.chat.state.OperationsState
 import com.bothbubbles.ui.chat.state.SendState
@@ -203,15 +205,19 @@ fun ChatScreen(
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val sendState by viewModel.sendState.collectAsStateWithLifecycle()
-    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
-    val operationsState by viewModel.operationsState.collectAsStateWithLifecycle()
-    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
-    val effectsState by viewModel.effectsState.collectAsStateWithLifecycle()
-    val threadState by viewModel.threadState.collectAsStateWithLifecycle()
-    val messages by viewModel.messagesState.collectAsStateWithLifecycle()
-    val draftText by viewModel.draftText.collectAsStateWithLifecycle()
-    val smartReplySuggestions by viewModel.smartReplySuggestions.collectAsStateWithLifecycle()
+    // Stage 3: Access delegate states directly (Container Pattern)
+    val sendState by viewModel.send.state.collectAsStateWithLifecycle()
+    val searchState by viewModel.search.state.collectAsStateWithLifecycle()
+    val operationsState by viewModel.operations.state.collectAsStateWithLifecycle()
+    val syncState by viewModel.sync.state.collectAsStateWithLifecycle()
+    val effectsState by viewModel.effects.state.collectAsStateWithLifecycle()
+    val threadState by viewModel.thread.state.collectAsStateWithLifecycle()
+    val messages by viewModel.messageList.messagesState.collectAsStateWithLifecycle()
+    val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
+    val smartReplySuggestions by viewModel.composer.smartReplySuggestions.collectAsStateWithLifecycle()
+    val chatInfoState by viewModel.chatInfo.state.collectAsStateWithLifecycle()
+    val connectionState by viewModel.connection.state.collectAsStateWithLifecycle()
+    val etaSharingState by viewModel.etaSharing.etaSharingState.collectAsStateWithLifecycle()
 
     // === CASCADE RECOMPOSITION DEBUGGING ===
     // Track what changed between recompositions
@@ -275,7 +281,7 @@ fun ChatScreen(
     // === END CASCADE DEBUGGING ===
 
     // LRU cached scroll position (for instant restore when re-opening recently viewed chat)
-    val cachedScrollPosition by viewModel.cachedScrollPosition.collectAsStateWithLifecycle()
+    val cachedScrollPosition by viewModel.messageList.cachedScrollPosition.collectAsStateWithLifecycle()
 
     // Determine effective scroll position: navigation state takes priority, then LRU cache
     val effectiveScrollPosition = if (initialScrollPosition > 0 || initialScrollOffset > 0) {
@@ -399,14 +405,14 @@ fun ChatScreen(
     val activeScreenEffectState = effectsState.activeScreenEffect
 
     // Animation control: only animate new messages after initial load completes
-    val initialLoadComplete by viewModel.initialLoadComplete.collectAsStateWithLifecycle()
+    val initialLoadComplete by viewModel.messageList.initialLoadComplete.collectAsStateWithLifecycle()
 
     // Track when fetching older messages from server (for loading indicator at top)
-    val isLoadingFromServer by viewModel.isLoadingFromServer.collectAsStateWithLifecycle()
+    val isLoadingFromServer by viewModel.messageList.isLoadingFromServer.collectAsStateWithLifecycle()
 
     // Attachment download settings and progress
-    val autoDownloadEnabled by viewModel.autoDownloadEnabled.collectAsStateWithLifecycle()
-    val downloadingAttachments by viewModel.attachmentDownloadProgress.collectAsStateWithLifecycle()
+    val autoDownloadEnabled by viewModel.attachment.autoDownloadEnabled.collectAsStateWithLifecycle()
+    val downloadingAttachments by viewModel.attachment.downloadProgress.collectAsStateWithLifecycle()
 
     // Track processed screen effects this session to avoid re-triggering
     val processedEffectMessages = remember { mutableSetOf<String>() }
@@ -440,7 +446,7 @@ fun ChatScreen(
     // Handle scroll-to-message events from thread overlay
     // Uses paging-aware jumpToMessage instead of indexOfFirst for sparse loading support
     LaunchedEffect(Unit) {
-        viewModel.scrollToGuid.collect { guid ->
+        viewModel.thread.scrollToGuid.collect { guid ->
             // Use paging-aware jump which loads data if needed
             val position = viewModel.jumpToMessage(guid)
             if (position != null) {
@@ -536,7 +542,7 @@ fun ChatScreen(
     val forwardableChats by viewModel.getForwardableChats().collectAsStateWithLifecycle(initialValue = emptyList())
 
     // Track pending attachments locally for UI
-    val pendingAttachments by viewModel.pendingAttachments.collectAsStateWithLifecycle()
+    val pendingAttachments by viewModel.composer.pendingAttachments.collectAsStateWithLifecycle()
 
     // Voice memo recording state
     var isRecording by remember { mutableStateOf(false) }
@@ -567,7 +573,7 @@ fun ChatScreen(
     }
 
     // Check WhatsApp availability
-    val isWhatsAppAvailable = remember { viewModel.isWhatsAppAvailable(context) }
+    val isWhatsAppAvailable = remember { viewModel.operations.isWhatsAppAvailable(context) }
 
     // Audio permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -677,7 +683,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.StartActivityForResult()
     ) {
         // Refresh contact info when returning from contacts app (regardless of result)
-        viewModel.refreshContactInfo()
+        viewModel.chatInfo.refreshContactInfo()
     }
 
     // File picker launcher for attaching documents
@@ -727,7 +733,7 @@ fun ChatScreen(
 
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
-    val activePanelState by viewModel.activePanel.collectAsStateWithLifecycle()
+    val activePanelState by viewModel.composer.activePanel.collectAsStateWithLifecycle()
     LaunchedEffect(activePanelState) {
         if (activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
             viewModel.composer.loadFeaturedGifs()
@@ -755,7 +761,7 @@ fun ChatScreen(
     // Handle search activation from ChatDetails screen
     LaunchedEffect(activateSearch) {
         if (activateSearch) {
-            viewModel.activateSearch()
+            viewModel.search.activateSearch()
             onSearchActivated()
         }
     }
@@ -787,17 +793,10 @@ fun ChatScreen(
                 .onSizeChanged { topBarHeightPx = it.height }
                 .zIndex(1f)
         ) {
+            // Stage 2B: Use decomposed state objects for ChatTopBar
             ChatTopBar(
-                chatTitle = uiState.chatTitle,
-                avatarPath = uiState.avatarPath,
-                isGroup = uiState.isGroup,
-                participantNames = uiState.participantNames,
-                participantAvatarPaths = uiState.participantAvatarPaths,
-                isSnoozed = uiState.isSnoozed,
-                isArchived = operationsState.isArchived,
-                isStarred = operationsState.isStarred,
-                showSubjectField = operationsState.showSubjectField,
-                isLocalSmsChat = uiState.isLocalSmsChat,
+                infoState = chatInfoState,
+                operationsState = operationsState,
                 onBackClick = {
                     // Clear saved state when user explicitly navigates back
                     viewModel.onNavigateBack()
@@ -808,17 +807,20 @@ fun ChatScreen(
                 onMenuAction = { action ->
                     when (action) {
                         ChatMenuAction.ADD_PEOPLE -> {
-                            context.startActivity(viewModel.getAddToContactsIntent())
+                            context.startActivity(viewModel.operations.getAddToContactsIntent(
+                                chatInfoState.participantPhone,
+                                chatInfoState.inferredSenderName
+                            ))
                         }
                         ChatMenuAction.DETAILS -> onDetailsClick()
-                        ChatMenuAction.STARRED -> viewModel.toggleStarred()
-                        ChatMenuAction.SEARCH -> viewModel.activateSearch()
-                        ChatMenuAction.ARCHIVE -> viewModel.archiveChat()
-                        ChatMenuAction.UNARCHIVE -> viewModel.unarchiveChat()
+                        ChatMenuAction.STARRED -> viewModel.operations.toggleStarred()
+                        ChatMenuAction.SEARCH -> viewModel.search.activateSearch()
+                        ChatMenuAction.ARCHIVE -> viewModel.operations.archiveChat()
+                        ChatMenuAction.UNARCHIVE -> viewModel.operations.unarchiveChat()
                         ChatMenuAction.DELETE -> showDeleteDialog = true
                         ChatMenuAction.BLOCK_AND_REPORT -> showBlockDialog = true
                         ChatMenuAction.HELP_AND_FEEDBACK -> {
-                            context.startActivity(viewModel.getHelpIntent())
+                            context.startActivity(viewModel.operations.getHelpIntent())
                         }
                     }
                 }
@@ -922,7 +924,7 @@ fun ChatScreen(
                 }
 
                 // Unified input area with animated content transitions
-                val composerState by viewModel.composerState.collectAsStateWithLifecycle()
+                val composerState by viewModel.composer.state.collectAsStateWithLifecycle()
 
                 // PHASE 3 OPTIMIZATION: Use derivedStateOf for recording state
                 // The old approach with remember(vararg keys) created a NEW ComposerState
@@ -961,7 +963,7 @@ fun ChatScreen(
                                 onCameraClick()
                             }
                             is ComposerEvent.SendLongPress -> {
-                                if (!uiState.isLocalSmsChat) {
+                                if (!chatInfoState.isLocalSmsChat) {
                                     hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                                     showEffectPicker = true
                                 }
@@ -1174,7 +1176,7 @@ fun ChatScreen(
                 .distinctUntilChanged()
                 .collect { shouldLoadMore ->
                     if (shouldLoadMore && uiState.canLoadMore && !uiState.isLoadingMore) {
-                        viewModel.loadMoreMessages()
+                        viewModel.messageList.loadMoreMessages()
                     }
                 }
         }
@@ -1229,7 +1231,7 @@ fun ChatScreen(
         // Track new messages from socket ONLY (not synced/historical messages)
         // This ensures the "x new messages" indicator only shows for truly new incoming messages
         LaunchedEffect(Unit) {
-            viewModel.socketNewMessage.collect { messageGuid ->
+            viewModel.messageList.socketNewMessage.collect { messageGuid ->
                 val isNearBottom = listState.firstVisibleItemIndex <= 2
                 val newestMessage = messages.firstOrNull { it.guid == messageGuid }
 
@@ -1288,22 +1290,22 @@ fun ChatScreen(
             InlineSearchBar(
                 visible = searchState.isActive,
                 query = searchState.query,
-                onQueryChange = viewModel::updateSearchQuery,
-                onClose = viewModel::closeSearch,
-                onNavigateUp = viewModel::navigateSearchUp,
-                onNavigateDown = viewModel::navigateSearchDown,
+                onQueryChange = { query -> viewModel.search.updateSearchQuery(query, messages) },
+                onClose = viewModel.search::closeSearch,
+                onNavigateUp = viewModel.search::navigateSearchUp,
+                onNavigateDown = viewModel.search::navigateSearchDown,
                 currentMatch = if (searchState.matchIndices.isNotEmpty()) searchState.currentMatchIndex + 1 else 0,
                 totalMatches = searchState.matchIndices.size,
                 isSearchingDatabase = searchState.isSearchingDatabase,
                 databaseResultCount = searchState.databaseResults.size,
-                onViewAllClick = viewModel::showSearchResultsSheet
+                onViewAllClick = viewModel.search::showResultsSheet
             )
 
             // iOS-style sending indicator bar
             // Send state now managed by ChatSendDelegate for reduced cascade recompositions
             SendingIndicatorBar(
                 isVisible = sendState.isSending,
-                isLocalSmsChat = uiState.isLocalSmsChat || syncState.isInSmsFallbackMode,
+                isLocalSmsChat = chatInfoState.isLocalSmsChat || syncState.isInSmsFallbackMode,
                 hasAttachments = sendState.pendingMessages.any { it.hasAttachments },
                 progress = sendState.sendProgress,
                 pendingMessages = sendState.pendingMessages
@@ -1311,40 +1313,40 @@ fun ChatScreen(
 
             // SMS fallback mode banner
             SmsFallbackBanner(
-                visible = syncState.isInSmsFallbackMode && !uiState.isLocalSmsChat,
+                visible = syncState.isInSmsFallbackMode && !chatInfoState.isLocalSmsChat,
                 fallbackReason = syncState.fallbackReason,
                 isServerConnected = syncState.isServerConnected,
-                showExitAction = uiState.isIMessageChat,
+                showExitAction = chatInfoState.isIMessageChat,
                 onExitFallback = viewModel::exitSmsFallback
             )
 
             // Save contact banner for unsaved senders
             SaveContactBanner(
-                visible = uiState.showSaveContactBanner,
-                senderAddress = uiState.unsavedSenderAddress ?: "",
-                inferredName = uiState.inferredSenderName,
+                visible = chatInfoState.showSaveContactBanner,
+                senderAddress = chatInfoState.unsavedSenderAddress ?: "",
+                inferredName = chatInfoState.inferredSenderName,
                 onAddContact = {
-                    addContactLauncher.launch(viewModel.getAddToContactsIntent())
+                    addContactLauncher.launch(viewModel.operations.getAddToContactsIntent(
+                        chatInfoState.participantPhone,
+                        chatInfoState.inferredSenderName
+                    ))
                 },
                 onReportSpam = {
                     // Report as spam and optionally block the contact
-                    viewModel.reportAsSpam()
-                    if (uiState.isLocalSmsChat) {
-                        viewModel.blockContact(context)
+                    viewModel.operations.reportAsSpam()
+                    if (chatInfoState.isLocalSmsChat) {
+                        viewModel.operations.blockContact(context, chatInfoState.participantPhone)
                     }
-                    viewModel.dismissSaveContactBanner()
+                    viewModel.chatInfo.dismissSaveContactBanner()
                 },
-                onDismiss = viewModel::dismissSaveContactBanner
+                onDismiss = viewModel.chatInfo::dismissSaveContactBanner
             )
 
-            // ETA sharing banner - shows when navigation is detected (one-tap access while driving)
+            // Stage 2B: ETA sharing banner uses decomposed state from delegate
             EtaSharingBanner(
-                isNavigationActive = uiState.isNavigationActive && uiState.isEtaSharingEnabled,
-                isCurrentlySharing = uiState.isEtaSharing,
-                isDismissed = uiState.isEtaBannerDismissed,
-                currentEtaMinutes = uiState.currentEtaMinutes,
-                onStartSharing = { viewModel.startEtaSharing() },
-                onDismiss = { viewModel.dismissEtaBanner() }
+                etaState = etaSharingState,
+                onStartSharing = { viewModel.etaSharing.startSharingEta(chatGuid, chatInfoState.chatTitle) },
+                onDismiss = { viewModel.etaSharing.dismissBanner() }
             )
 
             // Delayed loading indicator - only show after 500ms to avoid flash
@@ -1392,7 +1394,7 @@ fun ChatScreen(
                     // Animate top padding when save contact banner is shown
                     // Extra padding accounts for reaction badges that extend above messages
                     val bannerTopPadding by animateDpAsState(
-                        targetValue = if (uiState.showSaveContactBanner) 24.dp else 8.dp,
+                        targetValue = if (chatInfoState.showSaveContactBanner) 24.dp else 8.dp,
                         animationSpec = tween(durationMillis = 300),
                         label = "banner_padding"
                     )
@@ -1425,8 +1427,8 @@ fun ChatScreen(
 
                     // 3. PERF: Pre-compute showSenderName for group chats (O(n) once vs O(1) per-item)
                     // Show when: group chat, incoming message, sender changed from previous (older) message
-                    val showSenderNameMap = remember(messages, uiState.isGroup) {
-                        if (!uiState.isGroup) emptyMap()
+                    val showSenderNameMap = remember(messages, chatInfoState.isGroup) {
+                        if (!chatInfoState.isGroup) emptyMap()
                         else {
                             val map = mutableMapOf<Int, Boolean>()
                             val messages = messages
@@ -1443,8 +1445,8 @@ fun ChatScreen(
 
                     // 4. PERF: Pre-compute showAvatar for group chats (O(n) once vs O(1) per-item)
                     // Show on the last (newest) message in a consecutive group from same sender
-                    val showAvatarMap = remember(messages, uiState.isGroup) {
-                        if (!uiState.isGroup) emptyMap()
+                    val showAvatarMap = remember(messages, chatInfoState.isGroup) {
+                        if (!chatInfoState.isGroup) emptyMap()
                         else {
                             val map = mutableMapOf<Int, Boolean>()
                             val messages = messages
@@ -1477,7 +1479,7 @@ fun ChatScreen(
                         if (operationsState.isSpam) {
                             item(key = "spam_safety_banner", contentType = ContentType.BANNER) {
                                 SpamSafetyBanner(
-                                    onMarkAsSafe = { viewModel.markAsSafe() }
+                                    onMarkAsSafe = { viewModel.operations.markAsSafe() }
                                 )
                             }
                         }
@@ -1717,7 +1719,7 @@ fun ChatScreen(
                                                     selectedMessageForRetry = message
                                                     // Check if SMS retry is available
                                                     retryMenuScope.launch {
-                                                        canRetrySmsForMessage = viewModel.canRetryAsSms(message.guid)
+                                                        canRetrySmsForMessage = viewModel.send.canRetryAsSms(message.guid)
                                                     }
                                                 } else if (canTapback) {
                                                     selectedMessageForTapback = message
@@ -1745,10 +1747,10 @@ fun ChatScreen(
                                             onRetry = { guid ->
                                                 selectedMessageForRetry = message
                                                 retryMenuScope.launch {
-                                                    canRetrySmsForMessage = viewModel.canRetryAsSms(guid)
+                                                    canRetrySmsForMessage = viewModel.send.canRetryAsSms(guid)
                                                 }
                                             },
-                                            isGroupChat = uiState.isGroup,
+                                            isGroupChat = chatInfoState.isGroup,
                                             showAvatar = showAvatar,
                                             // Report bounds when this message is selected for tapback
                                             onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->
@@ -1762,14 +1764,14 @@ fun ChatScreen(
 
                                 // Show "Stop Sharing ETA" link under the latest ETA message when sharing
                                 // Placed outside the Box to appear below the bubble, not overlapping it
-                                if (uiState.isEtaSharing && index == latestEtaMessageIndex) {
+                                if (etaSharingState.isCurrentlySharing && index == latestEtaMessageIndex) {
                                     Box(
                                         modifier = Modifier.fillMaxWidth(),
                                         contentAlignment = Alignment.CenterEnd
                                     ) {
                                         EtaStopSharingLink(
                                             isVisible = true,
-                                            onStopSharing = { viewModel.stopEtaSharing() },
+                                            onStopSharing = { viewModel.etaSharing.stopSharingEta() },
                                             modifier = Modifier.padding(end = 16.dp)
                                         )
                                     }
@@ -1937,7 +1939,7 @@ fun ChatScreen(
         RetryMessageBottomSheet(
             messageGuid = failedMessage.guid,
             canRetryAsSms = canRetrySmsForMessage,
-            contactIMessageAvailable = uiState.contactIMessageAvailable == true,
+            contactIMessageAvailable = connectionState.contactIMessageAvailable == true,
             onRetryAsIMessage = {
                 viewModel.send.retryMessage(failedMessage.guid)
                 selectedMessageForRetry = null
@@ -1970,17 +1972,17 @@ fun ChatScreen(
         query = searchState.query,
         onResultClick = { result ->
             viewModel.scrollToAndHighlightMessage(result.messageGuid)
-            viewModel.hideSearchResultsSheet()
+            viewModel.search.hideResultsSheet()
         },
-        onDismiss = viewModel::hideSearchResultsSheet
+        onDismiss = viewModel.search::hideResultsSheet
     )
 
     // Confirmation dialogs
     if (showDeleteDialog) {
         DeleteConversationDialog(
-            chatDisplayName = uiState.chatTitle,
+            chatDisplayName = chatInfoState.chatTitle,
             onConfirm = {
-                viewModel.deleteChat()
+                viewModel.operations.deleteChat()
                 showDeleteDialog = false
             },
             onDismiss = { showDeleteDialog = false }
@@ -1989,25 +1991,25 @@ fun ChatScreen(
 
     if (showBlockDialog) {
         BlockAndReportDialog(
-            chatDisplayName = uiState.chatTitle,
-            isSmsChat = uiState.isLocalSmsChat,
+            chatDisplayName = chatInfoState.chatTitle,
+            isSmsChat = chatInfoState.isLocalSmsChat,
             onConfirm = { options: BlockOptions ->
                 // Handle block contact
                 if (options.blockContact) {
-                    if (viewModel.blockContact(context)) {
+                    if (viewModel.operations.blockContact(context, chatInfoState.participantPhone)) {
                         Toast.makeText(context, "Contact blocked", Toast.LENGTH_SHORT).show()
                     }
                 }
 
                 // Handle mark as spam
                 if (options.markAsSpam) {
-                    viewModel.reportAsSpam()
+                    viewModel.operations.reportAsSpam()
                     Toast.makeText(context, "Marked as spam", Toast.LENGTH_SHORT).show()
                 }
 
                 // Handle report to carrier
                 if (options.reportToCarrier) {
-                    if (viewModel.reportToCarrier()) {
+                    if (viewModel.operations.reportToCarrier()) {
                         Toast.makeText(context, "Reporting to carrier...", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -2040,11 +2042,11 @@ fun ChatScreen(
     if (showVideoCallDialog) {
         VideoCallMethodDialog(
             onGoogleMeet = {
-                context.startActivity(viewModel.getGoogleMeetIntent())
+                context.startActivity(viewModel.operations.getGoogleMeetIntent())
                 showVideoCallDialog = false
             },
             onWhatsApp = {
-                viewModel.getWhatsAppCallIntent()?.let { intent ->
+                viewModel.operations.getWhatsAppCallIntent(chatInfoState.participantPhone)?.let { intent ->
                     context.startActivity(intent)
                 }
                 showVideoCallDialog = false
@@ -2060,7 +2062,7 @@ fun ChatScreen(
         onDismiss = { showScheduleDialog = false },
         onSchedule = { timestamp ->
             // Schedule the message
-            viewModel.scheduleMessage(
+            viewModel.scheduledMessages.scheduleMessage(
                 text = draftText,
                 attachments = pendingAttachments,
                 sendAt = timestamp
@@ -2137,7 +2139,7 @@ fun ChatScreen(
     // Tutorial overlay - full screen overlay on top of everything
     // Only show when sendButtonBounds are valid (not Rect.Zero) to avoid layout issues
     val effectiveTutorialState = if (sendButtonBounds != Rect.Zero) {
-        uiState.tutorialState.toComposerTutorialState()
+        connectionState.tutorialState.toComposerTutorialState()
     } else {
         com.bothbubbles.ui.chat.composer.ComposerTutorialState.Hidden
     }
@@ -2150,7 +2152,7 @@ fun ChatScreen(
             // This callback is for logging/analytics if needed
         },
         onDismiss = {
-            viewModel.updateTutorialState(TutorialState.COMPLETED)
+            viewModel.sendMode.updateTutorialState(TutorialState.COMPLETED)
         }
     )
 }

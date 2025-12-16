@@ -5,10 +5,15 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.BlockedNumberContract
 import android.provider.ContactsContract
+import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.chat.state.OperationsState
+import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.Tapback
+import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.error.AppError
 import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
@@ -16,22 +21,28 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
  * Delegate responsible for chat menu actions and operations.
- * Handles archive, star, delete, spam reporting, and contact-related actions.
+ * Handles archive, star, delete, spam reporting, contact-related actions, and reactions.
  */
 class ChatOperationsDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
     private val spamRepository: SpamRepository,
-    private val spamReportingService: SpamReportingService
+    private val spamReportingService: SpamReportingService,
+    private val messageSendingService: MessageSendingService
 ) {
+    companion object {
+        private const val TAG = "ChatOperationsDelegate"
+    }
 
     private lateinit var chatGuid: String
     private lateinit var scope: CoroutineScope
+    private var messageListDelegate: ChatMessageListDelegate? = null
 
     // ============================================================================
     // CONSOLIDATED OPERATIONS STATE
@@ -46,10 +57,30 @@ class ChatOperationsDelegate @Inject constructor(
     fun initialize(chatGuid: String, scope: CoroutineScope) {
         this.chatGuid = chatGuid
         this.scope = scope
+        observeChatState()
+    }
+
+    /**
+     * Observe the chat entity and update state when archive/star/spam status changes.
+     */
+    private fun observeChatState() {
+        scope.launch {
+            chatRepository.observeChat(chatGuid)
+                .filterNotNull()
+                .collect { chat ->
+                    _state.update { it.copy(
+                        isArchived = chat.isArchived,
+                        isStarred = chat.isStarred,
+                        isSpam = chat.isSpam,
+                        isReportedToCarrier = chat.spamReportedToCarrier
+                    )}
+                }
+        }
     }
 
     /**
      * Update state from external sources.
+     * @deprecated Use observeChatState() for automatic updates instead.
      */
     fun updateState(
         isArchived: Boolean,
@@ -254,5 +285,97 @@ class ChatOperationsDelegate @Inject constructor(
      */
     fun clearError() {
         _state.update { it.copy(operationError = null) }
+    }
+
+    /**
+     * Set the message list delegate for reaction updates.
+     */
+    fun setMessageListDelegate(messageList: ChatMessageListDelegate) {
+        this.messageListDelegate = messageList
+    }
+
+    // ============================================================================
+    // REACTIONS
+    // ============================================================================
+
+    /**
+     * Toggle a reaction on a message.
+     * Only works on server-origin messages (IMESSAGE or SERVER_SMS).
+     * Uses native tapback API via BlueBubbles server.
+     */
+    fun toggleReaction(messageGuid: String, tapback: Tapback) {
+        val messageList = messageListDelegate ?: return
+        val message = messageList.messagesState.value.find { it.guid == messageGuid } ?: return
+
+        // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
+        // Local SMS/MMS cannot have tapbacks
+        if (!message.isServerOrigin) {
+            return
+        }
+
+        val isRemoving = tapback in message.myReactions
+        Log.d(TAG, "toggleReaction: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
+
+        scope.launch {
+            // OPTIMISTIC UPDATE: Immediately show the reaction in UI
+            val optimisticUpdateApplied = messageList.updateMessageLocally(messageGuid) { currentMessage ->
+                val newMyReactions = if (isRemoving) {
+                    currentMessage.myReactions - tapback
+                } else {
+                    currentMessage.myReactions + tapback
+                }
+
+                val newReactions = if (isRemoving) {
+                    // Remove my reaction from the list
+                    currentMessage.reactions.filter { !(it.tapback == tapback && it.isFromMe) }.toStable()
+                } else {
+                    // Add my reaction to the list
+                    (currentMessage.reactions + ReactionUiModel(
+                        tapback = tapback,
+                        isFromMe = true,
+                        senderName = null // Will be filled in on refresh from DB
+                    )).toStable()
+                }
+
+                currentMessage.copy(
+                    myReactions = newMyReactions,
+                    reactions = newReactions
+                )
+            }
+
+            if (optimisticUpdateApplied) {
+                Log.d(TAG, "toggleReaction: optimistic update applied for $messageGuid")
+            }
+
+            // Call API in background (fire and forget with rollback on failure)
+            // Pass selectedMessageText - required by BlueBubbles server for reaction matching
+            val messageText = message.text ?: ""
+            val result = if (isRemoving) {
+                messageSendingService.removeReaction(
+                    chatGuid = chatGuid,
+                    messageGuid = messageGuid,
+                    reaction = tapback.apiName,
+                    selectedMessageText = messageText
+                )
+            } else {
+                messageSendingService.sendReaction(
+                    chatGuid = chatGuid,
+                    messageGuid = messageGuid,
+                    reaction = tapback.apiName,
+                    selectedMessageText = messageText
+                )
+            }
+
+            result.onSuccess {
+                Log.d(TAG, "toggleReaction: API success for $messageGuid")
+                // Refresh from database to get the canonical server state
+                // This ensures our optimistic update is replaced with the real data
+                messageList.updateMessage(messageGuid)
+            }.onFailure { error ->
+                Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back optimistic update", error)
+                // ROLLBACK: Revert to database state (which doesn't have the reaction)
+                messageList.updateMessage(messageGuid)
+            }
+        }
     }
 }

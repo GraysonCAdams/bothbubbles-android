@@ -6,6 +6,7 @@ import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.media.AttachmentPreloader
@@ -80,6 +81,7 @@ class ChatMessageListDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
     private val handleRepository: HandleRepository,
+    private val smsRepository: SmsRepository,
     private val socketService: SocketService,
     private val appLifecycleTracker: AppLifecycleTracker,
     private val attachmentPreloader: AttachmentPreloader,
@@ -383,7 +385,20 @@ class ChatMessageListDelegate @Inject constructor(
     }
 
     /**
-     * Sync messages from server. Called during initial load.
+     * Sync messages - dispatches to SMS or server sync based on chat type.
+     * Sets isSyncingMessages = true before dispatching.
+     */
+    fun syncMessages() {
+        onUiStateUpdate { copy(isSyncingMessages = true) }
+        if (messageRepository.isLocalSmsChat(chatGuid)) {
+            syncSmsMessages()
+        } else {
+            syncMessagesFromServer()
+        }
+    }
+
+    /**
+     * Sync messages from server. Called during initial load for iMessage/server-based chats.
      */
     fun syncMessagesFromServer() {
         scope.launch {
@@ -409,6 +424,26 @@ class ChatMessageListDelegate @Inject constructor(
                     onUiStateUpdate { copy(error = e.message) }
                 }
             }
+            onUiStateUpdate { copy(isSyncingMessages = false) }
+        }
+    }
+
+    /**
+     * Sync SMS messages from Android system. Called during initial load for local SMS chats.
+     */
+    private fun syncSmsMessages() {
+        scope.launch {
+            smsRepository.importMessagesForChat(chatGuid, limit = 100).fold(
+                onSuccess = { count ->
+                    // Messages are now in Room and will be picked up by the paging controller
+                    Log.d(TAG, "Imported $count SMS messages for $chatGuid")
+                },
+                onFailure = { e ->
+                    if (_messagesState.value.isEmpty()) {
+                        onUiStateUpdate { copy(error = "Failed to load SMS messages: ${e.message}") }
+                    }
+                }
+            )
             onUiStateUpdate { copy(isSyncingMessages = false) }
         }
     }
@@ -733,11 +768,54 @@ class ChatMessageListDelegate @Inject constructor(
     }
 
     /**
+     * Mark all chats in merged conversation as read.
+     * Handles both local SMS chats and server-based (iMessage/server SMS) chats.
+     */
+    fun markAsRead() {
+        scope.launch {
+            for (guid in mergedChatGuids) {
+                try {
+                    val chat = chatRepository.getChat(guid)
+
+                    if (chat?.isLocalSms == true) {
+                        // Local SMS/MMS chat - mark in Android system
+                        smsRepository.markThreadAsRead(guid)
+                    } else {
+                        // iMessage or server SMS - mark via server API
+                        chatRepository.markChatAsRead(guid)
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Failed to mark $guid as read", e)
+                    // Continue with other chats
+                }
+            }
+        }
+    }
+
+    /**
      * Clear the active chat from download queue.
      * Called when leaving the chat.
      */
     fun clearActiveChat() {
         attachmentDownloadQueue.setActiveChat(null)
         attachmentPreloader.clearTracking()
+    }
+
+    /**
+     * Handle cleanup when leaving the chat.
+     * Saves scroll position and state to cache for instant restoration.
+     */
+    suspend fun onChatLeave() {
+        // Clear attachment queue prioritization
+        clearActiveChat()
+
+        // Save scroll position to DataStore
+        val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
+        Log.d(TAG, "onChatLeave: saving chatGuid=$chatGuid, scroll=($lastScrollPosition, $lastScrollOffset)")
+        settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
+        settingsDataStore.setLastScrollPosition(lastScrollPosition, lastScrollOffset)
+
+        // Save state to LRU cache for instant restore when re-opening this chat
+        chatStateCache.put(saveStateToCacheSync())
     }
 }

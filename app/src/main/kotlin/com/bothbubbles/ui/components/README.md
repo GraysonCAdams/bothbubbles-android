@@ -1,82 +1,70 @@
-# UI Components Directory Organization
+# Shared UI Components
 
-This directory contains reusable UI components. Components should be organized into subdirectories by their purpose.
+## Purpose
 
-## Directory Structure
+Reusable UI components shared across multiple screens. Organized by category.
+
+## Architecture
 
 ```
-ui/components/
-├── common/          # Generic UI components used across screens
-│   ├── Avatar.kt
-│   ├── ShimmerPlaceholder.kt
-│   ├── EmptyStates.kt
-│   ├── PullToRefresh.kt
-│   ├── ConnectionStatusBanner.kt
-│   └── AnimationUtils.kt
-│
-├── message/         # Message-related components
-│   ├── MessageBubble.kt
-│   ├── MessageSegment.kt
-│   ├── MessageTransformations.kt
-│   ├── MessagePlaceholder.kt
-│   ├── MessageModels.kt
-│   ├── LinkPreview.kt
-│   ├── LinkPreviewCard.kt
-│   └── ThreadOverlay.kt
-│
-├── attachment/      # Attachment display and picking
-│   ├── AttachmentContent.kt
-│   └── AttachmentPickerPanel.kt
-│
-├── dialogs/         # Modal dialogs and popups
-│   ├── ForwardMessageDialog.kt
-│   ├── SnoozeDurationDialog.kt
-│   ├── VCardOptionsDialog.kt
-│   ├── TapbackMenu.kt
-│   ├── ContactQuickActionsPopup.kt
-│   └── EmojiPickerPanel.kt
-│
-├── input/           # Input-related components
-│   ├── SmartReplyChips.kt
-│   └── QrCodeScanner.kt
-│
-└── conversation/    # Conversation list components
-    ├── SwipeableConversationTile.kt
-    ├── ChatIndicators.kt
-    └── SpamSafetyBanner.kt
+components/
+├── attachment/      - Attachment display components
+├── common/          - General purpose components
+├── conversation/    - Conversation list components
+├── dialogs/         - Dialog and bottom sheet components
+├── input/           - Input components
+└── message/         - Message display components
 ```
 
-## Migration Guide
+## Sub-packages
 
-When moving a component to its proper subdirectory:
+| Package | Purpose |
+|---------|---------|
+| `attachment/` | Image, video, audio, file attachment components |
+| `common/` | Avatar, link preview, empty states, banners |
+| `conversation/` | Conversation tiles, badges, swipe actions |
+| `dialogs/` | Dialogs, bottom sheets, popups |
+| `input/` | Search bars, text inputs, pickers |
+| `message/` | Message bubbles, reactions, delivery indicators |
 
-1. Move the file to the new location
-2. Update the package declaration: `package com.bothbubbles.ui.components.{subdirectory}`
-3. Search for imports: `grep -r "import.*{ClassName}" --include="*.kt"`
-4. Update all imports to use the new package path
-5. Run the build to verify no broken imports
+## Required Patterns
 
-Example:
-```bash
-# Move file
-mv Avatar.kt common/
+### Component Design
 
-# Update package (at top of file)
-# package com.bothbubbles.ui.components.common
-
-# Find all files importing this component
-grep -r "import.*Avatar" --include="*.kt"
-
-# Update imports in each file
-# import com.bothbubbles.ui.components.common.Avatar
+```kotlin
+@Composable
+fun MyComponent(
+    // Required parameters first
+    data: DataType,
+    onClick: () -> Unit,
+    // Optional parameters with defaults
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    // Implementation
+}
 ```
 
-## Current Status
+### Preview Functions
 
-Directories created, files pending migration. Components currently remain in root `ui/components/` for backwards compatibility.
+```kotlin
+@Preview
+@Composable
+private fun MyComponentPreview() {
+    BothBubblesTheme {
+        MyComponent(
+            data = PreviewData.sampleData,
+            onClick = {}
+        )
+    }
+}
+```
 
-To complete the migration:
-1. Move files to their proper subdirectories
-2. Update package declarations
-3. Update imports across codebase
-4. Run `./gradlew assembleDebug` to verify
+## Best Practices
+
+1. Keep components stateless where possible
+2. Use callbacks for all interactions
+3. Support Modifier parameter for flexibility
+4. Provide preview functions
+5. Follow Material 3 guidelines
+6. Use semantic colors from theme

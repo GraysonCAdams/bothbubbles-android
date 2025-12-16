@@ -7,6 +7,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.AttachmentRepository
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.GifRepository
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.ContactData
@@ -39,6 +40,8 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -73,7 +76,8 @@ class ChatComposerDelegate @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val socketService: SocketService
+    private val socketService: SocketService,
+    private val chatRepository: ChatRepository
 ) {
     companion object {
         private const val TAG = "ChatComposerDelegate"
@@ -101,6 +105,13 @@ class ChatComposerDelegate @Inject constructor(
     // Cached settings for typing indicators (avoids suspend calls on every keystroke)
     @Volatile private var cachedPrivateApiEnabled = false
     @Volatile private var cachedTypingIndicatorsEnabled = false
+
+    // ============================================================================
+    // DRAFT PERSISTENCE
+    // ============================================================================
+
+    private var draftSaveJob: Job? = null
+    private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
 
     // ============================================================================
     // SMART REPLY STATE
@@ -212,6 +223,20 @@ class ChatComposerDelegate @Inject constructor(
         observeTypingIndicatorSettings()
         // Observe messages for smart reply generation
         observeSmartReplies()
+        // Load draft text from database (once)
+        loadDraftFromChat()
+    }
+
+    /**
+     * Load draft text from the chat entity (runs once at initialization).
+     */
+    private fun loadDraftFromChat() {
+        scope.launch {
+            val chat = chatRepository.observeChat(chatGuid)
+                .filterNotNull()
+                .first()
+            restoreDraftText(chat.textFieldText)
+        }
     }
 
     /**
@@ -425,6 +450,47 @@ class ChatComposerDelegate @Inject constructor(
      */
     fun restoreDraftText(text: String?) {
         _draftText.value = text ?: ""
+    }
+
+    /**
+     * Update draft text with typing indicator and persistence.
+     * This is the main entry point for text changes from the UI.
+     */
+    fun updateDraft(text: String) {
+        setDraftText(text)
+        handleTypingIndicator(text)
+        persistDraft(text)
+    }
+
+    /**
+     * Persist draft to database with debouncing to avoid excessive writes.
+     */
+    private fun persistDraft(text: String) {
+        draftSaveJob?.cancel()
+        draftSaveJob = scope.launch {
+            delay(draftSaveDebounceMs)
+            chatRepository.updateDraftText(chatGuid, text)
+        }
+    }
+
+    /**
+     * Save draft immediately (called when leaving chat).
+     */
+    fun saveDraftImmediately() {
+        draftSaveJob?.cancel()
+        scope.launch {
+            chatRepository.updateDraftText(chatGuid, _draftText.value)
+        }
+    }
+
+    /**
+     * Clear draft from database (called when message is sent).
+     */
+    fun clearDraftFromDatabase() {
+        draftSaveJob?.cancel()
+        scope.launch {
+            chatRepository.updateDraftText(chatGuid, null)
+        }
     }
 
     // ============================================================================

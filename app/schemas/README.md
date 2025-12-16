@@ -4,10 +4,9 @@ This directory contains exported Room database schemas used for migration testin
 
 ## Schema Files
 
-Each JSON file represents a specific database version:
-- `3.json` - Current schema (version 3)
+Each JSON file represents a specific database version. Files are auto-generated when building the app and should be committed to version control.
 
-These files are auto-generated when building the app and should be committed to version control.
+Current database version: **37** (see `BothBubblesDatabase.kt` for latest version)
 
 ## Adding New Columns or Tables
 
@@ -168,8 +167,8 @@ This ensures we never silently lose user data due to a missing migration.
 
 ## Version History
 
-| Version | Changes |
-|---------|---------|
-| 1 | Initial schema |
-| 2 | Added `is_starred` column to chats |
-| 3 | Added per-chat notification settings, privacy settings, timestamps |
+See `DatabaseMigrations.kt` for the complete migration history. The database has grown significantly with many tables and columns added over time.
+
+Current version: **37**
+
+Key entities include: ChatEntity, MessageEntity, HandleEntity, AttachmentEntity, PendingMessageEntity, ScheduledMessageEntity, UnifiedChatGroupEntity, and more.

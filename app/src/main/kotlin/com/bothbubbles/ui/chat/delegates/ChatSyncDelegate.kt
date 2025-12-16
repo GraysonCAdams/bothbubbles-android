@@ -5,8 +5,11 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.messaging.FallbackReason
+import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.chat.state.SyncState
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -38,6 +41,7 @@ class ChatSyncDelegate @Inject constructor(
 
     private lateinit var chatGuid: String
     private lateinit var scope: CoroutineScope
+    private var mergedChatGuids: List<String> = emptyList()
 
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
@@ -73,11 +77,19 @@ class ChatSyncDelegate @Inject constructor(
     /**
      * Initialize the delegate.
      */
-    fun initialize(chatGuid: String, scope: CoroutineScope) {
+    fun initialize(
+        chatGuid: String,
+        scope: CoroutineScope,
+        mergedChatGuids: List<String> = listOf(chatGuid)
+    ) {
         this.chatGuid = chatGuid
         this.scope = scope
+        this.mergedChatGuids = mergedChatGuids
 
-        // Skip for local SMS chats
+        // Observe typing indicators from socket
+        observeTypingIndicators()
+
+        // Skip adaptive polling for local SMS chats
         if (!messageRepository.isLocalSmsChat(chatGuid)) {
             startAdaptivePolling()
             observeForegroundResume()
@@ -199,6 +211,68 @@ class ChatSyncDelegate @Inject constructor(
             }
         } catch (e: Exception) {
             Log.d(TAG, "Foreground sync error: ${e.message}")
+        }
+    }
+
+    // ============================================================================
+    // TYPING INDICATORS
+    // ============================================================================
+
+    /**
+     * Observe typing indicator events from the socket and update state.
+     * Uses GUID normalization to handle format differences between server and local.
+     */
+    private fun observeTypingIndicators() {
+        scope.launch {
+            socketService.events
+                .filterIsInstance<SocketEvent.TypingIndicator>()
+                .filter { event ->
+                    // Use normalized GUID comparison to handle format differences
+                    // Server may send "+1234567890" but local has "+1-234-567-890"
+                    val normalizedEventGuid = normalizeGuid(event.chatGuid)
+                    mergedChatGuids.any { normalizeGuid(it) == normalizedEventGuid } ||
+                        normalizeGuid(chatGuid) == normalizedEventGuid ||
+                        // Fallback: match by address/phone number only
+                        extractAddress(event.chatGuid)?.let { eventAddress ->
+                            mergedChatGuids.any { extractAddress(it) == eventAddress } ||
+                                extractAddress(chatGuid) == eventAddress
+                        } == true
+                }
+                .collect { event ->
+                    setTyping(event.isTyping)
+                }
+        }
+    }
+
+    /**
+     * Normalize a chat GUID for comparison by stripping formatting from phone numbers.
+     * Handles cases where server sends "+1234567890" but local has "+1-234-567-890".
+     */
+    private fun normalizeGuid(guid: String): String {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return guid.lowercase()
+        val prefix = parts[0].lowercase()
+        val address = if (parts[1].contains("@")) {
+            // Email address - just lowercase
+            parts[1].lowercase()
+        } else {
+            // Phone number - strip non-digits except leading +
+            parts[1].replace(Regex("[^0-9+]"), "")
+        }
+        return "$prefix;-;$address"
+    }
+
+    /**
+     * Extract just the address/phone portion from a chat GUID for fallback matching.
+     * Returns null if the GUID format is invalid.
+     */
+    private fun extractAddress(guid: String): String? {
+        val parts = guid.split(";-;")
+        if (parts.size != 2) return null
+        return if (parts[1].contains("@")) {
+            parts[1].lowercase()
+        } else {
+            parts[1].replace(Regex("[^0-9+]"), "")
         }
     }
 }
