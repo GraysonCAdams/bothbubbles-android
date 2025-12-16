@@ -3,6 +3,7 @@ package com.bothbubbles.services.messaging
 import android.content.Context
 import android.net.Uri
 import android.util.Log
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -118,11 +119,17 @@ class MessageSendingService @Inject constructor(
         subscriptionId: Int,
         tempGuid: String? // Stable ID for retry idempotency
     ): Result<MessageEntity> {
+        val sendStart = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] ── MessageSendingService.sendUnified START ──")
+        Log.i(TAG, "[SEND_TRACE] chatGuid=$chatGuid, text=\"${text.take(30)}...\", tempGuid=$tempGuid")
+        Log.i(TAG, "[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachments.size}")
+
         // Determine actual delivery mode
         val actualMode = when (deliveryMode) {
             MessageDeliveryMode.AUTO -> determineDeliveryMode(chatGuid, attachments.isNotEmpty())
             else -> deliveryMode
         }
+        Log.i(TAG, "[SEND_TRACE] actualMode=$actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         // Find strategy that can handle this delivery mode
         val strategy = strategies.firstOrNull { it.canHandle(actualMode) }
@@ -130,7 +137,7 @@ class MessageSendingService @Inject constructor(
                 IllegalStateException("No strategy found for delivery mode: $actualMode")
             )
 
-        Log.d(TAG, "Using ${strategy::class.simpleName} for $actualMode")
+        Log.i(TAG, "[SEND_TRACE] Using ${strategy::class.simpleName} for $actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         val options = SendOptions(
             chatGuid = chatGuid,
@@ -143,7 +150,11 @@ class MessageSendingService @Inject constructor(
             tempGuid = tempGuid
         )
 
-        return strategy.send(options).toResult()
+        Log.i(TAG, "[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
+        val result = strategy.send(options).toResult()
+        Log.i(TAG, "[SEND_TRACE] strategy.send() returned: success=${result.isSuccess} +${System.currentTimeMillis() - sendStart}ms")
+        Log.i(TAG, "[SEND_TRACE] ── MessageSendingService.sendUnified END: ${System.currentTimeMillis() - sendStart}ms ──")
+        return result
     }
 
     /**

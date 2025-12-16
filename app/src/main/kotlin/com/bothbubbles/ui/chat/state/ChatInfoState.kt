@@ -23,5 +23,6 @@ data class ChatInfoState(
     val unsavedSenderAddress: String? = null,
     val inferredSenderName: String? = null,
     val isSnoozed: Boolean = false,
-    val snoozeUntil: Long? = null
+    val snoozeUntil: Long? = null,
+    val discordChannelId: String? = null
 )

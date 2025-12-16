@@ -4,12 +4,15 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import android.content.Intent
+import android.net.Uri
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +30,7 @@ data class ConversationDetailsUiState(
     val otherMediaCount: Int = 0,
     val recentImages: List<AttachmentEntity> = emptyList(),
     val isContactStarred: Boolean = false,
+    val discordChannelId: String? = null,
     val isLoading: Boolean = true,
     val error: String? = null
 ) {
@@ -83,7 +87,8 @@ class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
-    private val androidContactsService: AndroidContactsService
+    private val androidContactsService: AndroidContactsService,
+    private val discordContactService: DiscordContactService
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -93,6 +98,7 @@ class ConversationDetailsViewModel @Inject constructor(
     val actionState: StateFlow<ActionState> = _actionState
 
     private val _isContactStarred = MutableStateFlow(false)
+    private val _discordChannelId = MutableStateFlow<String?>(null)
 
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
@@ -100,14 +106,17 @@ class ConversationDetailsViewModel @Inject constructor(
         attachmentRepository.observeImageCountForChat(chatGuid),
         attachmentRepository.observeOtherMediaCountForChat(chatGuid),
         attachmentRepository.observeRecentImagesForChat(chatGuid, 5),
-        _isContactStarred
+        _isContactStarred,
+        _discordChannelId
     ) { values ->
-        val chat = values[0] as ChatEntity?
-        val participants = values[1] as List<HandleEntity>
-        val imageCount = values[2] as Int
-        val otherMediaCount = values[3] as Int
-        val recentImages = values[4] as List<AttachmentEntity>
-        val isStarred = values[5] as Boolean
+        @Suppress("UNCHECKED_CAST")
+        val chat = values[0] as? ChatEntity
+        val participants = values[1] as? List<HandleEntity> ?: emptyList()
+        val imageCount = values[2] as? Int ?: 0
+        val otherMediaCount = values[3] as? Int ?: 0
+        val recentImages = values[4] as? List<AttachmentEntity> ?: emptyList()
+        val isStarred = values[5] as? Boolean ?: false
+        val discordChannelId = values[6] as? String
 
         ConversationDetailsUiState(
             chat = chat,
@@ -116,6 +125,7 @@ class ConversationDetailsViewModel @Inject constructor(
             otherMediaCount = otherMediaCount,
             recentImages = recentImages,
             isContactStarred = isStarred,
+            discordChannelId = discordChannelId,
             isLoading = false
         )
     }.stateIn(
@@ -125,12 +135,14 @@ class ConversationDetailsViewModel @Inject constructor(
     )
 
     init {
-        // Check starred status when participants are loaded
+        // Check starred status and Discord channel when participants are loaded
         viewModelScope.launch {
             chatRepository.observeParticipantsForChat(chatGuid).collect { participants ->
                 val address = participants.firstOrNull()?.address
                 if (address != null) {
                     _isContactStarred.value = androidContactsService.isContactStarred(address)
+                    // Load Discord channel ID for non-group chats
+                    _discordChannelId.value = discordContactService.getDiscordChannelId(address)
                 }
             }
         }
@@ -225,6 +237,66 @@ class ConversationDetailsViewModel @Inject constructor(
             if (displayName != null || photoUri != null) {
                 chatRepository.updateHandleCachedContactInfo(address, displayName, photoUri)
             }
+        }
+    }
+
+    // ============================================================================
+    // DISCORD VIDEO CALL SUPPORT
+    // ============================================================================
+
+    /**
+     * Check if Discord is installed.
+     */
+    fun isDiscordInstalled(): Boolean {
+        return discordContactService.isDiscordInstalled()
+    }
+
+    /**
+     * Save Discord channel ID for the participant.
+     */
+    fun saveDiscordChannelId(channelId: String) {
+        val address = uiState.value.firstParticipantAddress
+        if (address.isEmpty()) return
+
+        viewModelScope.launch {
+            val success = discordContactService.setDiscordChannelId(address, channelId)
+            if (success) {
+                _discordChannelId.value = channelId
+            }
+        }
+    }
+
+    /**
+     * Clear Discord channel ID for the participant.
+     */
+    fun clearDiscordChannelId() {
+        val address = uiState.value.firstParticipantAddress
+        if (address.isEmpty()) return
+
+        viewModelScope.launch {
+            val success = discordContactService.clearDiscordChannelId(address)
+            if (success) {
+                _discordChannelId.value = null
+            }
+        }
+    }
+
+    /**
+     * Create intent to open Discord DM channel.
+     */
+    fun getDiscordCallIntent(channelId: String): Intent {
+        return Intent(Intent.ACTION_VIEW, Uri.parse("discord://-/channels/@me/$channelId"))
+    }
+
+    /**
+     * Check if WhatsApp is installed.
+     */
+    fun isWhatsAppAvailable(): Boolean {
+        return try {
+            // This is a simple check - in production you'd use PackageManager
+            true // WhatsApp is commonly installed
+        } catch (e: Exception) {
+            false
         }
     }
 

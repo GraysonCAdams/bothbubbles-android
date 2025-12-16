@@ -296,7 +296,11 @@ class ChatMessageListDelegate @Inject constructor(
      * Used for instant display of sent messages without waiting for Room Flow.
      */
     fun insertMessageOptimistically(model: MessageUiModel) {
+        val start = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically START ──")
+        Log.i(TAG, "[SEND_TRACE] guid=${model.guid}")
         pagingController.insertMessageOptimistically(model)
+        Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically END: ${System.currentTimeMillis() - start}ms ──")
     }
 
     /**
@@ -471,21 +475,22 @@ class ChatMessageListDelegate @Inject constructor(
                 .conflate()
                 .collect { messageModels ->
                     val collectStart = System.currentTimeMillis()
-                    Log.d(TAG, "⏱️ [UI] collecting messages: ${messageModels.size}, thread: ${Thread.currentThread().name}")
+                    val newestGuid = messageModels.firstOrNull()?.guid?.takeLast(12) ?: "none"
+                    Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate COLLECTING ${messageModels.size} messages ──")
+                    Log.i(TAG, "[SEND_TRACE] Newest message guid=...$newestGuid")
 
                     val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
 
                     // Update separate messages flow FIRST (triggers list recomposition only)
                     val stableMessages = messageModels.toStable()
-                    Log.d("CascadeDebug", "[EMIT] _messagesState: ${stableMessages.size} messages, first=${stableMessages.firstOrNull()?.guid?.takeLast(8)}")
+                    Log.i(TAG, "[SEND_TRACE] Setting _messagesState with ${stableMessages.size} messages")
                     _messagesState.value = stableMessages
 
                     // Update main UI state
-                    Log.d("CascadeDebug", "[EMIT] _uiState: isLoading=false, canLoadMore=${messageModels.size < pagingController.totalCount.value}")
                     val canLoad = messageModels.size < pagingController.totalCount.value
                     onUiStateUpdate { copy(isLoading = false, canLoadMore = canLoad) }
                     PerformanceProfiler.end(collectId)
-                    Log.d(TAG, "⏱️ [UI] messages updated: +${System.currentTimeMillis() - collectStart}ms")
+                    Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate COLLECT DONE: ${System.currentTimeMillis() - collectStart}ms ──")
                 }
         }
 

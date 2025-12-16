@@ -282,18 +282,21 @@ class MessagePagingController(
      */
     fun insertMessageOptimistically(model: MessageUiModel) {
         val insertStart = System.currentTimeMillis()
-        Log.d(TAG, "⏱️ [PAGING] insertMessageOptimistically CALLED: ${model.guid}, thread: ${Thread.currentThread().name}")
+        Log.i(TAG, "[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically START ──")
+        Log.i(TAG, "[SEND_TRACE] guid=${model.guid}, text=\"${model.text?.take(30) ?: ""}...\"")
 
         // Check if already inserted (prevent duplicates)
         if (guidToPosition.containsKey(model.guid)) {
-            Log.d(TAG, "⏱️ [PAGING] SKIPPED - already exists: ${model.guid}")
+            Log.i(TAG, "[SEND_TRACE] SKIPPED - already exists: ${model.guid}")
             return
         }
 
         // Increment generation to invalidate any in-flight loads
         state.generation++
+        Log.i(TAG, "[SEND_TRACE] Incrementing generation to ${state.generation} +${System.currentTimeMillis() - insertStart}ms")
 
         // Shift all existing positions by 1 (in memory, no DB)
+        val shiftStart = System.currentTimeMillis()
         val newSparseData = mutableMapOf<Int, MessageUiModel>()
         val newGuidToPosition = mutableMapOf<String, Int>()
 
@@ -304,6 +307,7 @@ class MessagePagingController(
                 newGuidToPosition[existingModel.guid] = newPosition
             }
         }
+        Log.i(TAG, "[SEND_TRACE] Shifted ${sparseData.size} positions in ${System.currentTimeMillis() - shiftStart}ms")
 
         // Insert new message at position 0
         newSparseData[0] = model
@@ -331,12 +335,14 @@ class MessagePagingController(
         // Mark as optimistically inserted
         optimisticallyInsertedGuids.add(model.guid)
 
-        Log.d(TAG, "⏱️ [PAGING] state updated, calling emit: +${System.currentTimeMillis() - insertStart}ms")
+        Log.i(TAG, "[SEND_TRACE] State updated, totalSize=${state.totalSize} +${System.currentTimeMillis() - insertStart}ms")
 
         // Emit immediately
+        val emitStart = System.currentTimeMillis()
         emitMessagesLocked()
+        Log.i(TAG, "[SEND_TRACE] emitMessagesLocked() took ${System.currentTimeMillis() - emitStart}ms")
 
-        Log.d(TAG, "⏱️ [PAGING] emit DONE: +${System.currentTimeMillis() - insertStart}ms, totalSize=${state.totalSize}")
+        Log.i(TAG, "[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically END: ${System.currentTimeMillis() - insertStart}ms total ──")
     }
 
     /**
@@ -684,7 +690,10 @@ class MessagePagingController(
             loadedData = sparseData.toMap(),
             loadedRanges = MessagePagingHelpers.computeLoadedRanges(loadStatus, state.totalSize)
         )
-        android.util.Log.d("CascadeDebug", "[EMIT] pagingController._messages: ${list.totalSize} total, ${sparseData.size} loaded, first=${sparseData[0]?.guid?.takeLast(8)}")
+        val firstMessage = sparseData[0]
+        android.util.Log.d("ChatScroll", "📜 [EMIT] PagingController._messages: ${list.totalSize} total, " +
+            "${sparseData.size} loaded, first=${firstMessage?.guid?.takeLast(8)}, " +
+            "isFromMe=${firstMessage?.isFromMe}")
         _messages.value = list
     }
 }

@@ -115,28 +115,35 @@ class MessageSendWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
+        val workerStartTime = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
+        Log.i(TAG, "[SEND_TRACE] MessageSendWorker.doWork() STARTED at $workerStartTime")
+
         val pendingMessageId = inputData.getLong(KEY_PENDING_MESSAGE_ID, -1)
 
         if (pendingMessageId == -1L) {
-            Log.e(TAG, "Pending message ID is missing")
+            Log.e(TAG, "[SEND_TRACE] FATAL: Pending message ID is missing")
             return Result.failure()
         }
+        Log.i(TAG, "[SEND_TRACE] pendingMessageId=$pendingMessageId +${System.currentTimeMillis() - workerStartTime}ms")
 
         val pendingMessage = pendingMessageDao.getById(pendingMessageId)
         if (pendingMessage == null) {
-            Log.e(TAG, "Pending message not found: $pendingMessageId")
+            Log.e(TAG, "[SEND_TRACE] FATAL: Pending message not found: $pendingMessageId")
             return Result.failure()
         }
+        Log.i(TAG, "[SEND_TRACE] Loaded pending message: localId=${pendingMessage.localId}, chatGuid=${pendingMessage.chatGuid} +${System.currentTimeMillis() - workerStartTime}ms")
 
         // Skip if already sent
         if (pendingMessage.syncStatus == PendingSyncStatus.SENT.name) {
-            Log.d(TAG, "Message already sent: ${pendingMessage.localId}")
+            Log.i(TAG, "[SEND_TRACE] SKIPPING: Message already sent: ${pendingMessage.localId}")
             return Result.success()
         }
 
-        Log.d(TAG, "Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1})")
+        Log.i(TAG, "[SEND_TRACE] Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1}) +${System.currentTimeMillis() - workerStartTime}ms")
 
         // Update status to SENDING
+        Log.i(TAG, "[SEND_TRACE] Updating status to SENDING +${System.currentTimeMillis() - workerStartTime}ms")
         pendingMessageDao.updateStatusWithTimestamp(
             pendingMessageId,
             PendingSyncStatus.SENDING.name,
@@ -145,7 +152,9 @@ class MessageSendWorker @AssistedInject constructor(
 
         return try {
             // Get persisted attachments and convert to PendingAttachmentInput
+            Log.i(TAG, "[SEND_TRACE] Loading attachments +${System.currentTimeMillis() - workerStartTime}ms")
             val attachments = pendingAttachmentDao.getForMessage(pendingMessageId)
+            Log.i(TAG, "[SEND_TRACE] Found ${attachments.size} attachments +${System.currentTimeMillis() - workerStartTime}ms")
             val attachmentInputs = attachments.mapNotNull { attachment ->
                 val file = File(attachment.persistedPath)
                 if (file.exists()) {
@@ -157,7 +166,7 @@ class MessageSendWorker @AssistedInject constructor(
                         size = attachment.fileSize
                     )
                 } else {
-                    Log.w(TAG, "Attachment file missing: ${attachment.persistedPath}")
+                    Log.w(TAG, "[SEND_TRACE] Attachment file missing: ${attachment.persistedPath}")
                     null
                 }
             }
@@ -168,9 +177,12 @@ class MessageSendWorker @AssistedInject constructor(
             } catch (e: Exception) {
                 MessageDeliveryMode.AUTO
             }
+            Log.i(TAG, "[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachmentInputs.size} +${System.currentTimeMillis() - workerStartTime}ms")
 
             // Send via MessageSendingService
             // Pass localId as tempGuid to ensure same ID is used across retries
+            Log.i(TAG, "[SEND_TRACE] ── Calling MessageSendingService.sendUnified ── +${System.currentTimeMillis() - workerStartTime}ms")
+            val sendStart = System.currentTimeMillis()
             val result = messageSendingService.sendUnified(
                 chatGuid = pendingMessage.chatGuid,
                 text = pendingMessage.text ?: "",
@@ -181,23 +193,33 @@ class MessageSendWorker @AssistedInject constructor(
                 deliveryMode = deliveryMode,
                 tempGuid = pendingMessage.localId
             )
+            Log.i(TAG, "[SEND_TRACE] sendUnified RETURNED after ${System.currentTimeMillis() - sendStart}ms +${System.currentTimeMillis() - workerStartTime}ms total")
 
             if (result.isSuccess) {
                 val sentMessage = result.getOrThrow()
-                Log.i(TAG, "Message sent successfully: ${pendingMessage.localId} -> ${sentMessage.guid}")
+                Log.i(TAG, "[SEND_TRACE] ✓ Message SENT SUCCESSFULLY: ${pendingMessage.localId} -> ${sentMessage.guid}")
+                Log.i(TAG, "[SEND_TRACE] Server GUID: ${sentMessage.guid}")
 
                 // Mark as sent with server GUID
+                Log.i(TAG, "[SEND_TRACE] Marking as sent in DB +${System.currentTimeMillis() - workerStartTime}ms")
                 pendingMessageDao.markAsSent(pendingMessageId, sentMessage.guid)
 
                 // Clean up persisted attachments
-                attachmentPersistenceManager.cleanupAttachments(attachments.map { it.persistedPath })
+                if (attachments.isNotEmpty()) {
+                    Log.i(TAG, "[SEND_TRACE] Cleaning up ${attachments.size} attachment files")
+                    attachmentPersistenceManager.cleanupAttachments(attachments.map { it.persistedPath })
+                }
 
+                Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                Log.i(TAG, "[SEND_TRACE] MessageSendWorker COMPLETE: ${System.currentTimeMillis() - workerStartTime}ms total")
+                Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
                 Result.success()
             } else {
+                Log.e(TAG, "[SEND_TRACE] ✗ sendUnified FAILED: ${result.exceptionOrNull()?.message}")
                 handleFailure(pendingMessageId, result.exceptionOrNull())
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending message", e)
+            Log.e(TAG, "[SEND_TRACE] ✗ Exception during send: ${e.message}", e)
             handleFailure(pendingMessageId, e)
         }
     }

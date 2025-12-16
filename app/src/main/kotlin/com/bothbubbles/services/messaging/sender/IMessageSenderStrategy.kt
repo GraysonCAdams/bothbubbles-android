@@ -74,11 +74,15 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     override suspend fun send(options: SendOptions): SendResult {
-        return if (options.hasAttachments) {
+        Log.i(TAG, "[SEND_TRACE] ── IMessageSenderStrategy.send START ──")
+        Log.i(TAG, "[SEND_TRACE] hasAttachments=${options.hasAttachments}, text=\"${options.text.take(30)}...\"")
+        val result = if (options.hasAttachments) {
             sendWithAttachments(options)
         } else {
             sendTextOnly(options)
         }
+        Log.i(TAG, "[SEND_TRACE] ── IMessageSenderStrategy.send END: ${if (result is SendResult.Success) "SUCCESS" else "FAILURE"} ──")
+        return result
     }
 
     override fun resetUploadProgress() {
@@ -86,18 +90,22 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     private suspend fun sendTextOnly(options: SendOptions): SendResult {
+        val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
+        Log.i(TAG, "[SEND_TRACE] sendTextOnly: tempGuid=$tempGuid")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
+            Log.i(TAG, "[SEND_TRACE] existingMessage=${existingMessage != null} +${System.currentTimeMillis() - sendStart}ms")
             if (existingMessage != null) {
                 if (existingMessage.error != 0) {
-                    Log.d(TAG, "Retry: clearing error on existing temp message $tempGuid")
+                    Log.i(TAG, "[SEND_TRACE] Retry: clearing error on existing temp message $tempGuid")
                     messageDao.updateErrorStatus(tempGuid, 0)
                 }
             }
 
             if (existingMessage == null) {
+                Log.i(TAG, "[SEND_TRACE] Creating temp message entity +${System.currentTimeMillis() - sendStart}ms")
                 val tempMessage = MessageEntity(
                     guid = tempGuid,
                     chatGuid = options.chatGuid,
@@ -111,8 +119,11 @@ class IMessageSenderStrategy @Inject constructor(
                 )
                 messageDao.insertMessage(tempMessage)
                 chatDao.updateLastMessage(options.chatGuid, System.currentTimeMillis(), options.text)
+                Log.i(TAG, "[SEND_TRACE] Temp message inserted +${System.currentTimeMillis() - sendStart}ms")
             }
 
+            Log.i(TAG, "[SEND_TRACE] ▶▶▶ Calling api.sendMessage (NETWORK) +${System.currentTimeMillis() - sendStart}ms")
+            val apiStart = System.currentTimeMillis()
             val response = api.sendMessage(
                 SendMessageRequest(
                     chatGuid = options.chatGuid,
@@ -123,9 +134,11 @@ class IMessageSenderStrategy @Inject constructor(
                     subject = options.subject
                 )
             )
+            Log.i(TAG, "[SEND_TRACE] ◀◀◀ api.sendMessage RETURNED: ${System.currentTimeMillis() - apiStart}ms (status=${response.code()})")
 
             val body = response.body()
             if (!response.isSuccessful || body == null || body.status != 200) {
+                Log.e(TAG, "[SEND_TRACE] API FAILED: code=${response.code()}, message=${body?.message}")
                 messageDao.updateErrorStatus(tempGuid, 1)
                 return SendResult.Failure(
                     MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message"),
@@ -134,12 +147,16 @@ class IMessageSenderStrategy @Inject constructor(
             }
 
             val serverMessage = body.data
+            Log.i(TAG, "[SEND_TRACE] API SUCCESS: serverGuid=${serverMessage?.guid} +${System.currentTimeMillis() - sendStart}ms")
             return if (serverMessage != null) {
                 try {
+                    Log.i(TAG, "[SEND_TRACE] Replacing temp GUID with server GUID +${System.currentTimeMillis() - sendStart}ms")
                     messageDao.replaceGuid(tempGuid, serverMessage.guid)
+                    Log.i(TAG, "[SEND_TRACE] GUID replaced: $tempGuid -> ${serverMessage.guid}")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Non-critical error replacing GUID: ${e.message}")
+                    Log.w(TAG, "[SEND_TRACE] Non-critical error replacing GUID: ${e.message}")
                 }
+                Log.i(TAG, "[SEND_TRACE] sendTextOnly SUCCESS: ${System.currentTimeMillis() - sendStart}ms total")
                 SendResult.Success(serverMessage.toEntity(options.chatGuid))
             } else {
                 messageDao.updateErrorStatus(tempGuid, 0)
@@ -151,17 +168,21 @@ class IMessageSenderStrategy @Inject constructor(
                 SendResult.Success(message)
             }
         } catch (e: Exception) {
+            Log.e(TAG, "[SEND_TRACE] sendTextOnly EXCEPTION: ${e.message}")
             messageDao.updateErrorStatus(tempGuid, 1)
             return SendResult.Failure(e, tempGuid)
         }
     }
 
     private suspend fun sendWithAttachments(options: SendOptions): SendResult {
+        val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
+        Log.i(TAG, "[SEND_TRACE] sendWithAttachments: tempGuid=$tempGuid, attachments=${options.attachments.size}")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
             val tempAttachmentGuids = options.attachments.indices.map { "$tempGuid-att-$it" }
+            Log.i(TAG, "[SEND_TRACE] existingMessage=${existingMessage != null} +${System.currentTimeMillis() - sendStart}ms")
 
             if (existingMessage == null) {
                 database.withTransaction {

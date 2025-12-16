@@ -23,6 +23,8 @@
     <string name="emoji">Emoji</string>
     <string name="image">Image</string>
     <string name="voice_memo">Voice memo</string>
+    <string name="action_pause">Pause</string>
+    <string name="action_play">Play</string>
     <string name="noise_cancellation">Noise cancellation</string>
     <string name="restart_recording">Restart</string>
     <string name="attach_voice_memo">Attach</string>

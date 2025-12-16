@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.util.toStable
@@ -51,7 +52,8 @@ class ChatInfoDelegate @Inject constructor(
     private val messageRepository: MessageRepository,
     private val settingsDataStore: SettingsDataStore,
     private val androidContactsService: AndroidContactsService,
-    private val smsPermissionHelper: SmsPermissionHelper
+    private val smsPermissionHelper: SmsPermissionHelper,
+    private val discordContactService: DiscordContactService
 ) {
     companion object {
         private const val TAG = "ChatInfoDelegate"
@@ -98,6 +100,13 @@ class ChatInfoDelegate @Inject constructor(
                 .collect { (chat, participants) ->
                     chat?.let {
                         val chatTitle = resolveChatTitle(it, participants)
+
+                        // Load Discord channel ID for non-group chats
+                        val discordChannelId = if (!it.isGroup) {
+                            val address = it.chatIdentifier ?: participants.firstOrNull()?.address
+                            address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
+                        } else null
+
                         _state.update { state ->
                             state.copy(
                                 chatTitle = chatTitle,
@@ -110,7 +119,8 @@ class ChatInfoDelegate @Inject constructor(
                                 isIMessageChat = it.isIMessage,
                                 smsInputBlocked = it.isSmsChat && !smsPermissionHelper.isDefaultSmsApp(),
                                 isSnoozed = it.isSnoozed,
-                                snoozeUntil = it.snoozeUntil
+                                snoozeUntil = it.snoozeUntil,
+                                discordChannelId = discordChannelId
                             )
                         }
                     }
@@ -274,5 +284,19 @@ class ChatInfoDelegate @Inject constructor(
      */
     fun updateSmsInputBlocked(blocked: Boolean) {
         _state.update { it.copy(smsInputBlocked = blocked) }
+    }
+
+    /**
+     * Refresh Discord channel ID from contacts.
+     * Called after saving or clearing a Discord channel ID.
+     */
+    fun refreshDiscordChannelId() {
+        val address = _state.value.participantPhone ?: return
+        if (_state.value.isGroup) return
+
+        scope.launch {
+            val channelId = discordContactService.getDiscordChannelId(address)
+            _state.update { it.copy(discordChannelId = channelId) }
+        }
     }
 }

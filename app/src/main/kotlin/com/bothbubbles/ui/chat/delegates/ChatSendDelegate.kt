@@ -163,9 +163,13 @@ class ChatSendDelegate @Inject constructor(
         cancelTypingIndicator()
 
         val sendStartTime = System.currentTimeMillis()
-        Log.d(TAG, "⏱️ [DELEGATE] sendCurrentMessage() CALLED")
+        Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
+        Log.i(TAG, "[SEND_TRACE] STEP 1: sendCurrentMessage() CALLED at $sendStartTime")
+        Log.i(TAG, "[SEND_TRACE] Text: \"${text.take(50)}${if (text.length > 50) "..." else ""}\"")
+        Log.i(TAG, "[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
 
         scope.launch {
+            Log.i(TAG, "[SEND_TRACE] STEP 2: Coroutine launched +${System.currentTimeMillis() - sendStartTime}ms")
             val sendId = PerformanceProfiler.start("Message.send", "${text.take(20)}...")
             val replyToGuid = _state.value.replyingToGuid
 
@@ -173,7 +177,7 @@ class ChatSendDelegate @Inject constructor(
             composer.clearInput()
             _state.update { it.copy(replyingToGuid = null) }
             onDraftCleared?.invoke()
-            Log.d(TAG, "⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
+            Log.i(TAG, "[SEND_TRACE] STEP 3: UI cleared +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Determine delivery mode based on chat type and current send mode
             val deliveryMode = determineDeliveryMode(
@@ -185,6 +189,7 @@ class ChatSendDelegate @Inject constructor(
             // OPTIMISTIC INSERTION: Generate GUID and insert into UI before DB
             val tempGuid = "temp-${java.util.UUID.randomUUID()}"
             val creationTime = System.currentTimeMillis()
+            Log.i(TAG, "[SEND_TRACE] STEP 4: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Create optimistic message model
             val messageSource = when {
@@ -213,12 +218,15 @@ class ChatSendDelegate @Inject constructor(
                 threadOriginatorGuid = replyToGuid
             )
 
-            Log.d(TAG, "⏱️ [DELEGATE] inserting optimistic message: +${System.currentTimeMillis() - sendStartTime}ms")
+            Log.i(TAG, "[SEND_TRACE] STEP 5: Calling insertMessageOptimistically +${System.currentTimeMillis() - sendStartTime}ms")
             messageList.insertMessageOptimistically(optimisticModel)
-            Log.d(TAG, "⏱️ [DELEGATE] optimistic insert done: +${System.currentTimeMillis() - sendStartTime}ms")
+            Log.i(TAG, "[SEND_TRACE] STEP 6: Optimistic insert DONE +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Queue message for offline-first delivery via WorkManager
+            Log.i(TAG, "[SEND_TRACE] STEP 7: Switching to IO dispatcher +${System.currentTimeMillis() - sendStartTime}ms")
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                Log.i(TAG, "[SEND_TRACE] STEP 8: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
+                val queueStart = System.currentTimeMillis()
                 pendingMessageRepository.queueMessage(
                     chatGuid = chatGuid,
                     text = text,
@@ -229,7 +237,8 @@ class ChatSendDelegate @Inject constructor(
                     forcedLocalId = tempGuid
                 ).fold(
                     onSuccess = { localId ->
-                        Log.d(TAG, "Message queued successfully: $localId")
+                        Log.i(TAG, "[SEND_TRACE] STEP 9: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
+                        Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
                         PerformanceProfiler.end(sendId, "queued")
 
                         // Play sound for SMS delivery (optimistic)
@@ -239,7 +248,7 @@ class ChatSendDelegate @Inject constructor(
                         }
                     },
                     onFailure = { e ->
-                        Log.e(TAG, "Failed to queue message", e)
+                        Log.e(TAG, "[SEND_TRACE] STEP 9: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
                         _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                         PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
                     }

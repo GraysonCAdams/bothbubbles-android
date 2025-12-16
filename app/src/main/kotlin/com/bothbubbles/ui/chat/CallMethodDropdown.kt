@@ -28,7 +28,8 @@ import androidx.compose.ui.semantics.Role
  */
 enum class CallMethod(val displayName: String) {
     GOOGLE_MEET("Google Meet"),
-    WHATSAPP("WhatsApp")
+    WHATSAPP("WhatsApp"),
+    DISCORD("Discord")
 }
 
 /**

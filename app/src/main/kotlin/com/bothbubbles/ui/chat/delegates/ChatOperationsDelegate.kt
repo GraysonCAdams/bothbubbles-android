@@ -7,6 +7,7 @@ import android.provider.BlockedNumberContract
 import android.provider.ContactsContract
 import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
@@ -33,7 +34,8 @@ class ChatOperationsDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
-    private val messageSendingService: MessageSendingService
+    private val messageSendingService: MessageSendingService,
+    private val discordContactService: DiscordContactService
 ) {
     companion object {
         private const val TAG = "ChatOperationsDelegate"
@@ -277,6 +279,55 @@ class ChatOperationsDelegate @Inject constructor(
         } catch (e: Exception) {
             false
         }
+    }
+
+    // ============================================================================
+    // DISCORD VIDEO CALL SUPPORT
+    // ============================================================================
+
+    /**
+     * Check if Discord is installed.
+     */
+    fun isDiscordInstalled(): Boolean {
+        return discordContactService.isDiscordInstalled()
+    }
+
+    /**
+     * Get the Discord channel ID for a participant.
+     */
+    fun getDiscordChannelId(participantPhone: String?): String? {
+        if (participantPhone.isNullOrBlank()) return null
+        return discordContactService.getDiscordChannelId(participantPhone)
+    }
+
+    /**
+     * Save Discord channel ID for a participant.
+     */
+    fun saveDiscordChannelId(participantPhone: String?, channelId: String): Boolean {
+        if (participantPhone.isNullOrBlank()) return false
+        return discordContactService.setDiscordChannelId(participantPhone, channelId)
+    }
+
+    /**
+     * Clear Discord channel ID for a participant.
+     */
+    fun clearDiscordChannelId(participantPhone: String?): Boolean {
+        if (participantPhone.isNullOrBlank()) return false
+        return discordContactService.clearDiscordChannelId(participantPhone)
+    }
+
+    /**
+     * Validate a Discord channel ID.
+     */
+    fun isValidDiscordChannelId(channelId: String): Boolean {
+        return discordContactService.isValidChannelId(channelId)
+    }
+
+    /**
+     * Create intent to open Discord DM channel.
+     */
+    fun getDiscordCallIntent(channelId: String): Intent {
+        return Intent(Intent.ACTION_VIEW, Uri.parse("discord://-/channels/@me/$channelId"))
     }
 
     /**

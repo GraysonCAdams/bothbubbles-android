@@ -166,51 +166,202 @@ fun SmsBlockedDialog(
 }
 
 /**
- * Dialog for choosing video call method (Google Meet or WhatsApp).
- * WhatsApp option is only shown if the app is installed.
+ * Bottom sheet for choosing video call method.
+ * Shows Google Meet, WhatsApp (if installed), and Discord options.
+ * Discord shows "Set up" if no channel ID is configured.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoCallMethodDialog(
     onGoogleMeet: () -> Unit,
     onWhatsApp: () -> Unit,
+    onDiscord: () -> Unit,
+    onDiscordSetup: () -> Unit,
     onDismiss: () -> Unit,
-    isWhatsAppAvailable: Boolean
+    isWhatsAppAvailable: Boolean,
+    isDiscordAvailable: Boolean,
+    hasDiscordChannelId: Boolean
 ) {
-    AlertDialog(
+    ModalBottomSheet(
         onDismissRequest = onDismiss,
-        title = { Text("Video call") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 32.dp)
+        ) {
+            // Header
+            Text(
+                text = "Video call",
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.padding(horizontal = 24.dp, vertical = 16.dp)
+            )
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+            // Google Meet option (always available)
+            Surface(
+                onClick = {
+                    onGoogleMeet()
+                    onDismiss()
+                },
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    Surface(
+                        color = Color(0xFF00897B).copy(alpha = 0.1f),
+                        shape = CircleShape,
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.fillMaxSize()
+                        ) {
+                            Text(
+                                text = "G",
+                                style = MaterialTheme.typography.titleMedium,
+                                color = Color(0xFF00897B)
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Google Meet",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            // WhatsApp option (only if available)
+            if (isWhatsAppAvailable) {
+                Surface(
                     onClick = {
-                        onGoogleMeet()
+                        onWhatsApp()
                         onDismiss()
                     },
+                    color = Color.Transparent,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Google Meet", modifier = Modifier.fillMaxWidth())
-                }
-
-                if (isWhatsAppAvailable) {
-                    TextButton(
-                        onClick = {
-                            onWhatsApp()
-                            onDismiss()
-                        },
-                        modifier = Modifier.fillMaxWidth()
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        Text("WhatsApp", modifier = Modifier.fillMaxWidth())
+                        Surface(
+                            color = Color(0xFF25D366).copy(alpha = 0.1f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Text(
+                                    text = "W",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color(0xFF25D366)
+                                )
+                            }
+                        }
+                        Text(
+                            text = "WhatsApp",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
                     }
                 }
             }
-        },
-        confirmButton = {},
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+
+            // Discord option (only if installed)
+            if (isDiscordAvailable) {
+                Surface(
+                    onClick = {
+                        if (hasDiscordChannelId) {
+                            onDiscord()
+                            onDismiss()
+                        } else {
+                            onDiscordSetup()
+                        }
+                    },
+                    color = Color.Transparent,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 24.dp, vertical = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        Surface(
+                            color = Color(0xFF5865F2).copy(alpha = 0.1f),
+                            shape = CircleShape,
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Text(
+                                    text = "D",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    color = Color(0xFF5865F2)
+                                )
+                            }
+                        }
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Discord",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = if (hasDiscordChannelId)
+                                    MaterialTheme.colorScheme.onSurface
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (!hasDiscordChannelId) {
+                                Text(
+                                    text = "Set up",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Cancel option
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant,
+                modifier = Modifier.padding(vertical = 8.dp)
+            )
+
+            Surface(
+                onClick = onDismiss,
+                color = Color.Transparent,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(
+                    text = "Cancel",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                )
             }
         }
-    )
+    }
 }
 
 /**

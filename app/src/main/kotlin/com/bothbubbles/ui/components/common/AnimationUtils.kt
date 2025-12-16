@@ -217,11 +217,11 @@ fun Modifier.staggeredEntrance(
  * - shouldAnimate is true (message is new and hasn't been seen)
  * - Message slides up and fades in from the bottom
  *
- * For sent messages: appears right after hitting send
- * For received messages: appears when arriving via socket
+ * For sent messages: appears INSTANTLY (no animation delay) for responsive UX
+ * For received messages: subtle slide-up animation
  *
  * @param shouldAnimate Whether this message should animate (new, unseen message)
- * @param isFromMe Whether this is an outgoing message (affects animation direction)
+ * @param isFromMe Whether this is an outgoing message (instant appearance)
  */
 @Composable
 fun Modifier.newMessageEntrance(
@@ -231,6 +231,15 @@ fun Modifier.newMessageEntrance(
     // Skip animation entirely when not needed
     if (!shouldAnimate) return this
 
+    // PERF FIX: Sent messages appear INSTANTLY for responsive UX
+    // The user expects immediate feedback when they hit send
+    // Only incoming messages get the subtle slide-up animation
+    if (isFromMe) {
+        val entranceTime = System.currentTimeMillis()
+        android.util.Log.i("SEND_TRACE", "[ANIM] Outgoing message INSTANT appearance at $entranceTime")
+        return this // No animation - instant appearance
+    }
+
     var hasAppeared by remember { mutableStateOf(false) }
 
     // DEBUG: Log animation state
@@ -238,38 +247,38 @@ fun Modifier.newMessageEntrance(
 
     LaunchedEffect(Unit) {
         android.util.Log.d("MessageAnim", "newMessageEntrance: LaunchedEffect starting animation")
-        // Small delay to ensure smooth rendering
-        delay(16)
+        // Minimal delay to ensure layout is ready
+        delay(8)
         hasAppeared = true
         android.util.Log.d("MessageAnim", "newMessageEntrance: hasAppeared set to true")
     }
 
+    // Faster fade-in for incoming messages (100ms instead of 250ms)
     val alpha by animateFloatAsState(
         targetValue = if (hasAppeared) 1f else 0f,
         animationSpec = tween(
-            durationMillis = MotionTokens.Duration.MEDIUM_1,
+            durationMillis = 100, // Fast fade-in
             easing = MotionTokens.Easing.EmphasizedDecelerate
         ),
         label = "newMessageAlpha"
     )
 
-    // Slide up from below (positive = down, so we start positive and animate to 0)
-    // In reversed LazyColumn, new messages appear at the "bottom" visually
+    // Subtle slide up from below (reduced from 40f to 24f for snappier feel)
     val translationY by animateFloatAsState(
-        targetValue = if (hasAppeared) 0f else 40f,
+        targetValue = if (hasAppeared) 0f else 24f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioLowBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh // Snappier
         ),
         label = "newMessageTranslation"
     )
 
-    // Subtle scale for outgoing messages (sent by user)
+    // Subtle scale for incoming messages only
     val scale by animateFloatAsState(
-        targetValue = if (hasAppeared) 1f else if (isFromMe) 0.92f else 0.96f,
+        targetValue = if (hasAppeared) 1f else 0.96f,
         animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = Spring.StiffnessHigh
         ),
         label = "newMessageScale"
     )

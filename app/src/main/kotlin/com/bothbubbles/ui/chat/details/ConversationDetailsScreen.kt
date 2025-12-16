@@ -20,9 +20,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.ui.chat.VideoCallMethodDialog
 import com.bothbubbles.ui.components.common.ConversationAvatar
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
+import com.bothbubbles.ui.components.dialogs.DiscordChannelHelpOverlay
+import com.bothbubbles.ui.components.dialogs.DiscordChannelSetupDialog
 import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
 import com.bothbubbles.util.PhoneNumberFormatter
 
@@ -42,6 +45,9 @@ fun ConversationDetailsScreen(
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showSnoozeDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }
+    var showVideoCallDialog by remember { mutableStateOf(false) }
+    var showDiscordSetupDialog by remember { mutableStateOf(false) }
+    var showDiscordHelpOverlay by remember { mutableStateOf(false) }
     var selectedParticipant by remember { mutableStateOf<HandleEntity?>(null) }
 
     // Handle action states
@@ -168,13 +174,7 @@ fun ConversationDetailsScreen(
                                 context.startActivity(intent)
                             }
                         },
-                        onVideoClick = {
-                            val phoneNumber = uiState.firstParticipantAddress
-                            if (phoneNumber.isNotBlank()) {
-                                val intent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$phoneNumber"))
-                                context.startActivity(Intent.createChooser(intent, "Video call with..."))
-                            }
-                        },
+                        onVideoClick = { showVideoCallDialog = true },
                         onContactInfoClick = {
                             viewContact(context, uiState.firstParticipantAddress)
                         },
@@ -207,6 +207,18 @@ fun ConversationDetailsScreen(
                         onNotificationsClick = onNotificationSettingsClick,
                         onBlockReportClick = { showBlockDialog = true }
                     )
+                }
+
+                // Profile fields section (Discord channel for 1:1 chats)
+                if (uiState.chat?.isGroup != true) {
+                    item {
+                        ProfileFieldsSection(
+                            discordChannelId = uiState.discordChannelId,
+                            isDiscordInstalled = viewModel.isDiscordInstalled(),
+                            onDiscordEditClick = { showDiscordSetupDialog = true },
+                            onDiscordClearClick = { viewModel.clearDiscordChannelId() }
+                        )
+                    }
                 }
 
                 // Participants section (for group chats or to show contact)
@@ -337,6 +349,63 @@ fun ConversationDetailsScreen(
             onContactAdded = {
                 viewModel.refreshContactInfo(participant.address)
             }
+        )
+    }
+
+    // Video call method dialog
+    val context = LocalContext.current
+    if (showVideoCallDialog) {
+        VideoCallMethodDialog(
+            onGoogleMeet = {
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://meet.google.com/new"))
+                context.startActivity(intent)
+                showVideoCallDialog = false
+            },
+            onWhatsApp = {
+                val phone = uiState.firstParticipantAddress.replace(Regex("[^0-9+]"), "")
+                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://wa.me/$phone"))
+                context.startActivity(intent)
+                showVideoCallDialog = false
+            },
+            onDiscord = {
+                uiState.discordChannelId?.let { channelId ->
+                    context.startActivity(viewModel.getDiscordCallIntent(channelId))
+                }
+                showVideoCallDialog = false
+            },
+            onDiscordSetup = {
+                showVideoCallDialog = false
+                showDiscordSetupDialog = true
+            },
+            onDismiss = { showVideoCallDialog = false },
+            isWhatsAppAvailable = viewModel.isWhatsAppAvailable(),
+            isDiscordAvailable = viewModel.isDiscordInstalled(),
+            hasDiscordChannelId = uiState.discordChannelId != null
+        )
+    }
+
+    // Discord channel setup dialog
+    if (showDiscordSetupDialog) {
+        DiscordChannelSetupDialog(
+            currentChannelId = uiState.discordChannelId,
+            contactName = uiState.displayName,
+            onSave = { channelId ->
+                viewModel.saveDiscordChannelId(channelId)
+                showDiscordSetupDialog = false
+            },
+            onClear = {
+                viewModel.clearDiscordChannelId()
+                showDiscordSetupDialog = false
+            },
+            onDismiss = { showDiscordSetupDialog = false },
+            onShowHelp = { showDiscordHelpOverlay = true }
+        )
+    }
+
+    // Discord help overlay
+    if (showDiscordHelpOverlay) {
+        DiscordChannelHelpOverlay(
+            onDismiss = { showDiscordHelpOverlay = false }
         )
     }
 }

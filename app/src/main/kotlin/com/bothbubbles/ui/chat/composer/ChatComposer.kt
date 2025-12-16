@@ -41,8 +41,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
-import com.bothbubbles.ui.chat.components.ExpandedRecordingPanel
-import com.bothbubbles.ui.chat.components.PreviewContent
+import com.bothbubbles.ui.chat.components.ChatRecordingPanel
+import com.bothbubbles.ui.chat.components.ChatPreviewPanel
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.components.SendButton
 import com.bothbubbles.ui.chat.components.VoiceMemoButton
@@ -286,7 +286,7 @@ private fun MainInputRow(
                 }
                 ComposerInputMode.VOICE_RECORDING -> {
                     val recordingState = state.recordingState ?: RecordingState()
-                    ExpandedRecordingPanel(
+                    ChatRecordingPanel(
                         duration = recordingState.durationMs,
                         amplitudeHistory = recordingState.amplitudeHistory,
                         isNoiseCancellationEnabled = recordingState.isNoiseCancellationEnabled,
@@ -300,7 +300,7 @@ private fun MainInputRow(
                 }
                 ComposerInputMode.VOICE_PREVIEW -> {
                     val recordingState = state.recordingState ?: RecordingState()
-                    PreviewContent(
+                    ChatPreviewPanel(
                         duration = recordingState.durationMs,
                         playbackPosition = recordingState.playbackPositionMs,
                         isPlaying = recordingState.isPlaying,

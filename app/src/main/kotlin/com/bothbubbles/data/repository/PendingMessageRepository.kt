@@ -30,6 +30,7 @@ import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
 import com.bothbubbles.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
+import com.bothbubbles.services.messaging.MessageSender
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -63,7 +64,8 @@ class PendingMessageRepository @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val chatDao: ChatDao,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
-    @ApplicationScope private val applicationScope: CoroutineScope
+    @ApplicationScope private val applicationScope: CoroutineScope,
+    private val messageSender: dagger.Lazy<MessageSender>  // Lazy to avoid circular dependency
 ) {
     companion object {
         private const val TAG = "PendingMessageRepo"
@@ -95,24 +97,27 @@ class PendingMessageRepository @Inject constructor(
         forcedLocalId: String? = null
     ): Result<String> = runCatching {
         val startTime = System.currentTimeMillis()
-        Log.d(TAG, "⏱️ queueMessage START")
+        Log.i(TAG, "[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
+        Log.i(TAG, "[SEND_TRACE] chatGuid=$chatGuid, mode=$deliveryMode, attachments=${attachments.size}")
 
         // Use "temp-" prefix so MessageEntity.isSent correctly returns false
         val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] clientGuid=$clientGuid +${System.currentTimeMillis() - startTime}ms")
 
         // Determine message source based on delivery mode
         val messageSource = inferMessageSource(chatGuid, deliveryMode)
 
         // Persist attachments to internal storage first (outside transaction for I/O)
         val attachPersistStart = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] Persisting ${attachments.size} attachments +${System.currentTimeMillis() - startTime}ms")
         val persistedAttachments = if (attachments.isNotEmpty()) {
             attachments.mapIndexedNotNull { index, input ->
                 val uri = input.uri
                 val attachmentLocalId = "$clientGuid-att-$index"
                 attachmentPersistenceManager.persistAttachment(uri, attachmentLocalId)
                     .onFailure { e ->
-                        Log.e(TAG, "Failed to persist attachment: $uri", e)
+                        Log.e(TAG, "[SEND_TRACE] Failed to persist attachment: $uri", e)
                     }
                     .getOrNull()
                     ?.let { result ->
@@ -132,11 +137,12 @@ class PendingMessageRepository @Inject constructor(
             emptyList()
         }
         if (attachments.isNotEmpty()) {
-            Log.d(TAG, "⏱️ Attachment persist: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
+            Log.i(TAG, "[SEND_TRACE] Attachment persist DONE: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
         }
 
         // Use transaction to ensure atomicity: all-or-nothing for DB operations
         val txStart = System.currentTimeMillis()
+        Log.i(TAG, "[SEND_TRACE] Starting DB transaction +${System.currentTimeMillis() - startTime}ms")
         val messageId = database.withTransaction {
             // 1. Create pending message (durability/retry engine)
             val pendingMessage = PendingMessageEntity(
@@ -210,22 +216,82 @@ class PendingMessageRepository @Inject constructor(
 
             pendingId
         }
-        Log.d(TAG, "⏱️ DB transaction: ${System.currentTimeMillis() - txStart}ms")
+        Log.i(TAG, "[SEND_TRACE] DB transaction DONE: ${System.currentTimeMillis() - txStart}ms")
+        Log.i(TAG, "[SEND_TRACE] Created pending message id=$messageId +${System.currentTimeMillis() - startTime}ms")
 
-        Log.d(TAG, "Created pending message with local echo: $clientGuid (id=$messageId)")
         if (persistedAttachments.isNotEmpty()) {
-            Log.d(TAG, "Created ${persistedAttachments.size} attachment echoes for $clientGuid")
+            Log.i(TAG, "[SEND_TRACE] Created ${persistedAttachments.size} attachment echoes")
         }
 
-        // Enqueue WorkManager job asynchronously - don't block UI update
-        // The message is already in the DB, so UI will update via Room Flow
+        // Try immediate send first (bypasses WorkManager 300-400ms scheduling latency)
+        // Fall back to WorkManager only if immediate send fails
+        Log.i(TAG, "[SEND_TRACE] Launching async IMMEDIATE SEND +${System.currentTimeMillis() - startTime}ms")
         applicationScope.launch {
-            val workerStart = System.currentTimeMillis()
-            enqueueWorker(messageId, clientGuid)
-            Log.d(TAG, "⏱️ WorkManager enqueue (async): ${System.currentTimeMillis() - workerStart}ms")
+            val sendStart = System.currentTimeMillis()
+            Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Attempting immediate send...")
+
+            try {
+                // Build attachment inputs from persisted data
+                val attachmentInputs = persistedAttachments.map { data ->
+                    PendingAttachmentInput(
+                        uri = Uri.fromFile(File(data.persistedPath)),
+                        caption = data.caption,
+                        mimeType = data.mimeType,
+                        name = data.fileName,
+                        size = data.fileSize
+                    )
+                }
+
+                // Update status to SENDING
+                pendingMessageDao.updateStatusWithTimestamp(
+                    messageId,
+                    PendingSyncStatus.SENDING.name,
+                    System.currentTimeMillis()
+                )
+
+                // Try to send immediately
+                val result = messageSender.get().sendUnified(
+                    chatGuid = chatGuid,
+                    text = text ?: "",
+                    replyToGuid = replyToGuid,
+                    effectId = effectId,
+                    subject = subject,
+                    attachments = attachmentInputs,
+                    deliveryMode = deliveryMode,
+                    tempGuid = clientGuid
+                )
+
+                if (result.isSuccess) {
+                    val sentMessage = result.getOrThrow()
+                    Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] ✓ SUCCESS in ${System.currentTimeMillis() - sendStart}ms: $clientGuid -> ${sentMessage.guid}")
+
+                    // Mark as sent
+                    pendingMessageDao.markAsSent(messageId, sentMessage.guid)
+
+                    // Clean up persisted attachments
+                    if (persistedAttachments.isNotEmpty()) {
+                        attachmentPersistenceManager.cleanupAttachments(persistedAttachments.map { it.persistedPath })
+                    }
+                } else {
+                    val error = result.exceptionOrNull()
+                    Log.w(TAG, "[SEND_TRACE] [IMMEDIATE] ✗ FAILED in ${System.currentTimeMillis() - sendStart}ms: ${error?.message}")
+                    Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
+
+                    // Reset status and enqueue WorkManager for retry
+                    pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
+                    enqueueWorker(messageId, clientGuid)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "[SEND_TRACE] [IMMEDIATE] ✗ EXCEPTION: ${e.message}")
+                Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
+
+                // Reset status and enqueue WorkManager for retry
+                pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
+                enqueueWorker(messageId, clientGuid)
+            }
         }
 
-        Log.d(TAG, "⏱️ queueMessage TOTAL: ${System.currentTimeMillis() - startTime}ms")
+        Log.i(TAG, "[SEND_TRACE] ── PendingMessageRepository.queueMessage RETURNING: ${System.currentTimeMillis() - startTime}ms total ──")
         clientGuid
     }
 
