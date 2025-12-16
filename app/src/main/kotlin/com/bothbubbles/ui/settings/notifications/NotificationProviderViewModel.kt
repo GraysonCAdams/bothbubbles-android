@@ -66,7 +66,7 @@ class NotificationProviderViewModel @Inject constructor(
                     val isGooglePlayAvailable = try {
                         firebaseConfigManager.isGooglePlayServicesAvailable()
                     } catch (e: Exception) {
-                        android.util.Timber.tag("NotificationProviderVM").e(e, "Error checking Google Play Services")
+                        Timber.tag("NotificationProviderVM").e(e, "Error checking Google Play Services")
                         false
                     }
 
@@ -79,7 +79,7 @@ class NotificationProviderViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                android.util.Timber.tag("NotificationProviderVM").e(e, "Error observing FCM state")
+                Timber.tag("NotificationProviderVM").e(e, "Error observing FCM state")
             }
         }
     }

@@ -15,8 +15,6 @@ data class SparseMessageList(
     private val loadedData: Map<Int, MessageUiModel>,
     val loadedRanges: List<IntRange>
 ) {
-
-        fun empty() = SparseMessageList(0, emptyMap(), emptyList())
     val size: Int get() = totalSize
 
     val isEmpty: Boolean get() = totalSize == 0
@@ -71,6 +69,10 @@ data class SparseMessageList(
      */
     fun findPositionByGuid(guid: String): Int? {
         return loadedData.entries.find { it.value.guid == guid }?.key
+    }
+
+    companion object {
+        fun empty() = SparseMessageList(0, emptyMap(), emptyList())
     }
 }
 

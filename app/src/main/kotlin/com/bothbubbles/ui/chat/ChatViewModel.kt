@@ -384,10 +384,10 @@ class ChatViewModel @Inject constructor(
      * Called in init so state is persisted as soon as chat opens.
      */
     private fun saveCurrentChatState() {
-        android.util.Timber.tag("StateRestore").e("saveCurrentChatState CALLED: chatGuid=$chatGuid")
+        Timber.tag("StateRestore").e("saveCurrentChatState CALLED: chatGuid=$chatGuid")
         viewModelScope.launch {
             val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
-            android.util.Timber.tag("StateRestore").e("saveCurrentChatState SAVING: chatGuid=$chatGuid")
+            Timber.tag("StateRestore").e("saveCurrentChatState SAVING: chatGuid=$chatGuid")
             settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
         }
     }
@@ -544,7 +544,7 @@ class ChatViewModel @Inject constructor(
      * This clears the saved chat state so the app opens to conversation list next time.
      */
     fun onNavigateBack() {
-        android.util.Timber.tag("StateRestore").d("onNavigateBack: clearing saved chat state")
+        Timber.tag("StateRestore").d("onNavigateBack: clearing saved chat state")
         viewModelScope.launch {
             settingsDataStore.clearLastOpenChat()
         }

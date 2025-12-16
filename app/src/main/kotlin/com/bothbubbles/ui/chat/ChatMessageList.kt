@@ -30,8 +30,8 @@ import com.bothbubbles.ui.chat.components.EtaStopSharingLink
 import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
 import com.bothbubbles.ui.chat.components.SaveContactBanner
+import com.bothbubbles.ui.chat.components.SendModeHelperText
 import com.bothbubbles.ui.chat.components.SendingIndicatorBar
-import com.bothbubbles.ui.chat.components.SmsFallbackBanner
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
@@ -377,7 +377,7 @@ fun ChatMessageList(
         )
 
         // SMS fallback mode banner
-        SmsFallbackBanner(
+        SendModeHelperText(
             visible = syncState.isInSmsFallbackMode && !chatInfoState.isLocalSmsChat,
             fallbackReason = syncState.fallbackReason,
             isServerConnected = syncState.isServerConnected,

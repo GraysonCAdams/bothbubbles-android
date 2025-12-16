@@ -95,10 +95,6 @@ class ChatMessageListDelegate @AssistedInject constructor(
         ): ChatMessageListDelegate
     }
 
-
-        // Adaptive polling: catches missed messages when push is unreliable
-        private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
-        private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     // PERF: Message cache for incremental updates - preserves object identity for unchanged messages
     private val messageCache = MessageCache()
 
@@ -873,5 +869,11 @@ class ChatMessageListDelegate @AssistedInject constructor(
 
         // Save state to LRU cache for instant restore when re-opening this chat
         chatStateCache.put(saveStateToCacheSync())
+    }
+
+    companion object {
+        // Adaptive polling: catches missed messages when push is unreliable
+        private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
+        private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     }
 }

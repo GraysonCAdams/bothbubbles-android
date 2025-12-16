@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.message
 
+import timber.log.Timber
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +30,6 @@ import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.util.parsing.UrlParsingUtils
-import timber.log.Timber
 
 /**
  * Main message bubble component that displays a message with all its content.
@@ -99,7 +99,7 @@ fun MessageBubble(
     // PERFORMANCE TRACKING: Log when a temporary message is actually composed (debug builds only)
     if (BuildConfig.DEBUG && message.guid.startsWith("temp-")) {
         androidx.compose.runtime.SideEffect {
-            android.util.Timber.tag("MessageBubble").d("⏱️ [RENDER] MessageBubble composed for ${message.guid}")
+            Timber.tag("MessageBubble").d("⏱️ [RENDER] MessageBubble composed for ${message.guid}")
         }
     }
 

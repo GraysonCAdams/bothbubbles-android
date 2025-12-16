@@ -23,7 +23,9 @@ import javax.inject.Singleton
 @Singleton
 class ChatStateCache @Inject constructor() {
 
+    companion object {
         private const val MAX_SIZE = 5
+    }
     /**
      * Cached state for a chat conversation.
      *

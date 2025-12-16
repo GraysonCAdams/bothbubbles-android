@@ -5,8 +5,6 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import timber.log.Timber
-import androidx.hilt.work.HiltWorkerFactory
-import androidx.work.Configuration
 import coil.ImageLoader
 import coil.ImageLoaderFactory
 import coil.decode.GifDecoder
@@ -17,6 +15,7 @@ import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.data.repository.SmsRepository
+import com.bothbubbles.util.logging.CrashlyticsTree
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.ContactsContentObserver
@@ -36,10 +35,7 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 @HiltAndroidApp
-class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory {
-
-    @Inject
-    lateinit var workerFactory: HiltWorkerFactory
+class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var connectionModeManager: ConnectionModeManager

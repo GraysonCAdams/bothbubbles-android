@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.common
 
+import timber.log.Timber
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.core.Spring
@@ -25,7 +26,6 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.bothbubbles.ui.theme.MotionTokens
 import kotlinx.coroutines.delay
-import timber.log.Timber
 
 /**
  * Staggered list item wrapper for initial list load animations.
@@ -237,21 +237,21 @@ fun Modifier.newMessageEntrance(
     // Only incoming messages get the subtle slide-up animation
     if (isFromMe) {
         val entranceTime = System.currentTimeMillis()
-        android.util.Timber.tag("SEND_TRACE").i("[ANIM] Outgoing message INSTANT appearance at $entranceTime")
+        Timber.tag("SEND_TRACE").i("[ANIM] Outgoing message INSTANT appearance at $entranceTime")
         return this // No animation - instant appearance
     }
 
     var hasAppeared by remember { mutableStateOf(false) }
 
     // DEBUG: Log animation state
-    android.util.Timber.tag("MessageAnim").d("newMessageEntrance: shouldAnimate=$shouldAnimate hasAppeared=$hasAppeared isFromMe=$isFromMe")
+    Timber.tag("MessageAnim").d("newMessageEntrance: shouldAnimate=$shouldAnimate hasAppeared=$hasAppeared isFromMe=$isFromMe")
 
     LaunchedEffect(Unit) {
-        android.util.Timber.tag("MessageAnim").d("newMessageEntrance: LaunchedEffect starting animation")
+        Timber.tag("MessageAnim").d("newMessageEntrance: LaunchedEffect starting animation")
         // Minimal delay to ensure layout is ready
         delay(8)
         hasAppeared = true
-        android.util.Timber.tag("MessageAnim").d("newMessageEntrance: hasAppeared set to true")
+        Timber.tag("MessageAnim").d("newMessageEntrance: hasAppeared set to true")
     }
 
     // Faster fade-in for incoming messages (100ms instead of 250ms)

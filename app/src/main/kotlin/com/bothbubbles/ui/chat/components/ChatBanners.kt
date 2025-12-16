@@ -313,28 +313,3 @@ fun SendModeHelperText(
         }
     }
 }
-
-/**
- * Legacy thin banner - kept for backwards compatibility.
- * Consider using SendModeHelperText instead for MD3 compliance.
- */
-@Composable
-@Deprecated("Use SendModeHelperText below the input field instead", ReplaceWith("SendModeHelperText"))
-fun SmsFallbackBanner(
-    visible: Boolean,
-    fallbackReason: FallbackReason?,
-    isServerConnected: Boolean,
-    showExitAction: Boolean,
-    onExitFallback: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    // Delegate to new helper text component
-    SendModeHelperText(
-        visible = visible,
-        fallbackReason = fallbackReason,
-        isServerConnected = isServerConnected,
-        showExitAction = showExitAction,
-        onExitFallback = onExitFallback,
-        modifier = modifier
-    )
-}

@@ -53,8 +53,6 @@ class ChatSyncDelegate @AssistedInject constructor(
         ): ChatSyncDelegate
     }
 
-        private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
-        private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
 
@@ -275,5 +273,10 @@ class ChatSyncDelegate @AssistedInject constructor(
         } else {
             parts[1].replace(Regex("[^0-9+]"), "")
         }
+    }
+
+    companion object {
+        private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
+        private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     }
 }

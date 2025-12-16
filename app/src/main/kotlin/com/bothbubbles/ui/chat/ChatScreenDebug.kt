@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.chat
 
+import timber.log.Timber
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue

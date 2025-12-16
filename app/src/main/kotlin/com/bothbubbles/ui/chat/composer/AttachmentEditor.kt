@@ -39,7 +39,6 @@ sealed class EditResult {
  * Helper class for editing attachments using system or fallback editors.
  */
 class AttachmentEditor(private val context: Context) {
-        private const val AUTHORITY = "com.bothbubbles.fileprovider"
     private val editCacheDir: File by lazy {
         File(context.cacheDir, "edited_attachments").apply { mkdirs() }
     }
@@ -158,6 +157,10 @@ class AttachmentEditor(private val context: Context) {
                 file.delete()
             }
         }
+    }
+
+    companion object {
+        private const val AUTHORITY = "com.bothbubbles.fileprovider"
     }
 }
 
