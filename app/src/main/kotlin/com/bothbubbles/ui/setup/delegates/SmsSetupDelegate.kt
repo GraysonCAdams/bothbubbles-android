@@ -4,26 +4,47 @@ import android.content.Intent
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.sms.SmsPermissionHelper
-import com.bothbubbles.ui.setup.SetupUiState
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
  * Handles SMS setup configuration and permissions.
+ *
+ * Phase 9: Uses AssistedInject to receive CoroutineScope at construction.
+ * Exposes StateFlow<SmsSetupState> instead of mutating external state.
  */
-class SmsSetupDelegate(
+class SmsSetupDelegate @AssistedInject constructor(
     private val smsPermissionHelper: SmsPermissionHelper,
     private val settingsDataStore: SettingsDataStore,
-    private val smsRepository: SmsRepository
+    private val smsRepository: SmsRepository,
+    @Assisted private val scope: CoroutineScope
 ) {
-    fun loadSmsStatus(uiState: MutableStateFlow<SetupUiState>) {
-        val status = smsPermissionHelper.getSmsCapabilityStatus()
-        uiState.value = uiState.value.copy(smsCapabilityStatus = status)
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): SmsSetupDelegate
     }
 
-    fun updateSmsEnabled(uiState: MutableStateFlow<SetupUiState>, enabled: Boolean) {
-        uiState.value = uiState.value.copy(smsEnabled = enabled)
+    private val _state = MutableStateFlow(SmsSetupState())
+    val state: StateFlow<SmsSetupState> = _state.asStateFlow()
+
+    init {
+        loadSmsStatus()
+    }
+
+    fun loadSmsStatus() {
+        val status = smsPermissionHelper.getSmsCapabilityStatus()
+        _state.update { it.copy(smsCapabilityStatus = status) }
+    }
+
+    fun updateSmsEnabled(enabled: Boolean) {
+        _state.update { it.copy(smsEnabled = enabled) }
     }
 
     fun getMissingSmsPermissions(): Array<String> {
@@ -34,30 +55,32 @@ class SmsSetupDelegate(
         return smsPermissionHelper.createDefaultSmsAppIntent()
     }
 
-    fun onSmsPermissionsResult(uiState: MutableStateFlow<SetupUiState>) {
-        loadSmsStatus(uiState)
+    fun onSmsPermissionsResult() {
+        loadSmsStatus()
     }
 
-    fun onDefaultSmsAppResult(scope: CoroutineScope, uiState: MutableStateFlow<SetupUiState>) {
-        loadSmsStatus(uiState)
+    fun onDefaultSmsAppResult() {
+        loadSmsStatus()
         // If we're now the default SMS app, auto-enable SMS
         if (smsPermissionHelper.isDefaultSmsApp()) {
             scope.launch {
                 settingsDataStore.setSmsEnabled(true)
             }
-            uiState.value = uiState.value.copy(smsEnabled = true)
+            _state.update { it.copy(smsEnabled = true) }
         }
     }
 
-    suspend fun finalizeSmsSettings(uiState: MutableStateFlow<SetupUiState>) {
-        settingsDataStore.setSmsEnabled(uiState.value.smsEnabled)
+    fun finalizeSmsSettings() {
+        scope.launch {
+            settingsDataStore.setSmsEnabled(_state.value.smsEnabled)
+        }
     }
 
-    fun loadUserPhoneNumber(uiState: MutableStateFlow<SetupUiState>) {
+    fun loadUserPhoneNumber() {
         val phone = smsRepository.getAvailableSims().firstOrNull()?.number
             ?.takeIf { it.isNotBlank() }
             ?.let { formatPhone(it) }
-        uiState.value = uiState.value.copy(userPhoneNumber = phone)
+        _state.update { it.copy(userPhoneNumber = phone) }
     }
 
     private fun formatPhone(phone: String): String {

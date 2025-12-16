@@ -6,15 +6,26 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import androidx.core.content.ContextCompat
-import com.bothbubbles.ui.setup.SetupUiState
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
+import javax.inject.Inject
 
 /**
  * Handles permission checking for setup.
+ *
+ * Phase 9: Uses @Inject constructor with ApplicationContext.
+ * Exposes StateFlow<PermissionsState> instead of mutating external state.
  */
-class PermissionsDelegate(private val context: Context) {
+class PermissionsDelegate @Inject constructor(
+    @ApplicationContext private val context: Context
+) {
+    private val _state = MutableStateFlow(PermissionsState())
+    val state: StateFlow<PermissionsState> = _state.asStateFlow()
 
-    fun checkPermissions(uiState: MutableStateFlow<SetupUiState>) {
+    fun checkPermissions() {
         val hasNotificationPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(
                 context,
@@ -32,10 +43,12 @@ class PermissionsDelegate(private val context: Context) {
         val powerManager = context.getSystemService(Context.POWER_SERVICE) as PowerManager
         val isBatteryOptimizationDisabled = powerManager.isIgnoringBatteryOptimizations(context.packageName)
 
-        uiState.value = uiState.value.copy(
-            hasNotificationPermission = hasNotificationPermission,
-            hasContactsPermission = hasContactsPermission,
-            isBatteryOptimizationDisabled = isBatteryOptimizationDisabled
-        )
+        _state.update {
+            it.copy(
+                hasNotificationPermission = hasNotificationPermission,
+                hasContactsPermission = hasContactsPermission,
+                isBatteryOptimizationDisabled = isBatteryOptimizationDisabled
+            )
+        }
     }
 }

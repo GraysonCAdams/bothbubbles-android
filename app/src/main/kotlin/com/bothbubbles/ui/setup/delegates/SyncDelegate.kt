@@ -6,33 +6,52 @@ import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
-import com.bothbubbles.ui.setup.SetupUiState
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
  * Handles initial sync and setup completion.
+ *
+ * Phase 9: Uses AssistedInject to receive CoroutineScope at construction.
+ * Exposes StateFlow<SyncState> instead of mutating external state.
  */
-class SyncDelegate(
+class SyncDelegate @AssistedInject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val socketConnection: SocketConnection,
     private val syncService: SyncService,
     private val firebaseConfigManager: FirebaseConfigManager,
-    private val fcmTokenManager: FcmTokenManager
+    private val fcmTokenManager: FcmTokenManager,
+    @Assisted private val scope: CoroutineScope
 ) {
-    fun updateSkipEmptyChats(uiState: MutableStateFlow<SetupUiState>, skip: Boolean) {
-        uiState.value = uiState.value.copy(skipEmptyChats = skip)
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): SyncDelegate
     }
 
-    suspend fun completeSetupWithoutSync(uiState: MutableStateFlow<SetupUiState>) {
-        settingsDataStore.setSetupComplete(true)
-        uiState.value = uiState.value.copy(isSyncComplete = true)
+    private val _state = MutableStateFlow(SyncState())
+    val state: StateFlow<SyncState> = _state.asStateFlow()
+
+    fun updateSkipEmptyChats(skip: Boolean) {
+        _state.update { it.copy(skipEmptyChats = skip) }
     }
 
-    fun startSync(scope: CoroutineScope, uiState: MutableStateFlow<SetupUiState>) {
+    fun completeSetupWithoutSync() {
         scope.launch {
-            uiState.value = uiState.value.copy(isSyncing = true, syncProgress = 0f, syncError = null)
+            settingsDataStore.setSetupComplete(true)
+            _state.update { it.copy(isSyncComplete = true) }
+        }
+    }
+
+    fun startSync() {
+        scope.launch {
+            _state.update { it.copy(isSyncing = true, syncProgress = 0f, syncError = null) }
 
             try {
                 // Connect socket first
@@ -51,21 +70,25 @@ class SyncDelegate(
                 // Mark setup complete IMMEDIATELY so user can use the app
                 // Sync will continue in background
                 settingsDataStore.setSetupComplete(true)
-                uiState.value = uiState.value.copy(
-                    isSyncing = false,
-                    isSyncComplete = true
-                )
+                _state.update {
+                    it.copy(
+                        isSyncing = false,
+                        isSyncComplete = true
+                    )
+                }
 
                 // Start initial sync in SyncService's own scope (survives ViewModel destruction)
                 // Categorization runs automatically after sync completes in SyncService
                 syncService.startInitialSync(
-                    messagesPerChat = uiState.value.messagesPerChat
+                    messagesPerChat = _state.value.messagesPerChat
                 )
             } catch (e: Exception) {
-                uiState.value = uiState.value.copy(
-                    isSyncing = false,
-                    syncError = "Failed to start sync: ${e.message}"
-                )
+                _state.update {
+                    it.copy(
+                        isSyncing = false,
+                        syncError = "Failed to start sync: ${e.message}"
+                    )
+                }
             }
         }
     }
