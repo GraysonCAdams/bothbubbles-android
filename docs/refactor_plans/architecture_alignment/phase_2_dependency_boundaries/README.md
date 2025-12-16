@@ -1,61 +1,75 @@
 # Phase 2 — Dependency Boundaries (UI → Interfaces)
 
-## Layman’s explanation
+> **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed code examples and migration steps.
+>
+> **Recommendation**: Combine with Phase 3 for efficiency — change interfaces and lifecycle together.
 
-We want the UI to depend on “what something does,” not “how it’s implemented.”
+## Layman's Explanation
+
+We want the UI to depend on "what something does," not "how it's implemented."
 
 That means the Chat UI should talk to a `MessageSender` contract, not a specific `MessageSendingService` class. It makes testing easier and prevents the UI from becoming glued to one internal implementation.
 
+## Connection to Shared Vision
+
+This phase implements [ADR 0003](../phase_0_shared_vision/ADR_0003_ui_depends_on_interfaces.md):
+
+> **UI components depend on interfaces, not concrete implementations.**
+
+| Concrete Class | Target Interface |
+|----------------|------------------|
+| `MessageSendingService` | `MessageSender` |
+| `SocketService` | `SocketConnection` |
+| `NotificationService` | `Notifier` |
+| `IncomingMessageHandler` | `IncomingMessageProcessor` |
+
 ## Goals
 
-- Replace UI dependencies on concrete service implementations with interfaces.
-- Keep DI bindings in one place.
-- Make testing and refactoring safer.
+- Replace UI dependencies on concrete service implementations with interfaces
+- Keep DI bindings in one place
+- Make testing and refactoring safer
+- Enable fake injection for tests
 
 ## Scope
 
-- Refactor types and injection only (no feature behavior change).
-- Start with Chat send flow; expand outward.
+- Refactor types and injection only (no feature behavior change)
+- Start with Chat send flow; expand outward
 
-## Execution note (ordering)
+## Key Transformation
 
-For Chat delegates, prefer combining Phase 2 changes with Phase 3 lifecycle refactors.
+```kotlin
+// BEFORE
+class ChatSendDelegate @Inject constructor(
+    private val messageSendingService: MessageSendingService,  // Concrete
+)
 
-Reason: if we move a delegate to AssistedInject/factory construction, we will already be editing its constructor. That is the best time to also switch its dependencies from concrete implementations to interfaces (avoids touching the same delegate twice).
+// AFTER
+class ChatSendDelegate @AssistedInject constructor(
+    private val messageSender: MessageSender,  // Interface
+)
+```
 
-## Core operations
+## Work Items
 
-1. Promote interfaces as the primary dependency
-   - Example: delegates depend on `MessageSender` instead of `MessageSendingService`.
-2. Ensure DI binds interface → implementation
-   - Validate Hilt modules provide the correct implementation.
-3. Remove “leakage” where UI pulls in DB/DAO/network types indirectly.
+| Item | Change |
+|------|--------|
+| A | `MessageSendingService` → `MessageSender` in Chat delegates |
+| B | `SocketService` → `SocketConnection` in Chat delegates |
+| C | Introduce narrow facade interfaces where needed |
 
-## Parallelizable work items
+## Exit Criteria
 
-- Work item A: Chat send + operations delegates
-  - Swap `MessageSendingService` usage to `MessageSender`.
-- Work item B: Socket usage boundaries
-  - Decide if UI should depend on `SocketService` or a narrower `SocketConnection`/`SocketEvents` interface.
-- Work item C: Introduce narrow interfaces where needed
-  - Keep interfaces minimal, targeted, and stable.
-- Work item D: Singleton façade interfaces
-  - Wrap `ActiveConversationManager`, `SocketService`, `SettingsDataStore`, etc. with feature-facing interfaces so UI/delegates no longer import framework-aware singletons directly.
-
-## Candidate hot spots
-
-- Chat send delegate: [app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/ChatSendDelegate.kt](../../../app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/ChatSendDelegate.kt)
-- Chat operations delegate: [app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/ChatOperationsDelegate.kt](../../../app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/ChatOperationsDelegate.kt)
-- Sender contract: [app/src/main/kotlin/com/bothbubbles/services/messaging/MessageSender.kt](../../../app/src/main/kotlin/com/bothbubbles/services/messaging/MessageSender.kt)
-- Implementation: [app/src/main/kotlin/com/bothbubbles/services/messaging/MessageSendingService.kt](../../../app/src/main/kotlin/com/bothbubbles/services/messaging/MessageSendingService.kt)
-
-## Definition of Done
-
-- Chat UI layer has no direct dependency on `MessageSendingService`.
-- Interfaces are documented and have stable ownership.
-- DI modules compile and unit tests (where present) still pass.
+- [ ] Chat UI layer has no direct dependency on `MessageSendingService`
+- [ ] Chat UI layer has no direct dependency on `SocketService` (or documented exceptions)
+- [ ] Interfaces are documented
+- [ ] DI modules compile and tests pass
+- [ ] `FakeMessageSender` can be used in tests
 
 ## Risks
 
-- Medium: refactor touches many call sites.
-- Risk is controlled if changes are mechanical and covered by targeted tests.
+- Medium: refactor touches many call sites
+- Risk controlled if changes are mechanical and combined with Phase 3
+
+## Next Steps
+
+Implement together with Phase 3 (Delegate Lifecycle) for efficiency.

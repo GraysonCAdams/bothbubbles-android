@@ -1,66 +1,99 @@
 # Phase 3 — Delegate Lifecycle (Remove `initialize()` Footguns)
 
-## Layman’s explanation
+> **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed migration steps, code examples, and checklists.
+>
+> **Recommendation**: Combine with Phase 2 for efficiency — change lifecycle and interfaces together.
 
-Today, some delegates are created “empty” and only become safe after `initialize(chatGuid, scope)` is called. That’s like buying a car where the brakes only work if you remember to pull a hidden lever first.
+## Layman's Explanation
 
-This phase makes delegates *always safe to use* by construction, so future changes can’t accidentally forget initialization.
+Today, some delegates are created "empty" and only become safe after `initialize(chatGuid, scope)` is called. That's like buying a car where the brakes only work if you remember to pull a hidden lever first.
+
+This phase makes delegates *always safe to use* by construction, so future changes can't accidentally forget initialization.
+
+## Connection to Shared Vision
+
+This phase implements [ADR 0004](../phase_0_shared_vision/ADR_0004_delegate_lifecycle_rules.md):
+
+> **Delegates are "born ready" — safe to use immediately after construction.**
+
+## Key Transformation
+
+```kotlin
+// BEFORE - Temporal coupling
+class ChatSendDelegate @Inject constructor(...) {
+    private lateinit var chatGuid: String       // Can crash!
+    fun initialize(chatGuid: String, scope: CoroutineScope) {
+        this.chatGuid = chatGuid  // Must remember!
+    }
+}
+
+// AFTER - Safe by construction
+class ChatSendDelegate @AssistedInject constructor(
+    @Assisted private val chatGuid: String,  // Required at construction
+    @Assisted private val scope: CoroutineScope
+) {
+    @AssistedFactory
+    interface Factory {
+        fun create(chatGuid: String, scope: CoroutineScope): ChatSendDelegate
+    }
+}
+```
 
 ## Goals
 
-- Eliminate `lateinit` state required for correctness in delegates.
-- Make delegate APIs enforce correctness at compile time.
-- Keep the performance benefits of state isolation.
+- Eliminate `lateinit` state required for correctness
+- Make delegate APIs enforce correctness at compile time
+- Keep the performance benefits of state isolation
 
-## Two acceptable patterns
+## Pattern: AssistedInject (Default)
 
-Pick one per delegate (mixing is fine if consistent):
+```kotlin
+class ChatSendDelegate @AssistedInject constructor(
+    private val messageSender: MessageSender,         // DI injected
+    @Assisted private val chatGuid: String,           // Runtime param
+    @Assisted private val scope: CoroutineScope       // Runtime param
+) {
+    // No lateinit, no initialize()
 
-### Pattern A — Assisted injection / factories
+    @AssistedFactory
+    interface Factory {
+        fun create(chatGuid: String, scope: CoroutineScope): ChatSendDelegate
+    }
+}
+```
 
-- Create delegate instances with runtime parameters (like `chatGuid`).
-- No `initialize(...)` method needed.
+## Migration Order
 
-This should be the **default** for Chat delegates.
+| Order | Delegate | Complexity |
+|-------|----------|------------|
+| 1 | ChatConnectionDelegate | Low |
+| 2-6 | Info, Effects, Attachment, Scheduled, Thread | Low-Medium |
+| 7-11 | Search, Sync, Composer, MessageList, Operations | Medium-High |
+| 12-14 | SendModeManager, EtaSharing, **ChatSendDelegate** | High |
 
-### Pattern B — Pass runtime parameters per operation
+## Important: Keep setDelegates() Temporarily
 
-- Delegate does not store `chatGuid` or `scope`.
-- Each method takes them as parameters.
+Phase 3 changes **lifecycle only**. Keep cross-delegate wiring (`setDelegates()`) for now:
 
-Use this only when Pattern A becomes awkward (example: the delegate is already stateless and only needs `chatGuid` for a single call).
+```kotlin
+// KEEP THIS - Phase 4 removes it
+send.setDelegates(messageList, composer, ...)
+```
 
-## Operations
+## Exit Criteria
 
-1. Inventory delegates using `initialize()` + `lateinit` state.
-2. Choose Pattern A or B per delegate (document the choice).
-3. Refactor callers (primarily `ChatViewModel`) to match.
-4. Add minimal tests for “delegate can be used without init” where practical.
-
-**Special case — Send mode timing:** When migrating `ChatConnectionDelegate` and `ChatSendModeManager`, ensure the send mode can be injected via the factory rather than set later; otherwise the UI risks showing the wrong delivery mode while delegates finish initializing.
-
-## Testing note
-
-This repo currently has minimal automated test coverage. For high-risk delegates (send, list, sync), plan to add at least one focused test or fake-driven harness per refactor slice.
-
-## Parallelizable work items
-
-- Work item A: Chat delegates (highest risk)
-  - Convert `ChatSendDelegate`, `ChatMessageListDelegate`, `ChatConnectionDelegate`, etc.
-- Work item B: Other screens’ delegates
-  - Convert scope-only initialization patterns (e.g., conversations delegates).
-
-## Candidate files
-
-- Coordinator: [app/src/main/kotlin/com/bothbubbles/ui/chat/ChatViewModel.kt](../../../app/src/main/kotlin/com/bothbubbles/ui/chat/ChatViewModel.kt)
-- Example delegate with `initialize`: [ChatSendDelegate](../../../app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/ChatSendDelegate.kt)
-
-## Definition of Done
-
-- Delegates no longer crash because `initialize(...)` was not called.
-- The new lifecycle is documented and matches ADR 0004.
+- [ ] All Chat delegates use `@AssistedInject`
+- [ ] No `lateinit var` for chatGuid/scope in delegates
+- [ ] No `initialize()` methods in delegates
+- [ ] ChatViewModel uses Factory injection
+- [ ] `setDelegates()` still exists (Phase 4 removes it)
+- [ ] Build passes and app functions correctly
 
 ## Risks
 
-- High: touches many call sites.
-- Requires careful sequencing with Phase 4 (coupling reduction).
+- High: touches many call sites
+- Mitigated by: mechanical changes, one delegate at a time, combined with Phase 2
+
+## Next Steps
+
+After Phase 3, proceed to Phase 4 (Delegate Coupling Reduction) to remove `setDelegates()`.

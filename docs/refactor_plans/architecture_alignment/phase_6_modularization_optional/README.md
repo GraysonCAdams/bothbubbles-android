@@ -1,43 +1,77 @@
 # Phase 6 (Optional) — Modularization to Enforce Boundaries
 
-## Layman’s explanation
+> **Implementation Plan**: See [impl/README.md](impl/README.md) for module structure and Gradle setup.
+>
+> **Status**: Optional / Deferred. Only pursue if build times are painful.
 
-Right now everything is in one Gradle module (`:app`). That’s like having a house where every room connects directly to every other room — convenient, but it makes it easy to accidentally route plumbing through the bedroom.
+## Layman's Explanation
+
+Right now everything is in one Gradle module (`:app`). That's like having a house where every room connects directly to every other room — convenient, but it makes it easy to accidentally route plumbing through the bedroom.
 
 Modules add doors and hallways: they create boundaries the compiler can enforce.
 
-## When to do this
+## Connection to Shared Vision
 
-- Build times are becoming painful.
-- Multiple contributors keep breaking boundaries.
-- You want strong enforcement of “UI cannot touch DB/network directly.”
+This phase provides **compiler enforcement** of the boundaries established in earlier phases:
 
-## Goals
+- ADR 0003: UI cannot import concrete services
+- Separation: data layer cannot import UI
+- Testability: core modules can be tested in isolation
 
-- Create minimal modules that enforce boundaries without exploding complexity.
+## When to Do This
 
-## Strategy (incremental)
+**Only pursue if:**
+- [ ] Build times are painful (>2-3 minutes incremental)
+- [ ] Multiple contributors keep breaking architectural boundaries
+- [ ] You want compiler-enforced "UI cannot touch DB directly"
 
-1. Extract shared model types
-   - `:core:model`
-2. Extract data access
-   - `:core:data` (Room, repositories, DataStore)
-3. Extract networking
-   - `:core:network`
-4. Optional: feature modules
-   - `:feature:chat`, `:feature:conversations`
+**Skip if:**
+- Solo developer with small codebase
+- Build times are acceptable (<2 minutes)
+- Phases 2-4 not yet complete
 
-## Parallelizable work items
+## Target Module Structure
 
-- Work item A: Identify module seams and ownership
-- Work item B: Move code with minimal API surface first (models)
+```
+project/
+├── app/                      # Application shell
+├── core/
+│   ├── model/                # Data classes, no dependencies
+│   ├── data/                 # Room, DAOs, Repositories
+│   └── network/              # Retrofit, API interfaces
+└── feature/                  # Optional feature modules
+    ├── chat/
+    └── conversations/
+```
 
-## Definition of Done
+## Dependency Graph
 
-- At least one boundary is compiler-enforced.
-- Build remains maintainable.
+```
+        ┌─────────────────┐
+        │      :app       │
+        └────────┬────────┘
+                 │
+    ┌────────────┼────────────┐
+    │            │            │
+    ▼            ▼            ▼
+┌────────┐  ┌────────┐  ┌──────────┐
+│:core:  │  │:core:  │  │:core:    │
+│ data   │  │network │  │ model    │
+└────────┘  └────────┘  └──────────┘
+```
+
+## Exit Criteria
+
+- [ ] At least `:core:model` extracted and building
+- [ ] Build times improved (or at least not worse)
+- [ ] Architectural boundaries are compiler-enforced
+- [ ] All tests pass
 
 ## Risks
 
-- High: Gradle + DI churn.
-- Not required to address the core delegate lifecycle and interface boundary issues.
+- High: Gradle + DI churn
+- Not required to address core delegate lifecycle and interface boundary issues
+
+## Recommendation
+
+**For BothBubbles, defer modularization until Phases 2-4 are complete AND you're experiencing actual build time pain.**

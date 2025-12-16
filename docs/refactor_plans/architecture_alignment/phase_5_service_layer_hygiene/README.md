@@ -1,44 +1,69 @@
 # Phase 5 — Service Layer Hygiene (Framework vs Pure Logic)
 
-## Layman’s explanation
+> **Implementation Plan**: See [impl/README.md](impl/README.md) for audit checklists and code examples.
+>
+> **Status**: Optional but recommended after Phases 2-4 complete.
 
-Some code needs Android (permissions, background execution). Some code should be “pure” business logic (send message, parse socket events). If we mix these too much, testing becomes harder and background behavior becomes fragile.
+## Layman's Explanation
+
+Some code needs Android (permissions, background execution). Some code should be "pure" business logic (send message, parse socket events). If we mix these too much, testing becomes harder and background behavior becomes fragile.
 
 This phase audits and tightens the boundary between:
+- **Android framework components** (real `Service`, receivers, WorkManager workers)
+- **Injected singleton "services"** (application/domain services)
 
-- Android framework components (real `Service`, receivers, WorkManager workers)
-- Injected singleton “services” (application/domain services)
+## Connection to Shared Vision
+
+This phase reinforces the testability goals from [ADR 0003](../phase_0_shared_vision/ADR_0003_ui_depends_on_interfaces.md):
+
+> **Business logic should be testable. Framework components should be thin shells.**
+
+## Key Distinction
+
+| Type | Examples | Characteristics |
+|------|----------|-----------------|
+| **Framework Components** | `SocketForegroundService`, `BootReceiver`, `MessageSendWorker` | Lifecycle-bound, thin |
+| **Singleton Services** | `SocketService`, `MessageSendingService`, `NotificationService` | Testable, pure logic |
 
 ## Goals
 
-- Ensure singleton services don’t accidentally depend on UI or short-lived contexts.
-- Ensure framework components stay thin and delegate to testable logic.
-- Make naming/lifecycle expectations explicit.
+- Framework components are thin wrappers (<150 LOC)
+- Singleton services don't leak Activity contexts
+- Coroutine scopes are bounded (no GlobalScope)
+- Service initialization is safe (documented order OR automated)
 
-## Operations
+## Key Checks
 
-1. Inventory Android framework components (`android.app.Service`, receivers, workers).
-2. Confirm they delegate to injected singletons/use-cases.
-3. Audit singleton services for:
-   - Use of non-application `Context`
-   - Direct UI references
-   - Unbounded scopes or uncancelled jobs
-4. Document service ownership and responsibilities.
+```kotlin
+// Framework component - should be thin
+class SocketForegroundService : Service() {
+    @Inject lateinit var socketService: SocketService
+    override fun onStartCommand(...) {
+        socketService.connect()  // Delegate immediately
+        startForeground(...)
+    }
+}
 
-## Parallelizable work items
+// Singleton service - should use @ApplicationContext
+@Singleton
+class SocketService @Inject constructor(
+    @ApplicationContext private val context: Context  // NOT Activity context!
+)
+```
 
-- Work item A: Socket lifecycle
-  - Confirm separation between foreground service and `SocketService` singleton.
-- Work item B: SMS/MMS sending
-  - Ensure framework pieces are thin and logic is testable.
+## Exit Criteria
 
-## Definition of Done
-
-- Framework components are thin wrappers.
-- Singleton services are safe (no leaking contexts, no UI coupling).
-- Clear doc on what “Service” means in this repo.
+- [ ] Framework components are thin (<150 LOC, delegate only)
+- [ ] Singleton services use `@ApplicationContext`
+- [ ] No `GlobalScope` usage in services
+- [ ] Service initialization is safe
+- [ ] Interfaces exist for key singletons
 
 ## Risks
 
-- Medium: can touch background execution behavior.
-- Keep changes minimal and well-tested.
+- Medium: can touch background execution behavior
+- Keep changes minimal and well-tested
+
+## Next Steps
+
+Phase 6 (Modularization) is optional and should only be pursued if build times are painful.
