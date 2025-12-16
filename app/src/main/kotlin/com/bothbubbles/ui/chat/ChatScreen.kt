@@ -2,9 +2,6 @@ package com.bothbubbles.ui.chat
 
 import android.Manifest
 import android.content.Intent
-import android.media.MediaActionSound
-import android.media.MediaPlayer
-import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
 import android.util.Log
@@ -92,7 +89,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
-import androidx.core.net.toUri
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
@@ -339,43 +335,19 @@ fun ChatScreen(
     val hapticFeedback = LocalHapticFeedback.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
-    // Hide keyboard when user scrolls more than a threshold
-    LaunchedEffect(listState) {
-        var previousScrollOffset = listState.firstVisibleItemScrollOffset
-        var previousFirstVisibleItem = listState.firstVisibleItemIndex
-        var accumulatedScroll = 0
-
-        snapshotFlow {
-            Triple(
-                listState.firstVisibleItemIndex,
-                listState.firstVisibleItemScrollOffset,
-                listState.isScrollInProgress
-            )
-        }.collect { (currentIndex, currentOffset, isScrolling) ->
-            if (isScrolling) {
-                // Calculate scroll delta
-                val scrollDelta = if (currentIndex == previousFirstVisibleItem) {
-                    currentOffset - previousScrollOffset
-                } else {
-                    // Changed items, estimate large scroll
-                    (currentIndex - previousFirstVisibleItem) * 200
-                }
-                accumulatedScroll += kotlin.math.abs(scrollDelta)
-
-                // Hide keyboard after scrolling ~250dp worth
-                if (accumulatedScroll > 750) {
-                    keyboardController?.hide()
-                    accumulatedScroll = 0
-                }
-            } else {
-                // Reset when scroll stops
-                accumulatedScroll = 0
-            }
-
-            previousFirstVisibleItem = currentIndex
-            previousScrollOffset = currentOffset
+    // Consolidated scroll effects: keyboard hiding, load more, scroll position tracking
+    // See ChatScrollHelper.kt for implementation details
+    ChatScrollEffects(
+        listState = listState,
+        keyboardController = keyboardController,
+        canLoadMore = uiState.canLoadMore,
+        isLoadingMore = uiState.isLoadingMore,
+        onLoadMore = { viewModel.messageList.loadMoreMessages() },
+        onScrollPositionChanged = { index, offset, visibleCount ->
+            viewModel.updateScrollPosition(index, offset, visibleCount)
+            viewModel.onScrollPositionChanged(index, index + visibleCount - 1)
         }
-    }
+    )
 
     // Menu and dialog state
     var showDeleteDialog by remember { mutableStateOf(false) }
@@ -544,33 +516,11 @@ fun ChatScreen(
     // Track pending attachments locally for UI
     val pendingAttachments by viewModel.composer.pendingAttachments.collectAsStateWithLifecycle()
 
-    // Voice memo recording state
-    var isRecording by remember { mutableStateOf(false) }
-    var recordingDuration by remember { mutableLongStateOf(0L) }
-    var mediaRecorder by remember { mutableStateOf<MediaRecorder?>(null) }
-    var recordingFile by remember { mutableStateOf<java.io.File?>(null) }
-    var isNoiseCancellationEnabled by remember { mutableStateOf(true) }
-
-    // Voice memo preview/playback state
-    var isPreviewingVoiceMemo by remember { mutableStateOf(false) }
-    var mediaPlayer by remember { mutableStateOf<MediaPlayer?>(null) }
-    var isPlayingVoiceMemo by remember { mutableStateOf(false) }
-    var playbackPosition by remember { mutableLongStateOf(0L) }
-    var playbackDuration by remember { mutableLongStateOf(0L) }
+    // Voice memo recording and playback state (encapsulated in ChatAudioHelper)
+    val audioState = rememberChatAudioState()
 
     // Send button bounds for tutorial spotlight
     var sendButtonBounds by remember { mutableStateOf(Rect.Zero) }
-
-    // Audio amplitude history for waveform visualization (stores last 20 amplitude values)
-    var amplitudeHistory by remember { mutableStateOf(List(20) { 0f }) }
-
-    // Recording feedback sounds
-    val mediaActionSound = remember {
-        MediaActionSound().apply {
-            load(MediaActionSound.START_VIDEO_RECORDING)
-            load(MediaActionSound.STOP_VIDEO_RECORDING)
-        }
-    }
 
     // Check WhatsApp availability
     val isWhatsAppAvailable = remember { viewModel.operations.isWhatsAppAvailable(context) }
@@ -581,90 +531,21 @@ fun ChatScreen(
     ) { isGranted ->
         if (isGranted) {
             // Start recording after permission granted
-            startVoiceMemoRecording(
-                context = context,
-                enableNoiseCancellation = isNoiseCancellationEnabled,
-                onRecorderCreated = { recorder, file ->
-                    mediaRecorder = recorder
-                    recordingFile = file
-                    isRecording = true
-                    mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                },
-                onError = { error ->
-                    Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                }
-            )
+            audioState.startRecording(context, hapticFeedback)
         } else {
             Toast.makeText(context, "Microphone permission required for voice memos", Toast.LENGTH_SHORT).show()
         }
     }
 
-    // Recording duration timer with amplitude tracking
-    LaunchedEffect(isRecording, mediaRecorder) {
-        if (isRecording && mediaRecorder != null) {
-            recordingDuration = 0L
-            amplitudeHistory = List(20) { 0f }
-            while (isRecording) {
-                kotlinx.coroutines.delay(100L)
-                recordingDuration += 100L
-                // Capture amplitude for waveform visualization
-                try {
-                    val amplitude = mediaRecorder?.maxAmplitude ?: 0
-                    // Normalize to 0-1 range (maxAmplitude can be up to 32767)
-                    val normalized = (amplitude / 32767f).coerceIn(0f, 1f)
-                    amplitudeHistory = amplitudeHistory.drop(1) + normalized
-                } catch (_: Exception) {
-                    // Recorder may have been released
-                }
-            }
-        }
-    }
+    // Recording duration timer with amplitude tracking + playback position tracker
+    ChatAudioEffects(audioState)
 
-    // Playback position tracker
-    LaunchedEffect(isPlayingVoiceMemo, mediaPlayer) {
-        if (isPlayingVoiceMemo && mediaPlayer != null) {
-            while (isPlayingVoiceMemo) {
-                try {
-                    playbackPosition = mediaPlayer?.currentPosition?.toLong() ?: 0L
-                    if (mediaPlayer?.isPlaying == false) {
-                        isPlayingVoiceMemo = false
-                        playbackPosition = 0L
-                    }
-                } catch (_: Exception) {
-                    isPlayingVoiceMemo = false
-                }
-                kotlinx.coroutines.delay(50L)
-            }
-        }
-    }
+    // Note: Scroll position tracking is now handled by ChatScrollEffects above
 
-    // Track scroll position changes for state restoration, preloading, and paging
-    LaunchedEffect(listState) {
-        snapshotFlow {
-            val layoutInfo = listState.layoutInfo
-            val firstVisible = listState.firstVisibleItemIndex
-            val lastVisible = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: firstVisible
-            Triple(
-                firstVisible,
-                listState.firstVisibleItemScrollOffset,
-                lastVisible
-            )
-        }.collect { (index, offset, lastVisibleIndex) ->
-            // Note: logging removed to reduce main thread work during scroll
-            viewModel.updateScrollPosition(index, offset, lastVisibleIndex - index + 1)
-            // Notify paging controller about visible range for sparse loading
-            viewModel.onScrollPositionChanged(index, lastVisibleIndex)
-        }
-    }
-
-    // Cleanup recording and playback on dispose, and notify ViewModel we're leaving
+    // Notify ViewModel we're leaving the chat on dispose
+    // Note: Audio cleanup is handled by rememberChatAudioState()
     DisposableEffect(Unit) {
         onDispose {
-            mediaRecorder?.release()
-            mediaPlayer?.release()
-            mediaActionSound.release()
-            // Notify ViewModel we're leaving the chat to clear active conversation tracking
             viewModel.onChatLeave()
         }
     }
@@ -883,8 +764,8 @@ fun ChatScreen(
 
                 // Determine input mode for unified handling
                 val inputMode = when {
-                    isRecording -> InputMode.RECORDING
-                    isPreviewingVoiceMemo -> InputMode.PREVIEW
+                    audioState.isRecording -> InputMode.RECORDING
+                    audioState.isPreviewingVoiceMemo -> InputMode.PREVIEW
                     else -> InputMode.NORMAL
                 }
 
@@ -936,16 +817,16 @@ fun ChatScreen(
                 val adjustedComposerState by remember {
                     derivedStateOf {
                         // Only merge recording state when actively recording/previewing
-                        if (isRecording || isPreviewingVoiceMemo) {
+                        if (audioState.isRecording || audioState.isPreviewingVoiceMemo) {
                             composerState.copy(
-                                inputMode = if (isRecording) ComposerInputMode.VOICE_RECORDING else ComposerInputMode.VOICE_PREVIEW,
+                                inputMode = if (audioState.isRecording) ComposerInputMode.VOICE_RECORDING else ComposerInputMode.VOICE_PREVIEW,
                                 recordingState = RecordingState(
-                                    durationMs = recordingDuration,
-                                    amplitudeHistory = amplitudeHistory,
-                                    isNoiseCancellationEnabled = isNoiseCancellationEnabled,
-                                    playbackPositionMs = playbackPosition,
-                                    isPlaying = isPlayingVoiceMemo,
-                                    recordedUri = recordingFile?.toUri()
+                                    durationMs = audioState.recordingDuration,
+                                    amplitudeHistory = audioState.amplitudeHistory,
+                                    isNoiseCancellationEnabled = audioState.isNoiseCancellationEnabled,
+                                    playbackPositionMs = audioState.playbackPosition,
+                                    isPlaying = audioState.isPlayingVoiceMemo,
+                                    recordedUri = audioState.getRecordingUri()
                                 )
                             )
                         } else {
@@ -974,130 +855,35 @@ fun ChatScreen(
                             is ComposerEvent.EditAttachment -> {
                                 onEditAttachmentClick(event.attachment.uri)
                             }
-                            // Voice recording events - handled locally
+                            // Voice recording events - delegated to ChatAudioState
                             is ComposerEvent.StartVoiceRecording, is ComposerEvent.VoiceMemoTap -> {
                                 audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
                             is ComposerEvent.StopVoiceRecording -> {
-                                if (isRecording) {
-                                    try {
-                                        mediaRecorder?.stop()
-                                        mediaRecorder?.release()
-                                        mediaActionSound.play(MediaActionSound.STOP_VIDEO_RECORDING)
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    } catch (_: Exception) {
-                                        // May fail if recording was too short
-                                    }
-                                    mediaRecorder = null
-                                    isRecording = false
-                                    // Transition to preview mode if we have a recording
-                                    if (recordingFile?.exists() == true) {
-                                        isPreviewingVoiceMemo = true
-                                        playbackDuration = recordingDuration
-                                    }
-                                }
+                                audioState.stopRecording(hapticFeedback)
                             }
                             is ComposerEvent.CancelVoiceRecording -> {
-                                // Clean up recording state
-                                try {
-                                    mediaRecorder?.stop()
-                                    mediaRecorder?.release()
-                                } catch (_: Exception) {}
-                                mediaRecorder = null
-                                isRecording = false
-                                // Clean up preview/playback state
-                                mediaPlayer?.release()
-                                mediaPlayer = null
-                                isPlayingVoiceMemo = false
-                                isPreviewingVoiceMemo = false
-                                playbackPosition = 0L
-                                // Delete recording file
-                                recordingFile?.delete()
-                                recordingFile = null
+                                audioState.cancelRecording()
                             }
                             is ComposerEvent.RestartVoiceRecording -> {
-                                // Stop current recording and start fresh
-                                try {
-                                    mediaRecorder?.stop()
-                                    mediaRecorder?.release()
-                                } catch (_: Exception) {}
-                                mediaRecorder = null
-                                recordingFile?.delete()
-                                // Start new recording
-                                startVoiceMemoRecording(
-                                    context = context,
-                                    enableNoiseCancellation = isNoiseCancellationEnabled,
-                                    onRecorderCreated = { recorder, file ->
-                                        mediaRecorder = recorder
-                                        recordingFile = file
-                                        isRecording = true
-                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                                    },
-                                    onError = { error ->
-                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
+                                audioState.restartRecording(context, hapticFeedback)
                             }
                             is ComposerEvent.ToggleNoiseCancellation -> {
-                                isNoiseCancellationEnabled = !isNoiseCancellationEnabled
+                                audioState.toggleNoiseCancellation()
                             }
                             is ComposerEvent.TogglePreviewPlayback -> {
-                                if (isPlayingVoiceMemo) {
-                                    mediaPlayer?.pause()
-                                    isPlayingVoiceMemo = false
-                                } else {
-                                    if (mediaPlayer == null && recordingFile != null) {
-                                        mediaPlayer = MediaPlayer().apply {
-                                            setDataSource(recordingFile!!.absolutePath)
-                                            prepare()
-                                            setOnCompletionListener {
-                                                isPlayingVoiceMemo = false
-                                                playbackPosition = 0L
-                                            }
-                                        }
-                                    }
-                                    mediaPlayer?.start()
-                                    isPlayingVoiceMemo = true
-                                }
+                                audioState.togglePlayback()
                             }
                             is ComposerEvent.ReRecordVoiceMemo -> {
-                                // Clean up preview state
-                                mediaPlayer?.release()
-                                mediaPlayer = null
-                                isPlayingVoiceMemo = false
-                                playbackPosition = 0L
-                                isPreviewingVoiceMemo = false
-                                recordingFile?.delete()
-                                recordingFile = null
-                                // Start new recording
-                                startVoiceMemoRecording(
-                                    context = context,
-                                    enableNoiseCancellation = isNoiseCancellationEnabled,
-                                    onRecorderCreated = { recorder, file ->
-                                        mediaRecorder = recorder
-                                        recordingFile = file
-                                        isRecording = true
-                                        mediaActionSound.play(MediaActionSound.START_VIDEO_RECORDING)
-                                    },
-                                    onError = { error ->
-                                        Toast.makeText(context, error, Toast.LENGTH_SHORT).show()
-                                    }
-                                )
+                                audioState.reRecordFromPreview(context, hapticFeedback)
                             }
                             is ComposerEvent.SendVoiceMemo -> {
-                                // Clean up playback
-                                mediaPlayer?.release()
-                                mediaPlayer = null
-                                isPlayingVoiceMemo = false
                                 // Add voice memo as attachment and send
-                                recordingFile?.let { file ->
-                                    viewModel.composer.addAttachment(file.toUri())
+                                audioState.getRecordingUri()?.let { uri ->
+                                    viewModel.composer.addAttachment(uri)
                                     viewModel.sendMessage()
                                 }
-                                // Reset state
-                                isPreviewingVoiceMemo = false
-                                playbackPosition = 0L
-                                recordingFile = null
+                                audioState.resetAfterSend()
                             }
                             else -> viewModel.onComposerEvent(event)
                         }
@@ -1164,22 +950,7 @@ fun ChatScreen(
             }
         }
 
-        // Load more messages when scrolling near the top (older messages)
-        // Since reverseLayout=true, higher indices = older messages at the visual top
-        LaunchedEffect(listState) {
-            snapshotFlow {
-                val layoutInfo = listState.layoutInfo
-                val totalItems = layoutInfo.totalItemsCount
-                val lastVisibleItem = layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
-                lastVisibleItem >= totalItems - 25 && totalItems > 0
-            }
-                .distinctUntilChanged()
-                .collect { shouldLoadMore ->
-                    if (shouldLoadMore && uiState.canLoadMore && !uiState.isLoadingMore) {
-                        viewModel.messageList.loadMoreMessages()
-                    }
-                }
-        }
+        // Note: Load more messages is now handled by ChatScrollEffects at the top level
 
         // Track the previous newest message GUID to detect truly NEW messages (not initial load)
         var previousNewestGuid by remember { mutableStateOf<String?>(null) }
@@ -1189,9 +960,7 @@ fun ChatScreen(
         var newMessageCountWhileAway by remember { mutableStateOf(0) }
 
         // Derive whether user is scrolled away from bottom (with reverseLayout=true, index 0 = bottom)
-        val isScrolledAwayFromBottom by remember {
-            derivedStateOf { listState.firstVisibleItemIndex > 3 }
-        }
+        val isScrolledAwayFromBottom by rememberIsScrolledAwayFromBottom(listState)
 
         // Reset new message count when user scrolls back to bottom
         LaunchedEffect(isScrolledAwayFromBottom) {

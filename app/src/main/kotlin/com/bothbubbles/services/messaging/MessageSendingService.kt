@@ -1,18 +1,12 @@
 package com.bothbubbles.services.messaging
 
 import android.content.Context
-import android.graphics.BitmapFactory
-import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.provider.OpenableColumns
 import android.util.Log
-import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.remote.api.BothBubblesApi
@@ -34,7 +28,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -528,108 +521,6 @@ class MessageSendingService @Inject constructor(
     // ===== Helper Methods =====
 
     /**
-     * Sync attachments for an outbound message after server confirms upload.
-     *
-     * IMPORTANT: The caller must fetch and pass preservedLocalPaths BEFORE calling replaceGuid(),
-     * because replaceGuid() may cascade-delete temp attachments if the socket event already
-     * created a message with the server GUID.
-     *
-     * @param messageDto The server response containing attachment metadata
-     * @param preservedLocalPaths Local file paths from temp attachments, fetched before cascade delete
-     */
-    private suspend fun syncOutboundAttachments(
-        messageDto: MessageDto,
-        preservedLocalPaths: List<String> = emptyList()
-    ) {
-        if (messageDto.attachments.isNullOrEmpty()) return
-
-        val serverAddress = settingsDataStore.serverAddress.first()
-
-        messageDto.attachments.forEachIndexed { index, attachmentDto ->
-            val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
-
-            // Use pre-fetched local path if available (already filtered for pending_attachments)
-            val preservedLocalPath = preservedLocalPaths.getOrNull(index)
-
-            val attachment = AttachmentEntity(
-                guid = attachmentDto.guid,
-                messageGuid = messageDto.guid,
-                originalRowId = attachmentDto.originalRowId,
-                uti = attachmentDto.uti,
-                mimeType = attachmentDto.mimeType,
-                transferName = attachmentDto.transferName,
-                totalBytes = attachmentDto.totalBytes,
-                isOutgoing = attachmentDto.isOutgoing,
-                hideAttachment = attachmentDto.hideAttachment,
-                width = attachmentDto.width,
-                height = attachmentDto.height,
-                hasLivePhoto = attachmentDto.hasLivePhoto,
-                isSticker = attachmentDto.isSticker,
-                webUrl = webUrl,
-                localPath = preservedLocalPath, // Preserve local path for seamless UI
-                transferState = TransferState.UPLOADED.name,
-                transferProgress = 1f
-            )
-            attachmentDao.insertAttachment(attachment)
-        }
-    }
-
-    /**
-     * Get file name from a content URI
-     */
-    private fun getFileName(uri: Uri): String? {
-        return when (uri.scheme) {
-            "content" -> {
-                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                    if (cursor.moveToFirst() && nameIndex >= 0) {
-                        cursor.getString(nameIndex)
-                    } else null
-                }
-            }
-            "file" -> uri.lastPathSegment
-            else -> uri.lastPathSegment
-        }
-    }
-
-    /**
-     * Get media dimensions (width, height) from a content URI.
-     * Returns (null, null) if dimensions cannot be determined.
-     */
-    private fun getMediaDimensions(uri: Uri, mimeType: String): Pair<Int?, Int?> {
-        return try {
-            when {
-                mimeType.startsWith("image/") -> {
-                    // Use BitmapFactory to get image dimensions without loading full bitmap
-                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
-                        val options = BitmapFactory.Options().apply {
-                            inJustDecodeBounds = true
-                        }
-                        BitmapFactory.decodeStream(inputStream, null, options)
-                        Pair(options.outWidth.takeIf { it > 0 }, options.outHeight.takeIf { it > 0 })
-                    } ?: Pair(null, null)
-                }
-                mimeType.startsWith("video/") -> {
-                    // Use MediaMetadataRetriever for video dimensions
-                    val retriever = MediaMetadataRetriever()
-                    try {
-                        retriever.setDataSource(context, uri)
-                        val width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull()
-                        val height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull()
-                        Pair(width, height)
-                    } finally {
-                        retriever.release()
-                    }
-                }
-                else -> Pair(null, null)
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to get media dimensions for $uri", e)
-            Pair(null, null)
-        }
-    }
-
-    /**
      * Check if carrier messaging is ready. Returns an AppError if not ready, null if ready.
      */
     private fun ensureCarrierReady(requireMms: Boolean = false): SmsError? {
@@ -663,17 +554,6 @@ class MessageSendingService @Inject constructor(
         // Format: "sms;-;+1234567890" or "iMessage;-;+1234567890"
         val parts = chatGuid.split(";-;")
         return if (parts.size == 2) parts[1] else null
-    }
-
-    /**
-     * Extract multiple addresses from a chat GUID (for MMS groups)
-     */
-    private fun extractAddressesFromChatGuid(chatGuid: String): List<String> {
-        val parts = chatGuid.split(";-;")
-        if (parts.size != 2) return emptyList()
-
-        // For group MMS: "mms;-;+1234567890,+0987654321"
-        return parts[1].split(",").filter { it.isNotBlank() }
     }
 
     /**

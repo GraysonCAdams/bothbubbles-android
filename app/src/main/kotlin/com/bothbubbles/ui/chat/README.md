@@ -9,10 +9,12 @@ Main chat/conversation screen. The most complex screen in the app with message d
 | File | Description |
 |------|-------------|
 | `CallMethodDropdown.kt` | Dropdown for selecting call method |
+| `ChatAudioHelper.kt` | Voice memo recording/playback state management |
 | `ChatOverflowMenu.kt` | Overflow menu actions |
 | `ChatScreen.kt` | Main chat screen composable |
 | `ChatScreenDialogs.kt` | Dialog composables used in chat |
 | `ChatScreenUtils.kt` | Utility functions for chat screen |
+| `ChatScrollHelper.kt` | Scroll-related effects and state |
 | `ChatStateCache.kt` | Cache for chat state |
 | `ChatTopBar.kt` | Top app bar for chat |
 | `ChatUiState.kt` | UI state models |
@@ -112,3 +114,20 @@ fun ChatScreen(
 3. Use LazyColumn for message list (performance)
 4. Cache message transformations
 5. Handle keyboard/IME properly
+6. Use helper classes to extract complex state logic (see ChatAudioHelper, ChatScrollHelper)
+
+## Helper Classes
+
+### ChatScrollHelper
+
+Encapsulates scroll-related side effects:
+- `ChatScrollEffects()` - Combined keyboard hiding, load more, scroll position tracking
+- `ScrollToSafetyEffect()` - Ensures selected message is visible for tapback menu
+- `rememberIsScrolledAwayFromBottom()` - Derived state for jump-to-bottom indicator
+
+### ChatAudioHelper
+
+Encapsulates voice memo recording/playback:
+- `rememberChatAudioState()` - State holder with MediaRecorder/MediaPlayer lifecycle
+- `ChatAudioEffects()` - Recording duration timer and playback position tracker
+- Methods: `startRecording()`, `stopRecording()`, `togglePlayback()`, etc.

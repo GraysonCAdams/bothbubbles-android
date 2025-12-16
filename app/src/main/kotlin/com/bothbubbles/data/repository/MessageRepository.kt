@@ -1,6 +1,5 @@
 package com.bothbubbles.data.repository
 
-import android.content.Context
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -8,7 +7,6 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.SyncSource
-import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.MessageDto
 import com.bothbubbles.data.remote.api.dto.MessageQueryRequest
@@ -16,7 +14,6 @@ import com.bothbubbles.services.sync.SyncRangeTracker
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoff
 import com.bothbubbles.util.retryWithRateLimitAwareness
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -33,11 +30,9 @@ import javax.inject.Singleton
  */
 @Singleton
 class MessageRepository @Inject constructor(
-    @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val api: BothBubblesApi,
-    private val settingsDataStore: SettingsDataStore,
     private val syncRangeTracker: SyncRangeTracker,
     private val attachmentRepository: AttachmentRepository,
     private val chatSyncOperations: ChatSyncOperations

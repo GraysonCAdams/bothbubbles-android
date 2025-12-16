@@ -241,6 +241,89 @@ internal fun PinnedConversationsRow(
     }
 }
 
+/**
+ * Drag overlay that renders a pinned conversation item floating above everything
+ * during drag-to-reorder or drag-to-unpin operations.
+ *
+ * @param conversation The conversation being dragged (null if not dragging)
+ * @param isDragging Whether a drag is in progress
+ * @param startPosition The initial position of the dragged item in root coordinates
+ * @param dragOffset The current drag offset from the start position
+ * @param containerRootPosition The position of the containing Box in root coordinates
+ * @param unpinThresholdPx Distance in pixels to drag down before unpinning
+ */
+@Composable
+internal fun PinnedDragOverlay(
+    conversation: ConversationUiModel?,
+    isDragging: Boolean,
+    startPosition: Offset,
+    dragOffset: Offset,
+    containerRootPosition: Offset,
+    unpinThresholdPx: Float,
+    modifier: Modifier = Modifier
+) {
+    if (!isDragging || conversation == null) return
+
+    val unpinProgress = (dragOffset.y / unpinThresholdPx).coerceIn(0f, 1f)
+    val scale = 1.08f - (unpinProgress * 0.15f)
+    val overlayAlpha = 1f - (unpinProgress * 0.5f)
+
+    // Calculate position relative to the container (not root)
+    val relativeX = startPosition.x - containerRootPosition.x
+    val relativeY = startPosition.y - containerRootPosition.y
+
+    Box(
+        modifier = modifier
+            .offset {
+                androidx.compose.ui.unit.IntOffset(
+                    (relativeX + dragOffset.x).toInt(),
+                    (relativeY + dragOffset.y.coerceAtLeast(0f)).toInt()
+                )
+            }
+            .zIndex(100f)
+            .scale(scale)
+            .alpha(overlayAlpha)
+            .shadow(8.dp, RoundedCornerShape(12.dp))
+    ) {
+        // Render the pinned item visually
+        Column(
+            modifier = Modifier
+                .width(100.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceContainerLow),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(12.dp))
+            if (conversation.isGroup) {
+                GroupAvatar(
+                    names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                    avatarPaths = conversation.participantAvatarPaths,
+                    size = 56.dp
+                )
+            } else {
+                Avatar(
+                    name = conversation.displayName,
+                    avatarPath = conversation.avatarPath,
+                    size = 56.dp
+                )
+            }
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                text = conversation.displayName,
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PinnedConversationItem(

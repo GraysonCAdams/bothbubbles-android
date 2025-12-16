@@ -1,6 +1,5 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore

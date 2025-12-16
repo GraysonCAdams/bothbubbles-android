@@ -5,7 +5,6 @@ import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.PendingAttachmentInput
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendingService
@@ -71,7 +70,6 @@ data class QueuedMessageInfo(
  */
 class ChatSendDelegate @Inject constructor(
     private val pendingMessageRepository: PendingMessageRepository,
-    private val chatRepository: ChatRepository,
     private val messageSendingService: MessageSendingService,
     private val socketService: SocketService,
     private val soundManager: SoundManager

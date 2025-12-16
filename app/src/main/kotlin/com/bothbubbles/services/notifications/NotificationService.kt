@@ -19,7 +19,6 @@ import javax.inject.Singleton
 @Singleton
 class NotificationService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val notificationChannelManager: NotificationChannelManager,
     private val notificationBuilder: NotificationBuilder
 ) : Notifier {
     private val notificationManager = NotificationManagerCompat.from(context)

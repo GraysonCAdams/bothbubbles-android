@@ -1,6 +1,5 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.remote.api.BothBubblesApi

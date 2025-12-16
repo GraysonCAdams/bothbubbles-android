@@ -8,18 +8,21 @@ Main conversation list screen showing all chats. Supports filtering, search, pin
 
 | File | Description |
 |------|-------------|
-| `ConversationEmptyStates.kt` | Empty state UIs |
-| `ConversationFilters.kt` | Filter chips (All, iMessage, SMS) |
+| `ConversationEmptyStates.kt` | Empty state UIs for filters and no conversations |
+| `ConversationFilters.kt` | Filter enums (ConversationFilter, SearchFilter) |
 | `ConversationFormatters.kt` | Text formatting utilities |
 | `ConversationMappers.kt` | Map entities to UI models |
 | `ConversationProgressBars.kt` | Sync progress indicators |
-| `ConversationScrollHelpers.kt` | Scroll state utilities |
-| `ConversationSearch.kt` | Search bar and results |
-| `ConversationTile.kt` | Individual conversation row |
-| `ConversationsScreen.kt` | Main screen composable |
+| `ConversationScrollHelpers.kt` | PullToSearchIndicator, ScrollToTopButton |
+| `ConversationSearch.kt` | Search overlay and results |
+| `ConversationTile.kt` | GoogleStyleConversationTile row component |
+| `ConversationsList.kt` | Main LazyColumn list with pinned section |
+| `ConversationsScreen.kt` | Main screen coordinator |
+| `ConversationsTopBar.kt` | Top bar with filter dropdown |
 | `ConversationsUiState.kt` | UI state models |
 | `ConversationsViewModel.kt` | Main ViewModel with delegates |
-| `PinnedConversations.kt` | Pinned conversations section |
+| `PinnedConversations.kt` | PinnedConversationsRow, PinnedDragOverlay |
+| `PullToSearchLogic.kt` | rememberPullToSearchState hook |
 | `SelectionModeHeader.kt` | Multi-select mode header |
 
 ## Architecture
@@ -33,67 +36,86 @@ ConversationsViewModel
 ├── ConversationObserverDelegate  - DB/socket change observers
 └── UnifiedGroupMappingDelegate   - iMessage/SMS merging
 
-Screen Structure:
-ConversationsScreen
-├── TopAppBar (search, filter)
-├── SyncProgressIndicator
-├── PinnedConversations (horizontal)
-└── ConversationList (LazyColumn)
-    └── SwipeableConversationTile
+Screen Structure (Decomposed):
+
+ConversationsScreen (coordinator)
+├── ConversationsTopBar           - App title, filter, search, settings
+│   └── FilterDropdownMenu        - Conversation and category filters
+├── SelectionModeHeader           - Multi-select actions
+├── PullToSearchLogic             - NestedScrollConnection for pull gesture
+├── ConversationsList             - Main LazyColumn
+│   ├── PinnedConversationsRow    - Horizontal pinned section
+│   └── SwipeableConversationTile - Swipeable list items
+│       └── GoogleStyleConversationTile
+├── PinnedDragOverlay             - Floating overlay during pin drag
+├── SearchOverlay                 - Full-screen search
+└── Status Banners                - Connection, SMS, sync progress
 ```
 
 ## Required Patterns
 
-### Screen Structure
+### Pull-to-Search State
 
 ```kotlin
-@Composable
-fun ConversationsScreen(
-    viewModel: ConversationsViewModel = hiltViewModel(),
-    onNavigateToChat: (String) -> Unit,
-    onNavigateToSettings: () -> Unit,
-    onNavigateToNewChat: () -> Unit
+// Use rememberPullToSearchState for pull-to-search behavior
+val pullToSearchState = rememberPullToSearchState(
+    listState = listState,
+    isSearchActive = isSearchActive,
+    onSearchActivated = { isSearchActive = true }
+)
+
+// Apply nested scroll connection to container
+Column(
+    modifier = Modifier.nestedScroll(pullToSearchState.nestedScrollConnection)
 ) {
-    val conversations by viewModel.conversations.collectAsStateWithLifecycle()
-    val pinnedConversations by viewModel.pinnedConversations.collectAsStateWithLifecycle()
-    val syncState by viewModel.syncState.collectAsStateWithLifecycle()
-
-    Scaffold(
-        topBar = {
-            ConversationsTopBar(
-                onSearch = viewModel::search,
-                onSettings = onNavigateToSettings
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(onClick = onNavigateToNewChat) {
-                Icon(Icons.Default.Edit, "New chat")
-            }
-        }
-    ) { padding ->
-        LazyColumn(modifier = Modifier.padding(padding)) {
-            // Sync progress
-            if (syncState.isLoading) {
-                item { LinearProgressIndicator() }
-            }
-
-            // Pinned conversations
-            if (pinnedConversations.isNotEmpty()) {
-                item {
-                    PinnedConversations(pinnedConversations, onNavigateToChat)
-                }
-            }
-
-            // Conversation list
-            items(conversations, key = { it.guid }) { conversation ->
-                SwipeableConversationTile(
-                    conversation = conversation,
-                    onClick = { onNavigateToChat(conversation.guid) }
-                )
-            }
-        }
+    // Show indicator when pulling
+    if (pullToSearchState.pullOffset > 0) {
+        PullToSearchIndicator(
+            progress = (pullToSearchState.pullOffset / threshold).coerceIn(0f, 1f)
+        )
     }
+    // Content...
 }
+```
+
+### ConversationsList Usage
+
+```kotlin
+ConversationsList(
+    pinnedConversations = pinnedList,
+    regularConversations = regularList,
+    listState = listState,
+    swipeConfig = uiState.swipeConfig,
+    selectedConversations = selectedSet,
+    isSelectionMode = isSelectionMode,
+    isLoadingMore = uiState.isLoadingMore,
+    bottomPadding = bannerPadding,
+    onConversationClick = { guid, mergedGuids -> /* navigate */ },
+    onConversationLongClick = { guid -> /* toggle selection */ },
+    onAvatarClick = { contactInfo -> /* show popup */ },
+    onSwipeAction = { guid, action -> /* handle action */ },
+    onPinReorder = { guids -> viewModel.reorderPins(guids) },
+    onUnpin = { guid -> viewModel.togglePin(guid) },
+    onDragOverlayStart = { conv, pos -> /* start drag */ },
+    onDragOverlayMove = { offset -> /* update drag */ },
+    onDragOverlayEnd = { /* end drag */ }
+)
+```
+
+### ConversationsTopBar Usage
+
+```kotlin
+ConversationsTopBar(
+    useSimpleAppTitle = uiState.useSimpleAppTitle,
+    conversationFilter = conversationFilter,
+    categoryFilter = categoryFilter,
+    categorizationEnabled = uiState.categorizationEnabled,
+    onFilterSelected = { filter -> viewModel.setConversationFilter(filter.name) },
+    onCategorySelected = { category -> viewModel.setCategoryFilter(category?.name) },
+    onSearchClick = { isSearchActive = true },
+    onSettingsClick = { isSettingsOpen = true },
+    onTitleClick = { /* scroll to top */ }
+)
 ```
 
 ## Sub-packages

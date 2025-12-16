@@ -1,10 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.services.media.AttachmentDownloadQueue
-import com.bothbubbles.services.media.AttachmentPreloader
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -41,9 +38,7 @@ import javax.inject.Inject
  * ```
  */
 class ChatAttachmentDelegate @Inject constructor(
-    private val attachmentRepository: AttachmentRepository,
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
-    private val attachmentPreloader: AttachmentPreloader,
     private val settingsDataStore: SettingsDataStore
 ) {
     companion object {

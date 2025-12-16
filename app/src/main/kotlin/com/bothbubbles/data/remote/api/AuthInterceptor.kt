@@ -3,8 +3,6 @@ package com.bothbubbles.data.remote.api
 import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.di.ApplicationScope
-import com.bothbubbles.di.IoDispatcher
-import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.combine
@@ -27,8 +25,7 @@ import javax.inject.Inject
  */
 class AuthInterceptor @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    @ApplicationScope private val applicationScope: CoroutineScope,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    @ApplicationScope private val applicationScope: CoroutineScope
 ) : Interceptor {
 
     private data class CachedCredentials(

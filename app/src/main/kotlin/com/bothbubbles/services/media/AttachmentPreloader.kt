@@ -1,7 +1,6 @@
 package com.bothbubbles.services.media
 
 import android.content.Context
-import android.util.Log
 import coil.ImageLoader
 import coil.request.ImageRequest
 import coil.size.Precision

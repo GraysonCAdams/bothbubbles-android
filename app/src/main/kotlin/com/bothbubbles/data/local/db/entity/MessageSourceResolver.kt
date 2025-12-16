@@ -19,11 +19,6 @@ object MessageSourceResolver {
     private val LOCAL_SMS_PREFIXES = listOf("sms;-;", "SMS;-;", "mms;-;", "MMS;-;", "RCS;-;", "rcs;-;")
 
     /**
-     * Chat GUID prefixes indicating server-synced SMS (via BlueBubbles server).
-     */
-    private val SERVER_SMS_PREFIXES = LOCAL_SMS_PREFIXES
-
-    /**
      * Determine the message source from a chat GUID (for locally-initiated messages).
      *
      * @param chatGuid The chat's GUID

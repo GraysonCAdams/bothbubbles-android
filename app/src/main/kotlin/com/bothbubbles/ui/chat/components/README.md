@@ -9,10 +9,14 @@ Chat-specific UI components used in the chat screen.
 | File | Description |
 |------|-------------|
 | `AttachmentComponents.kt` | Attachment preview/display components |
+| `ChatAttachmentStrip.kt` | Pending attachments strip with warning banner |
 | `ChatBackground.kt` | Custom chat background |
 | `ChatBanners.kt` | Info banners (spam warning, etc.) |
 | `ChatGestures.kt` | Swipe and gesture handlers |
-| `ChatInputArea.kt` | Message input area wrapper |
+| `ChatInputArea.kt` | Message input area orchestrator (mode switching) |
+| `ChatInputFields.kt` | Text input field row with add/emoji/image buttons |
+| `ChatPreviewPanel.kt` | Voice memo preview/playback panel |
+| `ChatRecordingPanel.kt` | Voice memo recording panel with waveform |
 | `ComposerTextField.kt` | Text input field for composer |
 | `EmptyStateMessages.kt` | Empty chat state UI |
 | `EtaSharingBanner.kt` | ETA sharing status banner |
@@ -40,11 +44,29 @@ ChatScreen
 │   └── EmptyStateMessages
 ├── EtaSharingBanner
 ├── ReplyPreview
-├── ChatInputArea
-│   ├── ComposerTextField
-│   ├── ReorderableAttachmentStrip
+├── ChatInputArea (orchestrator - switches between modes)
+│   ├── ChatAttachmentStrip (pending attachments + quality indicator)
+│   │   ├── ReorderableAttachmentStrip
+│   │   └── AttachmentWarningBanner
+│   ├── ChatInputFieldRow (NORMAL mode - text input)
+│   │   └── ComposerTextField
+│   ├── ChatRecordingPanel (RECORDING mode - voice memo)
+│   │   └── RecordingWaveform
+│   ├── ChatPreviewPanel (PREVIEW mode - playback)
+│   ├── VoiceMemoButton
 │   └── SendButton / SendModeToggleButton
 └── SearchResultsSheet / QualitySelectionSheet
+```
+
+### Input Mode State Machine
+
+```
+┌─────────┐  hold voice btn  ┌───────────┐  stop/done  ┌─────────┐
+│ NORMAL  │ ───────────────► │ RECORDING │ ──────────► │ PREVIEW │
+└─────────┘                  └───────────┘             └─────────┘
+     ▲                            │                         │
+     │         cancel             │        cancel/send      │
+     └────────────────────────────┴─────────────────────────┘
 ```
 
 ## Required Patterns

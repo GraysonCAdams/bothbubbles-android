@@ -14,7 +14,6 @@ import com.bothbubbles.ui.chat.state.OperationsState
 import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.util.toStable
-import com.bothbubbles.util.error.AppError
 import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
 import kotlinx.coroutines.CoroutineScope
