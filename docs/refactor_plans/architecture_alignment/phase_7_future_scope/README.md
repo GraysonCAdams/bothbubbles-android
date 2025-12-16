@@ -1,5 +1,6 @@
-# Phase 7 — Future Scope & Follow-on Work
+# Phase 7b — Future Scope & Follow-on Work
 
+> **Sibling Phase**: See [Phase 7a — Interface Extraction](../phase_7_interface_extraction/README.md) for the safety-net work that must stay aligned with this plan.
 > **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed migration steps and code examples.
 >
 > **Status**: Ready to Start (Phase 2+3 Complete for Chat, 2024-12)
@@ -12,7 +13,7 @@ This phase is a reminder list of what to fix *next*, so we don't leave the app i
 
 ## Connection to Shared Vision
 
-This phase extends the [Shared Vision](../phase_0_shared_vision/README.md) to the rest of the app:
+This phase extends the [Shared Vision](../phase_0_shared_vision/README.md) to the rest of the app *after* the interface extractions in Phase 7a land:
 
 - **ConversationsViewModel** — Apply AssistedInject, replace callbacks with events
 - **SetupViewModel** — Proper Hilt DI for delegates
@@ -57,16 +58,16 @@ observer.events.collect { event ->
 
 | Target | Priority | Effort | Dependency |
 |--------|----------|--------|------------|
-| **PendingMessageSource interface** | P0 - Critical | 0.5 day | Enables full safety net testing |
-| **Migrate remaining modules to interfaces** | P1 - High | 0.5 day | Interfaces exist |
-| **VCardExporter interface** | P2 - Medium | 0.5 day | None |
-| ConversationsViewModel | P2 - Medium | 1-2 days | P1 completion |
-| SetupViewModel DI | P3 - Low | 0.5 day | P1 completion |
+| **Phase 7a: PendingMessageSource interface** | P0 - Critical | 0.5 day | Enables full safety net testing |
+| **Phase 7a: Migrate remaining modules to interfaces** | P1 - High | 0.5 day | Interfaces exist |
+| **Phase 7a: VCardExporter interface** | P2 - Medium | 0.5 day | None |
+| ConversationsViewModel | P2 - Medium | 1-2 days | Phase 7a complete |
+| SetupViewModel DI | P3 - Low | 0.5 day | Phase 7a complete |
 | Service Initialization | P4 - Optional | 0.5 day | None |
 
 ### Quick Wins (Can Do Now)
 
-11 modules still import concrete services. See [impl/README.md](impl/README.md) for full list.
+11 modules still import concrete services. See [impl/README.md](impl/README.md) for full list, and tackle them immediately after Phase 7a bindings to keep this backlog unblocked.
 
 ## Exit Criteria
 

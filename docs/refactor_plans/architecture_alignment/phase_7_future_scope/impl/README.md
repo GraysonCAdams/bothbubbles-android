@@ -1,15 +1,21 @@
-# Phase 7: Future Scope — Unified Implementation Plan
+# Phase 7b: Future Scope — Overview & Tracking
 
-> **Status**: Ready to Start (Phase 2+3 Complete for Chat)
-> **Blocking**: None - can proceed now
-> **Code Changes**: Apply Chat patterns to other ViewModels
+> **Status**: Ready to Start (Phase 2-4 Complete for Chat, 2025-12)
+> **Blocking**: Phase 7a (Interface Extraction) must stay in sync — see [../phase_7_interface_extraction/](../phase_7_interface_extraction/)
+> **Implementation Details**: See dedicated phase documents below
 > **Risk Level**: Medium (same patterns, different screens)
 
 ## Overview
 
-The Chat screen was the biggest and most complex part of the app, so we fixed it first. This phase applies the same architectural patterns to **ConversationsViewModel**, **SetupViewModel**, and service initialization.
+This document serves as a **tracking overview** for applying Chat architecture patterns to the rest of the app. Detailed implementation plans live in dedicated phase documents:
 
-## Pre-Requisite: Interface Extractions (High Priority)
+| Target | Implementation Plan |
+|--------|---------------------|
+| ConversationsViewModel | [Phase 8 — Conversations Architecture](../../phase_8_conversations_architecture/impl/README.md) |
+| SetupViewModel | [Phase 9 — Setup Architecture](../../phase_9_setup_architecture/impl/README.md) |
+| Service Initialization | [Phase 10 — Service Modernization](../../phase_10_service_modernization/impl/README.md) |
+
+## Pre-Requisite: Interface Extractions (Phase 7a)
 
 Before migrating other ViewModels, extract interfaces for remaining concrete dependencies:
 
@@ -51,7 +57,7 @@ interface VCardExporter {
 }
 ```
 
-### 3. Concrete Service Dependencies Found (2024-12)
+### 3. Concrete Service Dependencies Found
 
 UI modules still importing concrete services instead of interfaces:
 
@@ -75,293 +81,38 @@ UI modules still importing concrete services instead of interfaces:
 
 ## When to Start
 
-- [x] Chat refactor (Phases 2-3) is complete for ChatViewModel ✓ (2024-12)
-- [ ] Phase 4 (Delegate Coupling) complete OR decided to defer
+- [x] Chat refactor (Phases 2-3) is complete for ChatViewModel ✓
+- [x] Phase 4 (Delegate Coupling) complete (ChatViewModel ✅)
 - [ ] Chat refactor is stable and shipped
 - [ ] No active regressions from Chat changes
 - [ ] Team capacity available for next cycle
 
-**Can proceed now** with interface extractions (PendingMessageSource, VCardExporter) and simple migrations (SettingsViewModel).
+**Can proceed now** with interface extractions (PendingMessageSource, VCardExporter) and simple migrations (SettingsViewModel) **as long as the 7a bindings are merged or tracked in the same sprint**.
 
-## Target 1: ConversationsViewModel (Primary)
+## ViewModel Migration Targets
 
-### Current Problems
+> **Note**: Detailed implementation plans for each target live in dedicated phase documents.
+> This section provides quick reference and tracks readiness.
 
-`ConversationsViewModel` (880+ lines) has the same issues we fixed in Chat:
+### Target 1: ConversationsViewModel → [Phase 8](../../phase_8_conversations_architecture/impl/README.md)
 
-```kotlin
-// CURRENT - Same bad patterns
-class ConversationsViewModel @Inject constructor(
-    val loading: ConversationLoadingDelegate,
-    val actions: ConversationActionsDelegate,
-    val observer: ConversationObserverDelegate,
-    // ...
-) : ViewModel() {
-    init {
-        // Same initialize() pattern
-        loading.initialize(viewModelScope)
-        actions.initialize(viewModelScope, ::refreshConversations)
-        observer.initialize(
-            viewModelScope,
-            onDataChanged = { refreshConversations() },
-            onNewMessage = { handleNewMessage() },
-            onMessageUpdated = { handleMessageUpdated() },
-            onChatRead = { guid -> markChatRead(guid) }
-        )
-    }
-}
-```
+**Summary**: 880+ line ViewModel with callback hell and `initialize()` patterns.
+**Solution**: AssistedInject + sealed events via SharedFlow.
+**Status**: Ready when Phase 7a interfaces complete.
 
-### Callback Hell in ConversationObserverDelegate
+### Target 2: SetupViewModel → [Phase 9](../../phase_9_setup_architecture/impl/README.md)
 
-```kotlin
-// CURRENT - 4 callbacks stored as nullable vars
-class ConversationObserverDelegate @Inject constructor(...) {
-    private var onDataChanged: (suspend () -> Unit)? = null
-    private var onNewMessage: (suspend () -> Unit)? = null
-    private var onMessageUpdated: (suspend () -> Unit)? = null
-    private var onChatRead: ((String) -> Unit)? = null
+**Summary**: Manual delegate construction, no DI.
+**Solution**: Hilt injection + unified `SetupUiState`.
+**Status**: Ready when Phase 7a interfaces complete.
 
-    fun initialize(
-        scope: CoroutineScope,
-        onDataChanged: suspend () -> Unit,
-        onNewMessage: suspend () -> Unit,
-        onMessageUpdated: suspend () -> Unit,
-        onChatRead: (String) -> Unit
-    ) {
-        this.scope = scope
-        this.onDataChanged = onDataChanged
-        // ... store all callbacks
-    }
-}
-```
+### Target 3: Service Initialization → [Phase 10](../../phase_10_service_modernization/impl/README.md)
 
-### Target State
+**Summary**: 40+ lines of manual initialization in `BothBubblesApp.onCreate()`.
+**Solution**: AndroidX Startup initializers.
+**Status**: Can proceed independently (some items don't depend on Phase 7a).
 
-Replace callbacks with sealed events (cleaner, more Kotlin-idiomatic):
-
-```kotlin
-// AFTER - Sealed events instead of callbacks
-class ConversationObserverDelegate @AssistedInject constructor(
-    private val chatDao: ChatDao,
-    private val messageDao: MessageDao,
-    @Assisted private val scope: CoroutineScope
-) {
-    sealed interface ConversationEvent {
-        object DataChanged : ConversationEvent
-        object NewMessage : ConversationEvent
-        object MessageUpdated : ConversationEvent
-        data class ChatRead(val guid: String) : ConversationEvent
-    }
-
-    private val _events = MutableSharedFlow<ConversationEvent>()
-    val events: SharedFlow<ConversationEvent> = _events.asSharedFlow()
-
-    init {
-        observeChanges()
-    }
-
-    private fun observeChanges() {
-        scope.launch {
-            chatDao.observeAll().collect {
-                _events.emit(ConversationEvent.DataChanged)
-            }
-        }
-        // ... other observations emit events
-    }
-
-    @AssistedFactory
-    interface Factory {
-        fun create(scope: CoroutineScope): ConversationObserverDelegate
-    }
-}
-```
-
-ViewModel collects events with pattern matching:
-
-```kotlin
-@HiltViewModel
-class ConversationsViewModel @Inject constructor(
-    private val observerFactory: ConversationObserverDelegate.Factory,
-    private val loadingFactory: ConversationLoadingDelegate.Factory,
-    private val actionsFactory: ConversationActionsDelegate.Factory
-) : ViewModel() {
-
-    private val observer = observerFactory.create(viewModelScope)
-    private val loading = loadingFactory.create(viewModelScope)
-    private val actions = actionsFactory.create(viewModelScope)
-
-    init {
-        // Single collection point, pattern matching
-        viewModelScope.launch {
-            observer.events.collect { event ->
-                when (event) {
-                    is ConversationEvent.DataChanged -> refreshConversations()
-                    is ConversationEvent.NewMessage -> handleNewMessage()
-                    is ConversationEvent.MessageUpdated -> handleMessageUpdated()
-                    is ConversationEvent.ChatRead -> markChatRead(event.guid)
-                }
-            }
-        }
-    }
-}
-```
-
-### Migration Steps
-
-1. **Apply AssistedInject to delegates** (same as Phase 3):
-
-```kotlin
-class ConversationLoadingDelegate @AssistedInject constructor(
-    private val chatRepository: ChatRepository,
-    @Assisted private val scope: CoroutineScope
-) {
-    @AssistedFactory
-    interface Factory {
-        fun create(scope: CoroutineScope): ConversationLoadingDelegate
-    }
-}
-```
-
-2. **Replace callbacks with events** in `ConversationObserverDelegate`
-
-3. **Update ConversationsViewModel** to use factories and collect events
-
-### Files to Modify
-
-| File | Change |
-|------|--------|
-| `ConversationLoadingDelegate.kt` | Add AssistedInject |
-| `ConversationActionsDelegate.kt` | Add AssistedInject |
-| `ConversationObserverDelegate.kt` | Replace callbacks with events |
-| `UnifiedGroupMappingDelegate.kt` | Add AssistedInject if applicable |
-| `ConversationsViewModel.kt` | Use factories, collect events |
-
-## Target 2: SetupViewModel DI
-
-### Current Problem
-
-SetupViewModel manually constructs delegates:
-
-```kotlin
-// CURRENT - Manual construction, NOT DI
-class SetupViewModel @Inject constructor(
-    @ApplicationContext private val context: Context,
-    private val settingsDataStore: SettingsDataStore,
-    private val api: BothBubblesApi,
-    // ...
-) : ViewModel() {
-    // Manual construction - not injectable!
-    private val permissionsDelegate = PermissionsDelegate(context)
-    private val serverConnectionDelegate = ServerConnectionDelegate(settingsDataStore, api)
-    private val smsSetupDelegate = SmsSetupDelegate(smsPermissionHelper, settingsDataStore, smsRepository)
-}
-```
-
-### Target State
-
-```kotlin
-// AFTER - Proper DI injection
-class SetupViewModel @Inject constructor(
-    // Injected via Hilt
-    val permissions: PermissionsDelegate,
-    val serverConnection: ServerConnectionDelegate,
-    val smsSetup: SmsSetupDelegate
-) : ViewModel()
-
-// Each delegate becomes @Inject-able (no AssistedInject needed - no runtime params)
-class PermissionsDelegate @Inject constructor(
-    @ApplicationContext private val context: Context
-)
-
-class ServerConnectionDelegate @Inject constructor(
-    private val settingsDataStore: SettingsDataStore,
-    private val api: BothBubblesApi
-)
-
-class SmsSetupDelegate @Inject constructor(
-    private val smsPermissionHelper: SmsPermissionHelper,
-    private val settingsDataStore: SettingsDataStore,
-    private val smsRepository: SmsRepository
-)
-```
-
-**Note**: Setup delegates don't need AssistedInject because they don't require runtime parameters like `chatGuid`.
-
-### Files to Modify
-
-| File | Change |
-|------|--------|
-| `PermissionsDelegate.kt` | Add @Inject constructor |
-| `ServerConnectionDelegate.kt` | Add @Inject constructor |
-| `SmsSetupDelegate.kt` | Add @Inject constructor |
-| `SetupViewModel.kt` | Inject delegates, remove manual construction |
-
-## Target 3: Service Bootstrapping
-
-### Current Problem
-
-Manual initialization calls in Application:
-
-```kotlin
-// CURRENT - Manual calls, easy to forget order
-override fun onCreate() {
-    super.onCreate()
-    appLifecycleTracker.initialize()
-    activeConversationManager.initialize()
-    connectionModeManager.initialize()
-}
-```
-
-### Option A: AndroidX Startup (Recommended)
-
-```kotlin
-class AppLifecycleInitializer : Initializer<AppLifecycleTracker> {
-    override fun create(context: Context): AppLifecycleTracker {
-        val tracker = EntryPointAccessors.fromApplication(
-            context,
-            AppLifecycleTrackerEntryPoint::class.java
-        ).tracker()
-        tracker.initialize()
-        return tracker
-    }
-
-    override fun dependencies(): List<Class<out Initializer<*>>> = emptyList()
-}
-
-@EntryPoint
-@InstallIn(SingletonComponent::class)
-interface AppLifecycleTrackerEntryPoint {
-    fun tracker(): AppLifecycleTracker
-}
-```
-
-**AndroidManifest.xml:**
-```xml
-<provider
-    android:name="androidx.startup.InitializationProvider"
-    android:authorities="${applicationId}.androidx-startup">
-    <meta-data
-        android:name="com.bothbubbles.AppLifecycleInitializer"
-        android:value="androidx.startup" />
-</provider>
-```
-
-### Option B: Eager DI (Simpler)
-
-```kotlin
-@Module
-@InstallIn(SingletonComponent::class)
-object ServiceInitModule {
-    @Provides
-    @Singleton
-    fun provideAppLifecycleTracker(
-        @ApplicationContext context: Context
-    ): AppLifecycleTracker {
-        return AppLifecycleTracker(context).apply { initialize() }
-    }
-}
-```
+---
 
 ## Prioritized Backlog
 
@@ -438,4 +189,4 @@ JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradle
 
 ---
 
-**Status Update (2024-12)**: Phase 2+3 complete for ChatViewModel. Interface extractions (PendingMessageSource, VCardExporter) and quick-win migrations (SettingsViewModel) can proceed now. ConversationsViewModel migration should wait until after Phase 4 or stability verification.
+**Status Update (2025-12)**: Phase 2-4 complete for ChatViewModel. Interface extractions (PendingMessageSource, VCardExporter) and quick-win migrations (SettingsViewModel) can proceed now. See Phase 8/9/10 for detailed implementation plans.

@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository

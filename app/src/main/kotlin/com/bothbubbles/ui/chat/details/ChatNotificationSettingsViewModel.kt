@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel

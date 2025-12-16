@@ -5,6 +5,7 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
@@ -177,12 +178,13 @@ suspend fun ChatEntity.toUiModel(
     }
 
     // For group chats, get sender's first name if not from me
-    val senderName = if (isGroup && !isFromMe && lastMessage?.senderAddress != null) {
+    val senderAddress = lastMessage?.senderAddress
+    val senderName = if (isGroup && !isFromMe && senderAddress != null) {
         // Find participant by sender address
-        val senderParticipant = participants.find { it.address == lastMessage.senderAddress }
+        val senderParticipant = participants.find { it.address == senderAddress }
         val fullName = senderParticipant?.cachedDisplayName
             ?: senderParticipant?.formattedAddress
-            ?: lastMessage.senderAddress
+            ?: senderAddress
         extractFirstName(fullName)
     } else {
         null

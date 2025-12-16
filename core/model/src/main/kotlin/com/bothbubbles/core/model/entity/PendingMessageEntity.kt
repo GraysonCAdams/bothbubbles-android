@@ -1,0 +1,112 @@
+package com.bothbubbles.core.model.entity
+
+import androidx.room.ColumnInfo
+import androidx.room.Entity
+import androidx.room.Index
+import androidx.room.PrimaryKey
+
+/**
+ * Represents a message that is queued for sending.
+ *
+ * Messages are persisted here immediately when the user taps send, before any network
+ * request is made. This ensures messages survive app kills and device reboots.
+ *
+ * WorkManager is used to guarantee delivery when network is available.
+ */
+@Entity(
+    tableName = "pending_messages",
+    indices = [
+        Index(value = ["local_id"], unique = true),
+        Index(value = ["chat_guid"]),
+        Index(value = ["sync_status"]),
+        Index(value = ["created_at"])
+    ]
+)
+data class PendingMessageEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+
+    /**
+     * Local UUID for tracking this message through the send process.
+     * Used for UI updates and deduplication.
+     */
+    @ColumnInfo(name = "local_id")
+    val localId: String,
+
+    @ColumnInfo(name = "chat_guid")
+    val chatGuid: String,
+
+    @ColumnInfo(name = "text")
+    val text: String?,
+
+    @ColumnInfo(name = "subject")
+    val subject: String? = null,
+
+    @ColumnInfo(name = "reply_to_guid")
+    val replyToGuid: String? = null,
+
+    @ColumnInfo(name = "effect_id")
+    val effectId: String? = null,
+
+    /**
+     * Delivery mode: AUTO, IMESSAGE, LOCAL_SMS, LOCAL_MMS
+     */
+    @ColumnInfo(name = "delivery_mode")
+    val deliveryMode: String = "AUTO",
+
+    /**
+     * Current sync status: PENDING, SENDING, SENT, FAILED
+     */
+    @ColumnInfo(name = "sync_status")
+    val syncStatus: String = PendingSyncStatus.PENDING.name,
+
+    /**
+     * Server-assigned GUID after successful send
+     */
+    @ColumnInfo(name = "server_guid")
+    val serverGuid: String? = null,
+
+    /**
+     * Error message if send failed
+     */
+    @ColumnInfo(name = "error_message")
+    val errorMessage: String? = null,
+
+    /**
+     * Number of send attempts
+     */
+    @ColumnInfo(name = "retry_count")
+    val retryCount: Int = 0,
+
+    /**
+     * WorkManager request ID for cancellation
+     */
+    @ColumnInfo(name = "work_request_id")
+    val workRequestId: String? = null,
+
+    /**
+     * When the message was queued
+     */
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long = System.currentTimeMillis(),
+
+    /**
+     * Last send attempt timestamp
+     */
+    @ColumnInfo(name = "last_attempt_at")
+    val lastAttemptAt: Long? = null
+)
+
+/**
+ * Sync status for pending messages.
+ */
+enum class PendingSyncStatus {
+    /** Queued, waiting for network */
+    PENDING,
+    /** Currently being sent */
+    SENDING,
+    /** Successfully sent, serverGuid populated */
+    SENT,
+    /** Failed after max retries */
+    FAILED
+}

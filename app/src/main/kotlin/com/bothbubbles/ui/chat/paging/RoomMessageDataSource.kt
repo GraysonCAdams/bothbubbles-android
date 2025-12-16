@@ -3,6 +3,7 @@ package com.bothbubbles.ui.chat.paging
 import android.util.Log
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository

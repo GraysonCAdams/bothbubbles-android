@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository

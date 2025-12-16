@@ -2,6 +2,7 @@ package com.bothbubbles.ui.chat.delegates
 
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository

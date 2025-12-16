@@ -176,10 +176,10 @@ fun BorderlessLinkPreviewCard(
                 }
 
                 // Title
-                if (!preview.title.isNullOrBlank()) {
+                preview.title?.takeIf { it.isNotBlank() }?.let { title ->
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = preview.title,
+                        text = title,
                         style = MaterialTheme.typography.titleSmall,
                         color = textColor,
                         maxLines = 2,
@@ -188,10 +188,10 @@ fun BorderlessLinkPreviewCard(
                 }
 
                 // Description
-                if (!preview.description.isNullOrBlank()) {
+                preview.description?.takeIf { it.isNotBlank() }?.let { description ->
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        text = preview.description,
+                        text = description,
                         style = MaterialTheme.typography.bodySmall,
                         color = secondaryTextColor,
                         maxLines = 2,

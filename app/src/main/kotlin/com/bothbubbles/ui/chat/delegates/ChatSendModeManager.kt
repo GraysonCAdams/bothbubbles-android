@@ -395,8 +395,9 @@ class ChatSendModeManager @AssistedInject constructor(
         scope.launch {
             try {
                 val chat = chatRepository.getChat(chatGuid)
-                if (chat != null && chat.sendModeManuallySet && chat.preferredSendMode != null) {
-                    val persistedMode = when (chat.preferredSendMode.lowercase()) {
+                val preferredMode = chat?.preferredSendMode
+                if (chat != null && chat.sendModeManuallySet && preferredMode != null) {
+                    val persistedMode = when (preferredMode.lowercase()) {
                         "imessage" -> ChatSendMode.IMESSAGE
                         "sms" -> ChatSendMode.SMS
                         else -> null

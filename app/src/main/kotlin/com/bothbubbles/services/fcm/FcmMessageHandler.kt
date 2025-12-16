@@ -3,6 +3,8 @@ package com.bothbubbles.services.fcm
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope

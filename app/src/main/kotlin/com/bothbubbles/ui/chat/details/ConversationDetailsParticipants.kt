@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.util.PhoneNumberFormatter
 

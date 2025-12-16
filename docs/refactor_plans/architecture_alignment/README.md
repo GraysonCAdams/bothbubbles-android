@@ -24,8 +24,11 @@ Our architecture aims for five core principles:
 | [Phase 3](phase_3_delegate_lifecycle/) | Delegate Lifecycle | ✅ **Complete** (ChatViewModel) | [impl/](phase_3_delegate_lifecycle/impl/) |
 | [Phase 4](phase_4_delegate_coupling/) | Delegate Coupling | **Next** | [impl/](phase_4_delegate_coupling/impl/) |
 | [Phase 5](phase_5_service_layer_hygiene/) | Service Layer Hygiene | ✅ **Complete** | [impl/](phase_5_service_layer_hygiene/impl/) |
-| [Phase 6](phase_6_modularization_optional/) | Modularization | Optional/Deferred | [impl/](phase_6_modularization_optional/impl/) |
-| [Phase 7](phase_7_future_scope/) | Future Scope | Backlog | [impl/](phase_7_future_scope/impl/) |
+| [Phase 6](phase_6_modularization_optional/) | Modularization | ✅ **Complete** (:core:model) | [impl/](phase_6_modularization_optional/impl/) |
+| [Phase 7](phase_7_interface_extraction/) | Interface Extraction | Planned | [impl/](phase_7_interface_extraction/impl/) |
+| [Phase 8](phase_8_conversations_architecture/) | Conversations Architecture | Planned | [impl/](phase_8_conversations_architecture/impl/) |
+| [Phase 9](phase_9_setup_architecture/) | Setup Architecture | Planned | [impl/](phase_9_setup_architecture/impl/) |
+| [Phase 10](phase_10_service_modernization/) | Service Modernization | Planned | [impl/](phase_10_service_modernization/impl/) |
 
 ## Execution Order
 
@@ -60,8 +63,11 @@ Our architecture aims for five core principles:
 │  Chat Architecture Complete!                                        │
 │                                                                     │
 │  Phase 5 (Service Hygiene): ✅ COMPLETE                             │
-│  Phase 6 (Modularization): Optional/Deferred                        │
-│  Phase 7 (Other ViewModels): ConversationsViewModel, SetupViewModel │
+│  Phase 6 (Modularization): ✅ COMPLETE (:core:model extracted)      │
+│  Phase 7 (Interface Extraction): Planned                            │
+│  Phase 8 (Conversations Architecture): Planned                      │
+│  Phase 9 (Setup Architecture): Planned                              │
+│  Phase 10 (Service Modernization): Planned                          │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

@@ -1,13 +1,13 @@
 # Phase 6: Modularization (Optional) — Unified Implementation Plan
 
-> **Status**: Optional / Deferred
-> **Blocking**: Phases 2-4 complete; real build time pain exists
-> **Code Changes**: Gradle modules, DI restructuring
-> **Risk Level**: High (Gradle + DI churn)
+> **Status**: ✅ COMPLETE (2024-12-16)
+> **Blocking**: None
+> **Code Changes**: `:core:model` extracted
+> **Risk Level**: Low (Data classes only)
 
 ## Overview
 
-This phase creates Gradle modules to enforce architectural boundaries at compile time. Currently everything is in `:app`; modules add compiler-enforced boundaries.
+This phase creates Gradle modules to enforce architectural boundaries at compile time. `:core:model` has been extracted to separate pure data classes from the Android app module.
 
 ## When to Do This
 
@@ -37,7 +37,8 @@ Only pursue this if:
 
 ```kotlin
 // settings.gradle.kts
-include(":app")  // Everything in one module
+include(":app")
+include(":core:model")
 ```
 
 ## Target State
@@ -46,11 +47,9 @@ include(":app")  // Everything in one module
 // settings.gradle.kts
 include(":app")
 include(":core:model")
-include(":core:data")
-include(":core:network")
-// Optional feature modules:
-// include(":feature:chat")
-// include(":feature:conversations")
+// Deferred:
+// include(":core:data")
+// include(":core:network")
 ```
 
 ## Recommended Module Structure

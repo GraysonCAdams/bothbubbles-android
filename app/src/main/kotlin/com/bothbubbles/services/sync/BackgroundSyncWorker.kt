@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker

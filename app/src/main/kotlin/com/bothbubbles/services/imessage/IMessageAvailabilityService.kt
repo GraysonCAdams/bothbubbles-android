@@ -2,8 +2,8 @@ package com.bothbubbles.services.imessage
 
 import android.util.Log
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
+import com.bothbubbles.data.local.db.entity.CheckResult
 import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity
-import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity.CheckResult
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState

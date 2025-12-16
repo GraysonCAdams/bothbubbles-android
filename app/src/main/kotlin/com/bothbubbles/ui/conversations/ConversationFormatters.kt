@@ -4,6 +4,7 @@ import android.app.Application
 import android.text.format.DateFormat
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import java.text.SimpleDateFormat

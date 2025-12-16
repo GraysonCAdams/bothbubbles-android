@@ -66,7 +66,7 @@ class PendingMessageRepository @Inject constructor(
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     private val messageSender: dagger.Lazy<MessageSender>  // Lazy to avoid circular dependency
-) {
+) : PendingMessageSource {
     companion object {
         private const val TAG = "PendingMessageRepo"
     }
@@ -86,7 +86,7 @@ class PendingMessageRepository @Inject constructor(
      *
      * @return Local ID (temp GUID) of the queued message for UI tracking
      */
-    suspend fun queueMessage(
+    override suspend fun queueMessage(
         chatGuid: String,
         text: String?,
         subject: String? = null,
@@ -364,7 +364,7 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Retry a failed message.
      */
-    suspend fun retryMessage(localId: String): Result<Unit> = runCatching {
+    override suspend fun retryMessage(localId: String): Result<Unit> = runCatching {
         val pending = pendingMessageDao.getByLocalId(localId)
             ?: throw Exception("Message not found: $localId")
 
@@ -383,7 +383,7 @@ class PendingMessageRepository @Inject constructor(
      * Cancel a pending message.
      * Also removes the local echo from the messages table.
      */
-    suspend fun cancelMessage(localId: String): Result<Unit> = runCatching {
+    override suspend fun cancelMessage(localId: String): Result<Unit> = runCatching {
         val pending = pendingMessageDao.getByLocalId(localId)
             ?: throw Exception("Message not found: $localId")
 
@@ -417,20 +417,20 @@ class PendingMessageRepository @Inject constructor(
      * Observe pending messages for a specific chat.
      * Used by ChatViewModel to display queued messages with status indicators.
      */
-    fun observePendingForChat(chatGuid: String): Flow<List<PendingMessageEntity>> =
+    override fun observePendingForChat(chatGuid: String): Flow<List<PendingMessageEntity>> =
         pendingMessageDao.observeForChat(chatGuid)
 
     /**
      * Observe count of pending messages for a chat (for badges).
      */
-    fun observePendingCount(chatGuid: String): Flow<Int> =
+    override fun observePendingCount(chatGuid: String): Flow<Int> =
         pendingMessageDao.observePendingCount(chatGuid)
 
     /**
      * Re-enqueue all pending messages.
      * Called at app startup to restart stalled jobs.
      */
-    suspend fun reEnqueuePendingMessages() {
+    override suspend fun reEnqueuePendingMessages() {
         // Reset messages stuck in SENDING status (app was killed during send)
         // Consider stale if SENDING for more than 2 minutes
         val staleThreshold = System.currentTimeMillis() - (2 * 60 * 1000)
@@ -465,7 +465,7 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Clean up sent messages (run periodically or on startup).
      */
-    suspend fun cleanupSentMessages() {
+    override suspend fun cleanupSentMessages() {
         val sentCount = pendingMessageDao.getByStatus(PendingSyncStatus.SENT.name).size
         if (sentCount > 0) {
             pendingMessageDao.deleteSent()

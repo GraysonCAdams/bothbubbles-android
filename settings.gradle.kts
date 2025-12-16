@@ -25,3 +25,6 @@ rootProject.name = "BlueBubbles"
 
 // Native Compose app module
 include(":app")
+
+// Core modules (Phase 6 modularization)
+include(":core:model")

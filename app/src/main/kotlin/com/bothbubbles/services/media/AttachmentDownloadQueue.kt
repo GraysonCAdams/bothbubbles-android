@@ -6,7 +6,7 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
-import com.bothbubbles.util.error.AttachmentErrorState
+import com.bothbubbles.core.model.entity.AttachmentErrorState
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay

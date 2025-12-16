@@ -20,6 +20,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.ui.chat.VideoCallMethodDialog
 import com.bothbubbles.ui.components.common.ConversationAvatar
 import com.bothbubbles.ui.components.dialogs.ContactInfo

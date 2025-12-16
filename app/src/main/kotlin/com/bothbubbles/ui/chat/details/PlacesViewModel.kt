@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils

@@ -2,7 +2,7 @@
 
 > **Implementation Plan**: See [impl/README.md](impl/README.md) for module structure and Gradle setup.
 >
-> **Status**: Optional / Deferred. Only pursue if build times are painful.
+> **Status**: ✅ **COMPLETE** (2024-12-16) — `:core:model` extracted. Further modularization deferred.
 
 ## Layman's Explanation
 
@@ -62,10 +62,10 @@ project/
 
 ## Exit Criteria
 
-- [ ] At least `:core:model` extracted and building
-- [ ] Build times improved (or at least not worse)
-- [ ] Architectural boundaries are compiler-enforced
-- [ ] All tests pass
+- [x] At least `:core:model` extracted and building
+- [x] Build times improved (or at least not worse)
+- [x] Architectural boundaries are compiler-enforced
+- [x] All tests pass
 
 ## Risks
 
