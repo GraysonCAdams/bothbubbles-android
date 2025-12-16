@@ -13,6 +13,7 @@ import androidx.compose.material.icons.outlined.Place
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
@@ -42,7 +43,7 @@ fun PlacesScreen(
 ) {
     var searchQuery by remember { mutableStateOf("") }
 
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val places = uiState.places
 
     val filteredPlaces = remember(searchQuery, places) {

@@ -15,6 +15,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -22,7 +23,7 @@ fun SwipeSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: SwipeSettingsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     Scaffold(
         topBar = {
@@ -48,7 +49,7 @@ fun SwipeSettingsScreen(
 fun SwipeSettingsContent(
     modifier: Modifier = Modifier,
     viewModel: SwipeSettingsViewModel = hiltViewModel(),
-    uiState: SwipeSettingsUiState = viewModel.uiState.collectAsState().value
+    uiState: SwipeSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),

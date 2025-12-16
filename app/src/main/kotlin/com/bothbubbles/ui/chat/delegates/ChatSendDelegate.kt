@@ -245,6 +245,7 @@ class ChatSendDelegate @AssistedInject constructor(
      * @param onClearInput Callback to clear input UI state
      * @param onDraftCleared Callback when draft should be cleared from persistence
      * @param onQueued Callback when message is queued, provides data for optimistic UI insert
+     * @param onRemoveOptimistic Callback to remove optimistic message when DB insertion fails
      */
     fun sendMessage(
         text: String,
@@ -254,7 +255,8 @@ class ChatSendDelegate @AssistedInject constructor(
         isLocalSmsChat: Boolean,
         onClearInput: () -> Unit,
         onDraftCleared: () -> Unit,
-        onQueued: ((QueuedMessageInfo) -> Unit)? = null
+        onQueued: ((QueuedMessageInfo) -> Unit)? = null,
+        onRemoveOptimistic: ((String) -> Unit)? = null
     ) {
         val trimmedText = text.trim()
         if (trimmedText.isBlank() && attachments.isEmpty()) return
@@ -331,7 +333,8 @@ class ChatSendDelegate @AssistedInject constructor(
                         Timber.e(e, "Failed to queue message")
                         _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                         PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
-                        // TODO: We should probably remove the optimistic message here if DB failed
+                        // Remove the optimistic message from UI since DB insertion failed
+                        onRemoveOptimistic?.invoke(tempGuid)
                     }
                 )
             }

@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -120,10 +121,10 @@ class ConversationDetailScreen(
             screenScope.launch {
                 try {
                     chatRepository.markChatAsRead(chat.guid)
-                    android.util.Log.d(TAG, "Auto-marked chat ${chat.guid} as read")
+                    Timber.d("Auto-marked chat ${chat.guid} as read")
                     onRefresh() // Refresh conversation list to update unread indicator
                 } catch (e: Exception) {
-                    android.util.Log.e(TAG, "Failed to auto mark as read", e)
+                    Timber.e(e, "Failed to auto mark as read")
                 }
             }
         }
@@ -163,7 +164,7 @@ class ConversationDetailScreen(
 
                 // If no messages found, trigger priority sync to load them immediately
                 if (messages.isEmpty() && syncService != null) {
-                    android.util.Log.i(TAG, "No messages found, triggering priority sync for ${chat.guid}")
+                    Timber.i("No messages found, triggering priority sync for ${chat.guid}")
                     syncService.prioritizeChatSync(chat.guid)
                     // Re-fetch after a short delay to pick up synced messages
                     kotlinx.coroutines.delay(2000)
@@ -189,14 +190,14 @@ class ConversationDetailScreen(
                     }
                 }
 
-                android.util.Log.d(TAG, "Loaded ${cachedMessages.size} messages, total=$totalMessageCount, hasMore=$hasMoreMessages")
+                Timber.d("Loaded ${cachedMessages.size} messages, total=$totalMessageCount, hasMore=$hasMoreMessages")
 
                 // Pre-fetch audio attachments for messages with attachments
                 prefetchAudioAttachments(cachedMessages)
 
                 invalidate()
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to refresh messages", e)
+                Timber.e(e, "Failed to refresh messages")
                 isLoadingMessages = false
                 invalidate()
             }
@@ -219,18 +220,18 @@ class ConversationDetailScreen(
                 // Check if it's an audio attachment
                 if (attachment.mimeType?.startsWith("audio/") == true) {
                     audioAttachmentCache[attachment.messageGuid] = attachment
-                    android.util.Log.d(TAG, "Found audio attachment: ${attachment.guid} for message ${attachment.messageGuid}")
+                    Timber.d("Found audio attachment: ${attachment.guid} for message ${attachment.messageGuid}")
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to prefetch audio attachments", e)
+            Timber.e(e, "Failed to prefetch audio attachments")
         }
     }
 
     private fun loadMoreMessages() {
         if (!hasMoreMessages || isLoadingMessages) return
         currentPage++
-        android.util.Log.d(TAG, "Loading more messages, page=$currentPage")
+        Timber.d("Loading more messages, page=$currentPage")
         refreshMessages()
     }
 
@@ -313,7 +314,7 @@ class ConversationDetailScreen(
                         CarToast.makeText(carContext, "Marked as read", CarToast.LENGTH_SHORT).show()
                         onRefresh()
                     } catch (e: Exception) {
-                        android.util.Log.e(TAG, "Failed to mark as read", e)
+                        Timber.e(e, "Failed to mark as read")
                     }
                 }
             }
@@ -369,7 +370,7 @@ class ConversationDetailScreen(
 
             rowBuilder.build()
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to build message row", e)
+            Timber.e(e, "Failed to build message row")
             null
         }
     }
@@ -401,12 +402,12 @@ class ConversationDetailScreen(
                         CarToast.makeText(carContext, "Playback complete", CarToast.LENGTH_SHORT).show()
                     },
                     onError = { e ->
-                        android.util.Log.e(TAG, "Audio playback error", e)
+                        Timber.e(e, "Audio playback error")
                         CarToast.makeText(carContext, "Playback failed", CarToast.LENGTH_SHORT).show()
                     }
                 )
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to play audio message", e)
+                Timber.e(e, "Failed to play audio message")
                 CarToast.makeText(carContext, "Failed to load audio", CarToast.LENGTH_SHORT).show()
             }
         }
@@ -460,7 +461,6 @@ class ConversationDetailScreen(
     }
 
     companion object {
-        private const val TAG = "ConversationDetailScreen"
         private const val PAGE_SIZE = 15  // Show 15 messages per page
         private const val MAX_MESSAGES_TO_READ = 5  // Limit TTS to recent messages
     }

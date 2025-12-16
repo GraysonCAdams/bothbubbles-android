@@ -307,16 +307,32 @@
                 android:resource="@xml/file_paths" />
         </provider>
 
-        <!-- Disable default WorkManager initialization to use Hilt -->
+        <!-- AndroidX Startup - Custom Initializers -->
         <provider
             android:name="androidx.startup.InitializationProvider"
             android:authorities="${applicationId}.androidx-startup"
             android:exported="false"
             tools:node="merge">
+            <!-- Disable default WorkManager initialization to use Hilt -->
             <meta-data
                 android:name="androidx.work.WorkManagerInitializer"
                 android:value="androidx.startup"
                 tools:node="remove" />
+
+            <!-- Custom WorkManager initialization with Hilt -->
+            <meta-data
+                android:name="com.bothbubbles.di.startup.WorkManagerInitializer"
+                android:value="androidx.startup" />
+
+            <!-- Timber logging initialization (debug builds only) -->
+            <meta-data
+                android:name="com.bothbubbles.di.startup.TimberInitializer"
+                android:value="androidx.startup" />
+
+            <!-- App lifecycle tracking initialization -->
+            <meta-data
+                android:name="com.bothbubbles.di.startup.AppLifecycleTrackerInitializer"
+                android:value="androidx.startup" />
         </provider>
 
     </application>

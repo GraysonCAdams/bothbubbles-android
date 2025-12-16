@@ -2,10 +2,10 @@ package com.bothbubbles.ui.navigation
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.net.toUri
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
@@ -34,39 +34,39 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         // Handle captured photo from camera screen
         val capturedPhotoUri = backStackEntry.savedStateHandle
             .getStateFlow<String?>("captured_photo_uri", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
 
         // Handle shared content from share picker
         val sharedText = backStackEntry.savedStateHandle
             .getStateFlow<String?>("shared_text", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
         val sharedUris = backStackEntry.savedStateHandle
             .getStateFlow<ArrayList<String>?>("shared_uris", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
 
         // Handle search activation from ChatDetails screen
         val activateSearch = backStackEntry.savedStateHandle
             .getStateFlow("activate_search", false)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
 
         // Handle scroll position restoration
         val restoreScrollPosition = backStackEntry.savedStateHandle
             .getStateFlow("restore_scroll_position", 0)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
         val restoreScrollOffset = backStackEntry.savedStateHandle
             .getStateFlow("restore_scroll_offset", 0)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
 
         // Handle edited attachment
         val editedAttachmentUri = backStackEntry.savedStateHandle
             .getStateFlow<String?>("edited_attachment_uri", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
         val editedAttachmentCaption = backStackEntry.savedStateHandle
             .getStateFlow<String?>("edited_attachment_caption", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
         val originalAttachmentUri = backStackEntry.savedStateHandle
             .getStateFlow<String?>("original_attachment_uri", null)
-            .collectAsState()
+            .collectAsStateWithLifecycle()
 
         ChatScreen(
             chatGuid = route.chatGuid,

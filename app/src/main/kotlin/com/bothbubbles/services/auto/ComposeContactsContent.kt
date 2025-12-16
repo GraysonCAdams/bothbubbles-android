@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Content delegate for the Compose tab in Android Auto.
@@ -106,7 +107,7 @@ class ComposeContactsContent(
                 // Start async avatar loading
                 loadAvatarsAsync(contacts)
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load contacts", e)
+                Timber.e(e, "Failed to load contacts")
                 isLoading = false
                 onInvalidate()
             }
@@ -135,7 +136,7 @@ class ComposeContactsContent(
                             }
                         } else null
                     } catch (e: Exception) {
-                        android.util.Log.d(TAG, "Failed to load avatar for ${contact.chatGuid}", e)
+                        Timber.d(e, "Failed to load avatar for ${contact.chatGuid}")
                         null
                     }
                 }
@@ -224,7 +225,6 @@ class ComposeContactsContent(
     )
 
     companion object {
-        private const val TAG = "ComposeContactsContent"
         private const val MAX_RECENT_CONTACTS = 20
         private const val AVATAR_SIZE = 64
     }

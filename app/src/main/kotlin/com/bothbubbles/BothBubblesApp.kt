@@ -48,9 +48,6 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     lateinit var developerEventLog: DeveloperEventLog
 
     @Inject
-    lateinit var appLifecycleTracker: AppLifecycleTracker
-
-    @Inject
     lateinit var activeConversationManager: ActiveConversationManager
 
     @Inject
@@ -75,11 +72,6 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     @Inject
     @IoDispatcher
     lateinit var ioDispatcher: CoroutineDispatcher
-
-    override val workManagerConfiguration: Configuration
-        get() = Configuration.Builder()
-            .setWorkerFactory(workerFactory)
-            .build()
 
     override fun newImageLoader(): ImageLoader {
         return ImageLoader.Builder(this)
@@ -116,18 +108,17 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
         val startupId = PerformanceProfiler.start("App.onCreate")
         super.onCreate()
 
-        // Initialize Timber logging for debug builds
-        if (BuildConfig.DEBUG) {
-            Timber.plant(Timber.DebugTree())
+        // Note: Timber is initialized via TimberInitializer (AndroidX Startup)
+        // Note: AppLifecycleTracker is initialized via AppLifecycleTrackerInitializer
+        // Note: WorkManager is initialized via WorkManagerInitializer
+
+        // Initialize Crashlytics logging for release builds
+        if (!BuildConfig.DEBUG) {
+            Timber.plant(CrashlyticsTree())
         }
 
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
-
-        // Initialize app lifecycle tracker (must be before other managers that may depend on it)
-        val lifecycleId = PerformanceProfiler.start("App.lifecycleTracker")
-        appLifecycleTracker.initialize()
-        PerformanceProfiler.end(lifecycleId)
 
         // Initialize active conversation manager (clears active chat when app backgrounds)
         activeConversationManager.initialize()

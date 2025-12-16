@@ -11,6 +11,7 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -42,8 +43,8 @@ fun ConversationDetailsScreen(
     onCreateGroupClick: (address: String, displayName: String, service: String, avatarPath: String?) -> Unit = { _, _, _, _ -> },
     viewModel: ConversationDetailsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
-    val actionState by viewModel.actionState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val actionState by viewModel.actionState.collectAsStateWithLifecycle()
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showSnoozeDialog by remember { mutableStateOf(false) }
     var showBlockDialog by remember { mutableStateOf(false) }

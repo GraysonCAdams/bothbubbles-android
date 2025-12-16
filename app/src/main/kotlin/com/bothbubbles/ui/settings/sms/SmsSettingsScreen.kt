@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -24,7 +25,7 @@ fun SmsSettingsScreen(
     onBackupRestoreClick: () -> Unit = {},
     viewModel: SmsSettingsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     // Permission request launcher
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -67,7 +68,7 @@ fun SmsSettingsScreen(
 fun SmsSettingsContent(
     modifier: Modifier = Modifier,
     viewModel: SmsSettingsViewModel = hiltViewModel(),
-    uiState: SmsSettingsUiState = viewModel.uiState.collectAsState().value,
+    uiState: SmsSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     onBackupRestoreClick: () -> Unit = {},
     onRequestPermissions: () -> Unit = {},
     onRequestDefaultSmsApp: () -> Unit = {}

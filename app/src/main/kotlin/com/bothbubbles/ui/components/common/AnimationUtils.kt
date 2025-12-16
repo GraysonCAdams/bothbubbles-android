@@ -25,6 +25,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.bothbubbles.ui.theme.MotionTokens
 import kotlinx.coroutines.delay
+import timber.log.Timber
 
 /**
  * Staggered list item wrapper for initial list load animations.

@@ -67,14 +67,22 @@ class BackgroundSyncWorker @AssistedInject constructor(
         /**
          * Schedule the background sync worker.
          * Should be called once when setup is complete.
+         *
+         * Constraints:
+         * - Requires network connectivity (can't sync without server)
+         * - Runs when device is not in battery saver mode (BATTERY_NOT_LOW)
+         *   This is appropriate because message sync is non-critical background work
+         *   and can be deferred when battery is low. Critical messages should arrive
+         *   via Socket.IO push (foreground) or FCM (background with high priority).
          */
         fun schedule(context: Context) {
             val constraints = Constraints.Builder()
                 .setRequiredNetworkType(NetworkType.CONNECTED)
+                .setRequiresBatteryNotLow(true) // Defer when battery is low
                 .build()
 
             val workRequest = PeriodicWorkRequestBuilder<BackgroundSyncWorker>(
-                15, TimeUnit.MINUTES // Android minimum
+                15, TimeUnit.MINUTES // Android minimum for periodic work
             )
                 .setConstraints(constraints)
                 .build()
@@ -85,7 +93,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 workRequest
             )
 
-            Timber.i("Background sync scheduled (every 15 minutes)")
+            Timber.i("Background sync scheduled (every 15 minutes, network + battery constraints)")
         }
 
         /**

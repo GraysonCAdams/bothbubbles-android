@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.firebase.crashlytics)
+    alias(libs.plugins.firebase.perf)
 }
 
 android {
@@ -151,8 +153,9 @@ dependencies {
     implementation(libs.mlkit.smart.reply)
     implementation(libs.mlkit.entity.extraction)
 
-    // WorkManager
+    // WorkManager & Startup
     implementation(libs.work.runtime.ktx)
+    implementation(libs.androidx.startup)
 
     // Coroutines
     implementation(libs.kotlinx.coroutines.android)
@@ -161,6 +164,9 @@ dependencies {
     // Firebase
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.crashlytics)
+    implementation(libs.firebase.analytics)
+    implementation(libs.firebase.perf)
 
     // Google Play Services
     implementation(libs.play.services.location)
@@ -174,6 +180,9 @@ dependencies {
 
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")
+
+    // LeakCanary (debug only)
+    debugImplementation(libs.leakcanary)
 
     // Testing
     testImplementation(libs.junit)

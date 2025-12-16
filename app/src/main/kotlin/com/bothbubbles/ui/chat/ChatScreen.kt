@@ -487,7 +487,7 @@ fun ChatScreen(
             composerHeightPxProvider = { state.composerHeightPx },
 
             // Wave 2: Server connection collected locally for tapback availability
-            isServerConnected = viewModel.sync.state.collectAsState().value.isServerConnected
+            isServerConnected = viewModel.sync.state.collectAsStateWithLifecycle().value.isServerConnected
         )
 
     } // End of content Box

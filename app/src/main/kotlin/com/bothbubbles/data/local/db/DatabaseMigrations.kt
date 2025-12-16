@@ -2,6 +2,7 @@ package com.bothbubbles.data.local.db
 
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import timber.log.Timber
 
 /**
  * Contains all Room database migrations for BothBubblesDatabase.
@@ -694,13 +695,10 @@ object DatabaseMigrations {
                     END
                 """.trimIndent())
 
-                android.util.Log.i("BothBubblesDatabase", "FTS5 full-text search enabled")
+                Timber.i("FTS5 full-text search enabled")
             } catch (e: Exception) {
                 // FTS5 not available on this device - fall back to LIKE-based search
-                android.util.Log.w(
-                    "BothBubblesDatabase",
-                    "FTS5 not available, falling back to LIKE-based search: ${e.message}"
-                )
+                Timber.w("FTS5 not available, falling back to LIKE-based search: ${e.message}")
             }
         }
     }

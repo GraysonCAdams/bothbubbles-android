@@ -32,6 +32,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Android Auto screen displaying the list of recent conversations.
@@ -95,7 +96,7 @@ class ConversationListScreen(
                 // regardless of when the last message was received
                 val chats = chatDao.getActiveChats().first()
 
-                android.util.Log.d(TAG, "Found ${chats.size} total active chats")
+                Timber.d("Found ${chats.size} total active chats")
 
                 // Sort: unread+pinned first, then unread, then pinned, then by latest message date
                 val sortedChats = chats.sortedWith(
@@ -158,12 +159,12 @@ class ConversationListScreen(
                     avatarIconCache[chat.guid] = avatarIcon
                 }
 
-                android.util.Log.d(TAG, "Displaying ${chatsToDisplay.size} chats, hasMore=$hasMoreConversations")
+                Timber.d("Displaying ${chatsToDisplay.size} chats, hasMore=$hasMoreConversations")
 
                 isLoading = false
                 invalidate()
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to refresh conversation data", e)
+                Timber.e(e, "Failed to refresh conversation data")
                 isLoading = false
             }
         }
@@ -172,7 +173,7 @@ class ConversationListScreen(
     private fun loadMoreConversations() {
         if (!hasMoreConversations || isLoading) return
         currentPage++
-        android.util.Log.d(TAG, "Loading more conversations, page=$currentPage")
+        Timber.d("Loading more conversations, page=$currentPage")
         refreshData()
     }
 
@@ -277,7 +278,7 @@ class ConversationListScreen(
                 }
                 .build()
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to build row for ${chat.guid}", e)
+            Timber.e(e, "Failed to build row for ${chat.guid}")
             null
         }
     }
@@ -372,7 +373,6 @@ class ConversationListScreen(
     }
 
     companion object {
-        private const val TAG = "ConversationListScreen"
         private const val PAGE_SIZE = 15  // Show 15 conversations per page for better UX
     }
 }

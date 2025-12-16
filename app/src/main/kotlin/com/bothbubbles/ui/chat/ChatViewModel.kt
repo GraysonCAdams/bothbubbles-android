@@ -610,6 +610,8 @@ class ChatViewModel @Inject constructor(
             }.onFailure { error ->
                 Timber.e(error, "Failed to queue message")
                 // Error state is updated by ChatSendDelegate
+                // Note: No need to remove optimistic message here because it was never inserted
+                // (queueMessageForSending returns a Result, so we only insert on success)
             }
         }
     }

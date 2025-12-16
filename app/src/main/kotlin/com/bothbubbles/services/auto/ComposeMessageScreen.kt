@@ -29,6 +29,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Android Auto screen for composing a new message.
@@ -116,7 +117,7 @@ class ComposeMessageScreen(
                 isLoading = false
                 invalidate()
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to load contacts", e)
+                Timber.e(e, "Failed to load contacts")
                 isLoading = false
                 invalidate()
             }
@@ -251,7 +252,7 @@ class ComposeMessageScreen(
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to start voice input", e)
+            Timber.e(e, "Failed to start voice input")
             CarToast.makeText(
                 carContext,
                 "Voice input not available",
@@ -268,7 +269,6 @@ class ComposeMessageScreen(
     )
 
     companion object {
-        private const val TAG = "ComposeMessageScreen"
         private const val MAX_RECENT_CONTACTS = 20
     }
 }

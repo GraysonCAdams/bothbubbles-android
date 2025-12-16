@@ -1,5 +1,6 @@
 package com.bothbubbles.services.developer
 
+import timber.log.Timber
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -72,6 +73,9 @@ class DeveloperEventLog @Inject constructor() {
             eventType = eventType,
             details = details
         ))
+
+        // Also log to Timber for Crashlytics breadcrumbs
+        Timber.d("Socket: $eventType ${details ?: ""}")
     }
 
     /**
@@ -85,6 +89,9 @@ class DeveloperEventLog @Inject constructor() {
             eventType = eventType,
             details = details
         ))
+
+        // Also log to Timber for Crashlytics breadcrumbs
+        Timber.d("FCM: $eventType ${details ?: ""}")
     }
 
     /**
@@ -98,6 +105,10 @@ class DeveloperEventLog @Inject constructor() {
             eventType = "CONNECTION: $state",
             details = details
         ))
+
+        // Also log to Timber for Crashlytics breadcrumbs
+        val sourceStr = if (source == EventSource.SOCKET) "Socket" else "FCM"
+        Timber.i("$sourceStr CONNECTION: $state ${details ?: ""}")
     }
 
     @Synchronized

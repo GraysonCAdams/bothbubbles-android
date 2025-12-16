@@ -11,6 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.data.local.db.entity.displayName
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -20,7 +21,7 @@ fun ChatNotificationSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: ChatNotificationSettingsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsState()
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var showSoundPicker by remember { mutableStateOf(false) }
     var showLockScreenPicker by remember { mutableStateOf(false) }
 

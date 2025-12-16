@@ -59,9 +59,12 @@ mlkitEntityExtraction = "16.0.0-beta5"
 
 # Background
 workRuntimeKtx = "2.10.0"
+startup = "1.2.0"
 
 # Firebase
 firebaseBom = "33.6.0"
+firebaseCrashlytics = "2.9.9"
+firebasePerf = "1.4.2"
 
 # Google Play Services
 playServicesLocation = "21.3.0"
@@ -75,6 +78,9 @@ serialization = "1.7.3"
 
 # Phone Number
 libphonenumber = "8.13.50"
+
+# LeakCanary
+leakcanary = "2.12"
 
 # Testing
 junit = "4.13.2"
@@ -165,8 +171,9 @@ mlkit-barcode-scanning = { group = "com.google.mlkit", name = "barcode-scanning"
 mlkit-smart-reply = { group = "com.google.mlkit", name = "smart-reply", version.ref = "mlkitSmartReply" }
 mlkit-entity-extraction = { group = "com.google.mlkit", name = "entity-extraction", version.ref = "mlkitEntityExtraction" }
 
-# WorkManager
+# WorkManager & Startup
 work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workRuntimeKtx" }
+androidx-startup = { group = "androidx.startup", name = "startup-runtime", version.ref = "startup" }
 
 # Coroutines
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
@@ -176,6 +183,9 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 # Firebase
 firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.ref = "firebaseBom" }
 firebase-messaging = { group = "com.google.firebase", name = "firebase-messaging-ktx" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics-ktx" }
+firebase-analytics = { group = "com.google.firebase", name = "firebase-analytics-ktx" }
+firebase-perf = { group = "com.google.firebase", name = "firebase-perf-ktx" }
 
 # Google Play Services
 play-services-location = { group = "com.google.android.gms", name = "play-services-location", version.ref = "playServicesLocation" }
@@ -186,6 +196,9 @@ car-app-projected = { group = "androidx.car.app", name = "app-projected", versio
 
 # Phone Number
 libphonenumber = { group = "io.michaelrocks", name = "libphonenumber-android", version.ref = "libphonenumber" }
+
+# LeakCanary
+leakcanary = { group = "com.squareup.leakcanary", name = "leakcanary-android", version.ref = "leakcanary" }
 
 # Testing
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -202,3 +215,5 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
 kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlytics" }
+firebase-perf = { id = "com.google.firebase.firebase-perf", version.ref = "firebasePerf" }

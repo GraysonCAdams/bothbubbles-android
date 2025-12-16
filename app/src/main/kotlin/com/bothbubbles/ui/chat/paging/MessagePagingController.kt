@@ -342,6 +342,82 @@ class MessagePagingController(
     }
 
     /**
+     * Remove an optimistic message that failed to persist to the database.
+     * This reverses the effects of insertMessageOptimistically().
+     *
+     * @param guid The GUID of the message to remove
+     */
+    fun removeOptimisticMessage(guid: String) {
+        Timber.i("[SEND_TRACE] ── MessagePagingController.removeOptimisticMessage START ──")
+        Timber.i("[SEND_TRACE] Removing optimistic message: $guid")
+
+        // Check if this message exists and was optimistically inserted
+        val position = guidToPosition[guid]
+        if (position == null) {
+            Timber.w("[SEND_TRACE] Message not found in guidToPosition: $guid")
+            return
+        }
+
+        if (!optimisticallyInsertedGuids.contains(guid)) {
+            Timber.w("[SEND_TRACE] Message was not optimistically inserted, skipping removal: $guid")
+            return
+        }
+
+        // Increment generation to invalidate any in-flight loads
+        state.generation++
+
+        // Remove from tracking sets
+        optimisticallyInsertedGuids.remove(guid)
+        seenMessageGuids.remove(guid)
+        guidToPosition.remove(guid)
+        sparseData.remove(position)
+
+        // Shift all positions after this one down by 1
+        val newSparseData = mutableMapOf<Int, MessageUiModel>()
+        val newGuidToPosition = mutableMapOf<String, Int>()
+
+        sparseData.forEach { (pos, model) ->
+            if (pos < position) {
+                // Keep positions before the removed message unchanged
+                newSparseData[pos] = model
+                newGuidToPosition[model.guid] = pos
+            } else if (pos > position) {
+                // Shift positions after the removed message down by 1
+                val newPos = pos - 1
+                newSparseData[newPos] = model
+                newGuidToPosition[model.guid] = newPos
+            }
+        }
+
+        // Update state
+        sparseData.clear()
+        sparseData.putAll(newSparseData)
+        guidToPosition.clear()
+        guidToPosition.putAll(newGuidToPosition)
+
+        // Shift BitSet down by 1
+        val newLoadStatus = BitSet()
+        for (i in 0 until state.totalSize - 1) {
+            if (i < position) {
+                newLoadStatus.set(i, loadStatus.get(i))
+            } else {
+                newLoadStatus.set(i, loadStatus.get(i + 1))
+            }
+        }
+        loadStatus.clear()
+        loadStatus.or(newLoadStatus)
+
+        // Update total size
+        state.totalSize--
+        _totalCount.value = state.totalSize
+
+        // Emit updated messages
+        emitMessagesLocked()
+
+        Timber.i("[SEND_TRACE] ── MessagePagingController.removeOptimisticMessage END ──")
+    }
+
+    /**
      * Force refresh all loaded data.
      * Use sparingly as it reloads everything.
      */

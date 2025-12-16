@@ -26,6 +26,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Android Auto screen for searching contacts via voice or keyboard.
@@ -183,7 +184,7 @@ class VoiceSearchScreen(
                 isSearching = false
                 invalidate()
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Search failed", e)
+                Timber.e(e, "Search failed")
                 isSearching = false
                 invalidate()
             }
@@ -200,7 +201,7 @@ class VoiceSearchScreen(
                     CarToast.makeText(carContext, "Contact not found", CarToast.LENGTH_SHORT).show()
                 }
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to select contact", e)
+                Timber.e(e, "Failed to select contact")
                 CarToast.makeText(carContext, "Error selecting contact", CarToast.LENGTH_SHORT).show()
             }
         }
@@ -214,7 +215,6 @@ class VoiceSearchScreen(
     )
 
     companion object {
-        private const val TAG = "VoiceSearchScreen"
         private const val MAX_RESULTS = 10
     }
 }

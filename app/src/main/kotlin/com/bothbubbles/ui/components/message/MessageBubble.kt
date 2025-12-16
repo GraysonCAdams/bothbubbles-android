@@ -29,6 +29,7 @@ import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.util.parsing.UrlParsingUtils
+import timber.log.Timber
 
 /**
  * Main message bubble component that displays a message with all its content.

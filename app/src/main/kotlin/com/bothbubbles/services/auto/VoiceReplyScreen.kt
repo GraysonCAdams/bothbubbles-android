@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import timber.log.Timber
 
 /**
  * Android Auto screen for composing and sending a voice reply.
@@ -154,11 +155,11 @@ class VoiceReplyScreen(
 
         } catch (e: ActivityNotFoundException) {
             // Head unit doesn't have speech recognizer activity
-            android.util.Log.w(TAG, "Speech recognizer not available on this head unit", e)
+            Timber.w(e, "Speech recognizer not available on this head unit")
             handleVoiceInputUnavailable()
         } catch (e: SecurityException) {
             // Permission denied for speech recognition
-            android.util.Log.w(TAG, "Speech recognition permission denied", e)
+            Timber.w(e, "Speech recognition permission denied")
             CarToast.makeText(
                 carContext,
                 "Voice input permission denied",
@@ -166,7 +167,7 @@ class VoiceReplyScreen(
             ).show()
         } catch (e: Exception) {
             // Catch-all for other unexpected errors
-            android.util.Log.e(TAG, "Failed to start voice input", e)
+            Timber.e(e, "Failed to start voice input")
             CarToast.makeText(
                 carContext,
                 "Voice input not available",
@@ -212,7 +213,7 @@ class VoiceReplyScreen(
                 onMessageSent()
                 screenManager.pop()
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to send message", e)
+                Timber.e(e, "Failed to send message")
                 CarToast.makeText(carContext, "Failed to send message", CarToast.LENGTH_SHORT).show()
                 isSending = false
                 invalidate()
@@ -226,7 +227,5 @@ class VoiceReplyScreen(
         invalidate()
     }
 
-    companion object {
-        private const val TAG = "VoiceReplyScreen"
-    }
+    companion object
 }

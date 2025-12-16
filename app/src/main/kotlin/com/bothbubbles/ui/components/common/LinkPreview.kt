@@ -2,7 +2,6 @@ package com.bothbubbles.ui.components.common
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -12,6 +11,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.LinkPreviewFetchStatus
@@ -121,7 +121,7 @@ fun LinkPreview(
     modifier: Modifier = Modifier,
     viewModel: LinkPreviewViewModel = hiltViewModel()
 ) {
-    val previewState by viewModel.getPreviewState(url).collectAsState()
+    val previewState by viewModel.getPreviewState(url).collectAsStateWithLifecycle()
     val domain = remember(url) { UrlParsingUtils.extractDomain(url) }
 
     when (val state = previewState) {
@@ -175,7 +175,7 @@ fun BorderlessLinkPreview(
     maxWidth: Dp = 300.dp,
     viewModel: LinkPreviewViewModel = hiltViewModel()
 ) {
-    val previewState by viewModel.getPreviewState(url).collectAsState()
+    val previewState by viewModel.getPreviewState(url).collectAsStateWithLifecycle()
     val domain = remember(url) { UrlParsingUtils.extractDomain(url) }
 
     when (val state = previewState) {

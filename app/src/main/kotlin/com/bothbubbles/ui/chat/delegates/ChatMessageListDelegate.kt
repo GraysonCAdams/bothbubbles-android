@@ -310,6 +310,16 @@ class ChatMessageListDelegate @AssistedInject constructor(
     }
 
     /**
+     * Remove an optimistic message that failed to persist to the database.
+     * This is used when database insertion fails after optimistic UI update.
+     *
+     * @param guid The GUID of the message to remove
+     */
+    fun removeOptimisticMessage(guid: String) {
+        pagingController.removeOptimisticMessage(guid)
+    }
+
+    /**
      * Apply a reaction optimistically to a message.
      * Phase 4: Used by ChatViewModel to coordinate reaction toggling.
      *
