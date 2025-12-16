@@ -951,11 +951,6 @@ class ChatViewModel @Inject constructor(
         chatFallbackTracker.exitFallbackMode(chatGuid)
     }
 
-    // ===== Thread Overlay Functions (delegated to ChatThreadDelegate) =====
-
-    fun loadThread(originGuid: String) = thread.loadThread(originGuid)
-    fun dismissThreadOverlay() = thread.dismissThreadOverlay()
-    fun scrollToMessage(guid: String) = thread.scrollToMessage(guid)
 
     /**
      * Jump to a specific message, loading its position from the database if needed.
@@ -1210,40 +1205,6 @@ class ChatViewModel @Inject constructor(
         messageList.dispose()
     }
 
-    // ============================================================================
-    // ATTACHMENT METHODS - Backward compatibility wrappers
-    // ChatScreen will be updated to use viewModel.composer.* directly in future
-    // ============================================================================
-
-    fun addAttachment(uri: Uri) = composer.addAttachment(uri)
-    fun addAttachments(uris: List<Uri>) = composer.addAttachments(uris)
-    fun getContactData(contactUri: Uri): ContactData? = composer.getContactData(contactUri)
-    fun addContactFromPicker(contactUri: Uri) = composer.addContactFromPicker(contactUri)
-    fun addContactAsVCard(contactData: ContactData, options: FieldOptions): Boolean =
-        composer.addContactAsVCard(contactData, options)
-    fun removeAttachment(uri: Uri) = composer.removeAttachment(uri)
-    fun reorderAttachments(reorderedList: List<PendingAttachmentInput>) = composer.reorderAttachments(reorderedList)
-    fun onAttachmentEdited(originalUri: Uri, editedUri: Uri, caption: String? = null) =
-        composer.onAttachmentEdited(originalUri, editedUri, caption)
-    fun clearAttachments() = composer.clearAttachments()
-    fun dismissAttachmentWarning() = composer.dismissAttachmentWarning()
-    fun setAttachmentQuality(quality: AttachmentQuality) = composer.setAttachmentQuality(quality)
-
-    // GIF Picker - delegated to composer
-    val gifPickerState get() = composer.gifPickerState
-    val gifSearchQuery get() = composer.gifSearchQuery
-    fun updateGifSearchQuery(query: String) = composer.updateGifSearchQuery(query)
-    fun searchGifs(query: String) = composer.searchGifs(query)
-    fun loadFeaturedGifs() = composer.loadFeaturedGifs()
-    fun selectGif(gif: com.bothbubbles.ui.chat.composer.panels.GifItem) = composer.selectGif(gif)
-
-    // Smart Reply - delegated to composer
-    fun recordTemplateUsage(templateId: Long) = composer.recordTemplateUsage(templateId)
-
-    // Attachment Download - delegated to attachment delegate
-    fun downloadAttachment(attachmentGuid: String) = attachment.downloadAttachment(attachmentGuid)
-    fun isDownloading(attachmentGuid: String): Boolean = attachment.isDownloading(attachmentGuid)
-    fun getDownloadProgress(attachmentGuid: String): Float = attachment.getDownloadProgress(attachmentGuid)
 
     // ============================================================================
     // SEND MESSAGE
@@ -1566,11 +1527,6 @@ class ChatViewModel @Inject constructor(
     }
     fun checkReportedToCarrier() = operations.checkReportedToCarrier()
 
-    // ===== Effect Playback (delegated to ChatEffectsDelegate) =====
-
-    fun onBubbleEffectCompleted(messageGuid: String) = effects.onBubbleEffectCompleted(messageGuid)
-    fun triggerScreenEffect(message: MessageUiModel) = effects.triggerScreenEffect(message)
-    fun onScreenEffectCompleted() = effects.onScreenEffectCompleted()
 
     // ===== Scheduled Messages (delegated to ChatScheduledMessageDelegate) =====
 

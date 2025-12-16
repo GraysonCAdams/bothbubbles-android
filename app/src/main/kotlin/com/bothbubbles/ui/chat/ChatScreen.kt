@@ -668,7 +668,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.GetMultipleContents()
     ) { uris ->
         uris.forEach { uri ->
-            viewModel.addAttachment(uri)
+            viewModel.composer.addAttachment(uri)
         }
     }
 
@@ -685,7 +685,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris ->
         uris.forEach { uri ->
-            viewModel.addAttachment(uri)
+            viewModel.composer.addAttachment(uri)
         }
     }
 
@@ -694,7 +694,7 @@ fun ChatScreen(
         contract = ActivityResultContracts.PickContact()
     ) { contactUri ->
         contactUri?.let { uri ->
-            viewModel.addContactFromPicker(uri)
+            viewModel.composer.addContactFromPicker(uri)
         }
     }
 
@@ -708,7 +708,7 @@ fun ChatScreen(
     // Handle captured photo from in-app camera
     LaunchedEffect(capturedPhotoUri) {
         capturedPhotoUri?.let { uri ->
-            viewModel.addAttachment(uri)
+            viewModel.composer.addAttachment(uri)
             onCapturedPhotoHandled()
         }
     }
@@ -716,7 +716,7 @@ fun ChatScreen(
     // Handle edited attachment
     LaunchedEffect(editedAttachmentUri) {
         if (editedAttachmentUri != null) {
-            viewModel.onAttachmentEdited(
+            viewModel.composer.onAttachmentEdited(
                 originalUri = originalAttachmentUri ?: editedAttachmentUri,
                 editedUri = editedAttachmentUri,
                 caption = editedAttachmentCaption
@@ -730,7 +730,7 @@ fun ChatScreen(
     val activePanelState by viewModel.activePanel.collectAsStateWithLifecycle()
     LaunchedEffect(activePanelState) {
         if (activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
-            viewModel.loadFeaturedGifs()
+            viewModel.composer.loadFeaturedGifs()
         }
     }
 
@@ -739,7 +739,7 @@ fun ChatScreen(
         // Add shared URIs as attachments
         if (sharedUris.isNotEmpty()) {
             sharedUris.forEach { uri ->
-                viewModel.addAttachment(uri)
+                viewModel.composer.addAttachment(uri)
             }
         }
         // Set shared text as draft
@@ -848,7 +848,7 @@ fun ChatScreen(
                     visible = showAttachmentPicker,
                     onDismiss = { showAttachmentPicker = false },
                     onAttachmentSelected = { uri ->
-                        viewModel.addAttachment(uri)
+                        viewModel.composer.addAttachment(uri)
                     },
                     onLocationSelected = { lat, lng ->
                         // Format location as a shareable Google Maps link
@@ -857,7 +857,7 @@ fun ChatScreen(
                     },
                     onContactSelected = { contactUri ->
                         // Get contact data and show options dialog
-                        val contactData = viewModel.getContactData(contactUri)
+                        val contactData = viewModel.composer.getContactData(contactUri)
                         if (contactData != null) {
                             pendingContactData = contactData
                             showVCardOptionsDialog = true
@@ -896,7 +896,7 @@ fun ChatScreen(
                         suggestions = smartReplySuggestions,
                         onSuggestionClick = { suggestion ->
                             viewModel.updateDraft(suggestion.text)
-                            suggestion.templateId?.let { viewModel.recordTemplateUsage(it) }
+                            suggestion.templateId?.let { viewModel.composer.recordTemplateUsage(it) }
                         }
                     )
                 }
@@ -916,7 +916,7 @@ fun ChatScreen(
                     replyingToMessage?.let { message ->
                         ReplyPreview(
                             message = message,
-                            onDismiss = { viewModel.clearReply() }
+                            onDismiss = { viewModel.send.clearReply() }
                         )
                     }
                 }
@@ -1089,7 +1089,7 @@ fun ChatScreen(
                                 isPlayingVoiceMemo = false
                                 // Add voice memo as attachment and send
                                 recordingFile?.let { file ->
-                                    viewModel.addAttachment(file.toUri())
+                                    viewModel.composer.addAttachment(file.toUri())
                                     viewModel.sendMessage()
                                 }
                                 // Reset state
@@ -1101,7 +1101,7 @@ fun ChatScreen(
                         }
                     },
                     onMediaSelected = { uris ->
-                        viewModel.addAttachments(uris)
+                        viewModel.composer.addAttachments(uris)
                     },
                     onCameraClick = {
                         onCameraClick()
@@ -1116,11 +1116,11 @@ fun ChatScreen(
                         contactPickerLauncher.launch(null)
                     },
                     // GIF Picker
-                    gifPickerState = viewModel.gifPickerState.collectAsState().value,
-                    gifSearchQuery = viewModel.gifSearchQuery.collectAsState().value,
-                    onGifSearchQueryChange = { viewModel.updateGifSearchQuery(it) },
-                    onGifSearch = { viewModel.searchGifs(it) },
-                    onGifSelected = { gif -> viewModel.selectGif(gif) },
+                    gifPickerState = viewModel.composer.gifPickerState.collectAsState().value,
+                    gifSearchQuery = viewModel.composer.gifSearchQuery.collectAsState().value,
+                    onGifSearchQueryChange = { viewModel.composer.updateGifSearchQuery(it) },
+                    onGifSearch = { viewModel.composer.searchGifs(it) },
+                    onGifSelected = { gif -> viewModel.composer.selectGif(gif) },
                     onSendButtonBoundsChanged = { bounds ->
                         sendButtonBounds = bounds
                     }
@@ -1275,7 +1275,7 @@ fun ChatScreen(
             val effect = MessageEffect.fromStyleId(newest.expressiveSendStyleId)
             if (effect is MessageEffect.Screen) {
                 processedEffectMessages.add(newest.guid)
-                viewModel.triggerScreenEffect(newest)
+                viewModel.effects.triggerScreenEffect(newest)
             }
         }
 
@@ -1691,7 +1691,7 @@ fun ChatScreen(
                                         effect = bubbleEffect,
                                         isNewMessage = shouldAnimateBubble,
                                         isFromMe = message.isFromMe,
-                                        onEffectComplete = { viewModel.onBubbleEffectCompleted(message.guid) },
+                                        onEffectComplete = { viewModel.effects.onBubbleEffectCompleted(message.guid) },
                                         isInvisibleInkRevealed = isInvisibleInkRevealed,
                                         onInvisibleInkRevealChanged = { revealed ->
                                             // Update local revealed state
@@ -1730,13 +1730,13 @@ fun ChatScreen(
                                             isCurrentSearchMatch = isCurrentSearchMatch,
                                             // Manual download mode: pass callback when auto-download is disabled
                                             onDownloadClick = if (!autoDownloadEnabled) {
-                                                { attachmentGuid -> viewModel.downloadAttachment(attachmentGuid) }
+                                                { attachmentGuid -> viewModel.attachment.downloadAttachment(attachmentGuid) }
                                             } else null,
                                             downloadingAttachments = downloadingAttachments,
                                             showDeliveryIndicator = showDeliveryIndicator,
                                             // Don't allow reply on stickers placed on other messages
-                                            onReply = if (message.isPlacedSticker) null else { guid -> viewModel.setReplyTo(guid) },
-                                            onReplyIndicatorClick = { originGuid -> viewModel.loadThread(originGuid) },
+                                            onReply = if (message.isPlacedSticker) null else { guid -> viewModel.send.setReplyTo(guid) },
+                                            onReplyIndicatorClick = { originGuid -> viewModel.thread.loadThread(originGuid) },
                                             // Track when this message is being swiped (to hide overlaying stickers)
                                             onSwipeStateChanged = { isSwiping ->
                                                 swipingMessageGuid = if (isSwiping) message.guid else null
@@ -1855,7 +1855,7 @@ fun ChatScreen(
                             },
                             onReply = {
                                 selectedMessageForTapback?.let { message ->
-                                    viewModel.setReplyTo(message.guid)
+                                    viewModel.send.setReplyTo(message.guid)
                                 }
                             },
                             onCopy = {
@@ -1901,15 +1901,15 @@ fun ChatScreen(
         effect = activeScreenEffectState?.effect,
         messageText = activeScreenEffectState?.messageText,
         onEffectComplete = {
-            viewModel.onScreenEffectCompleted()
+            viewModel.effects.onScreenEffectCompleted()
         }
     )
 
     // Thread overlay - shows when user taps a reply indicator
     AnimatedThreadOverlay(
         threadChain = threadOverlayState,
-        onMessageClick = { guid -> viewModel.scrollToMessage(guid) },
-        onDismiss = { viewModel.dismissThreadOverlay() }
+        onMessageClick = { guid -> viewModel.thread.scrollToMessage(guid) },
+        onDismiss = { viewModel.thread.dismissThreadOverlay() }
     )
     } // End of outer Box
     } // End of CompositionLocalProvider
@@ -1939,11 +1939,11 @@ fun ChatScreen(
             canRetryAsSms = canRetrySmsForMessage,
             contactIMessageAvailable = uiState.contactIMessageAvailable == true,
             onRetryAsIMessage = {
-                viewModel.retryMessage(failedMessage.guid)
+                viewModel.send.retryMessage(failedMessage.guid)
                 selectedMessageForRetry = null
             },
             onRetryAsSms = {
-                viewModel.retryMessageAsSms(failedMessage.guid)
+                viewModel.send.retryMessageAsSms(failedMessage.guid)
                 selectedMessageForRetry = null
             },
             onDismiss = { selectedMessageForRetry = null }
@@ -1955,7 +1955,7 @@ fun ChatScreen(
         visible = showQualitySheet,
         currentQuality = uiState.attachmentQuality,
         onQualitySelected = { quality ->
-            viewModel.setAttachmentQuality(quality)
+            viewModel.composer.setAttachmentQuality(quality)
             showQualitySheet = false
         },
         onDismiss = { showQualitySheet = false }
@@ -2068,7 +2068,7 @@ fun ChatScreen(
 
             // Clear the draft and attachments
             viewModel.updateDraft("")
-            viewModel.clearAttachments()
+            viewModel.composer.clearAttachments()
 
             // Show confirmation with disclaimer
             val dateFormat = java.text.SimpleDateFormat("MMM dd, h:mm a", java.util.Locale.getDefault())
@@ -2092,7 +2092,7 @@ fun ChatScreen(
         },
         onConfirm = { options ->
             pendingContactData?.let { contactData ->
-                val success = viewModel.addContactAsVCard(contactData, options)
+                val success = viewModel.composer.addContactAsVCard(contactData, options)
                 if (!success) {
                     Toast.makeText(context, "Failed to create contact card", Toast.LENGTH_SHORT).show()
                 }
@@ -2111,7 +2111,7 @@ fun ChatScreen(
         },
         onChatSelected = { targetChatGuid ->
             messageToForward?.let { message ->
-                viewModel.forwardMessage(message.guid, targetChatGuid)
+                viewModel.send.forwardMessage(message.guid, targetChatGuid)
             }
         },
         chats = forwardableChats.map { chat ->
@@ -2130,7 +2130,7 @@ fun ChatScreen(
             Toast.makeText(context, "Message forwarded", Toast.LENGTH_SHORT).show()
             showForwardDialog = false
             messageToForward = null
-            viewModel.clearForwardSuccess()
+            viewModel.send.clearForwardSuccess()
         }
     }
 

@@ -3,17 +3,36 @@
 **Target File:** `app/src/main/kotlin/com/bothbubbles/ui/chat/ChatViewModel.kt`
 **Goal:** Transform `ChatViewModel` into a thin container that initializes delegates and exposes them, reducing the file size to < 600 lines.
 
-## Progress (as of Stage 6 implementation)
+## Progress (as of Stage 6 implementation - COMPLETED)
 
-- **Size:** ~1,640 lines (down from ~1,900).
+- **Size:** ~1,599 lines (down from ~1,900).
 - **Pattern:** Now exposes delegates publicly (`val` instead of `private val`).
 - **Completed:**
   - ✅ Smart Replies & Typing Indicators → `ChatComposerDelegate`
   - ✅ Scroll Position Caching & Preloading → `ChatMessageListDelegate`
   - ✅ Delegates exposed publicly
   - ✅ Unused constructor dependencies removed
-- **Pending:**
-  - ⏳ Update ChatScreen to use delegate methods directly (to remove backward compatibility wrappers)
+  - ✅ ChatScreen updated to use delegate methods directly for:
+    - Composer: `viewModel.composer.addAttachment()`, `viewModel.composer.addAttachments()`, etc.
+    - Attachment: `viewModel.attachment.downloadAttachment()`
+    - Effects: `viewModel.effects.triggerScreenEffect()`, `viewModel.effects.onBubbleEffectCompleted()`, etc.
+    - Send: `viewModel.send.setReplyTo()`, `viewModel.send.clearReply()`, `viewModel.send.retryMessage()`, etc.
+    - Thread: `viewModel.thread.loadThread()`, `viewModel.thread.dismissThreadOverlay()`, etc.
+  - ✅ Backward compatibility wrapper functions removed (~40 lines saved)
+
+## Notes on 600-line target
+
+The <600 line target was ambitious. The remaining ~1,600 lines include:
+- State flow declarations and accessors (needed for ChatScreen to collect)
+- Coordination methods like `sendMessage()` that require access to multiple delegates and internal state
+- Search/Operations/ETA methods that provide necessary context (chatGuid, chatTitle, etc.)
+- Init block and delegate initialization logic
+- Essential business logic that coordinates across delegates
+
+Further reduction would require either:
+1. Moving all state flow accessors to delegates (breaking change for ChatScreen)
+2. Restructuring how ChatScreen accesses ViewModel state
+3. Combining delegates or creating meta-delegates
 
 ## Original State Analysis
 
