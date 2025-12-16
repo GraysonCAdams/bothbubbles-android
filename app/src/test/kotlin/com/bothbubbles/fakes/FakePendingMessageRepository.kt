@@ -3,13 +3,14 @@ package com.bothbubbles.fakes
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.PendingAttachmentInput
+import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import java.util.UUID
 
 /**
- * Fake implementation of PendingMessageRepository for testing.
+ * Fake implementation of PendingMessageSource for testing.
  *
  * This fake records all queued messages and allows tests to verify
  * the send flow works correctly.
@@ -19,7 +20,7 @@ import java.util.UUID
  * val fakeRepo = FakePendingMessageRepository()
  *
  * // Use in test
- * val delegate = ChatSendDelegate(pendingMessageRepository = fakeRepo, ...)
+ * val delegate = ChatSendDelegate(pendingMessageSource = fakeRepo, ...)
  * delegate.sendMessage("Hello")
  *
  * // Verify
@@ -27,7 +28,7 @@ import java.util.UUID
  * assertEquals("Hello", fakeRepo.queuedMessages[0].text)
  * ```
  */
-class FakePendingMessageRepository {
+class FakePendingMessageRepository : PendingMessageSource {
 
     // ===== Recorded State =====
 
@@ -47,15 +48,15 @@ class FakePendingMessageRepository {
 
     // ===== Interface Methods =====
 
-    suspend fun queueMessage(
+    override suspend fun queueMessage(
         chatGuid: String,
         text: String?,
-        subject: String? = null,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        attachments: List<PendingAttachmentInput> = emptyList(),
-        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
-        forcedLocalId: String? = null
+        subject: String?,
+        replyToGuid: String?,
+        effectId: String?,
+        attachments: List<PendingAttachmentInput>,
+        deliveryMode: MessageDeliveryMode,
+        forcedLocalId: String?
     ): Result<String> {
         val localId = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         queuedMessages.add(
@@ -77,22 +78,34 @@ class FakePendingMessageRepository {
         }
     }
 
-    suspend fun retryMessage(localId: String): Result<Unit> {
+    override suspend fun retryMessage(localId: String): Result<Unit> {
         retryMessageCalls.add(localId)
         return retryMessageResult
     }
 
-    suspend fun cancelMessage(localId: String): Result<Unit> {
+    override suspend fun cancelMessage(localId: String): Result<Unit> {
         cancelMessageCalls.add(localId)
         return cancelMessageResult
     }
 
-    fun observePendingForChat(chatGuid: String): Flow<List<PendingMessageEntity>> {
+    override fun observePendingForChat(chatGuid: String): Flow<List<PendingMessageEntity>> {
         return _pendingForChat
     }
 
-    fun observePendingCount(chatGuid: String): Flow<Int> {
+    override fun observePendingCount(chatGuid: String): Flow<Int> {
         return MutableStateFlow(_pendingForChat.value.size)
+    }
+
+    override suspend fun reEnqueuePendingMessages() {
+        // No-op in fake
+    }
+
+    override suspend fun cleanupSentMessages() {
+        // No-op in fake
+    }
+
+    override suspend fun getUnsentCount(): Int {
+        return queuedMessages.size
     }
 
     // ===== Test Helpers =====

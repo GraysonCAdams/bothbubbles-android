@@ -6,7 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.services.export.SmsBackupProgress
 import com.bothbubbles.services.export.SmsBackupService
 import com.bothbubbles.services.export.SmsRestoreProgress
-import com.bothbubbles.services.export.SmsRestoreService
+import com.bothbubbles.services.export.SmsRestorer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +20,7 @@ import javax.inject.Inject
 @HiltViewModel
 class SmsBackupViewModel @Inject constructor(
     private val backupService: SmsBackupService,
-    private val restoreService: SmsRestoreService
+    private val smsRestorer: SmsRestorer
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SmsBackupUiState())
@@ -38,7 +38,7 @@ class SmsBackupViewModel @Inject constructor(
             .launchIn(viewModelScope)
 
         // Observe restore progress
-        restoreService.restoreProgress
+        smsRestorer.restoreProgress
             .onEach { progress ->
                 _uiState.update { it.copy(restoreProgress = progress) }
             }
@@ -58,7 +58,7 @@ class SmsBackupViewModel @Inject constructor(
     fun startRestore(fileUri: Uri) {
         if (restoreJob?.isActive == true) return
 
-        restoreJob = restoreService.restoreBackup(fileUri)
+        restoreJob = smsRestorer.restoreBackup(fileUri)
             .onEach { progress ->
                 _uiState.update { it.copy(restoreProgress = progress) }
             }
@@ -72,7 +72,7 @@ class SmsBackupViewModel @Inject constructor(
 
     fun cancelRestore() {
         restoreJob?.cancel()
-        restoreService.resetProgress()
+        smsRestorer.resetProgress()
     }
 
     fun resetBackupProgress() {
@@ -80,7 +80,7 @@ class SmsBackupViewModel @Inject constructor(
     }
 
     fun resetRestoreProgress() {
-        restoreService.resetProgress()
+        smsRestorer.resetProgress()
     }
 
     fun dismissError() {
@@ -89,7 +89,7 @@ class SmsBackupViewModel @Inject constructor(
             else -> {}
         }
         when (_uiState.value.restoreProgress) {
-            is SmsRestoreProgress.Error -> restoreService.resetProgress()
+            is SmsRestoreProgress.Error -> smsRestorer.resetProgress()
             else -> {}
         }
     }

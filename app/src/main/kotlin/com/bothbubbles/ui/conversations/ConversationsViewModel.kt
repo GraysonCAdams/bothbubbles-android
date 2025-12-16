@@ -25,6 +25,7 @@ import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 import com.bothbubbles.ui.conversations.delegates.CategorizationState
 import com.bothbubbles.ui.conversations.delegates.ConversationActionsDelegate
+import com.bothbubbles.ui.conversations.delegates.ConversationEvent
 import com.bothbubbles.ui.conversations.delegates.ConversationLoadingDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationObserverDelegate
 import com.bothbubbles.ui.conversations.delegates.SmsImportState
@@ -38,6 +39,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+/**
+ * ViewModel for the Conversations screen.
+ *
+ * Phase 8: Uses AssistedInject delegate factories for lifecycle-safe construction
+ * and SharedFlow events for delegate-to-ViewModel communication.
+ */
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class ConversationsViewModel @Inject constructor(
@@ -55,17 +62,31 @@ class ConversationsViewModel @Inject constructor(
     private val notificationService: NotificationService,
     private val syncService: SyncService,
     private val categorizationRepository: CategorizationRepository,
-    // Delegates
-    private val loadingDelegate: ConversationLoadingDelegate,
-    private val observerDelegate: ConversationObserverDelegate,
-    private val actionsDelegate: ConversationActionsDelegate
+    // Phase 8: Delegate factories instead of direct delegates
+    private val loadingDelegateFactory: ConversationLoadingDelegate.Factory,
+    private val observerDelegateFactory: ConversationObserverDelegate.Factory,
+    private val actionsDelegateFactory: ConversationActionsDelegate.Factory
 ) : ViewModel() {
+
+    // ============================================================================
+    // Phase 8: Create delegates via factories (no lateinit, no initialize())
+    // ============================================================================
+
+    private val loadingDelegate: ConversationLoadingDelegate =
+        loadingDelegateFactory.create(viewModelScope)
+
+    private val observerDelegate: ConversationObserverDelegate =
+        observerDelegateFactory.create(viewModelScope)
+
+    private val actionsDelegate: ConversationActionsDelegate =
+        actionsDelegateFactory.create(viewModelScope)
+
+    // ============================================================================
+    // UI State
+    // ============================================================================
 
     private val _uiState = MutableStateFlow(ConversationsUiState())
     val uiState: StateFlow<ConversationsUiState> = _uiState.asStateFlow()
-
-    // Event to trigger scroll when a chat is pinned (from actionsDelegate)
-    val scrollToIndexEvent = actionsDelegate.scrollToIndexEvent
 
     private val _searchQuery = MutableStateFlow("")
     private val _smsStateRefreshTrigger = MutableStateFlow(0)
@@ -73,7 +94,10 @@ class ConversationsViewModel @Inject constructor(
     // Track if we've already started categorization this session
     private var hasStartedCategorization = false
 
+    // ============================================================================
     // SavedStateHandle-backed scroll position restoration (survives process death)
+    // ============================================================================
+
     private companion object {
         const val KEY_SCROLL_INDEX = "scroll_index"
         const val KEY_SCROLL_OFFSET = "scroll_offset"
@@ -100,20 +124,14 @@ class ConversationsViewModel @Inject constructor(
         savedStateHandle[KEY_SEARCH_ACTIVE] = active
     }
 
+    // ============================================================================
+    // Initialization
+    // ============================================================================
+
     init {
-        // Initialize delegates
-        loadingDelegate.initialize(viewModelScope)
-        observerDelegate.initialize(
-            scope = viewModelScope,
-            onDataChanged = { refreshAllLoadedPages() },
-            onNewMessage = { refreshAllLoadedPages() },
-            onMessageUpdated = { refreshAllLoadedPages() },
-            onChatRead = { chatGuid -> optimisticallyMarkChatRead(chatGuid) }
-        )
-        actionsDelegate.initialize(
-            scope = viewModelScope,
-            onConversationsUpdated = { updated -> updateConversations(updated) }
-        )
+        // Phase 8: Collect events from delegates instead of callbacks
+        collectObserverEvents()
+        collectActionsEvents()
 
         // Load filter FIRST before loading conversations to avoid race condition
         viewModelScope.launch {
@@ -141,6 +159,58 @@ class ConversationsViewModel @Inject constructor(
         markExistingMmsDrafts()
         observeCategorizationTrigger()
     }
+
+    // ============================================================================
+    // Phase 8: Event Collection from Delegates
+    // ============================================================================
+
+    /**
+     * Collect events from ConversationObserverDelegate.
+     * Replaces the callback-based initialize() approach.
+     */
+    private fun collectObserverEvents() {
+        viewModelScope.launch {
+            observerDelegate.events.collect { event ->
+                when (event) {
+                    is ConversationEvent.DataChanged -> refreshAllLoadedPages()
+                    is ConversationEvent.NewMessage -> refreshAllLoadedPages()
+                    is ConversationEvent.MessageUpdated -> refreshAllLoadedPages()
+                    is ConversationEvent.ChatRead -> optimisticallyMarkChatRead(event.chatGuid)
+                    // Actions events are not emitted by observer delegate
+                    else -> { /* Ignore other events */ }
+                }
+            }
+        }
+    }
+
+    /**
+     * Collect events from ConversationActionsDelegate.
+     * Replaces the callback-based initialize() approach.
+     */
+    private fun collectActionsEvents() {
+        viewModelScope.launch {
+            actionsDelegate.events.collect { event ->
+                when (event) {
+                    is ConversationEvent.ConversationsUpdated -> {
+                        _uiState.update { it.copy(conversations = event.conversations.toStable()) }
+                    }
+                    is ConversationEvent.ScrollToIndex -> {
+                        _scrollToIndexEvent.emit(event.index)
+                    }
+                    is ConversationEvent.ActionError -> {
+                        // Could show a snackbar or toast here
+                        android.util.Log.e("ConversationsViewModel", "Action error: ${event.message}")
+                    }
+                    // Observer events are not emitted by actions delegate
+                    else -> { /* Ignore other events */ }
+                }
+            }
+        }
+    }
+
+    // Phase 8: ScrollToIndex exposed as SharedFlow for UI to collect
+    private val _scrollToIndexEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
+    val scrollToIndexEvent: SharedFlow<Int> = _scrollToIndexEvent.asSharedFlow()
 
     /**
      * Observe state from delegates and merge into UI state.
@@ -870,12 +940,5 @@ class ConversationsViewModel @Inject constructor(
 
     fun refreshContactInfo(address: String) {
         actionsDelegate.refreshContactInfo(address)
-    }
-
-    /**
-     * Update conversations list (callback from delegates).
-     */
-    private fun updateConversations(updated: List<ConversationUiModel>) {
-        _uiState.update { it.copy(conversations = updated.toStable()) }
     }
 }

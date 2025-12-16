@@ -7,8 +7,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.developer.DeveloperEventLog
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
-import com.bothbubbles.services.socket.SocketService
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -18,7 +18,7 @@ import javax.inject.Inject
 @HiltViewModel
 class AboutViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val developerEventLog: DeveloperEventLog
 ) : ViewModel() {
@@ -59,7 +59,7 @@ class AboutViewModel @Inject constructor(
 
     private fun observeServerVersion() {
         viewModelScope.launch {
-            socketService.events.collect { event ->
+            socketConnection.events.collect { event ->
                 if (event is SocketEvent.ServerUpdate) {
                     _uiState.update { it.copy(serverVersion = event.version) }
                 }

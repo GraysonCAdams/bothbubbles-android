@@ -1,13 +1,9 @@
 package com.bothbubbles.ui.settings.blocked
 
-import android.content.ContentValues
-import android.content.Context
-import android.provider.BlockedNumberContract
-import android.provider.BlockedNumberContract.BlockedNumbers
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bothbubbles.services.contacts.ContactBlocker
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -16,7 +12,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class BlockedContactsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    private val contactBlocker: ContactBlocker
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BlockedContactsUiState())
@@ -32,7 +28,7 @@ class BlockedContactsViewModel @Inject constructor(
 
             try {
                 val numbers = withContext(Dispatchers.IO) {
-                    getBlockedNumbers()
+                    contactBlocker.getBlockedNumbers()
                 }
                 _uiState.update {
                     it.copy(
@@ -54,13 +50,14 @@ class BlockedContactsViewModel @Inject constructor(
     fun blockNumber(number: String) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    val values = ContentValues().apply {
-                        put(BlockedNumbers.COLUMN_ORIGINAL_NUMBER, number)
-                    }
-                    context.contentResolver.insert(BlockedNumbers.CONTENT_URI, values)
+                val success = withContext(Dispatchers.IO) {
+                    contactBlocker.blockNumber(number)
                 }
-                loadBlockedNumbers()
+                if (success) {
+                    loadBlockedNumbers()
+                } else {
+                    _uiState.update { it.copy(error = "Failed to block number") }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message) }
             }
@@ -70,44 +67,18 @@ class BlockedContactsViewModel @Inject constructor(
     fun unblockNumber(number: String) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
-                    context.contentResolver.delete(
-                        BlockedNumbers.CONTENT_URI,
-                        "${BlockedNumbers.COLUMN_ORIGINAL_NUMBER} = ?",
-                        arrayOf(number)
-                    )
+                val success = withContext(Dispatchers.IO) {
+                    contactBlocker.unblockNumber(number)
                 }
-                loadBlockedNumbers()
+                if (success) {
+                    loadBlockedNumbers()
+                } else {
+                    _uiState.update { it.copy(error = "Failed to unblock number") }
+                }
             } catch (e: Exception) {
                 _uiState.update { it.copy(error = e.message) }
             }
         }
-    }
-
-    private fun getBlockedNumbers(): List<String> {
-        val numbers = mutableListOf<String>()
-
-        try {
-            context.contentResolver.query(
-                BlockedNumbers.CONTENT_URI,
-                arrayOf(BlockedNumbers.COLUMN_ORIGINAL_NUMBER),
-                null,
-                null,
-                null
-            )?.use { cursor ->
-                val columnIndex = cursor.getColumnIndex(BlockedNumbers.COLUMN_ORIGINAL_NUMBER)
-                while (cursor.moveToNext()) {
-                    val number = cursor.getString(columnIndex)
-                    if (number != null) {
-                        numbers.add(number)
-                    }
-                }
-            }
-        } catch (e: SecurityException) {
-            // Not authorized to access blocked numbers
-        }
-
-        return numbers
     }
 
     fun clearError() {

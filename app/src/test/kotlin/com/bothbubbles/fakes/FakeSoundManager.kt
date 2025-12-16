@@ -48,7 +48,7 @@ class FakeSoundManager : SoundPlayer {
         receiveSoundChatGuids.add(chatGuid)
     }
 
-    fun previewSounds(theme: SoundTheme) {
+    override fun previewSounds(theme: SoundTheme) {
         previewSoundsCalls.add(theme)
     }
 

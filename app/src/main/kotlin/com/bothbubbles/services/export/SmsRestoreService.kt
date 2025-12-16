@@ -24,7 +24,7 @@ import javax.inject.Singleton
 @Singleton
 class SmsRestoreService @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : SmsRestorer {
     companion object {
         private const val TAG = "SmsRestoreService"
     }
@@ -35,14 +35,14 @@ class SmsRestoreService @Inject constructor(
     }
 
     private val _restoreProgress = MutableStateFlow<SmsRestoreProgress>(SmsRestoreProgress.Idle)
-    val restoreProgress: StateFlow<SmsRestoreProgress> = _restoreProgress.asStateFlow()
+    override val restoreProgress: StateFlow<SmsRestoreProgress> = _restoreProgress.asStateFlow()
 
     /**
      * Restore SMS/MMS messages from a backup file URI.
      * Performs duplicate detection based on date, address, and type.
      * Returns a Flow that emits progress updates.
      */
-    fun restoreBackup(fileUri: Uri): Flow<SmsRestoreProgress> = flow {
+    override fun restoreBackup(fileUri: Uri): Flow<SmsRestoreProgress> = flow {
         try {
             _restoreProgress.value = SmsRestoreProgress.Reading("backup file")
             emit(SmsRestoreProgress.Reading("backup file"))
@@ -316,7 +316,7 @@ class SmsRestoreService @Inject constructor(
         }
     }
 
-    fun resetProgress() {
+    override fun resetProgress() {
         _restoreProgress.value = SmsRestoreProgress.Idle
     }
 }

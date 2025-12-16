@@ -3,10 +3,10 @@ package com.bothbubbles.ui.chat.delegates
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.provider.BlockedNumberContract
 import android.provider.ContactsContract
 import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.contacts.ContactBlocker
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.spam.SpamReportingService
@@ -42,6 +42,7 @@ class ChatOperationsDelegate @AssistedInject constructor(
     private val spamReportingService: SpamReportingService,
     private val messageSender: MessageSender,
     private val discordContactService: DiscordContactService,
+    private val contactBlocker: ContactBlocker,
     @Assisted private val chatGuid: String,
     @Assisted private val scope: CoroutineScope
 ) {
@@ -255,25 +256,18 @@ class ChatOperationsDelegate @AssistedInject constructor(
 
     /**
      * Block a contact (SMS only).
+     * Uses ContactBlocker interface for testability.
      */
-    fun blockContact(context: Context, participantPhone: String?): Boolean {
+    fun blockContact(participantPhone: String?): Boolean {
         val phone = participantPhone ?: return false
 
-        return try {
-            val values = android.content.ContentValues().apply {
-                put(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER, phone)
-            }
-            context.contentResolver.insert(
-                BlockedNumberContract.BlockedNumbers.CONTENT_URI,
-                values
-            )
-            true
-        } catch (e: Exception) {
+        val success = contactBlocker.blockNumber(phone)
+        if (!success) {
             _state.update { it.copy(
-                operationError = ValidationError.InvalidInput("contact", "Failed to block: ${e.message ?: "unknown error"}")
+                operationError = ValidationError.InvalidInput("contact", "Failed to block number")
             )}
-            false
         }
+        return success
     }
 
     /**

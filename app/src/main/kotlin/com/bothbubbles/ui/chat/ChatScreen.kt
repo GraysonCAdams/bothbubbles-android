@@ -402,7 +402,7 @@ fun ChatScreen(
                 onReportSpam = {
                     viewModel.operations.reportAsSpam()
                     if (currentChatInfoState.isLocalSmsChat) {
-                        viewModel.operations.blockContact(currentContext, currentChatInfoState.participantPhone)
+                        viewModel.operations.blockContact(currentChatInfoState.participantPhone)
                     }
                     viewModel.chatInfo.dismissSaveContactBanner()
                 },

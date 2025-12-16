@@ -5,50 +5,66 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
-import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sync.StageProgress
 import com.bothbubbles.services.sync.StageStatus
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
 import com.bothbubbles.services.sync.SyncStageType
 import com.bothbubbles.services.sync.UnifiedSyncProgress
-import com.bothbubbles.ui.conversations.normalizeGuid
-import com.bothbubbles.ui.util.toStable
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Job
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterIsInstance
-import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for observing database and socket changes.
  * Handles real-time updates from sync, socket events, and typing indicators.
  *
- * This delegate extracts the observer/reactive logic from ConversationsViewModel,
- * including socket event handling and sync state observation.
+ * Phase 8: Uses AssistedInject for lifecycle-safe construction and
+ * SharedFlow events instead of callbacks for ViewModel coordination.
  */
-class ConversationObserverDelegate @Inject constructor(
+@OptIn(FlowPreview::class)
+class ConversationObserverDelegate @AssistedInject constructor(
     private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
     private val chatRepository: ChatRepository,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val syncService: SyncService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @Assisted private val scope: CoroutineScope
 ) {
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): ConversationObserverDelegate
+    }
+
     companion object {
         private const val TAG = "ConversationObserverDelegate"
     }
 
-    private lateinit var scope: CoroutineScope
+    // ============================================================================
+    // Event Flow - Phase 8: Replaces callbacks
+    // ============================================================================
+
+    private val _events = MutableSharedFlow<ConversationEvent>(extraBufferCapacity = 64)
+    val events: SharedFlow<ConversationEvent> = _events.asSharedFlow()
+
+    // ============================================================================
+    // State Flows - exposed to ViewModel for UI state composition
+    // ============================================================================
 
     // Typing indicator state
     private val _typingChats = MutableStateFlow<Set<String>>(emptySet())
@@ -76,28 +92,11 @@ class ConversationObserverDelegate @Inject constructor(
     private val _categorizationState = MutableStateFlow<CategorizationState>(CategorizationState.Idle)
     private val _isExpanded = MutableStateFlow(false)
 
-    // Callbacks for triggering refresh
-    private var onDataChanged: (suspend () -> Unit)? = null
-    private var onNewMessage: (suspend () -> Unit)? = null
-    private var onMessageUpdated: (suspend () -> Unit)? = null
-    private var onChatRead: ((String) -> Unit)? = null
+    // ============================================================================
+    // Initialization - Phase 8: All setup happens in init block
+    // ============================================================================
 
-    /**
-     * Initialize the delegate with coroutine scope.
-     */
-    fun initialize(
-        scope: CoroutineScope,
-        onDataChanged: suspend () -> Unit,
-        onNewMessage: suspend () -> Unit,
-        onMessageUpdated: suspend () -> Unit,
-        onChatRead: (String) -> Unit
-    ) {
-        this.scope = scope
-        this.onDataChanged = onDataChanged
-        this.onNewMessage = onNewMessage
-        this.onMessageUpdated = onMessageUpdated
-        this.onChatRead = onChatRead
-
+    init {
         startGracePeriod()
         observeDataChanges()
         observeConnectionState()
@@ -132,7 +131,7 @@ class ConversationObserverDelegate @Inject constructor(
             ) { _, _, _, _ -> Unit }
                 .debounce(100) // Reduced debounce for faster UI updates
                 .collect {
-                    onDataChanged?.invoke()
+                    _events.emit(ConversationEvent.DataChanged)
                 }
         }
     }
@@ -142,7 +141,7 @@ class ConversationObserverDelegate @Inject constructor(
      */
     private fun observeConnectionState() {
         scope.launch {
-            socketService.connectionState.collect { state ->
+            socketConnection.connectionState.collect { state ->
                 // Track if we ever connected (for banner logic)
                 if (state == ConnectionState.CONNECTED) {
                     wasEverConnected = true
@@ -159,7 +158,7 @@ class ConversationObserverDelegate @Inject constructor(
      */
     private fun observeTypingIndicators() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.TypingIndicator>()
                 .collect { event ->
                     _typingChats.update { chats ->
@@ -451,7 +450,9 @@ class ConversationObserverDelegate @Inject constructor(
         }.takeIf { it.isNotEmpty() }
     }
 
-    // Public methods to update SMS and categorization state (called from ViewModel)
+    // ============================================================================
+    // Public Methods - State updates (called from ViewModel)
+    // ============================================================================
 
     fun updateSmsImportState(state: SmsImportState) {
         _smsImportState.value = state
@@ -493,12 +494,11 @@ class ConversationObserverDelegate @Inject constructor(
      */
     private fun observeNewMessagesFromSocket() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.NewMessage>()
                 .collect { event ->
                     Log.d(TAG, "Socket: New message for ${event.chatGuid}")
-                    // Immediately refresh to show new message in conversation list
-                    onNewMessage?.invoke()
+                    _events.emit(ConversationEvent.NewMessage)
                 }
         }
     }
@@ -509,12 +509,11 @@ class ConversationObserverDelegate @Inject constructor(
      */
     private fun observeMessageUpdatesFromSocket() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.MessageUpdated>()
                 .collect { event ->
                     Log.d(TAG, "Socket: Message updated for ${event.chatGuid}")
-                    // Refresh to show updated status (read receipts, delivery, edits)
-                    onMessageUpdated?.invoke()
+                    _events.emit(ConversationEvent.MessageUpdated)
                 }
         }
     }
@@ -525,12 +524,11 @@ class ConversationObserverDelegate @Inject constructor(
      */
     private fun observeChatReadFromSocket() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.ChatRead>()
                 .collect { event ->
                     Log.d(TAG, "Socket: Chat read ${event.chatGuid}")
-                    // Trigger optimistic update in ViewModel
-                    onChatRead?.invoke(event.chatGuid)
+                    _events.emit(ConversationEvent.ChatRead(event.chatGuid))
                 }
         }
     }
@@ -544,7 +542,7 @@ class ConversationObserverDelegate @Inject constructor(
      * Retry connection now.
      */
     fun retryConnection() {
-        socketService.retryNow()
+        socketConnection.retryNow()
     }
 }
 

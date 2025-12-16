@@ -12,7 +12,7 @@ import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.services.sms.SmsCapabilityStatus
 import com.bothbubbles.services.sms.SmsPermissionHelper
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.ui.setup.delegates.*
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -28,7 +28,7 @@ class SetupViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     settingsDataStore: SettingsDataStore,
     api: BothBubblesApi,
-    socketService: SocketService,
+    socketConnection: SocketConnection,
     syncService: SyncService,
     smsPermissionHelper: SmsPermissionHelper,
     entityExtractionService: EntityExtractionService,
@@ -45,7 +45,7 @@ class SetupViewModel @Inject constructor(
     private val serverConnectionDelegate = ServerConnectionDelegate(settingsDataStore, api)
     private val smsSetupDelegate = SmsSetupDelegate(smsPermissionHelper, settingsDataStore, smsRepository)
     private val mlModelDelegate = MlModelDelegate(context, settingsDataStore, entityExtractionService)
-    private val syncDelegate = SyncDelegate(settingsDataStore, socketService, syncService, firebaseConfigManager, fcmTokenManager)
+    private val syncDelegate = SyncDelegate(settingsDataStore, socketConnection, syncService, firebaseConfigManager, fcmTokenManager)
     private val autoResponderDelegate = AutoResponderDelegate(settingsDataStore)
 
     init {

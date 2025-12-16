@@ -89,12 +89,12 @@ class PendingMessageRepository @Inject constructor(
     override suspend fun queueMessage(
         chatGuid: String,
         text: String?,
-        subject: String? = null,
-        replyToGuid: String? = null,
-        effectId: String? = null,
-        attachments: List<PendingAttachmentInput> = emptyList(),
-        deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
-        forcedLocalId: String? = null
+        subject: String?,
+        replyToGuid: String?,
+        effectId: String?,
+        attachments: List<PendingAttachmentInput>,
+        deliveryMode: MessageDeliveryMode,
+        forcedLocalId: String?
     ): Result<String> = runCatching {
         val startTime = System.currentTimeMillis()
         Log.i(TAG, "[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
@@ -476,5 +476,5 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Get count of unsent messages (for startup indicator).
      */
-    suspend fun getUnsentCount(): Int = pendingMessageDao.getUnsentCount()
+    override suspend fun getUnsentCount(): Int = pendingMessageDao.getUnsentCount()
 }

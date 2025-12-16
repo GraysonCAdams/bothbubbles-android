@@ -4,7 +4,7 @@ import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.fcm.FcmTokenManager
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.ui.setup.SetupUiState
 import kotlinx.coroutines.CoroutineScope
@@ -16,7 +16,7 @@ import kotlinx.coroutines.launch
  */
 class SyncDelegate(
     private val settingsDataStore: SettingsDataStore,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val syncService: SyncService,
     private val firebaseConfigManager: FirebaseConfigManager,
     private val fcmTokenManager: FcmTokenManager
@@ -36,7 +36,7 @@ class SyncDelegate(
 
             try {
                 // Connect socket first
-                socketService.connect()
+                socketConnection.connect()
 
                 // Initialize FCM for push notifications (non-blocking)
                 launch {

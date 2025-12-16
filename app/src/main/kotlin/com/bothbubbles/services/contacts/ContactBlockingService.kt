@@ -15,7 +15,7 @@ import javax.inject.Singleton
 @Singleton
 class ContactBlockingService @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : ContactBlocker {
     companion object {
         private const val TAG = "ContactBlockingService"
     }
@@ -24,7 +24,7 @@ class ContactBlockingService @Inject constructor(
      * Check if the app can block numbers.
      * Blocking requires the app to be the default dialer/SMS app or have system privileges.
      */
-    fun canBlockNumbers(): Boolean {
+    override fun canBlockNumbers(): Boolean {
         return try {
             BlockedNumberContract.canCurrentUserBlockNumbers(context)
         } catch (e: Exception) {
@@ -39,7 +39,7 @@ class ContactBlockingService @Inject constructor(
      *
      * Note: Blocking requires the app to be the default dialer or SMS app.
      */
-    fun blockNumber(phoneNumber: String): Boolean {
+    override fun blockNumber(phoneNumber: String): Boolean {
         if (!canBlockNumbers()) {
             Log.w(TAG, "App cannot block numbers - must be default dialer or SMS app")
             return false
@@ -71,7 +71,7 @@ class ContactBlockingService @Inject constructor(
     /**
      * Check if a number is blocked.
      */
-    fun isNumberBlocked(phoneNumber: String): Boolean {
+    override fun isNumberBlocked(phoneNumber: String): Boolean {
         return try {
             BlockedNumberContract.isBlocked(context, phoneNumber)
         } catch (e: Exception) {
@@ -84,7 +84,7 @@ class ContactBlockingService @Inject constructor(
      * Unblock a phone number.
      * Returns true if successful.
      */
-    fun unblockNumber(phoneNumber: String): Boolean {
+    override fun unblockNumber(phoneNumber: String): Boolean {
         if (!canBlockNumbers()) {
             Log.w(TAG, "App cannot unblock numbers - must be default dialer or SMS app")
             return false
@@ -108,5 +108,38 @@ class ContactBlockingService @Inject constructor(
             Log.e(TAG, "Error unblocking number: $phoneNumber", e)
             false
         }
+    }
+
+    /**
+     * Get all blocked phone numbers.
+     */
+    override fun getBlockedNumbers(): List<String> {
+        val numbers = mutableListOf<String>()
+
+        try {
+            context.contentResolver.query(
+                BlockedNumberContract.BlockedNumbers.CONTENT_URI,
+                arrayOf(BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER),
+                null,
+                null,
+                null
+            )?.use { cursor ->
+                val columnIndex = cursor.getColumnIndex(
+                    BlockedNumberContract.BlockedNumbers.COLUMN_ORIGINAL_NUMBER
+                )
+                while (cursor.moveToNext()) {
+                    val number = cursor.getString(columnIndex)
+                    if (number != null) {
+                        numbers.add(number)
+                    }
+                }
+            }
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Not authorized to access blocked numbers", e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error getting blocked numbers", e)
+        }
+
+        return numbers
     }
 }

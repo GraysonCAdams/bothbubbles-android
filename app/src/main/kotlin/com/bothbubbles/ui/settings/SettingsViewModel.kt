@@ -5,8 +5,8 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.services.sound.SoundManager
+import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.services.sync.SyncState
@@ -20,11 +20,11 @@ import javax.inject.Inject
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val syncService: SyncService,
     private val chatRepository: ChatRepository,
     private val settingsDataStore: SettingsDataStore,
-    private val soundManager: SoundManager
+    private val soundPlayer: SoundPlayer
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -118,7 +118,7 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setSoundTheme(theme)
             // Preview the sounds when theme is selected
-            soundManager.previewSounds(theme)
+            soundPlayer.previewSounds(theme)
         }
     }
 
@@ -146,7 +146,7 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeConnectionState() {
         viewModelScope.launch {
-            socketService.connectionState.collect { state ->
+            socketConnection.connectionState.collect { state ->
                 _uiState.update { it.copy(connectionState = state) }
             }
         }
@@ -223,7 +223,7 @@ class SettingsViewModel @Inject constructor(
      * Reconnect to the server
      */
     fun reconnect() {
-        socketService.reconnect()
+        socketConnection.reconnect()
     }
 
     /**

@@ -4,7 +4,7 @@ import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.SelectedRecipient
 import kotlinx.coroutines.CoroutineScope
@@ -23,7 +23,7 @@ import javax.inject.Inject
  */
 class RecipientSelectionDelegate @Inject constructor(
     private val api: BothBubblesApi,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
@@ -136,7 +136,7 @@ class RecipientSelectionDelegate @Inject constructor(
     private fun checkAndUpdateRecipientService(address: String, scope: CoroutineScope) {
         scope.launch {
             val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
-            val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+            val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
             Log.d(TAG, "checkAndUpdateRecipientService: address=$address, smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
 
             if (!smsOnlyMode && isConnected) {

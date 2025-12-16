@@ -5,7 +5,7 @@ import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AutoShareContact
 import com.bothbubbles.data.repository.AutoShareContactRepository
-import com.bothbubbles.data.repository.PendingMessageRepository
+import com.bothbubbles.data.repository.PendingMessageSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -26,7 +26,7 @@ import kotlin.math.abs
  */
 @Singleton
 class EtaSharingManager @Inject constructor(
-    private val pendingMessageRepository: PendingMessageRepository,
+    private val pendingMessageSource: PendingMessageSource,
     private val settingsDataStore: SettingsDataStore,
     private val featurePreferences: FeaturePreferences,
     private val autoShareContactRepository: AutoShareContactRepository
@@ -323,7 +323,7 @@ class EtaSharingManager @Inject constructor(
             val message = buildInitialMessage(etaData)
             Log.d(TAG, "Auto-share: Sending initial message to ${session.recipientDisplayName}")
 
-            pendingMessageRepository.queueMessage(
+            pendingMessageSource.queueMessage(
                 chatGuid = session.recipientGuid,
                 text = message
             ).onSuccess {
@@ -357,7 +357,7 @@ class EtaSharingManager @Inject constructor(
 
                 Log.d(TAG, "Auto-share: Sending $messageType to ${session.recipientDisplayName}")
 
-                pendingMessageRepository.queueMessage(
+                pendingMessageSource.queueMessage(
                     chatGuid = session.recipientGuid,
                     text = message
                 )
@@ -397,7 +397,7 @@ class EtaSharingManager @Inject constructor(
 
             Log.d(TAG, "Auto-share: Sending ${if (wasNearDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName}")
 
-            pendingMessageRepository.queueMessage(
+            pendingMessageSource.queueMessage(
                 chatGuid = session.recipientGuid,
                 text = message
             )
@@ -419,7 +419,7 @@ class EtaSharingManager @Inject constructor(
         scope.launch {
             if (sendFinalMessage) {
                 for (session in activeAutoShareSessions) {
-                    pendingMessageRepository.queueMessage(
+                    pendingMessageSource.queueMessage(
                         chatGuid = session.recipientGuid,
                         text = buildCancelledMessage()
                     )
@@ -450,7 +450,7 @@ class EtaSharingManager @Inject constructor(
 
         Log.d(TAG, "Sending $messageType message: $message")
 
-        pendingMessageRepository.queueMessage(
+        pendingMessageSource.queueMessage(
             chatGuid = session.recipientGuid,
             text = message
         ).onSuccess {
@@ -524,7 +524,7 @@ class EtaSharingManager @Inject constructor(
      */
     private suspend fun sendStoppedMessage(session: EtaSharingSession) {
         val message = buildCancelledMessage()
-        pendingMessageRepository.queueMessage(
+        pendingMessageSource.queueMessage(
             chatGuid = session.recipientGuid,
             text = message
         ).onFailure { e ->

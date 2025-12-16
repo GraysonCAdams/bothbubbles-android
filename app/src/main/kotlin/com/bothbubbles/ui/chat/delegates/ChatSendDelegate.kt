@@ -5,7 +5,7 @@ import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.PendingAttachmentInput
-import com.bothbubbles.data.repository.PendingMessageRepository
+import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.socket.SocketConnection
@@ -59,7 +59,7 @@ data class QueuedMessageInfo(
  * concrete services for improved testability.
  */
 class ChatSendDelegate @AssistedInject constructor(
-    private val pendingMessageRepository: PendingMessageRepository,
+    private val pendingMessageSource: PendingMessageSource,
     private val messageSender: MessageSender,
     private val socketConnection: SocketConnection,
     private val soundPlayer: SoundPlayer,
@@ -173,7 +173,7 @@ class ChatSendDelegate @AssistedInject constructor(
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             Log.i(TAG, "[SEND_TRACE] STEP 3: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
             val queueStart = System.currentTimeMillis()
-            pendingMessageRepository.queueMessage(
+            pendingMessageSource.queueMessage(
                 chatGuid = chatGuid,
                 text = trimmedText,
                 replyToGuid = replyToGuid,
@@ -310,7 +310,7 @@ class ChatSendDelegate @AssistedInject constructor(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val queueStart = System.currentTimeMillis()
                 Log.d(TAG, "⏱️ [DELEGATE] calling queueMessage (IO): +${System.currentTimeMillis() - sendStartTime}ms")
-                pendingMessageRepository.queueMessage(
+                pendingMessageSource.queueMessage(
                     chatGuid = chatGuid,
                     text = trimmedText,
                     replyToGuid = replyToGuid,
@@ -363,7 +363,7 @@ class ChatSendDelegate @AssistedInject constructor(
             onDraftCleared()
 
             // Queue message for offline-first delivery
-            pendingMessageRepository.queueMessage(
+            pendingMessageSource.queueMessage(
                 chatGuid = chatGuid,
                 text = trimmedText,
                 attachments = attachments,
@@ -541,7 +541,7 @@ class ChatSendDelegate @AssistedInject constructor(
      */
     private fun observeQueuedMessages() {
         scope.launch {
-            pendingMessageRepository.observePendingForChat(chatGuid)
+            pendingMessageSource.observePendingForChat(chatGuid)
                 .collect { pending ->
                     updateQueuedMessages(pending.map { it.toQueuedUiModel() })
                 }
@@ -553,7 +553,7 @@ class ChatSendDelegate @AssistedInject constructor(
      */
     fun retryQueuedMessage(localId: String) {
         scope.launch {
-            pendingMessageRepository.retryMessage(localId)
+            pendingMessageSource.retryMessage(localId)
                 .onFailure { e ->
                     Log.e(TAG, "Failed to retry message: $localId", e)
                     _state.update { it.copy(sendError = "Failed to retry: ${e.message}") }
@@ -566,7 +566,7 @@ class ChatSendDelegate @AssistedInject constructor(
      */
     fun cancelQueuedMessage(localId: String) {
         scope.launch {
-            pendingMessageRepository.cancelMessage(localId)
+            pendingMessageSource.cancelMessage(localId)
                 .onFailure { e ->
                     Log.e(TAG, "Failed to cancel message: $localId", e)
                     _state.update { it.copy(sendError = "Failed to cancel: ${e.message}") }

@@ -214,7 +214,7 @@ fun ChatDialogsHost(
             isSmsChat = chatInfoState.isLocalSmsChat,
             onConfirm = { options: BlockOptions ->
                 if (options.blockContact) {
-                    if (viewModel.operations.blockContact(context, chatInfoState.participantPhone)) {
+                    if (viewModel.operations.blockContact(chatInfoState.participantPhone)) {
                         Toast.makeText(context, "Contact blocked", Toast.LENGTH_SHORT).show()
                     }
                 }

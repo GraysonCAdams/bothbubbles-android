@@ -5,7 +5,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chatcreator.ManualAddressEntry
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +24,7 @@ import javax.inject.Inject
  */
 class ContactSearchDelegate @Inject constructor(
     private val api: BothBubblesApi,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val handleRepository: HandleRepository
 ) {
@@ -81,7 +81,7 @@ class ContactSearchDelegate @Inject constructor(
 
         // Check if we're in SMS-only mode
         val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
-        val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+        val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
 
         var isIMessageAvailable = false
         var service = "SMS"

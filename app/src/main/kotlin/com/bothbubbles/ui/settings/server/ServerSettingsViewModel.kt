@@ -5,7 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -13,7 +13,7 @@ import javax.inject.Inject
 
 @HiltViewModel
 class ServerSettingsViewModel @Inject constructor(
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val api: BothBubblesApi
 ) : ViewModel() {
@@ -37,7 +37,7 @@ class ServerSettingsViewModel @Inject constructor(
 
     private fun observeConnectionState() {
         viewModelScope.launch {
-            socketService.connectionState.collect { state ->
+            socketConnection.connectionState.collect { state ->
                 _uiState.update { it.copy(connectionState = state) }
 
                 // When connected, fetch server info to check for Private API
@@ -93,7 +93,7 @@ class ServerSettingsViewModel @Inject constructor(
 
     fun reconnect() {
         _uiState.update { it.copy(isReconnecting = true) }
-        socketService.reconnect()
+        socketConnection.reconnect()
 
         viewModelScope.launch {
             // Wait a bit then update the state
@@ -103,7 +103,7 @@ class ServerSettingsViewModel @Inject constructor(
     }
 
     fun disconnect() {
-        socketService.disconnect()
+        socketConnection.disconnect()
     }
 
     fun testConnection() {

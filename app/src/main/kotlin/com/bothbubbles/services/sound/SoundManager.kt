@@ -180,7 +180,7 @@ class SoundManager @Inject constructor(
      * Preview both sounds for a theme (receive then send).
      * Used when user selects a new sound theme in settings.
      */
-    fun previewSounds(theme: SoundTheme) {
+    override fun previewSounds(theme: SoundTheme) {
         applicationScope.launch(ioDispatcher) {
             // Play receive sound first
             playSoundDirect(getReceiveSoundId(theme))

@@ -16,7 +16,7 @@ import javax.inject.Singleton
 @Singleton
 class VCardService @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : VCardExporter {
     companion object {
         private const val TAG = "VCardService"
     }
@@ -27,7 +27,7 @@ class VCardService @Inject constructor(
      * Creates a vCard file from a contact URI and returns the file URI.
      * Returns null if the contact cannot be read or the file cannot be created.
      */
-    fun createVCardFromContact(contactUri: Uri): Uri? {
+    override fun createVCardFromContact(contactUri: Uri): Uri? {
         return try {
             val contactData = getContactData(contactUri) ?: return null
             val vCardContent = VCardGenerator.generateVCard(contactData)
@@ -42,7 +42,7 @@ class VCardService @Inject constructor(
      * Creates a vCard file from ContactData with field options.
      * Returns null if the file cannot be created.
      */
-    fun createVCardFromContactData(contactData: ContactData, options: FieldOptions): Uri? {
+    override fun createVCardFromContactData(contactData: ContactData, options: FieldOptions): Uri? {
         return try {
             val vCardContent = VCardGenerator.generateVCardWithOptions(contactData, options)
             saveVCardToFile(contactData.displayName, vCardContent)
@@ -56,7 +56,7 @@ class VCardService @Inject constructor(
      * Extracts full contact data from a contact URI.
      * This can be used to preview contact info before generating vCard.
      */
-    fun getContactData(contactUri: Uri): ContactData? {
+    override fun getContactData(contactUri: Uri): ContactData? {
         return contactDataExtractor.getContactData(contactUri)
     }
 

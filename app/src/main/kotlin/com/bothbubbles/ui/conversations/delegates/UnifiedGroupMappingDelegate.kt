@@ -24,31 +24,30 @@ import com.bothbubbles.ui.conversations.isVoiceMessage
 import com.bothbubbles.ui.conversations.parseTapbackType
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.parsing.UrlParsingUtils
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
-import javax.inject.Inject
 
 /**
  * Delegate responsible for unified group mapping logic.
  * Handles merging iMessage/SMS conversations for the same contact.
  *
- * This delegate extracts the complex unified group to UI model conversion
- * logic from ConversationsViewModel, including optimized batch queries.
+ * Phase 8: Uses AssistedInject for lifecycle-safe construction.
+ * No more lateinit or initialize() - scope is provided at construction time.
  */
-class UnifiedGroupMappingDelegate @Inject constructor(
+class UnifiedGroupMappingDelegate @AssistedInject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val attachmentRepository: AttachmentRepository,
     private val linkPreviewRepository: LinkPreviewRepository,
-    private val handleRepository: HandleRepository
+    private val handleRepository: HandleRepository,
+    @Assisted private val scope: CoroutineScope
 ) {
-    private lateinit var scope: CoroutineScope
-
-    /**
-     * Initialize the delegate with coroutine scope.
-     */
-    fun initialize(scope: CoroutineScope) {
-        this.scope = scope
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): UnifiedGroupMappingDelegate
     }
 
     /**

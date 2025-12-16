@@ -28,4 +28,12 @@ interface SoundPlayer {
      * @param chatGuid The chat GUID for the incoming message
      */
     fun playReceiveSound(chatGuid: String)
+
+    /**
+     * Preview both sounds for a theme (receive then send).
+     * Used when user selects a new sound theme in settings.
+     *
+     * @param theme The sound theme to preview
+     */
+    fun previewSounds(theme: SoundTheme)
 }

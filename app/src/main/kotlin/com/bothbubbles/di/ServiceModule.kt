@@ -1,5 +1,13 @@
 package com.bothbubbles.di
 
+import com.bothbubbles.data.repository.PendingMessageRepository
+import com.bothbubbles.data.repository.PendingMessageSource
+import com.bothbubbles.services.contacts.ContactBlocker
+import com.bothbubbles.services.contacts.ContactBlockingService
+import com.bothbubbles.services.contacts.VCardExporter
+import com.bothbubbles.services.contacts.VCardService
+import com.bothbubbles.services.export.SmsRestoreService
+import com.bothbubbles.services.export.SmsRestorer
 import com.bothbubbles.services.messaging.IncomingMessageHandler
 import com.bothbubbles.services.messaging.IncomingMessageProcessor
 import com.bothbubbles.services.messaging.MessageSender
@@ -85,4 +93,44 @@ abstract class ServiceModule {
     abstract fun bindSoundPlayer(
         soundManager: SoundManager
     ): SoundPlayer
+
+    /**
+     * Binds [PendingMessageRepository] to the [PendingMessageSource] interface.
+     * Use PendingMessageSource in ViewModels for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindPendingMessageSource(
+        pendingMessageRepository: PendingMessageRepository
+    ): PendingMessageSource
+
+    /**
+     * Binds [VCardService] to the [VCardExporter] interface.
+     * Use VCardExporter in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindVCardExporter(
+        vCardService: VCardService
+    ): VCardExporter
+
+    /**
+     * Binds [ContactBlockingService] to the [ContactBlocker] interface.
+     * Use ContactBlocker in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindContactBlocker(
+        contactBlockingService: ContactBlockingService
+    ): ContactBlocker
+
+    /**
+     * Binds [SmsRestoreService] to the [SmsRestorer] interface.
+     * Use SmsRestorer in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSmsRestorer(
+        smsRestoreService: SmsRestoreService
+    ): SmsRestorer
 }

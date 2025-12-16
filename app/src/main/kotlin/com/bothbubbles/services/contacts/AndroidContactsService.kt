@@ -20,7 +20,7 @@ import javax.inject.Singleton
  * - ContactQueryHelper: Contact ID lookup and display name resolution
  * - ContactPhotoLoader: Photo URI retrieval
  * - ContactParser: Parsing contact data from cursors
- * - ContactBlockingService: Number blocking functionality
+ * - ContactBlocker: Number blocking functionality
  */
 @Singleton
 class AndroidContactsService @Inject constructor(
@@ -28,7 +28,7 @@ class AndroidContactsService @Inject constructor(
     private val contactQueryHelper: ContactQueryHelper,
     private val contactPhotoLoader: ContactPhotoLoader,
     private val contactParser: ContactParser,
-    private val contactBlockingService: ContactBlockingService
+    private val contactBlocker: ContactBlocker
 ) {
     companion object {
         private const val TAG = "AndroidContactsService"
@@ -228,7 +228,7 @@ class AndroidContactsService @Inject constructor(
      * Blocking requires the app to be the default dialer/SMS app or have system privileges.
      */
     fun canBlockNumbers(): Boolean {
-        return contactBlockingService.canBlockNumbers()
+        return contactBlocker.canBlockNumbers()
     }
 
     /**
@@ -238,14 +238,14 @@ class AndroidContactsService @Inject constructor(
      * Note: Blocking requires the app to be the default dialer or SMS app.
      */
     fun blockNumber(phoneNumber: String): Boolean {
-        return contactBlockingService.blockNumber(phoneNumber)
+        return contactBlocker.blockNumber(phoneNumber)
     }
 
     /**
      * Check if a number is blocked.
      */
     fun isNumberBlocked(phoneNumber: String): Boolean {
-        return contactBlockingService.isNumberBlocked(phoneNumber)
+        return contactBlocker.isNumberBlocked(phoneNumber)
     }
 
     /**
@@ -253,6 +253,6 @@ class AndroidContactsService @Inject constructor(
      * Returns true if successful.
      */
     fun unblockNumber(phoneNumber: String): Boolean {
-        return contactBlockingService.unblockNumber(phoneNumber)
+        return contactBlocker.unblockNumber(phoneNumber)
     }
 }

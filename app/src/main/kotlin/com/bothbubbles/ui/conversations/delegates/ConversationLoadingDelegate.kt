@@ -12,13 +12,13 @@ import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.ui.conversations.ConversationUiModel
 import com.bothbubbles.ui.conversations.toUiModel
 import com.bothbubbles.util.PerformanceProfiler
-import com.bothbubbles.util.PhoneNumberFormatter
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 private const val PAGE_SIZE = 25
 private const val INITIAL_LOAD_TARGET = 100 // Target number of conversations for instant display on boot
@@ -27,23 +27,31 @@ private const val INITIAL_LOAD_TARGET = 100 // Target number of conversations fo
  * Delegate responsible for loading and paginating conversations.
  * Handles initial load, pagination, and refresh logic.
  *
- * This delegate extracts the data loading logic from ConversationsViewModel,
- * including optimized batch queries and pagination.
+ * Phase 8: Uses AssistedInject for lifecycle-safe construction.
+ * No more lateinit or initialize() - scope is provided at construction time.
  */
-class ConversationLoadingDelegate @Inject constructor(
+class ConversationLoadingDelegate @AssistedInject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val attachmentRepository: AttachmentRepository,
     private val linkPreviewRepository: LinkPreviewRepository,
     private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
-    private val unifiedGroupMappingDelegate: UnifiedGroupMappingDelegate
+    private val unifiedGroupMappingDelegateFactory: UnifiedGroupMappingDelegate.Factory,
+    @Assisted private val scope: CoroutineScope
 ) {
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): ConversationLoadingDelegate
+    }
+
     companion object {
         private const val TAG = "ConversationLoadingDelegate"
     }
 
-    private lateinit var scope: CoroutineScope
+    // Create UnifiedGroupMappingDelegate via factory (Phase 8: delegate composition)
+    private val unifiedGroupMappingDelegate: UnifiedGroupMappingDelegate =
+        unifiedGroupMappingDelegateFactory.create(scope)
 
     // Loading state
     private val _isLoading = MutableStateFlow(true)
@@ -60,14 +68,6 @@ class ConversationLoadingDelegate @Inject constructor(
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
-
-    /**
-     * Initialize the delegate with coroutine scope.
-     */
-    fun initialize(scope: CoroutineScope) {
-        this.scope = scope
-        unifiedGroupMappingDelegate.initialize(scope)
-    }
 
     /**
      * Load the first page of conversations on startup.

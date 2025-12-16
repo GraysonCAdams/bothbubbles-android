@@ -14,7 +14,7 @@ import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.PhoneContact
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,7 +30,7 @@ class GroupCreatorViewModel @Inject constructor(
     private val handleRepository: HandleRepository,
     private val chatRepository: ChatRepository,
     private val api: BothBubblesApi,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
@@ -191,7 +191,7 @@ class GroupCreatorViewModel @Inject constructor(
             _uiState.update { it.copy(isCheckingAvailability = true) }
 
             val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
-            val isConnected = socketService.connectionState.value == ConnectionState.CONNECTED
+            val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
 
             var isIMessageAvailable = false
             var service = "SMS"

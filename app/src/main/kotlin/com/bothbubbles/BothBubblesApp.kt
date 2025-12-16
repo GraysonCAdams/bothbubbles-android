@@ -15,7 +15,7 @@ import coil.decode.VideoFrameDecoder
 import coil.disk.DiskCache
 import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.data.repository.PendingMessageRepository
+import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
@@ -66,7 +66,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     lateinit var shortcutService: ShortcutService
 
     @Inject
-    lateinit var pendingMessageRepository: PendingMessageRepository
+    lateinit var pendingMessageSource: PendingMessageSource
 
     @Inject
     @ApplicationScope
@@ -282,10 +282,10 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 if (!setupComplete) return@launch
 
                 // Re-enqueue any pending messages and clean up sent ones
-                pendingMessageRepository.reEnqueuePendingMessages()
-                pendingMessageRepository.cleanupSentMessages()
+                pendingMessageSource.reEnqueuePendingMessages()
+                pendingMessageSource.cleanupSentMessages()
 
-                val unsentCount = pendingMessageRepository.getUnsentCount()
+                val unsentCount = pendingMessageSource.getUnsentCount()
                 if (unsentCount > 0) {
                     Log.i(TAG, "Found $unsentCount unsent messages in queue")
                 }

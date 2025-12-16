@@ -6,8 +6,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.messaging.MessageSender
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.util.StableList
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -30,8 +30,8 @@ class BubbleChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
-    private val messageSendingService: MessageSendingService,
-    private val socketService: SocketService
+    private val messageSender: MessageSender,
+    private val socketConnection: SocketConnection
 ) : ViewModel() {
 
     private val chatGuid: String = checkNotNull(savedStateHandle[BubbleActivity.EXTRA_CHAT_GUID])
@@ -104,7 +104,7 @@ class BubbleChatViewModel @Inject constructor(
 
     private fun observeSocketConnection() {
         viewModelScope.launch {
-            socketService.connectionState.map { it == com.bothbubbles.services.socket.ConnectionState.CONNECTED }.collect { connected ->
+            socketConnection.connectionState.map { it == com.bothbubbles.services.socket.ConnectionState.CONNECTED }.collect { connected ->
                 _uiState.update { it.copy(isServerConnected = connected) }
             }
         }
@@ -142,7 +142,7 @@ class BubbleChatViewModel @Inject constructor(
         }
 
         viewModelScope.launch {
-            messageSendingService.sendUnified(
+            messageSender.sendUnified(
                 chatGuid = chatGuid,
                 text = text
             ).fold(

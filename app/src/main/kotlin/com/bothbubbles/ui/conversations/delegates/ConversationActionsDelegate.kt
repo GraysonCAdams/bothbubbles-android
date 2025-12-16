@@ -15,57 +15,48 @@ import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.conversations.ConversationUiModel
-import com.bothbubbles.ui.util.toStable
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import java.io.File
-import javax.inject.Inject
 
 /**
  * Delegate responsible for user actions on conversations.
  * Handles pin, mute, snooze, archive, delete, mark read/unread, block, etc.
  *
- * This delegate extracts the action handling logic from ConversationsViewModel,
- * including optimistic UI updates and background persistence.
+ * Phase 8: Uses AssistedInject for lifecycle-safe construction and
+ * SharedFlow events instead of callbacks for ViewModel coordination.
  */
-class ConversationActionsDelegate @Inject constructor(
+class ConversationActionsDelegate @AssistedInject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val handleRepository: HandleRepository,
     private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
     private val androidContactsService: AndroidContactsService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @Assisted private val scope: CoroutineScope
 ) {
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): ConversationActionsDelegate
+    }
+
     companion object {
         private const val TAG = "ConversationActionsDelegate"
     }
 
-    private lateinit var scope: CoroutineScope
+    // ============================================================================
+    // Event Flow - Phase 8: Replaces callbacks
+    // ============================================================================
 
-    // Event to trigger scroll when a chat is pinned (emits target index to scroll to)
-    private val _scrollToIndexEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
-    val scrollToIndexEvent: SharedFlow<Int> = _scrollToIndexEvent.asSharedFlow()
-
-    // Callbacks for optimistic updates
-    private var onConversationsUpdated: ((List<ConversationUiModel>) -> Unit)? = null
-
-    /**
-     * Initialize the delegate with coroutine scope.
-     */
-    fun initialize(
-        scope: CoroutineScope,
-        onConversationsUpdated: (List<ConversationUiModel>) -> Unit
-    ) {
-        this.scope = scope
-        this.onConversationsUpdated = onConversationsUpdated
-    }
+    private val _events = MutableSharedFlow<ConversationEvent>(extraBufferCapacity = 64)
+    val events: SharedFlow<ConversationEvent> = _events.asSharedFlow()
 
     /**
      * Handle swipe action on a conversation.
@@ -98,7 +89,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid == chatGuid) conv.copy(isSnoozed = true, snoozeUntil = snoozeUntil)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.snoozeChat(chatGuid, durationMs)
@@ -115,7 +106,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid == chatGuid) conv.copy(isSnoozed = false, snoozeUntil = null)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.unsnoozeChat(chatGuid)
@@ -132,7 +123,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid == chatGuid) conv.copy(unreadCount = 1)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.markChatAsUnread(chatGuid)
@@ -173,14 +164,14 @@ class ConversationActionsDelegate @Inject constructor(
                     .thenBy { it.pinIndex }
                     .thenByDescending { it.lastMessageTimestamp }
             )
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Emit scroll event when pinning (not unpinning)
             if (newPinState) {
                 // If more than 3 pins, scroll to the new pin position (end of pins)
                 // Otherwise scroll to top
                 val scrollIndex = if (currentPinnedCount >= 3) newPinIndex else 0
-                _scrollToIndexEvent.tryEmit(scrollIndex)
+                _events.emit(ConversationEvent.ScrollToIndex(scrollIndex))
             }
 
             // Persist to database in background - update both chats and unified_chat_groups
@@ -222,7 +213,7 @@ class ConversationActionsDelegate @Inject constructor(
                     .thenBy { it.pinIndex }
                     .thenByDescending { it.lastMessageTimestamp }
             )
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database - update both chats table and unified_chat_groups table
             reorderedGuids.forEachIndexed { index, guid ->
@@ -298,7 +289,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid == chatGuid) conv.copy(isMuted = newMuteState)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.setMuted(chatGuid, newMuteState)
@@ -312,7 +303,7 @@ class ConversationActionsDelegate @Inject constructor(
         scope.launch {
             // Optimistically remove from list immediately for instant feedback
             val updated = conversations.filter { it.guid != chatGuid }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.setArchived(chatGuid, true)
@@ -326,7 +317,7 @@ class ConversationActionsDelegate @Inject constructor(
         scope.launch {
             // Optimistically remove from list immediately for instant feedback
             val updated = conversations.filter { it.guid != chatGuid }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.deleteChat(chatGuid)
@@ -343,7 +334,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid == chatGuid) conv.copy(unreadCount = 0)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.markChatAsRead(chatGuid)
@@ -360,7 +351,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid in chatGuids) conv.copy(unreadCount = 1)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatGuids.forEach { chatGuid ->
@@ -379,7 +370,7 @@ class ConversationActionsDelegate @Inject constructor(
                 if (conv.guid in chatGuids) conv.copy(unreadCount = 0)
                 else conv
             }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatGuids.forEach { chatGuid ->
@@ -395,7 +386,7 @@ class ConversationActionsDelegate @Inject constructor(
         scope.launch {
             // Optimistically remove from list immediately for instant feedback
             val updated = conversations.filter { it.guid !in chatGuids }
-            onConversationsUpdated?.invoke(updated)
+            _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatGuids.forEach { chatGuid ->

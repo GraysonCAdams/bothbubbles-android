@@ -12,7 +12,7 @@ import com.bothbubbles.data.repository.GifRepository
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.services.contacts.FieldOptions
-import com.bothbubbles.services.contacts.VCardService
+import com.bothbubbles.services.contacts.VCardExporter
 import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.smartreply.SmartReplyService
@@ -77,7 +77,7 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val gifRepository: GifRepository,
-    private val vCardService: VCardService,
+    private val vCardExporter: VCardExporter,
     private val settingsDataStore: SettingsDataStore,
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
@@ -720,7 +720,7 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Returns null if the contact cannot be read.
      */
     fun getContactData(contactUri: Uri): ContactData? {
-        return vCardService.getContactData(contactUri)
+        return vCardExporter.getContactData(contactUri)
     }
 
     /**
@@ -728,7 +728,7 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Uses default options (includes all fields).
      */
     fun addContactFromPicker(contactUri: Uri) {
-        val contactData = vCardService.getContactData(contactUri) ?: return
+        val contactData = vCardExporter.getContactData(contactUri) ?: return
         val defaultOptions = FieldOptions()
         addContactAsVCard(contactData, defaultOptions)
     }
@@ -738,7 +738,7 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Returns true if successful, false otherwise.
      */
     fun addContactAsVCard(contactData: ContactData, options: FieldOptions): Boolean {
-        val vcardUri = vCardService.createVCardFromContactData(contactData, options)
+        val vcardUri = vCardExporter.createVCardFromContactData(contactData, options)
         return if (vcardUri != null) {
             addAttachment(vcardUri)
             true

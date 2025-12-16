@@ -170,7 +170,12 @@ class ChatSendDelegateTest {
         fakePendingRepo.queueMessage(
             chatGuid = "test-chat",
             text = "Test message",
-            deliveryMode = MessageDeliveryMode.IMESSAGE
+            subject = null,
+            replyToGuid = null,
+            effectId = null,
+            attachments = emptyList(),
+            deliveryMode = MessageDeliveryMode.IMESSAGE,
+            forcedLocalId = null
         )
 
         // ASSERT
