@@ -1,7 +1,7 @@
 # Phase 7: Future Scope — Unified Implementation Plan
 
-> **Status**: Backlog (After Chat Refactor Ships)
-> **Blocking**: Phases 2-4 must be complete and stable
+> **Status**: Ready to Start (Phase 2+3 Complete for Chat)
+> **Blocking**: None - can proceed now
 > **Code Changes**: Apply Chat patterns to other ViewModels
 > **Risk Level**: Medium (same patterns, different screens)
 
@@ -9,18 +9,79 @@
 
 The Chat screen was the biggest and most complex part of the app, so we fixed it first. This phase applies the same architectural patterns to **ConversationsViewModel**, **SetupViewModel**, and service initialization.
 
+## Pre-Requisite: Interface Extractions (High Priority)
+
+Before migrating other ViewModels, extract interfaces for remaining concrete dependencies:
+
+### 1. PendingMessageRepository → PendingMessageSource (BLOCKING)
+
+**Why**: ChatSendDelegate depends on `PendingMessageRepository` directly, blocking full unit testing.
+
+```kotlin
+// CURRENT - Concrete class, untestable
+class ChatSendDelegate @AssistedInject constructor(
+    private val pendingMessageRepository: PendingMessageRepository,  // Concrete!
+    private val messageSender: MessageSender,  // Interface ✓
+    // ...
+)
+
+// TARGET - Interface for testability
+interface PendingMessageSource {
+    suspend fun queueMessage(chatGuid: String, text: String, deliveryMode: MessageDeliveryMode, ...)
+    suspend fun retryMessage(tempGuid: String)
+    suspend fun cancelMessage(tempGuid: String)
+}
+
+class PendingMessageRepository @Inject constructor(...) : PendingMessageSource
+```
+
+**Impact**: Enables FakePendingMessageRepository injection for full ChatSendDelegate testing.
+
+### 2. VCardService → VCardExporter (Medium Priority)
+
+**Why**: ChatComposerDelegate depends on `VCardService` directly.
+
+```kotlin
+// CURRENT
+import com.bothbubbles.services.contacts.VCardService
+
+// TARGET
+interface VCardExporter {
+    suspend fun exportContact(contactUri: Uri): Result<String>
+}
+```
+
+### 3. Concrete Service Dependencies Found (2024-12)
+
+UI modules still importing concrete services instead of interfaces:
+
+| Module | Concrete Import | Should Use |
+|--------|-----------------|------------|
+| `BubbleChatViewModel` | `MessageSendingService`, `SocketService` | `MessageSender`, `SocketConnection` |
+| `ConversationObserverDelegate` | `SocketService` | `SocketConnection` |
+| `RecipientSelectionDelegate` | `SocketService` | `SocketConnection` |
+| `ContactSearchDelegate` | `SocketService` | `SocketConnection` |
+| `GroupCreatorViewModel` | `SocketService` | `SocketConnection` |
+| `SetupViewModel` | `SocketService` | `SocketConnection` |
+| `SyncDelegate` | `SocketService` | `SocketConnection` |
+| `ServerSettingsViewModel` | `SocketService` | `SocketConnection` |
+| `AboutViewModel` | `SocketService` | `SocketConnection` |
+| `SettingsViewModel` | `SocketService`, `SoundManager` | `SocketConnection`, `SoundPlayer` |
+| `ChatComposerDelegate` | `VCardService` | `VCardExporter` (needs extraction) |
+
 ## Core Principle
 
 > **Don't leave the app half-modernized. Apply consistent patterns everywhere.**
 
 ## When to Start
 
-- [ ] Chat refactor (Phases 2-4) is complete
+- [x] Chat refactor (Phases 2-3) is complete for ChatViewModel ✓ (2024-12)
+- [ ] Phase 4 (Delegate Coupling) complete OR decided to defer
 - [ ] Chat refactor is stable and shipped
 - [ ] No active regressions from Chat changes
 - [ ] Team capacity available for next cycle
 
-**Do NOT start this while Chat refactor is in progress.**
+**Can proceed now** with interface extractions (PendingMessageSource, VCardExporter) and simple migrations (SettingsViewModel).
 
 ## Target 1: ConversationsViewModel (Primary)
 
@@ -306,16 +367,38 @@ object ServiceInitModule {
 
 | Target | Priority | Effort | Dependency |
 |--------|----------|--------|------------|
-| ConversationsViewModel | P1 - High | 1-2 days | None |
-| SetupViewModel DI | P2 - Medium | 0.5 day | None |
-| Service Initialization | P3 - Low | 0.5 day | None |
+| **PendingMessageSource interface** | P0 - Critical | 0.5 day | None - enables full safety net testing |
+| **SocketService → SocketConnection** (other modules) | P1 - High | 0.5 day | None - interfaces already exist |
+| **VCardExporter interface** | P2 - Medium | 0.5 day | None |
+| ConversationsViewModel | P2 - Medium | 1-2 days | P1 completion for SocketConnection |
+| SettingsViewModel | P2 - Medium | 0.5 day | P1 completion for SocketConnection |
+| SetupViewModel DI | P3 - Low | 0.5 day | P1 completion for SocketConnection |
+| BubbleChatViewModel | P3 - Low | 0.5 day | None |
+| Service Initialization | P4 - Optional | 0.5 day | None |
+
+### Quick Wins (Can Do Now)
+
+These modules just need import changes (interfaces already exist):
+- `SettingsViewModel`: Change `SocketService` → `SocketConnection`, `SoundManager` → `SoundPlayer`
+- `ServerSettingsViewModel`: Change `SocketService` → `SocketConnection`
+- `AboutViewModel`: Change `SocketService` → `SocketConnection`
 
 ## Exit Criteria
 
+### Interface Extractions (P0-P2)
+- [ ] `PendingMessageSource` interface extracted, FakePendingMessageRepository updated
+- [ ] `VCardExporter` interface extracted from VCardService
+- [ ] All UI modules use `SocketConnection` interface (not `SocketService`)
+- [ ] All UI modules use `SoundPlayer` interface (not `SoundManager`)
+- [ ] ChatSendDelegateTest fully enabled (tests delegate instantiation)
+
+### ViewModel Migrations (P2-P3)
 - [ ] ConversationsViewModel uses AssistedInject for all delegates
 - [ ] No callback-based initialization in ConversationObserverDelegate
 - [ ] SetupViewModel uses DI for all delegates (no manual construction)
 - [ ] Service initialization is safe (AndroidX Startup OR documented order)
+
+### Quality Gates
 - [ ] No `lateinit var` for critical state in any delegate
 - [ ] All tests pass
 - [ ] No regressions in Conversations or Setup flows
@@ -323,6 +406,11 @@ object ServiceInitModule {
 ## Verification Commands
 
 ```bash
+# Check for concrete service imports in UI (should be 0 when complete)
+grep -r "import com.bothbubbles.services.socket.SocketService" app/src/main/kotlin/com/bothbubbles/ui/
+grep -r "import com.bothbubbles.services.sound.SoundManager" app/src/main/kotlin/com/bothbubbles/ui/
+grep -r "import com.bothbubbles.services.messaging.MessageSendingService" app/src/main/kotlin/com/bothbubbles/ui/
+
 # Check for remaining initialize() calls
 grep -r "\.initialize(" app/src/main/kotlin/com/bothbubbles/ui/conversations/
 grep -r "\.initialize(" app/src/main/kotlin/com/bothbubbles/ui/setup/
@@ -336,6 +424,9 @@ grep -r "= .*Delegate(" app/src/main/kotlin/com/bothbubbles/ui/setup/SetupViewMo
 
 # Verify AssistedInject usage
 grep -r "@AssistedInject" app/src/main/kotlin/com/bothbubbles/ui/conversations/delegates/ | wc -l
+
+# Run safety net tests
+JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew test --tests "ChatSendDelegateTest"
 ```
 
 ## Process
@@ -347,4 +438,4 @@ grep -r "@AssistedInject" app/src/main/kotlin/com/bothbubbles/ui/conversations/d
 
 ---
 
-**Note**: This phase is planned for the release cycle AFTER Chat refactor ships. Do not start until Chat is stable.
+**Status Update (2024-12)**: Phase 2+3 complete for ChatViewModel. Interface extractions (PendingMessageSource, VCardExporter) and quick-win migrations (SettingsViewModel) can proceed now. ConversationsViewModel migration should wait until after Phase 4 or stability verification.

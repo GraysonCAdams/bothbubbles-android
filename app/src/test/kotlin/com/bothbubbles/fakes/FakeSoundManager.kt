@@ -1,9 +1,10 @@
 package com.bothbubbles.fakes
 
+import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
 
 /**
- * Fake implementation of SoundManager for unit testing.
+ * Fake implementation of [SoundPlayer] for unit testing.
  *
  * This fake records all method calls without playing actual sounds.
  *
@@ -12,14 +13,14 @@ import com.bothbubbles.services.sound.SoundTheme
  * val fakeSound = FakeSoundManager()
  *
  * // Use in test
- * val delegate = ChatSendDelegate(soundManager = fakeSound, ...)
+ * val delegate = ChatSendDelegate(soundPlayer = fakeSound, ...)
  * delegate.sendMessage(...)
  *
  * // Verify
  * assertEquals(1, fakeSound.sendSoundPlayCount)
  * ```
  */
-class FakeSoundManager {
+class FakeSoundManager : SoundPlayer {
 
     // ===== Call Recording =====
 
@@ -38,11 +39,11 @@ class FakeSoundManager {
 
     // ===== Interface Methods =====
 
-    fun playSendSound() {
+    override fun playSendSound() {
         sendSoundPlayCount++
     }
 
-    fun playReceiveSound(chatGuid: String) {
+    override fun playReceiveSound(chatGuid: String) {
         receiveSoundPlayCount++
         receiveSoundChatGuids.add(chatGuid)
     }

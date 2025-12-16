@@ -97,9 +97,10 @@ class FakeMessageSender : MessageSender {
         chatGuid: String,
         messageGuid: String,
         reaction: String,
+        selectedMessageText: String?,
         partIndex: Int
     ): Result<MessageEntity> {
-        sendReactionCalls.add(SendReactionCall(chatGuid, messageGuid, reaction, partIndex))
+        sendReactionCalls.add(SendReactionCall(chatGuid, messageGuid, reaction, selectedMessageText, partIndex))
         return sendReactionResult
     }
 
@@ -107,9 +108,10 @@ class FakeMessageSender : MessageSender {
         chatGuid: String,
         messageGuid: String,
         reaction: String,
+        selectedMessageText: String?,
         partIndex: Int
     ): Result<Unit> {
-        removeReactionCalls.add(RemoveReactionCall(chatGuid, messageGuid, reaction, partIndex))
+        removeReactionCalls.add(RemoveReactionCall(chatGuid, messageGuid, reaction, selectedMessageText, partIndex))
         return removeReactionResult
     }
 
@@ -214,6 +216,7 @@ class FakeMessageSender : MessageSender {
         val chatGuid: String,
         val messageGuid: String,
         val reaction: String,
+        val selectedMessageText: String?,
         val partIndex: Int
     )
 
@@ -221,6 +224,7 @@ class FakeMessageSender : MessageSender {
         val chatGuid: String,
         val messageGuid: String,
         val reaction: String,
+        val selectedMessageText: String?,
         val partIndex: Int
     )
 

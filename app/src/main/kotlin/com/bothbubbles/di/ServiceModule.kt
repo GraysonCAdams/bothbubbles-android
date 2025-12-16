@@ -8,6 +8,8 @@ import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.sound.SoundManager
+import com.bothbubbles.services.sound.SoundPlayer
 import dagger.Binds
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -73,4 +75,14 @@ abstract class ServiceModule {
     abstract fun bindNotifier(
         notificationService: NotificationService
     ): Notifier
+
+    /**
+     * Binds [SoundManager] to the [SoundPlayer] interface.
+     * Use SoundPlayer in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSoundPlayer(
+        soundManager: SoundManager
+    ): SoundPlayer
 }

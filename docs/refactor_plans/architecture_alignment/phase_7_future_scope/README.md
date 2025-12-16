@@ -2,7 +2,7 @@
 
 > **Implementation Plan**: See [impl/README.md](impl/README.md) for detailed migration steps and code examples.
 >
-> **Status**: Backlog. Do NOT start until Chat refactor (Phases 2-4) is stable and shipped.
+> **Status**: Ready to Start (Phase 2+3 Complete for Chat, 2024-12)
 
 ## Layman's Explanation
 
@@ -57,20 +57,36 @@ observer.events.collect { event ->
 
 | Target | Priority | Effort | Dependency |
 |--------|----------|--------|------------|
-| ConversationsViewModel | P1 - High | 1-2 days | None |
-| SetupViewModel DI | P2 - Medium | 0.5 day | None |
-| Service Initialization | P3 - Low | 0.5 day | None |
+| **PendingMessageSource interface** | P0 - Critical | 0.5 day | Enables full safety net testing |
+| **Migrate remaining modules to interfaces** | P1 - High | 0.5 day | Interfaces exist |
+| **VCardExporter interface** | P2 - Medium | 0.5 day | None |
+| ConversationsViewModel | P2 - Medium | 1-2 days | P1 completion |
+| SetupViewModel DI | P3 - Low | 0.5 day | P1 completion |
+| Service Initialization | P4 - Optional | 0.5 day | None |
+
+### Quick Wins (Can Do Now)
+
+11 modules still import concrete services. See [impl/README.md](impl/README.md) for full list.
 
 ## Exit Criteria
 
+### Interface Extractions
+- [ ] `PendingMessageSource` interface extracted (enables full safety net testing)
+- [ ] `VCardExporter` interface extracted
+- [ ] All UI modules use interfaces (not concrete services)
+
+### ViewModel Migrations
 - [ ] ConversationsViewModel uses AssistedInject for all delegates
 - [ ] No callback-based initialization in ConversationObserverDelegate
 - [ ] SetupViewModel uses DI for all delegates
-- [ ] Service initialization is safe
 - [ ] Patterns match Chat architecture
 
 ## When to Start
 
-> **Do NOT start this until Chat (Phases 2-4) is stable and shipped.**
->
-> Treat this as "Technical Debt Paydown" for the next release cycle.
+**Can proceed now** with:
+- Interface extractions (PendingMessageSource, VCardExporter)
+- Quick-win migrations (SettingsViewModel, AboutViewModel, etc.)
+
+**Wait for stability** before:
+- ConversationsViewModel full migration
+- SetupViewModel full migration

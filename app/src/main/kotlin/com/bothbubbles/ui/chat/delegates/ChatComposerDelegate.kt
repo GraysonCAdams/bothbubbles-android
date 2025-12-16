@@ -16,7 +16,7 @@ import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.smartreply.SmartReplyService
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.AttachmentWarning
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.ChatUiState
@@ -31,7 +31,11 @@ import com.bothbubbles.ui.chat.state.SyncState
 import com.bothbubbles.ui.components.input.SuggestionItem
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.util.StableList
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -40,16 +44,14 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.filterNotNull
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate that handles all composer-related state and logic for ChatViewModel.
@@ -64,11 +66,14 @@ import javax.inject.Inject
  * - GIF picker integration
  * - vCard/contact attachment integration
  *
- * This delegate follows the composition pattern where ChatViewModel
- * delegates specific concerns to focused helper classes.
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
+ *
+ * Phase 2: Uses SocketConnection interface instead of SocketService
+ * for improved testability.
  */
 @OptIn(FlowPreview::class)
-class ChatComposerDelegate @Inject constructor(
+class ChatComposerDelegate @AssistedInject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val gifRepository: GifRepository,
@@ -76,21 +81,33 @@ class ChatComposerDelegate @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val smartReplyService: SmartReplyService,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val socketService: SocketService,
-    private val chatRepository: ChatRepository
+    private val socketConnection: SocketConnection,
+    private val chatRepository: ChatRepository,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val uiStateFlow: StateFlow<ChatUiState>,
+    @Assisted private val syncStateFlow: StateFlow<SyncState>,
+    @Assisted private val sendStateFlow: StateFlow<SendState>,
+    @Assisted private val messagesStateFlow: StateFlow<StableList<MessageUiModel>>,
+    @Assisted private val onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            uiStateFlow: StateFlow<ChatUiState>,
+            syncStateFlow: StateFlow<SyncState>,
+            sendStateFlow: StateFlow<SendState>,
+            messagesStateFlow: StateFlow<StableList<MessageUiModel>>,
+            onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
+        ): ChatComposerDelegate
+    }
+
     companion object {
         private const val TAG = "ChatComposerDelegate"
     }
-
-    // Initialization context
-    private lateinit var scope: CoroutineScope
-    private lateinit var uiStateFlow: StateFlow<ChatUiState>
-    private lateinit var syncStateFlow: StateFlow<SyncState>
-    private lateinit var sendStateFlow: StateFlow<SendState>
-    private lateinit var onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
-    private lateinit var messagesStateFlow: StateFlow<StableList<MessageUiModel>>
-    private lateinit var chatGuid: String
 
     // ============================================================================
     // TYPING INDICATOR STATE
@@ -118,10 +135,6 @@ class ChatComposerDelegate @Inject constructor(
     // ============================================================================
 
     private val _mlSuggestions = MutableStateFlow<List<String>>(emptyList())
-
-    // Late-initialized smart reply flow
-    private lateinit var _smartReplySuggestions: StateFlow<List<SuggestionItem>>
-    val smartReplySuggestions: StateFlow<List<SuggestionItem>> get() = _smartReplySuggestions
 
     // ============================================================================
     // INTERNAL MUTABLE STATE
@@ -169,54 +182,22 @@ class ChatComposerDelegate @Inject constructor(
         val attachmentWarning: AttachmentWarning? = null
     )
 
-    // Late-initialized combined state flow
-    private lateinit var _state: StateFlow<ComposerState>
-    val state: StateFlow<ComposerState> get() = _state
-
     // GIF picker state - delegated to repository
     val gifPickerState get() = gifRepository.state
     val gifSearchQuery get() = gifRepository.searchQuery
 
-    /**
-     * Initialize the delegate with external dependencies.
-     * Must be called before any composer operations.
-     *
-     * @param chatGuid The chat GUID for typing indicators
-     * @param scope CoroutineScope for launching operations
-     * @param uiState StateFlow of the main ChatUiState
-     * @param syncState StateFlow from ChatSyncDelegate
-     * @param sendState StateFlow from ChatSendDelegate
-     * @param messagesState StateFlow of messages for smart reply context
-     * @param onUiStateUpdate Callback to update ChatUiState (for attachment warnings, counts, etc.)
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        uiState: StateFlow<ChatUiState>,
-        syncState: StateFlow<SyncState>,
-        sendState: StateFlow<SendState>,
-        messagesState: StateFlow<StableList<MessageUiModel>>,
-        onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        this.uiStateFlow = uiState
-        this.syncStateFlow = syncState
-        this.sendStateFlow = sendState
-        this.messagesStateFlow = messagesState
-        this.onUiStateUpdate = onUiStateUpdate
+    // Combined state flow
+    val state: StateFlow<ComposerState> = createComposerStateFlow()
 
-        // Initialize the combined state flow
-        _state = createComposerStateFlow()
+    // Smart reply suggestions
+    val smartReplySuggestions: StateFlow<List<SuggestionItem>> = combine(
+        _mlSuggestions,
+        quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
+    ) { mlSuggestions, templates ->
+        getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
+    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-        // Initialize smart reply suggestions flow
-        _smartReplySuggestions = combine(
-            _mlSuggestions,
-            quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
-        ) { mlSuggestions, templates ->
-            getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
-        }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
-
+    init {
         // Observe quality settings
         observeQualitySettings()
         // Observe typing indicator settings
@@ -831,7 +812,7 @@ class ChatComposerDelegate @Inject constructor(
             if (!isCurrentlyTyping && (now - lastStartedTypingTime > typingCooldownMs)) {
                 isCurrentlyTyping = true
                 lastStartedTypingTime = now
-                socketService.sendStartedTyping(chatGuid)
+                socketConnection.sendStartedTyping(chatGuid)
             }
 
             // Set up debounce to send stopped-typing after inactivity
@@ -839,14 +820,14 @@ class ChatComposerDelegate @Inject constructor(
                 delay(typingDebounceMs)
                 if (isCurrentlyTyping) {
                     isCurrentlyTyping = false
-                    socketService.sendStoppedTyping(chatGuid)
+                    socketConnection.sendStoppedTyping(chatGuid)
                 }
             }
         } else {
             // Text cleared - immediately send stopped-typing
             if (isCurrentlyTyping) {
                 isCurrentlyTyping = false
-                socketService.sendStoppedTyping(chatGuid)
+                socketConnection.sendStoppedTyping(chatGuid)
             }
         }
     }
@@ -859,7 +840,7 @@ class ChatComposerDelegate @Inject constructor(
         typingDebounceJob?.cancel()
         if (isCurrentlyTyping) {
             isCurrentlyTyping = false
-            socketService.sendStoppedTyping(chatGuid)
+            socketConnection.sendStoppedTyping(chatGuid)
         }
     }
 

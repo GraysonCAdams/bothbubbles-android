@@ -6,6 +6,9 @@ import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.ui.chat.state.SearchState
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.util.text.TextNormalization
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -16,7 +19,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
 
 /**
  * Delegate responsible for in-chat message search functionality.
@@ -29,11 +31,21 @@ import javax.inject.Inject
  * - Diacritic-insensitive matching (e.g., "cafe" matches "café")
  * - Expanded search scope: message text, subject, and attachment filenames
  * - Search results with snippets for the "View All" bottom sheet
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatSearchDelegate @Inject constructor(
+class ChatSearchDelegate @AssistedInject constructor(
     private val messageDao: MessageDao,
-    private val attachmentDao: AttachmentDao
+    private val attachmentDao: AttachmentDao,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val chatGuids: List<String>
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope, chatGuids: List<String>): ChatSearchDelegate
+    }
 
     private companion object {
         const val SEARCH_DEBOUNCE_MS = 150L
@@ -42,13 +54,11 @@ class ChatSearchDelegate @Inject constructor(
         const val DATABASE_SEARCH_LIMIT = 100
     }
 
-    private lateinit var scope: CoroutineScope
     private var searchJob: Job? = null
     private var databaseSearchJob: Job? = null
 
     // Cross-delegate references (set after initialization)
     private var messageListDelegate: ChatMessageListDelegate? = null
-    private var chatGuids: List<String> = emptyList()
 
     // ============================================================================
     // CONSOLIDATED SEARCH STATE
@@ -57,14 +67,6 @@ class ChatSearchDelegate @Inject constructor(
     // ============================================================================
     private val _state = MutableStateFlow(SearchState())
     val state: StateFlow<SearchState> = _state.asStateFlow()
-
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(scope: CoroutineScope, chatGuids: List<String> = emptyList()) {
-        this.scope = scope
-        this.chatGuids = chatGuids
-    }
 
     /**
      * Set cross-delegate references for internal message lookup.

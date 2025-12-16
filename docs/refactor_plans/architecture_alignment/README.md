@@ -20,10 +20,10 @@ Our architecture aims for five core principles:
 |-------|-------|--------|----------------|
 | [Phase 0](phase_0_shared_vision/) | Shared Vision & ADRs | ✅ **Complete** | [impl/](phase_0_shared_vision/impl/) |
 | [Phase 1](phase_1_docs_alignment/) | Documentation Alignment | Parallel | [impl/](phase_1_docs_alignment/impl/) |
-| [Phase 2](phase_2_dependency_boundaries/) | Dependency Boundaries | **Next** (with Phase 3) | [impl/](phase_2_dependency_boundaries/impl/) |
-| [Phase 3](phase_3_delegate_lifecycle/) | Delegate Lifecycle | **Next** (with Phase 2) | [impl/](phase_3_delegate_lifecycle/impl/) |
-| [Phase 4](phase_4_delegate_coupling/) | Delegate Coupling | After Phase 3 | [impl/](phase_4_delegate_coupling/impl/) |
-| [Phase 5](phase_5_service_layer_hygiene/) | Service Layer Hygiene | Optional | [impl/](phase_5_service_layer_hygiene/impl/) |
+| [Phase 2](phase_2_dependency_boundaries/) | Dependency Boundaries | ✅ **Complete** (ChatViewModel) | [impl/](phase_2_dependency_boundaries/impl/) |
+| [Phase 3](phase_3_delegate_lifecycle/) | Delegate Lifecycle | ✅ **Complete** (ChatViewModel) | [impl/](phase_3_delegate_lifecycle/impl/) |
+| [Phase 4](phase_4_delegate_coupling/) | Delegate Coupling | **Next** | [impl/](phase_4_delegate_coupling/impl/) |
+| [Phase 5](phase_5_service_layer_hygiene/) | Service Layer Hygiene | ✅ **Complete** | [impl/](phase_5_service_layer_hygiene/impl/) |
 | [Phase 6](phase_6_modularization_optional/) | Modularization | Optional/Deferred | [impl/](phase_6_modularization_optional/impl/) |
 | [Phase 7](phase_7_future_scope/) | Future Scope | Backlog | [impl/](phase_7_future_scope/impl/) |
 
@@ -39,17 +39,17 @@ Our architecture aims for five core principles:
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Phase 2+3 (Combined): Interfaces + Lifecycle                       │
-│  - Swap concrete services to interfaces                             │
-│  - Convert to AssistedInject factories                              │
-│  - Migrate one delegate at a time                                   │
+│  Phase 2+3 (Combined): Interfaces + Lifecycle  ✅ COMPLETE          │
+│  - Swap concrete services to interfaces ✓                           │
+│  - Convert to AssistedInject factories ✓                            │
+│  - All 14 ChatViewModel delegates migrated ✓                        │
 │                                                                     │
-│  Phase 1 runs in parallel: Update docs with each PR                 │
+│  Interfaces created: MessageSender, SocketConnection, SoundPlayer   │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│  Phase 4: Delegate Coupling Reduction                               │
+│  Phase 4: Delegate Coupling Reduction  ← NEXT                       │
 │  - Remove setDelegates() patterns                                   │
 │  - ViewModel becomes single coordinator                             │
 │  - Extract workflows for complex flows                              │
@@ -59,8 +59,9 @@ Our architecture aims for five core principles:
 ┌─────────────────────────────────────────────────────────────────────┐
 │  Chat Architecture Complete!                                        │
 │                                                                     │
-│  Optional: Phase 5 (Service Hygiene), Phase 6 (Modularization)      │
-│  Future: Phase 7 (ConversationsViewModel, SetupViewModel)           │
+│  Phase 5 (Service Hygiene): ✅ COMPLETE                             │
+│  Phase 6 (Modularization): Optional/Deferred                        │
+│  Phase 7 (Other ViewModels): ConversationsViewModel, SetupViewModel │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 

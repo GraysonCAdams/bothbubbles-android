@@ -40,6 +40,8 @@ enum class SoundTheme(val displayName: String) {
  * - Respects DND (Do Not Disturb) and silent/vibrate modes
  * - Uses media volume stream for playback
  * - User can disable sounds via settings
+ *
+ * Implements [SoundPlayer] interface for testability in UI layer consumers.
  */
 @Singleton
 class SoundManager @Inject constructor(
@@ -49,7 +51,7 @@ class SoundManager @Inject constructor(
     private val activeConversationManager: ActiveConversationManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
-) {
+) : SoundPlayer {
     companion object {
         private const val TAG = "SoundManager"
         private const val MAX_STREAMS = 2
@@ -135,7 +137,7 @@ class SoundManager @Inject constructor(
      * Background notifications use system default sounds.
      * Respects DND, sound mode, and user settings.
      */
-    fun playSendSound() {
+    override fun playSendSound() {
         applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
                 Log.d(TAG, "App in background - skipping send sound (use system notification)")
@@ -156,7 +158,7 @@ class SoundManager @Inject constructor(
      *
      * @param chatGuid The chat GUID for the incoming message
      */
-    fun playReceiveSound(chatGuid: String) {
+    override fun playReceiveSound(chatGuid: String) {
         applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
                 Log.d(TAG, "App in background - skipping receive sound (use system notification)")

@@ -1,35 +1,43 @@
 package com.bothbubbles.ui.chat
 
+import android.util.Log
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.services.messaging.ChatFallbackTracker
-import android.util.Log
-import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.ui.components.message.Tapback
+import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.chat.delegates.ChatComposerDelegate
 import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
-import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
 import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatScheduledMessageDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendModeManager
 import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
-import com.bothbubbles.ui.chat.delegates.ChatScheduledMessageDelegate
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
+import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.util.error.AppError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -69,33 +77,31 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
     private val activeConversationManager: ActiveConversationManager,
-    // Delegates for decomposition - publicly exposed for thin controller pattern
-    val send: ChatSendDelegate,
-    val attachment: ChatAttachmentDelegate,
-    val etaSharing: ChatEtaSharingDelegate,
-    val search: ChatSearchDelegate,
-    val operations: ChatOperationsDelegate,
-    val sync: ChatSyncDelegate,
-    val effects: ChatEffectsDelegate,
-    val thread: ChatThreadDelegate,
-    val composer: ChatComposerDelegate,
-    val messageList: ChatMessageListDelegate,
-    val sendMode: ChatSendModeManager,
-    val scheduledMessages: ChatScheduledMessageDelegate,
-    // New Stage 1 delegates for state decomposition
-    val chatInfo: ChatInfoDelegate,
-    val connection: ChatConnectionDelegate,
+    // Delegate factories for AssistedInject pattern
+    private val sendFactory: ChatSendDelegate.Factory,
+    private val attachmentFactory: ChatAttachmentDelegate.Factory,
+    private val etaSharingFactory: ChatEtaSharingDelegate.Factory,
+    private val searchFactory: ChatSearchDelegate.Factory,
+    private val operationsFactory: ChatOperationsDelegate.Factory,
+    private val syncFactory: ChatSyncDelegate.Factory,
+    private val effectsFactory: ChatEffectsDelegate.Factory,
+    private val threadFactory: ChatThreadDelegate.Factory,
+    private val composerFactory: ChatComposerDelegate.Factory,
+    private val messageListFactory: ChatMessageListDelegate.Factory,
+    private val sendModeFactory: ChatSendModeManager.Factory,
+    private val scheduledMessagesFactory: ChatScheduledMessageDelegate.Factory,
+    private val chatInfoFactory: ChatInfoDelegate.Factory,
+    private val connectionFactory: ChatConnectionDelegate.Factory,
     // Media playback
     val exoPlayerPool: ExoPlayerPool
 ) : ViewModel() {
 
     companion object {
         private const val TAG = "ChatViewModel"
-        // Send mode constants moved to ChatSendModeManager
     }
 
     private val chatGuid: String = checkNotNull(savedStateHandle["chatGuid"])
@@ -123,6 +129,44 @@ class ChatViewModel @Inject constructor(
 
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
+
+    // Create delegates using factories - these are "born ready"
+    val effects: ChatEffectsDelegate = effectsFactory.create(viewModelScope)
+    val etaSharing: ChatEtaSharingDelegate = etaSharingFactory.create(viewModelScope)
+    val scheduledMessages: ChatScheduledMessageDelegate = scheduledMessagesFactory.create(chatGuid, viewModelScope)
+    val thread: ChatThreadDelegate = threadFactory.create(viewModelScope, mergedChatGuids)
+    val search: ChatSearchDelegate = searchFactory.create(viewModelScope, mergedChatGuids)
+    val attachment: ChatAttachmentDelegate = attachmentFactory.create(chatGuid, viewModelScope, mergedChatGuids)
+    val chatInfo: ChatInfoDelegate = chatInfoFactory.create(chatGuid, viewModelScope, mergedChatGuids)
+    val operations: ChatOperationsDelegate = operationsFactory.create(chatGuid, viewModelScope)
+    val sync: ChatSyncDelegate = syncFactory.create(chatGuid, viewModelScope, mergedChatGuids)
+    val send: ChatSendDelegate = sendFactory.create(chatGuid, viewModelScope)
+    val messageList: ChatMessageListDelegate = messageListFactory.create(
+        chatGuid, mergedChatGuids, viewModelScope, _uiState
+    ) { transform -> _uiState.update { it.transform() } }
+
+    // sendMode needs isGroup and participantPhone - created lazily after chatInfo loads
+    // For now, create with null participantPhone and update later
+    val sendMode: ChatSendModeManager = sendModeFactory.create(
+        chatGuid = chatGuid,
+        scope = viewModelScope,
+        initialSendMode = initialSendMode,
+        isGroup = false, // Updated after chatInfo loads
+        participantPhone = null // Updated after chatInfo loads
+    )
+
+    val connection: ChatConnectionDelegate = connectionFactory.create(
+        chatGuid, viewModelScope, sendMode, mergedChatGuids
+    )
+
+    val composer: ChatComposerDelegate = composerFactory.create(
+        chatGuid = chatGuid,
+        scope = viewModelScope,
+        uiStateFlow = _uiState,
+        syncStateFlow = sync.state,
+        sendStateFlow = send.state,
+        messagesStateFlow = messageList.messagesState
+    ) { transform -> _uiState.update { it.transform() } }
 
     // Stage 3: Passthrough properties removed - access delegates directly:
     // - State: viewModel.send.state, viewModel.search.state, viewModel.operations.state, etc.
@@ -156,36 +200,8 @@ class ChatViewModel @Inject constructor(
     fun hasMessageBeenSeen(guid: String): Boolean = messageList.hasMessageBeenSeen(guid)
 
     init {
-        // Initialize delegates
-        send.initialize(chatGuid, viewModelScope)
-        attachment.initialize(chatGuid, viewModelScope, mergedChatGuids)
-        etaSharing.initialize(viewModelScope)
-        search.initialize(viewModelScope, mergedChatGuids)
-        operations.initialize(chatGuid, viewModelScope)
-        sync.initialize(chatGuid, viewModelScope, mergedChatGuids)
-        effects.initialize(viewModelScope)
-        thread.initialize(viewModelScope, mergedChatGuids)
-        scheduledMessages.initialize(chatGuid, viewModelScope)
-        // Initialize new Stage 1 delegates
-        chatInfo.initialize(chatGuid, viewModelScope, mergedChatGuids)
-        connection.initialize(chatGuid, viewModelScope, sendMode, mergedChatGuids)
-        // Initialize messageList first so we can pass its messagesState to composer
-        messageList.initialize(
-            chatGuid = chatGuid,
-            mergedChatGuids = mergedChatGuids,
-            scope = viewModelScope,
-            uiState = _uiState,
-            onUiStateUpdate = { transform -> _uiState.update { it.transform() } }
-        )
-        composer.initialize(
-            chatGuid = chatGuid,
-            scope = viewModelScope,
-            uiState = _uiState,
-            syncState = sync.state,
-            sendState = send.state,
-            messagesState = messageList.messagesState,
-            onUiStateUpdate = { transform -> _uiState.update { it.transform() } }
-        )
+        // Phase 3: Delegates are now "born ready" via AssistedInject
+        // No initialize() calls needed - delegates self-initialize in their init blocks
 
         // Set delegate references for full send flow (enables optimistic UI in delegate)
         send.setDelegates(
@@ -307,16 +323,16 @@ class ChatViewModel @Inject constructor(
         activeConversationManager.setActiveConversation(chatGuid, mergedChatGuids.toSet())
 
         // Notify server which chat is open (helps server optimize notification delivery)
-        socketService.sendOpenChat(chatGuid)
+        socketConnection.sendOpenChat(chatGuid)
 
         // Chat metadata loading, determineChatType, and observeParticipantsForSaveContactBanner
-        // are now handled by chatInfo.initialize() above.
-        // Draft loading is handled by composer.initialize() above.
-        // Operations state (archive/star/spam) is handled by operations.initialize() above.
+        // are now handled by ChatInfoDelegate (self-initializes via AssistedInject).
+        // Draft loading is handled by ChatComposerDelegate.
+        // Operations state (archive/star/spam) is handled by ChatOperationsDelegate.
         loadPersistedSendMode()
 
-        // Note: Message loading, socket observation, and sync are now handled by messageList
-        // Typing indicators are now handled by sync.initialize() above.
+        // Note: Message loading, socket observation, and sync are now handled by messageList.
+        // Typing indicators are now handled by ChatSyncDelegate.
         messageList.syncMessages() // Always sync to check for new messages (runs in background)
         messageList.markAsRead()
         // Forward connection.fallbackState to sync delegate
@@ -339,20 +355,11 @@ class ChatViewModel @Inject constructor(
         saveCurrentChatState()
         connection.checkAndRepairCounterpart() // Lazy repair: check for missing iMessage/SMS counterpart
 
-        // Initialize send mode manager and check iMessage availability
-        // Delay slightly to ensure chat data is loaded first
+        // Check iMessage availability after chat data is loaded
+        // Delay slightly to ensure chatInfo has populated participantPhone and isGroup
         viewModelScope.launch {
-            delay(500) // Wait for loadChat() to populate participantPhone and isGroup
+            delay(500) // Wait for chatInfo to load
             val currentState = _uiState.value
-
-            // Initialize send mode manager with chat data
-            sendMode.initialize(
-                chatGuid = chatGuid,
-                scope = viewModelScope,
-                initialSendMode = currentState.currentSendMode,
-                isGroup = currentState.isGroup,
-                participantPhone = currentState.participantPhone
-            )
 
             // Check if iMessage is available again (for chats in SMS fallback mode)
             sendMode.checkAndMaybeExitFallback(currentState.participantPhone)
@@ -521,7 +528,7 @@ class ChatViewModel @Inject constructor(
         activeConversationManager.clearActiveConversation()
 
         // Notify server we're leaving this chat
-        socketService.sendCloseChat(chatGuid)
+        socketConnection.sendCloseChat(chatGuid)
 
         // Send stopped-typing and save draft via composer delegate
         composer.sendStoppedTyping()

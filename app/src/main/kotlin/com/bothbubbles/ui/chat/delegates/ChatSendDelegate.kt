@@ -7,9 +7,9 @@ import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.services.messaging.MessageDeliveryMode
-import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.socket.SocketService
-import com.bothbubbles.services.sound.SoundManager
+import com.bothbubbles.services.messaging.MessageSender
+import com.bothbubbles.services.socket.SocketConnection
+import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.PendingMessage
 import com.bothbubbles.ui.chat.QueuedMessageUiModel
@@ -19,6 +19,9 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.formatMessageTime
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -26,7 +29,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Data for optimistic UI insertion when a message is queued.
@@ -51,36 +53,29 @@ data class QueuedMessageInfo(
  * - Reply state management
  * - Typing indicator coordination
  *
- * This delegate follows the composition pattern where ChatViewModel
- * delegates specific concerns to focused helper classes.
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  *
- * Usage in ChatViewModel:
- * ```kotlin
- * class ChatViewModel @Inject constructor(
- *     private val chatSendDelegate: ChatSendDelegate,
- *     ...
- * ) : ViewModel() {
- *     init {
- *         chatSendDelegate.initialize(chatGuid, viewModelScope)
- *     }
- *
- *     fun sendMessage() = chatSendDelegate.sendMessage(...)
- * }
- * ```
+ * Phase 2: Uses MessageSender and SocketConnection interfaces instead of
+ * concrete services for improved testability.
  */
-class ChatSendDelegate @Inject constructor(
+class ChatSendDelegate @AssistedInject constructor(
     private val pendingMessageRepository: PendingMessageRepository,
-    private val messageSendingService: MessageSendingService,
-    private val socketService: SocketService,
-    private val soundManager: SoundManager
+    private val messageSender: MessageSender,
+    private val socketConnection: SocketConnection,
+    private val soundPlayer: SoundPlayer,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(chatGuid: String, scope: CoroutineScope): ChatSendDelegate
+    }
+
     companion object {
         private const val TAG = "ChatSendDelegate"
     }
-
-    // State
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
 
     // References to other delegates for full send flow
     private var messageListDelegate: ChatMessageListDelegate? = null
@@ -104,15 +99,8 @@ class ChatSendDelegate @Inject constructor(
     private val _state = MutableStateFlow(SendState())
     val state: StateFlow<SendState> = _state.asStateFlow()
 
-    /**
-     * Initialize the delegate with the chat context.
-     * Must be called before any send operations.
-     */
-    fun initialize(chatGuid: String, scope: CoroutineScope) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-
-        // Observe upload progress from MessageSendingService
+    init {
+        // Observe upload progress from MessageSender
         observeUploadProgress()
 
         // Observe queued messages from database
@@ -244,7 +232,7 @@ class ChatSendDelegate @Inject constructor(
                         // Play sound for SMS delivery (optimistic)
                         val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
                         if (isSmsSend) {
-                            soundManager.playSendSound()
+                            soundPlayer.playSendSound()
                         }
                     },
                     onFailure = { e ->
@@ -264,7 +252,7 @@ class ChatSendDelegate @Inject constructor(
      */
     private fun observeUploadProgress() {
         scope.launch {
-            messageSendingService.uploadProgress.collect { progress ->
+            messageSender.uploadProgress.collect { progress ->
                 if (progress != null) {
                     // Calculate individual message progress (0.0 to 1.0)
                     val attachmentBase = progress.attachmentIndex.toFloat() / progress.totalAttachments
@@ -379,7 +367,7 @@ class ChatSendDelegate @Inject constructor(
                         // Play sound for SMS delivery (optimistic)
                         val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
                         if (isSmsSend) {
-                            soundManager.playSendSound()
+                            soundPlayer.playSendSound()
                         }
                     },
                     onFailure = { e ->
@@ -424,7 +412,7 @@ class ChatSendDelegate @Inject constructor(
                 onSuccess = { localId ->
                     Log.d(TAG, "Message queued via $deliveryMode: $localId")
                     if (isLocalSms) {
-                        soundManager.playSendSound()
+                        soundPlayer.playSendSound()
                     }
                 },
                 onFailure = { e ->
@@ -454,7 +442,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun retryMessage(messageGuid: String) {
         scope.launch {
-            messageSendingService.retryMessage(messageGuid)
+            messageSender.retryMessage(messageGuid)
         }
     }
 
@@ -463,7 +451,7 @@ class ChatSendDelegate @Inject constructor(
      */
     fun retryMessageAsSms(messageGuid: String) {
         scope.launch {
-            messageSendingService.retryAsSms(messageGuid).fold(
+            messageSender.retryAsSms(messageGuid).fold(
                 onSuccess = { /* Message was successfully sent via SMS */ },
                 onFailure = { e ->
                     _state.update { it.copy(sendError = e.message) }
@@ -478,10 +466,10 @@ class ChatSendDelegate @Inject constructor(
     fun forwardMessage(messageGuid: String, targetChatGuid: String) {
         scope.launch {
             _state.update { it.copy(isForwarding = true) }
-            messageSendingService.forwardMessage(messageGuid, targetChatGuid).fold(
+            messageSender.forwardMessage(messageGuid, targetChatGuid).fold(
                 onSuccess = {
                     _state.update { it.copy(isForwarding = false, forwardSuccess = true) }
-                    soundManager.playSendSound()
+                    soundPlayer.playSendSound()
                 },
                 onFailure = { e ->
                     _state.update { it.copy(isForwarding = false, sendError = "Failed to forward: ${e.message}") }
@@ -494,7 +482,7 @@ class ChatSendDelegate @Inject constructor(
      * Check if a failed message can be retried as SMS.
      */
     suspend fun canRetryAsSms(messageGuid: String): Boolean {
-        return messageSendingService.canRetryAsSms(messageGuid)
+        return messageSender.canRetryAsSms(messageGuid)
     }
 
     /**
@@ -657,7 +645,7 @@ class ChatSendDelegate @Inject constructor(
         if (!isCurrentlyTyping && now - lastStartedTypingTime > typingCooldownMs) {
             isCurrentlyTyping = true
             lastStartedTypingTime = now
-            socketService.sendStartedTyping(chatGuid)
+            socketConnection.sendStartedTyping(chatGuid)
         }
 
         // Debounce: cancel previous job and start new one
@@ -666,7 +654,7 @@ class ChatSendDelegate @Inject constructor(
             kotlinx.coroutines.delay(typingDebounceMs)
             if (isCurrentlyTyping) {
                 isCurrentlyTyping = false
-                socketService.sendStoppedTyping(chatGuid)
+                socketConnection.sendStoppedTyping(chatGuid)
             }
         }
     }
@@ -679,7 +667,7 @@ class ChatSendDelegate @Inject constructor(
         typingDebounceJob?.cancel()
         if (isCurrentlyTyping) {
             isCurrentlyTyping = false
-            socketService.sendStoppedTyping(chatGuid)
+            socketConnection.sendStoppedTyping(chatGuid)
         }
     }
 

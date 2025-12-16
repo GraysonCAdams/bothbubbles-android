@@ -11,6 +11,9 @@ import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PhoneNumberFormatter
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +22,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for managing chat metadata and identity information.
@@ -30,55 +32,38 @@ import javax.inject.Inject
  * - Determining chat titles (resolving from participants for 1:1 chats)
  * - Managing the "save contact" banner for unsaved senders
  *
- * This delegate follows the composition pattern where ChatViewModel
- * delegates specific concerns to focused helper classes.
- *
- * Usage in ChatViewModel:
- * ```kotlin
- * class ChatViewModel @Inject constructor(
- *     val chatInfo: ChatInfoDelegate,
- *     ...
- * ) : ViewModel() {
- *     init {
- *         chatInfo.initialize(chatGuid, viewModelScope, mergedChatGuids)
- *     }
- *
- *     // Access state directly: chatInfo.state
- * }
- * ```
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatInfoDelegate @Inject constructor(
+class ChatInfoDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val settingsDataStore: SettingsDataStore,
     private val androidContactsService: AndroidContactsService,
     private val smsPermissionHelper: SmsPermissionHelper,
-    private val discordContactService: DiscordContactService
+    private val discordContactService: DiscordContactService,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            mergedChatGuids: List<String>
+        ): ChatInfoDelegate
+    }
+
     companion object {
         private const val TAG = "ChatInfoDelegate"
     }
 
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
-    private var mergedChatGuids: List<String> = emptyList()
-
     private val _state = MutableStateFlow(ChatInfoState())
     val state: StateFlow<ChatInfoState> = _state.asStateFlow()
 
-    /**
-     * Initialize the delegate with the chat context.
-     * Must be called before accessing state.
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        mergedChatGuids: List<String> = listOf(chatGuid)
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        this.mergedChatGuids = mergedChatGuids
-
+    init {
         loadChat()
         determineChatType()
         observeParticipantsForSaveContactBanner()

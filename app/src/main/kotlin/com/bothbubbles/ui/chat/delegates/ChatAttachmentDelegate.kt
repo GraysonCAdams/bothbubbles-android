@@ -2,6 +2,9 @@ package com.bothbubbles.ui.chat.delegates
 
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.media.AttachmentDownloadQueue
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -9,7 +12,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate that handles attachment download operations for ChatViewModel.
@@ -20,36 +22,31 @@ import javax.inject.Inject
  * - Auto-download mode handling
  * - Preloading attachments for visible messages
  *
- * This delegate follows the composition pattern where ChatViewModel
- * delegates specific concerns to focused helper classes.
- *
- * Usage in ChatViewModel:
- * ```kotlin
- * class ChatViewModel @Inject constructor(
- *     private val attachmentDelegate: ChatAttachmentDelegate,
- *     ...
- * ) : ViewModel() {
- *     init {
- *         attachmentDelegate.initialize(chatGuid, viewModelScope, mergedChatGuids)
- *     }
- *
- *     fun downloadAttachment(guid: String) = attachmentDelegate.downloadAttachment(guid)
- * }
- * ```
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatAttachmentDelegate @Inject constructor(
+class ChatAttachmentDelegate @AssistedInject constructor(
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            mergedChatGuids: List<String>
+        ): ChatAttachmentDelegate
+    }
+
     companion object {
         private const val TAG = "ChatAttachmentDelegate"
     }
 
-    // State
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
-    private var mergedChatGuids: List<String> = emptyList()
-    private var isMergedChat: Boolean = false
+    private val isMergedChat: Boolean = mergedChatGuids.size > 1
 
     // Download progress tracking
     // Maps attachment GUID to download progress (0.0 to 1.0, or null if not downloading)
@@ -64,20 +61,7 @@ class ChatAttachmentDelegate @Inject constructor(
     private val _autoDownloadEnabled = MutableStateFlow(true)
     val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
 
-    /**
-     * Initialize the delegate with the chat context.
-     * Must be called before any download operations.
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        mergedChatGuids: List<String> = listOf(chatGuid)
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        this.mergedChatGuids = mergedChatGuids
-        this.isMergedChat = mergedChatGuids.size > 1
-
+    init {
         // Set this chat as active for download queue prioritization
         attachmentDownloadQueue.setActiveChat(chatGuid)
 

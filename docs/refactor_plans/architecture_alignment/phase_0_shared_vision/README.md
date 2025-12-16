@@ -43,10 +43,21 @@ Our architecture aims for:
 ## Exit Criteria
 
 - [x] All 4 ADRs reviewed and marked ACCEPTED
-- [x] Safety net test exists (`ChatSendDelegateTest`)
+- [x] Safety net test exists (`ChatSendDelegateTest`) — enabled and passing
 - [x] PR template updated with architecture checklist
-- [ ] Team signed off on decisions
+- [ ] Team signed off on decisions (see Implementation Evidence below)
+
+### Implementation Evidence
+
+Formal sign-off is pending, but Phase 2+3 implementation validates all ADRs:
+- All 14 ChatViewModel delegates migrated to AssistedInject (ADR 0004)
+- All UI delegates depend on interfaces: `MessageSender`, `SocketConnection`, `SoundPlayer` (ADR 0003)
+- No global event bus introduced (ADR 0002)
+- ChatViewModel acts as coordinator (ADR 0001)
 
 ## Next Steps
 
-After Phase 0 is complete, proceed to **combined Phase 2+3** for efficiency (change interface dependencies and lifecycle together).
+Phase 2+3 is ✅ **COMPLETE** for ChatViewModel delegates. Next options:
+- **Phase 4**: Delegate coupling reduction (remove `setDelegates()`)
+- **Follow-on**: Apply patterns to ConversationsViewModel, SetupViewModel
+- **Interface Extraction**: `PendingMessageRepository` (to enable full safety net testing)

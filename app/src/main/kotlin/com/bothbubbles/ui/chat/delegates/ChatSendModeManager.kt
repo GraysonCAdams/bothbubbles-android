@@ -9,9 +9,12 @@ import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.socket.ConnectionState
-import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.TutorialState
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -20,7 +23,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for managing send mode (iMessage vs SMS) logic.
@@ -30,16 +32,39 @@ import javax.inject.Inject
  * - Send mode switching and persistence
  * - Tutorial state management
  * - Automatic fallback to SMS on server disconnect
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
+ *
+ * Phase 2: Uses SocketConnection interface instead of SocketService
+ * for improved testability.
  */
-class ChatSendModeManager @Inject constructor(
-    private val socketService: SocketService,
+class ChatSendModeManager @AssistedInject constructor(
+    private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val iMessageAvailabilityService: IMessageAvailabilityService,
     private val chatRepository: ChatRepository,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val api: BothBubblesApi
+    private val api: BothBubblesApi,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val initialSendMode: ChatSendMode,
+    @Assisted("isGroup") private val isGroup: Boolean,
+    @Assisted("participantPhone") private val participantPhone: String?
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            initialSendMode: ChatSendMode,
+            @Assisted("isGroup") isGroup: Boolean,
+            @Assisted("participantPhone") participantPhone: String?
+        ): ChatSendModeManager
+    }
+
     companion object {
         private const val TAG = "ChatSendModeManager"
         private const val AVAILABILITY_CHECK_COOLDOWN = 5 * 60 * 1000L // 5 minutes
@@ -47,9 +72,6 @@ class ChatSendModeManager @Inject constructor(
         private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
         private const val FLIP_FLOP_THRESHOLD = 3 // 3+ state changes = unstable server
     }
-
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
 
     // Server stability tracking
     private var serverConnectedSince: Long? = null
@@ -62,7 +84,7 @@ class ChatSendModeManager @Inject constructor(
     private var iMessageAvailabilityCheckJob: Job? = null
 
     // Send mode state
-    private val _currentSendMode = MutableStateFlow(ChatSendMode.SMS)
+    private val _currentSendMode = MutableStateFlow(initialSendMode)
     val currentSendMode: StateFlow<ChatSendMode> = _currentSendMode.asStateFlow()
 
     private val _contactIMessageAvailable = MutableStateFlow<Boolean?>(null)
@@ -86,27 +108,14 @@ class ChatSendModeManager @Inject constructor(
     private val _tutorialState = MutableStateFlow(TutorialState.NOT_SHOWN)
     val tutorialState: StateFlow<TutorialState> = _tutorialState.asStateFlow()
 
-    /**
-     * Initialize the manager with chat context.
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        initialSendMode: ChatSendMode,
-        isGroup: Boolean,
-        participantPhone: String?
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        _currentSendMode.value = initialSendMode
-
+    init {
         // Initialize server stability tracking if already connected
-        if (socketService.connectionState.value == ConnectionState.CONNECTED) {
+        if (socketConnection.connectionState.value == ConnectionState.CONNECTED) {
             serverConnectedSince = System.currentTimeMillis()
         }
 
         // Start observing connection state
-        observeConnectionState(isGroup, participantPhone)
+        observeConnectionState()
 
         // Load persisted send mode preference
         loadPersistedSendMode()
@@ -237,7 +246,7 @@ class ChatSendModeManager @Inject constructor(
                 return@launch
             }
 
-            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
+            if (socketConnection.connectionState.value != ConnectionState.CONNECTED) {
                 Log.d(TAG, "Server not connected, skipping availability check")
                 return@launch
             }
@@ -406,9 +415,9 @@ class ChatSendModeManager @Inject constructor(
     /**
      * Observe connection state for automatic fallback.
      */
-    private fun observeConnectionState(isGroup: Boolean, participantPhone: String?) {
+    private fun observeConnectionState() {
         scope.launch {
-            socketService.connectionState.collect { state ->
+            socketConnection.connectionState.collect { state ->
                 val isConnected = state == ConnectionState.CONNECTED
                 val now = System.currentTimeMillis()
                 val wasConnected = previousConnectionState == ConnectionState.CONNECTED
@@ -467,7 +476,7 @@ class ChatSendModeManager @Inject constructor(
         iMessageAvailabilityCheckJob = scope.launch {
             delay(SERVER_STABILITY_PERIOD_MS)
 
-            if (socketService.connectionState.value != ConnectionState.CONNECTED) {
+            if (socketConnection.connectionState.value != ConnectionState.CONNECTED) {
                 return@launch
             }
 

@@ -8,6 +8,9 @@ import com.bothbubbles.services.sync.CounterpartSyncService
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.TutorialState
 import com.bothbubbles.ui.chat.state.ChatConnectionState
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,7 +21,6 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for managing connection status, send modes, and availability.
@@ -34,34 +36,34 @@ import javax.inject.Inject
  * that can be observed by the UI. It also adds the counterpartSynced state which
  * tracks whether a missing iMessage/SMS counterpart was found and synced.
  *
- * Usage in ChatViewModel:
- * ```kotlin
- * class ChatViewModel @Inject constructor(
- *     val connection: ChatConnectionDelegate,
- *     ...
- * ) : ViewModel() {
- *     init {
- *         connection.initialize(chatGuid, viewModelScope, sendModeManager)
- *     }
- *
- *     // Access state directly: connection.state
- * }
- * ```
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatConnectionDelegate @Inject constructor(
+class ChatConnectionDelegate @AssistedInject constructor(
     private val chatFallbackTracker: ChatFallbackTracker,
     private val counterpartSyncService: CounterpartSyncService,
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val sendModeManager: ChatSendModeManager,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            sendModeManager: ChatSendModeManager,
+            mergedChatGuids: List<String>
+        ): ChatConnectionDelegate
+    }
+
     companion object {
         private const val TAG = "ChatConnectionDelegate"
     }
 
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
-    private lateinit var sendModeManager: ChatSendModeManager
-    private var mergedChatGuids: List<String> = emptyList()
-    private var isMergedChat: Boolean = false
+    private val isMergedChat: Boolean = mergedChatGuids.size > 1
 
     // Counterpart sync state (independent of ChatSendModeManager)
     private val _counterpartSynced = MutableStateFlow(false)
@@ -74,73 +76,49 @@ class ChatConnectionDelegate @Inject constructor(
     private val _fallbackState = MutableStateFlow(FallbackState())
     val fallbackState: StateFlow<FallbackState> = _fallbackState.asStateFlow()
 
-    // Combined state flow
-    private lateinit var _state: StateFlow<ChatConnectionState>
-    val state: StateFlow<ChatConnectionState> get() = _state
+    // Combined state flow - initialized in init block
+    val state: StateFlow<ChatConnectionState> = combine(
+        sendModeManager.currentSendMode,
+        sendModeManager.contactIMessageAvailable,
+        sendModeManager.isCheckingIMessageAvailability,
+        sendModeManager.canToggleSendMode,
+        sendModeManager.showSendModeRevealAnimation
+    ) { values: Array<Any?> ->
+        @Suppress("UNCHECKED_CAST")
+        val sendMode = values[0] as? ChatSendMode ?: ChatSendMode.SMS
+        val iMessageAvailable = values[1] as? Boolean
+        val isChecking = values[2] as? Boolean ?: false
+        val canToggle = values[3] as? Boolean ?: false
+        val showReveal = values[4] as? Boolean ?: false
+        CombinedState1(sendMode, iMessageAvailable, isChecking, canToggle, showReveal)
+    }.combine(
+        combine(
+            sendModeManager.sendModeManuallySet,
+            sendModeManager.tutorialState,
+            _counterpartSynced
+        ) { manuallySet, tutorial, counterpart ->
+            CombinedState2(manuallySet, tutorial, counterpart)
+        }
+    ) { state1, state2 ->
+        ChatConnectionState(
+            currentSendMode = state1.sendMode,
+            contactIMessageAvailable = state1.iMessageAvailable,
+            isCheckingIMessageAvailability = state1.isChecking,
+            canToggleSendMode = state1.canToggle,
+            showSendModeRevealAnimation = state1.showReveal,
+            sendModeManuallySet = state2.manuallySet,
+            tutorialState = state2.tutorial,
+            counterpartSynced = state2.counterpart
+        )
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = ChatConnectionState()
+    )
 
-    /**
-     * Initialize the delegate with the chat context and send mode manager.
-     * Must be called before accessing state.
-     *
-     * @param chatGuid The chat GUID
-     * @param scope The CoroutineScope for launching coroutines
-     * @param sendModeManager The ChatSendModeManager to wrap
-     * @param mergedChatGuids List of merged chat GUIDs (for merged conversations)
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        sendModeManager: ChatSendModeManager,
-        mergedChatGuids: List<String> = listOf(chatGuid)
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        this.sendModeManager = sendModeManager
-        this.mergedChatGuids = mergedChatGuids
-        this.isMergedChat = mergedChatGuids.size > 1
-
+    init {
         // Observe fallback mode
         observeFallbackMode()
-
-        // Combine all send mode manager flows with counterpartSynced
-        _state = combine(
-            sendModeManager.currentSendMode,
-            sendModeManager.contactIMessageAvailable,
-            sendModeManager.isCheckingIMessageAvailability,
-            sendModeManager.canToggleSendMode,
-            sendModeManager.showSendModeRevealAnimation
-        ) { values: Array<Any?> ->
-            @Suppress("UNCHECKED_CAST")
-            val sendMode = values[0] as? ChatSendMode ?: ChatSendMode.SMS
-            val iMessageAvailable = values[1] as? Boolean
-            val isChecking = values[2] as? Boolean ?: false
-            val canToggle = values[3] as? Boolean ?: false
-            val showReveal = values[4] as? Boolean ?: false
-            CombinedState1(sendMode, iMessageAvailable, isChecking, canToggle, showReveal)
-        }.combine(
-            combine(
-                sendModeManager.sendModeManuallySet,
-                sendModeManager.tutorialState,
-                _counterpartSynced
-            ) { manuallySet, tutorial, counterpart ->
-                CombinedState2(manuallySet, tutorial, counterpart)
-            }
-        ) { state1, state2 ->
-            ChatConnectionState(
-                currentSendMode = state1.sendMode,
-                contactIMessageAvailable = state1.iMessageAvailable,
-                isCheckingIMessageAvailability = state1.isChecking,
-                canToggleSendMode = state1.canToggle,
-                showSendModeRevealAnimation = state1.showReveal,
-                sendModeManuallySet = state2.manuallySet,
-                tutorialState = state2.tutorial,
-                counterpartSynced = state2.counterpart
-            )
-        }.stateIn(
-            scope = scope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = ChatConnectionState()
-        )
     }
 
     // Helper data classes for combine

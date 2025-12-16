@@ -8,6 +8,9 @@ import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
 import com.bothbubbles.ui.chat.state.ThreadState
 import com.bothbubbles.ui.components.message.ThreadChain
 import com.bothbubbles.ui.util.toStable
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,20 +20,26 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for thread overlay functionality.
  * Manages loading and displaying message threads (origin + replies).
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatThreadDelegate @Inject constructor(
+class ChatThreadDelegate @AssistedInject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
-    private val attachmentRepository: AttachmentRepository
+    private val attachmentRepository: AttachmentRepository,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
 
-    private lateinit var scope: CoroutineScope
-    private lateinit var mergedChatGuids: List<String>
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope, mergedChatGuids: List<String>): ChatThreadDelegate
+    }
 
     // ============================================================================
     // CONSOLIDATED THREAD STATE
@@ -42,14 +51,6 @@ class ChatThreadDelegate @Inject constructor(
     // Scroll-to-message event (SharedFlow for one-time events, not state)
     private val _scrollToGuid = MutableSharedFlow<String>()
     val scrollToGuid: SharedFlow<String> = _scrollToGuid.asSharedFlow()
-
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(scope: CoroutineScope, mergedChatGuids: List<String>) {
-        this.scope = scope
-        this.mergedChatGuids = mergedChatGuids
-    }
 
     /**
      * Load a thread chain for display in the thread overlay.

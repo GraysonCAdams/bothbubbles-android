@@ -8,7 +8,7 @@ import android.provider.ContactsContract
 import android.util.Log
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.contacts.DiscordContactService
-import com.bothbubbles.services.messaging.MessageSendingService
+import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.chat.state.OperationsState
@@ -17,6 +17,9 @@ import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.error.ValidationError
 import com.bothbubbles.util.error.handle
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -24,25 +27,36 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for chat menu actions and operations.
  * Handles archive, star, delete, spam reporting, contact-related actions, and reactions.
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
+ *
+ * Phase 2: Uses MessageSender interface instead of MessageSendingService
+ * for improved testability.
  */
-class ChatOperationsDelegate @Inject constructor(
+class ChatOperationsDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
-    private val messageSendingService: MessageSendingService,
-    private val discordContactService: DiscordContactService
+    private val messageSender: MessageSender,
+    private val discordContactService: DiscordContactService,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(chatGuid: String, scope: CoroutineScope): ChatOperationsDelegate
+    }
+
     companion object {
         private const val TAG = "ChatOperationsDelegate"
     }
 
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
     private var messageListDelegate: ChatMessageListDelegate? = null
 
     // ============================================================================
@@ -52,12 +66,7 @@ class ChatOperationsDelegate @Inject constructor(
     private val _state = MutableStateFlow(OperationsState())
     val state: StateFlow<OperationsState> = _state.asStateFlow()
 
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(chatGuid: String, scope: CoroutineScope) {
-        this.chatGuid = chatGuid
-        this.scope = scope
+    init {
         observeChatState()
     }
 
@@ -401,14 +410,14 @@ class ChatOperationsDelegate @Inject constructor(
             // Pass selectedMessageText - required by BlueBubbles server for reaction matching
             val messageText = message.text ?: ""
             val result = if (isRemoving) {
-                messageSendingService.removeReaction(
+                messageSender.removeReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
                     reaction = tapback.apiName,
                     selectedMessageText = messageText
                 )
             } else {
-                messageSendingService.sendReaction(
+                messageSender.sendReaction(
                     chatGuid = chatGuid,
                     messageGuid = messageGuid,
                     reaction = tapback.apiName,

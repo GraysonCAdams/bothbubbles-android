@@ -10,8 +10,8 @@ import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.media.AttachmentPreloader
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
-import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.chat.ChatStateCache
 import com.bothbubbles.ui.chat.ChatUiState
 import com.bothbubbles.ui.chat.MessageCache
@@ -26,6 +26,9 @@ import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.util.PerformanceProfiler
 import com.bothbubbles.util.error.handle
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -35,13 +38,12 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.conflate
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate that handles message list state and paging for ChatViewModel.
@@ -54,41 +56,42 @@ import javax.inject.Inject
  * - Foreground resume sync
  * - Server sync coordination
  *
- * This delegate owns the message list state and exposes it via StateFlows.
- * The ViewModel acts as a facade, delegating message list operations here.
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  *
- * Usage in ChatViewModel:
- * ```kotlin
- * class ChatViewModel @Inject constructor(
- *     private val messageListDelegate: ChatMessageListDelegate,
- *     ...
- * ) : ViewModel() {
- *     init {
- *         messageListDelegate.initialize(
- *             chatGuid = chatGuid,
- *             mergedChatGuids = mergedChatGuids,
- *             scope = viewModelScope,
- *             uiState = _uiState
- *         )
- *     }
- *
- *     val messagesState = messageListDelegate.messagesState
- * }
- * ```
+ * Phase 2: Uses SocketConnection interface instead of SocketService
+ * for improved testability.
  */
-class ChatMessageListDelegate @Inject constructor(
+class ChatMessageListDelegate @AssistedInject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
     private val handleRepository: HandleRepository,
     private val smsRepository: SmsRepository,
-    private val socketService: SocketService,
+    private val socketConnection: SocketConnection,
     private val appLifecycleTracker: AppLifecycleTracker,
     private val attachmentPreloader: AttachmentPreloader,
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
     private val settingsDataStore: SettingsDataStore,
-    private val chatStateCache: ChatStateCache
+    private val chatStateCache: ChatStateCache,
+    @Assisted private val chatGuid: String,
+    @Assisted private val mergedChatGuids: List<String>,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val uiStateFlow: MutableStateFlow<ChatUiState>,
+    @Assisted private val onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            mergedChatGuids: List<String>,
+            scope: CoroutineScope,
+            uiStateFlow: MutableStateFlow<ChatUiState>,
+            onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
+        ): ChatMessageListDelegate
+    }
+
     companion object {
         private const val TAG = "ChatMessageListDelegate"
 
@@ -96,13 +99,6 @@ class ChatMessageListDelegate @Inject constructor(
         private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
         private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     }
-
-    // State - set during initialize()
-    private lateinit var chatGuid: String
-    private lateinit var mergedChatGuids: List<String>
-    private lateinit var scope: CoroutineScope
-    private lateinit var uiStateFlow: MutableStateFlow<ChatUiState>
-    private lateinit var onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
 
     // PERF: Message cache for incremental updates - preserves object identity for unchanged messages
     private val messageCache = MessageCache()
@@ -154,7 +150,7 @@ class ChatMessageListDelegate @Inject constructor(
     private var cachedAttachmentsMessageCount: Int = 0
 
     // Whether this is a merged conversation
-    private var isMergedChat: Boolean = false
+    private val isMergedChat: Boolean = mergedChatGuids.size > 1
 
     // SyncTrigger implementation for fetching from server when gaps are detected
     private val syncTriggerImpl: SyncTrigger by lazy {
@@ -233,24 +229,7 @@ class ChatMessageListDelegate @Inject constructor(
     // INITIALIZATION
     // ============================================================================
 
-    /**
-     * Initialize the delegate with chat context.
-     * Must be called before any operations.
-     */
-    fun initialize(
-        chatGuid: String,
-        mergedChatGuids: List<String>,
-        scope: CoroutineScope,
-        uiState: MutableStateFlow<ChatUiState>,
-        onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
-    ) {
-        this.chatGuid = chatGuid
-        this.mergedChatGuids = mergedChatGuids
-        this.scope = scope
-        this.uiStateFlow = uiState
-        this.onUiStateUpdate = onUiStateUpdate
-        this.isMergedChat = mergedChatGuids.size > 1
-
+    init {
         // Restore cached scroll position from LRU cache
         val cachedState = chatStateCache.get(chatGuid)
         if (cachedState != null) {
@@ -514,7 +493,7 @@ class ChatMessageListDelegate @Inject constructor(
      */
     private fun observeNewMessages() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.NewMessage>()
                 .filter { event -> isEventForThisChat(event.chatGuid) }
                 .collect { event ->
@@ -537,7 +516,7 @@ class ChatMessageListDelegate @Inject constructor(
      */
     private fun observeMessageUpdates() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.MessageUpdated>()
                 .filter { event -> isEventForThisChat(event.chatGuid) }
                 .collect { event ->
@@ -610,7 +589,7 @@ class ChatMessageListDelegate @Inject constructor(
                 }
 
                 // Only poll if socket is connected
-                if (!socketService.isConnected()) {
+                if (!socketConnection.isConnected()) {
                     continue
                 }
 

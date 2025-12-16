@@ -5,23 +5,32 @@ import com.bothbubbles.ui.chat.state.EffectsState
 import com.bothbubbles.ui.chat.state.ScreenEffectData
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.effects.MessageEffect
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for message effect playback (bubble and screen effects).
  * Manages effect queue and playback state.
+ *
+ * Uses AssistedInject to receive runtime parameters (scope) at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatEffectsDelegate @Inject constructor(
-    private val messageRepository: MessageRepository
+class ChatEffectsDelegate @AssistedInject constructor(
+    private val messageRepository: MessageRepository,
+    @Assisted private val scope: CoroutineScope
 ) {
 
-    private lateinit var scope: CoroutineScope
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): ChatEffectsDelegate
+    }
 
     // ============================================================================
     // CONSOLIDATED EFFECTS STATE
@@ -32,13 +41,6 @@ class ChatEffectsDelegate @Inject constructor(
 
     private val screenEffectQueue = mutableListOf<ScreenEffectData>()
     private var isPlayingScreenEffect = false
-
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(scope: CoroutineScope) {
-        this.scope = scope
-    }
 
     /**
      * Called when a bubble effect animation completes.

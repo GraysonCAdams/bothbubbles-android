@@ -3,6 +3,9 @@ package com.bothbubbles.ui.chat.delegates
 import android.content.Context
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.eta.EtaSharingManager
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,18 +15,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate for handling ETA sharing functionality in ChatViewModel.
  * Manages the state and actions for sharing arrival times during navigation.
+ *
+ * Uses AssistedInject to receive runtime parameters (scope) at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatEtaSharingDelegate @Inject constructor(
+class ChatEtaSharingDelegate @AssistedInject constructor(
     @ApplicationContext private val context: Context,
     private val etaSharingManager: EtaSharingManager,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    @Assisted private val scope: CoroutineScope
 ) {
-    private lateinit var scope: CoroutineScope
+
+    @AssistedFactory
+    interface Factory {
+        fun create(scope: CoroutineScope): ChatEtaSharingDelegate
+    }
 
     /**
      * Combined state for ETA sharing availability and status
@@ -43,46 +53,36 @@ class ChatEtaSharingDelegate @Inject constructor(
     private val _latestEtaMessageGuid = MutableStateFlow<String?>(null)
     val latestEtaMessageGuid: StateFlow<String?> = _latestEtaMessageGuid.asStateFlow()
 
-    lateinit var etaSharingState: StateFlow<EtaSharingUiState>
-        private set
-
     // Previous navigation state for detecting navigation restart
     private var wasNavigationActive = false
 
-    /**
-     * Initialize the delegate with the ViewModel's coroutine scope
-     */
-    fun initialize(viewModelScope: CoroutineScope) {
-        scope = viewModelScope
-
-        etaSharingState = combine(
-            settingsDataStore.etaSharingEnabled,
-            etaSharingManager.isNavigationActive,
-            etaSharingManager.state,
-            _bannerDismissed
-        ) { enabled, navActive, state, dismissed ->
-            // Reset dismiss state when navigation restarts (was inactive, now active)
-            if (navActive && !wasNavigationActive) {
-                // Navigation just started - reset dismiss state
-                viewModelScope.launch {
-                    _bannerDismissed.value = false
-                }
+    val etaSharingState: StateFlow<EtaSharingUiState> = combine(
+        settingsDataStore.etaSharingEnabled,
+        etaSharingManager.isNavigationActive,
+        etaSharingManager.state,
+        _bannerDismissed
+    ) { enabled, navActive, state, dismissed ->
+        // Reset dismiss state when navigation restarts (was inactive, now active)
+        if (navActive && !wasNavigationActive) {
+            // Navigation just started - reset dismiss state
+            scope.launch {
+                _bannerDismissed.value = false
             }
-            wasNavigationActive = navActive
+        }
+        wasNavigationActive = navActive
 
-            EtaSharingUiState(
-                isEnabled = enabled,
-                isNavigationActive = navActive,
-                isCurrentlySharing = state.isSharing,
-                isBannerDismissed = dismissed,
-                currentEtaMinutes = state.currentEta?.etaMinutes ?: 0
-            )
-        }.stateIn(
-            scope = viewModelScope,
-            started = SharingStarted.WhileSubscribed(5000),
-            initialValue = EtaSharingUiState()
+        EtaSharingUiState(
+            isEnabled = enabled,
+            isNavigationActive = navActive,
+            isCurrentlySharing = state.isSharing,
+            isBannerDismissed = dismissed,
+            currentEtaMinutes = state.currentEta?.etaMinutes ?: 0
         )
-    }
+    }.stateIn(
+        scope = scope,
+        started = SharingStarted.WhileSubscribed(5000),
+        initialValue = EtaSharingUiState()
+    )
 
     /**
      * Start sharing ETA with the current chat recipient

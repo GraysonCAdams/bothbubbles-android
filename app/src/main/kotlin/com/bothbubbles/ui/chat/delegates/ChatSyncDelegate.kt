@@ -5,43 +5,59 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.messaging.FallbackReason
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
-import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.chat.state.SyncState
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.filterIsInstance
 import com.bothbubbles.ui.components.message.MessageUiModel
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import javax.inject.Inject
 
 /**
  * Delegate responsible for message syncing and adaptive polling.
  * Handles:
  * - Adaptive polling to catch missed messages when push is unreliable
  * - Foreground resume sync when app returns from background
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
+ *
+ * Phase 2: Uses SocketConnection interface instead of SocketService
+ * for improved testability.
  */
-class ChatSyncDelegate @Inject constructor(
+class ChatSyncDelegate @AssistedInject constructor(
     private val messageRepository: MessageRepository,
     private val chatRepository: ChatRepository,
-    private val socketService: SocketService,
-    private val appLifecycleTracker: AppLifecycleTracker
+    private val socketConnection: SocketConnection,
+    private val appLifecycleTracker: AppLifecycleTracker,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(
+            chatGuid: String,
+            scope: CoroutineScope,
+            mergedChatGuids: List<String>
+        ): ChatSyncDelegate
+    }
 
     companion object {
         private const val TAG = "ChatSyncDelegate"
         private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
         private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
     }
-
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
-    private var mergedChatGuids: List<String> = emptyList()
 
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
@@ -74,18 +90,7 @@ class ChatSyncDelegate @Inject constructor(
         _state.update { it.copy(lastSyncTime = System.currentTimeMillis()) }
     }
 
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(
-        chatGuid: String,
-        scope: CoroutineScope,
-        mergedChatGuids: List<String> = listOf(chatGuid)
-    ) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-        this.mergedChatGuids = mergedChatGuids
-
+    init {
         // Observe typing indicators from socket
         observeTypingIndicators()
 
@@ -124,7 +129,7 @@ class ChatSyncDelegate @Inject constructor(
                 }
 
                 // Only poll if socket is connected (server is reachable)
-                if (!socketService.isConnected()) {
+                if (!socketConnection.isConnected()) {
                     continue
                 }
 
@@ -144,7 +149,7 @@ class ChatSyncDelegate @Inject constructor(
             return // Socket is active
         }
 
-        if (!socketService.isConnected()) {
+        if (!socketConnection.isConnected()) {
             return // Server not reachable
         }
 
@@ -224,7 +229,7 @@ class ChatSyncDelegate @Inject constructor(
      */
     private fun observeTypingIndicators() {
         scope.launch {
-            socketService.events
+            socketConnection.events
                 .filterIsInstance<SocketEvent.TypingIndicator>()
                 .filter { event ->
                     // Use normalized GUID comparison to handle format differences

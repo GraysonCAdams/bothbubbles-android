@@ -10,6 +10,9 @@ import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.ScheduledMessageRepository
 import com.bothbubbles.services.scheduled.ScheduledMessageWorker
 import com.bothbubbles.ui.chat.state.ScheduledMessagesState
+import dagger.assisted.Assisted
+import dagger.assisted.AssistedFactory
+import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -18,7 +21,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.util.UUID
 import java.util.concurrent.TimeUnit
-import javax.inject.Inject
 
 /**
  * Delegate responsible for scheduled message management.
@@ -27,17 +29,25 @@ import javax.inject.Inject
  * - Observing scheduled messages for the current chat
  * - Canceling scheduled messages
  * - Updating scheduled message time
+ *
+ * Uses AssistedInject to receive runtime parameters at construction time,
+ * eliminating the need for a separate initialize() call.
  */
-class ChatScheduledMessageDelegate @Inject constructor(
+class ChatScheduledMessageDelegate @AssistedInject constructor(
     private val scheduledMessageRepository: ScheduledMessageRepository,
-    private val workManager: WorkManager
+    private val workManager: WorkManager,
+    @Assisted private val chatGuid: String,
+    @Assisted private val scope: CoroutineScope
 ) {
+
+    @AssistedFactory
+    interface Factory {
+        fun create(chatGuid: String, scope: CoroutineScope): ChatScheduledMessageDelegate
+    }
+
     companion object {
         private const val TAG = "ChatScheduledMsgDelegate"
     }
-
-    private lateinit var chatGuid: String
-    private lateinit var scope: CoroutineScope
 
     // ============================================================================
     // SCHEDULED MESSAGES STATE
@@ -45,13 +55,7 @@ class ChatScheduledMessageDelegate @Inject constructor(
     private val _state = MutableStateFlow(ScheduledMessagesState())
     val state: StateFlow<ScheduledMessagesState> = _state.asStateFlow()
 
-    /**
-     * Initialize the delegate.
-     */
-    fun initialize(chatGuid: String, scope: CoroutineScope) {
-        this.chatGuid = chatGuid
-        this.scope = scope
-
+    init {
         observeScheduledMessages()
     }
 
