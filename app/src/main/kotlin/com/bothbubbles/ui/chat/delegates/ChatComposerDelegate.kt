@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
@@ -105,9 +105,6 @@ class ChatComposerDelegate @AssistedInject constructor(
         ): ChatComposerDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatComposerDelegate"
-    }
 
     // ============================================================================
     // TYPING INDICATOR STATE
@@ -359,7 +356,7 @@ class ChatComposerDelegate @AssistedInject constructor(
     ) {
         when (event) {
             is ComposerEvent.TextChanged -> {
-                // Log.d("PerfTrace", "TextChanged event received, text length=${event.text.length}")
+                // Timber.tag("PerfTrace").d("TextChanged event received, text length=${event.text.length}")
                 _draftText.value = event.text
             }
             is ComposerEvent.AddAttachments -> {
@@ -525,7 +522,7 @@ class ChatComposerDelegate @AssistedInject constructor(
                 val newFileSize = try {
                     attachmentRepository.getAttachmentSize(uri) ?: 0L
                 } catch (e: Exception) {
-                    Log.w(TAG, "Could not determine attachment size", e)
+                    Timber.w(e, "Could not determine attachment size")
                     0L
                 }
 

@@ -2,7 +2,7 @@ package com.bothbubbles.services.linkpreview
 
 import android.content.Context
 import android.location.Geocoder
-import android.util.Log
+import timber.log.Timber
 import java.util.Locale
 
 /**
@@ -18,8 +18,6 @@ internal class MapsPreviewHandler(
     private val geocoder by lazy { Geocoder(context, Locale.getDefault()) }
 
     companion object {
-        private const val TAG = "MapsPreviewHandler"
-
         // Maps URL patterns for synthetic preview generation
         // Each pattern captures (latitude, longitude) as groups 1 and 2
         private val MAPS_PATTERNS = listOf(
@@ -61,11 +59,11 @@ internal class MapsPreviewHandler(
 
             // Validate coordinate ranges
             if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-                Log.w(TAG, "Invalid coordinates in maps URL: lat=$lat, lng=$lng")
+                Timber.w("Invalid coordinates in maps URL: lat=$lat, lng=$lng")
                 continue
             }
 
-            Log.d(TAG, "Detected ${pattern.siteName} URL with coordinates: $lat, $lng")
+            Timber.d("Detected ${pattern.siteName} URL with coordinates: $lat, $lng")
 
             // Generate static map image URL
             val staticMapUrl = buildStaticMapUrl(lat, lng)
@@ -109,7 +107,7 @@ internal class MapsPreviewHandler(
             val addresses = geocoder.getFromLocation(lat, lng, 1)
             addresses?.firstOrNull()?.getAddressLine(0)
         } catch (e: Exception) {
-            Log.w(TAG, "Reverse geocoding failed: ${e.message}")
+            Timber.w("Reverse geocoding failed: ${e.message}")
             null
         }
     }

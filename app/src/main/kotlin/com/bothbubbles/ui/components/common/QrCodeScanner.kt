@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.components.common
 
 import android.Manifest
-import android.util.Log
+import timber.log.Timber
 import android.view.ViewGroup
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -281,7 +281,7 @@ private fun CameraPreviewWithScanner(
                                             val rawValue = barcode.rawValue
                                             if (rawValue != null && !hasScanned) {
                                                 hasScanned = true
-                                                Log.d("QrCodeScanner", "Scanned: $rawValue")
+                                                Timber.tag("QrCodeScanner").d("Scanned: $rawValue")
                                                 onQrCodeScanned(rawValue)
                                             }
                                         }
@@ -307,7 +307,7 @@ private fun CameraPreviewWithScanner(
                     camera.cameraControl.enableTorch(isFlashOn)
                     onCameraReady(cameraProvider, camera)
                 } catch (e: Exception) {
-                    Log.e("QrCodeScanner", "Camera binding failed", e)
+                    Timber.tag("QrCodeScanner").e(e, "Camera binding failed")
                 }
             }, ContextCompat.getMainExecutor(ctx))
 

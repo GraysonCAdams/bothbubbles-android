@@ -106,8 +106,7 @@ fun ChatScreenRecompositionDebug(
         }
         prevUiStateHash.intValue = uiStateHash
 
-        android.util.Log.d(
-            "CascadeDebug",
+        Timber.tag("CascadeDebug").d(
             "[RECOMPOSE #${recomposeCount.intValue}] ${if (changes.isEmpty()) "NO TRACKED CHANGES" else changes.joinToString(", ")}"
         )
     }

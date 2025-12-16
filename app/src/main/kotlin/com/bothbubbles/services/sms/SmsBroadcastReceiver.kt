@@ -8,7 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.provider.Telephony
 import android.telephony.SmsMessage as AndroidSmsMessage
-import android.util.Log
+import timber.log.Timber
 import androidx.core.content.ContextCompat
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
@@ -49,10 +49,6 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     interface SmsBroadcastReceiverEntryPoint {
         @ApplicationScope
         fun applicationScope(): CoroutineScope
-    }
-
-    companion object {
-        private const val TAG = "SmsBroadcastReceiver"
     }
 
     @Inject
@@ -101,12 +97,12 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
     private fun handleSmsReceived(context: Context, intent: Intent) {
         if (!smsPermissionHelper.isDefaultSmsApp()) {
-            Log.d(TAG, "SMS_RECEIVED_ACTION - ignoring because we are not the default SMS app")
+            Timber.d("SMS_RECEIVED_ACTION - ignoring because we are not the default SMS app")
             return
         }
 
         // If we are the default app, handleSmsDeliver will be called, so we still ignore this one
-        Log.d(TAG, "SMS_RECEIVED_ACTION - ignoring because we are default app (waiting for DELIVER)")
+        Timber.d("SMS_RECEIVED_ACTION - ignoring because we are default app (waiting for DELIVER)")
     }
 
     private fun handleSmsDeliver(context: Context, intent: Intent) {
@@ -114,7 +110,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
         val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
         if (messages.isNullOrEmpty()) return
 
-        Log.d(TAG, "SMS_DELIVER_ACTION - received ${messages.size} message parts")
+        Timber.d("SMS_DELIVER_ACTION - received ${messages.size} message parts")
 
         val pendingResult = goAsync()
 
@@ -127,7 +123,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             try {
                 processIncomingSms(context, messages)
             } catch (e: Exception) {
-                Log.e(TAG, "Error processing SMS", e)
+                Timber.e(e, "Error processing SMS")
             } finally {
                 pendingResult.finish()
             }
@@ -135,7 +131,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     }
 
     private fun handleMmsReceived(intent: Intent) {
-        Log.d(TAG, "MMS received")
+        Timber.d("MMS received")
         // MMS handling is more complex and requires content observer
         // For now, we'll rely on content observer to pick up MMS
     }
@@ -152,7 +148,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
             // Skip non-phone addresses (RCS, email, etc.) - rare for SMS but check anyway
             if (!isValidPhoneAddress(rawAddress)) {
-                Log.d(TAG, "Skipping SMS from non-phone address: $rawAddress")
+                Timber.d("Skipping SMS from non-phone address: $rawAddress")
                 return@forEach
             }
 
@@ -212,19 +208,19 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
             // Check if notifications are disabled for this chat
             if (!chat.notificationsEnabled) {
-                Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping SMS notification")
+                Timber.i("Notifications disabled for chat $chatGuid, skipping SMS notification")
                 return@forEach
             }
 
             // Check if chat is snoozed
             if (chat.isSnoozed) {
-                Log.i(TAG, "Chat $chatGuid is snoozed, skipping SMS notification")
+                Timber.i("Chat $chatGuid is snoozed, skipping SMS notification")
                 return@forEach
             }
 
             // Check if user is currently viewing this conversation
             if (activeConversationManager.isConversationActive(chatGuid)) {
-                Log.i(TAG, "Chat $chatGuid is currently active, playing in-app sound and skipping notification")
+                Timber.i("Chat $chatGuid is currently active, playing in-app sound and skipping notification")
                 soundManager.playReceiveSound(chatGuid)
                 return@forEach
             }
@@ -232,7 +228,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Check for spam - if spam, skip notification
             val spamResult = spamRepository.evaluateAndMarkSpam(chatGuid, address, fullBody)
             if (spamResult.isSpam) {
-                Log.i(TAG, "SMS from $address detected as spam (score: ${spamResult.score}), skipping notification")
+                Timber.i("SMS from $address detected as spam (score: ${spamResult.score}), skipping notification")
                 return@forEach
             }
 
@@ -255,7 +251,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 avatarUri = senderAvatarUri
             )
 
-            Log.d(TAG, "Saved incoming SMS from $address: ${fullBody.take(50)}...")
+            Timber.d("Saved incoming SMS from $address: ${fullBody.take(50)}...")
         }
     }
 
@@ -297,10 +293,10 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: SecurityException) {
-            Log.e(TAG, "Unable to insert SMS into system provider", e)
+            Timber.e(e, "Unable to insert SMS into system provider")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Unexpected error inserting SMS into system provider", e)
+            Timber.e(e, "Unexpected error inserting SMS into system provider")
             null
         }
     }
@@ -342,7 +338,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 nameInferenceService.processIncomingMessage(it.id, messageText)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error ensuring handle and inferring sender name", e)
+            Timber.e(e, "Error ensuring handle and inferring sender name")
         }
     }
 

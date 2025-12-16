@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
@@ -28,8 +28,6 @@ import kotlin.math.pow
 class SyncBackoffStrategy @Inject constructor() {
 
     companion object {
-        private const val TAG = "SyncBackoffStrategy"
-
         /** Initial backoff delay in milliseconds (1 second) */
         private const val INITIAL_DELAY_MS = 1000L
 
@@ -64,13 +62,13 @@ class SyncBackoffStrategy @Inject constructor() {
 
         // Check debounce interval
         if (timeSinceLastAttempt < MIN_SYNC_INTERVAL_MS) {
-            Log.d(TAG, "Sync debounced - only ${timeSinceLastAttempt}ms since last attempt")
+            Timber.d("Sync debounced - only ${timeSinceLastAttempt}ms since last attempt")
             return false
         }
 
         // Check backoff delay
         if (timeSinceLastAttempt < requiredDelay) {
-            Log.d(TAG, "Sync backoff active - need ${requiredDelay}ms, only ${timeSinceLastAttempt}ms elapsed")
+            Timber.d("Sync backoff active - need ${requiredDelay}ms, only ${timeSinceLastAttempt}ms elapsed")
             return false
         }
 
@@ -93,7 +91,7 @@ class SyncBackoffStrategy @Inject constructor() {
         val previousFailures = consecutiveFailures.getAndSet(0)
         lastSuccessTime.set(System.currentTimeMillis())
         if (previousFailures > 0) {
-            Log.d(TAG, "Sync succeeded after $previousFailures consecutive failures, backoff reset")
+            Timber.d("Sync succeeded after $previousFailures consecutive failures, backoff reset")
         }
     }
 
@@ -104,7 +102,7 @@ class SyncBackoffStrategy @Inject constructor() {
     fun recordFailure() {
         val failures = consecutiveFailures.incrementAndGet()
         val nextDelay = getNextDelay()
-        Log.w(TAG, "Sync failed ($failures consecutive), next attempt delayed by ${nextDelay}ms")
+        Timber.w("Sync failed ($failures consecutive), next attempt delayed by ${nextDelay}ms")
     }
 
     /**
@@ -146,6 +144,6 @@ class SyncBackoffStrategy @Inject constructor() {
     fun reset() {
         consecutiveFailures.set(0)
         lastAttemptTime.set(0)
-        Log.d(TAG, "Backoff strategy reset")
+        Timber.d("Backoff strategy reset")
     }
 }

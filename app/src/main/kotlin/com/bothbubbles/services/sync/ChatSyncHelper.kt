@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
 import kotlinx.coroutines.channels.Channel
 import javax.inject.Inject
@@ -65,6 +65,6 @@ class ChatSyncHelper @Inject constructor(
         } while (result.getOrNull()?.size == CHAT_PAGE_SIZE)
 
         chatQueue.close()
-        Log.i(TAG, "Chat fetching complete: ${progressTracker.totalChatsFound.get()} chats found")
+        Timber.i("Chat fetching complete: ${progressTracker.totalChatsFound.get()} chats found")
     }
 }

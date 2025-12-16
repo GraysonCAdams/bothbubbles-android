@@ -1,6 +1,6 @@
 package com.bothbubbles.services.categorization
 
-import android.util.Log
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,8 +21,6 @@ class MessageCategorizer @Inject constructor(
     private val entityExtractionService: EntityExtractionService
 ) {
     companion object {
-        private const val TAG = "MessageCategorizer"
-
         // Confidence thresholds
         const val HIGH_CONFIDENCE = 80
         const val MEDIUM_CONFIDENCE = 50
@@ -177,7 +175,7 @@ class MessageCategorizer @Inject constructor(
                 reasons = bestCategory.value.reasons,
                 usedMlKit = usedMlKit
             ).also {
-                Log.d(TAG, "Categorized as ${it.category?.name}: confidence=${it.confidence}, reasons=${it.reasons}")
+                Timber.d("Categorized as ${it.category?.name}: confidence=${it.confidence}, reasons=${it.reasons}")
             }
         } else {
             CategoryResult(null, 0, listOf("No category match"), usedMlKit)

@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
@@ -45,10 +45,6 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
         fun create(chatGuid: String, scope: CoroutineScope): ChatScheduledMessageDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatScheduledMsgDelegate"
-    }
-
     // ============================================================================
     // SCHEDULED MESSAGES STATE
     // ============================================================================
@@ -87,7 +83,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun scheduleMessage(text: String, attachments: List<PendingAttachmentInput>, sendAt: Long) {
         scope.launch {
-            Log.d(TAG, "Scheduling message for chat $chatGuid at $sendAt")
+            Timber.d("Scheduling message for chat $chatGuid at $sendAt")
 
             // Convert attachments to JSON array string (extract URIs from PendingAttachmentInput)
             val attachmentUrisJson = if (attachments.isNotEmpty()) {
@@ -106,7 +102,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
 
             // Insert into database
             val id = scheduledMessageRepository.insert(scheduledMessage)
-            Log.d(TAG, "Scheduled message inserted with id $id")
+            Timber.d("Scheduled message inserted with id $id")
 
             // Calculate delay
             val delay = sendAt - System.currentTimeMillis()
@@ -120,7 +116,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
                 .build()
 
             workManager.enqueue(workRequest)
-            Log.d(TAG, "WorkManager job enqueued with id ${workRequest.id}")
+            Timber.d("WorkManager job enqueued with id ${workRequest.id}")
 
             // Save the work request ID for potential cancellation
             scheduledMessageRepository.updateWorkRequestId(id, workRequest.id.toString())
@@ -134,11 +130,11 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun cancelScheduledMessage(id: Long) {
         scope.launch {
-            Log.d(TAG, "Canceling scheduled message $id")
+            Timber.d("Canceling scheduled message $id")
 
             val scheduledMessage = scheduledMessageRepository.getById(id)
             if (scheduledMessage == null) {
-                Log.w(TAG, "Scheduled message $id not found")
+                Timber.w("Scheduled message $id not found")
                 return@launch
             }
 
@@ -146,15 +142,15 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
             scheduledMessage.workRequestId?.let { workRequestId ->
                 try {
                     workManager.cancelWorkById(UUID.fromString(workRequestId))
-                    Log.d(TAG, "WorkManager job $workRequestId canceled")
+                    Timber.d("WorkManager job $workRequestId canceled")
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to cancel WorkManager job: ${e.message}")
+                    Timber.w("Failed to cancel WorkManager job: ${e.message}")
                 }
             }
 
             // Update status to cancelled
             scheduledMessageRepository.updateStatus(id, ScheduledMessageStatus.CANCELLED)
-            Log.d(TAG, "Scheduled message $id marked as cancelled")
+            Timber.d("Scheduled message $id marked as cancelled")
         }
     }
 
@@ -166,16 +162,16 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun updateScheduledTime(id: Long, newSendAt: Long) {
         scope.launch {
-            Log.d(TAG, "Updating scheduled time for message $id to $newSendAt")
+            Timber.d("Updating scheduled time for message $id to $newSendAt")
 
             val scheduledMessage = scheduledMessageRepository.getById(id)
             if (scheduledMessage == null) {
-                Log.w(TAG, "Scheduled message $id not found")
+                Timber.w("Scheduled message $id not found")
                 return@launch
             }
 
             if (scheduledMessage.status != ScheduledMessageStatus.PENDING) {
-                Log.w(TAG, "Cannot update non-pending scheduled message (status: ${scheduledMessage.status})")
+                Timber.w("Cannot update non-pending scheduled message (status: ${scheduledMessage.status})")
                 return@launch
             }
 
@@ -184,7 +180,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
                 try {
                     workManager.cancelWorkById(UUID.fromString(workRequestId))
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to cancel existing WorkManager job: ${e.message}")
+                    Timber.w("Failed to cancel existing WorkManager job: ${e.message}")
                 }
             }
 
@@ -206,7 +202,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
                     workRequestId = workRequest.id.toString()
                 )
             )
-            Log.d(TAG, "Scheduled message $id updated with new time $newSendAt")
+            Timber.d("Scheduled message $id updated with new time $newSendAt")
         }
     }
 
@@ -218,11 +214,11 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun deleteScheduledMessage(id: Long) {
         scope.launch {
-            Log.d(TAG, "Deleting scheduled message $id")
+            Timber.d("Deleting scheduled message $id")
 
             val scheduledMessage = scheduledMessageRepository.getById(id)
             if (scheduledMessage == null) {
-                Log.w(TAG, "Scheduled message $id not found")
+                Timber.w("Scheduled message $id not found")
                 return@launch
             }
 
@@ -232,14 +228,14 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
                     try {
                         workManager.cancelWorkById(UUID.fromString(workRequestId))
                     } catch (e: Exception) {
-                        Log.w(TAG, "Failed to cancel WorkManager job: ${e.message}")
+                        Timber.w("Failed to cancel WorkManager job: ${e.message}")
                     }
                 }
             }
 
             // Delete from database
             scheduledMessageRepository.delete(id)
-            Log.d(TAG, "Scheduled message $id deleted")
+            Timber.d("Scheduled message $id deleted")
         }
     }
 
@@ -251,16 +247,16 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun retryScheduledMessage(id: Long, newSendAt: Long = System.currentTimeMillis()) {
         scope.launch {
-            Log.d(TAG, "Retrying scheduled message $id")
+            Timber.d("Retrying scheduled message $id")
 
             val scheduledMessage = scheduledMessageRepository.getById(id)
             if (scheduledMessage == null) {
-                Log.w(TAG, "Scheduled message $id not found")
+                Timber.w("Scheduled message $id not found")
                 return@launch
             }
 
             if (scheduledMessage.status != ScheduledMessageStatus.FAILED) {
-                Log.w(TAG, "Can only retry failed scheduled messages (status: ${scheduledMessage.status})")
+                Timber.w("Can only retry failed scheduled messages (status: ${scheduledMessage.status})")
                 return@launch
             }
 
@@ -280,7 +276,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
 
             // Update work request ID
             scheduledMessageRepository.updateWorkRequestId(id, workRequest.id.toString())
-            Log.d(TAG, "Scheduled message $id retried with new work request ${workRequest.id}")
+            Timber.d("Scheduled message $id retried with new work request ${workRequest.id}")
         }
     }
 
@@ -289,7 +285,7 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
      */
     fun cleanupSentMessages() {
         scope.launch {
-            Log.d(TAG, "Cleaning up sent scheduled messages")
+            Timber.d("Cleaning up sent scheduled messages")
             scheduledMessageRepository.deleteSent()
         }
     }

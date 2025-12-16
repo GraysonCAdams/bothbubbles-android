@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
@@ -95,14 +95,10 @@ class ChatMessageListDelegate @AssistedInject constructor(
         ): ChatMessageListDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatMessageListDelegate"
 
         // Adaptive polling: catches missed messages when push is unreliable
         private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
         private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
-    }
-
     // PERF: Message cache for incremental updates - preserves object identity for unchanged messages
     private val messageCache = MessageCache()
 
@@ -163,7 +159,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
                 // Skip if chat doesn't exist yet (foreign key constraint would fail)
                 if (chatRepository.getChat(chatGuid) == null) return
 
-                Log.d(TAG, "SyncTrigger: requesting sync for range $startPosition-${startPosition + count}")
+                Timber.d("SyncTrigger: requesting sync for range $startPosition-${startPosition + count}")
                 _isLoadingFromServer.value = true
 
                 try {
@@ -173,19 +169,19 @@ class ChatMessageListDelegate @AssistedInject constructor(
                         offset = startPosition
                     )
                 } catch (e: Exception) {
-                    Log.e(TAG, "SyncTrigger: sync failed", e)
+                    Timber.e(e, "SyncTrigger: sync failed")
                 } finally {
                     _isLoadingFromServer.value = false
                 }
             }
 
             override suspend fun requestSyncForMessage(chatGuids: List<String>, messageGuid: String) {
-                Log.d(TAG, "SyncTrigger: requesting sync for message $messageGuid")
+                Timber.d("SyncTrigger: requesting sync for message $messageGuid")
                 if (chatRepository.getChat(chatGuid) == null) return
                 try {
                     messageRepository.syncMessagesForChat(chatGuid = chatGuid, limit = 10)
                 } catch (e: Exception) {
-                    Log.e(TAG, "SyncTrigger: message sync failed", e)
+                    Timber.e(e, "SyncTrigger: message sync failed")
                 }
             }
         }
@@ -236,7 +232,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
         // Restore cached scroll position from LRU cache
         val cachedState = chatStateCache.get(chatGuid)
         if (cachedState != null) {
-            Log.d(TAG, "Restoring chat from cache: scrollPos=${cachedState.scrollPosition}, messages=${cachedState.messages.size}")
+            Timber.d("Restoring chat from cache: scrollPos=${cachedState.scrollPosition}, messages=${cachedState.messages.size}")
             lastScrollPosition = cachedState.scrollPosition
             lastScrollOffset = cachedState.scrollOffset
             _cachedScrollPosition.value = Pair(cachedState.scrollPosition, cachedState.scrollOffset)
@@ -279,10 +275,10 @@ class ChatMessageListDelegate @AssistedInject constructor(
      */
     fun insertMessageOptimistically(model: MessageUiModel) {
         val start = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically START ──")
-        Log.i(TAG, "[SEND_TRACE] guid=${model.guid}")
+        Timber.i("[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically START ──")
+        Timber.i("[SEND_TRACE] guid=${model.guid}")
         pagingController.insertMessageOptimistically(model)
-        Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically END: ${System.currentTimeMillis() - start}ms ──")
+        Timber.i("[SEND_TRACE] ── ChatMessageListDelegate.insertMessageOptimistically END: ${System.currentTimeMillis() - start}ms ──")
     }
 
     /**
@@ -390,19 +386,19 @@ class ChatMessageListDelegate @AssistedInject constructor(
      * Load more (older) messages from the server.
      */
     fun loadMoreMessages() {
-        Log.d("ChatScroll", "[Delegate] loadMoreMessages called: isLoadingMore=${uiStateFlow.value.isLoadingMore}, canLoadMore=${uiStateFlow.value.canLoadMore}")
+        Timber.tag("ChatScroll").d("[Delegate] loadMoreMessages called: isLoadingMore=${uiStateFlow.value.isLoadingMore}, canLoadMore=${uiStateFlow.value.canLoadMore}")
         if (uiStateFlow.value.isLoadingMore || !uiStateFlow.value.canLoadMore) {
-            Log.d("ChatScroll", "[Delegate] loadMoreMessages SKIPPED - already loading or no more to load")
+            Timber.tag("ChatScroll").d("[Delegate] loadMoreMessages SKIPPED - already loading or no more to load")
             return
         }
 
         val oldestMessage = _messagesState.value.lastOrNull()
         if (oldestMessage == null) {
-            Log.d("ChatScroll", "[Delegate] loadMoreMessages SKIPPED - no messages in list")
+            Timber.tag("ChatScroll").d("[Delegate] loadMoreMessages SKIPPED - no messages in list")
             return
         }
 
-        Log.d("ChatScroll", "[Delegate] >>> STARTING loadMoreMessages: oldestDate=${oldestMessage.dateCreated}, currentMsgCount=${_messagesState.value.size}")
+        Timber.tag("ChatScroll").d("[Delegate] >>> STARTING loadMoreMessages: oldestDate=${oldestMessage.dateCreated}, currentMsgCount=${_messagesState.value.size}")
 
         scope.launch {
             onUiStateUpdate { copy(isLoadingMore = true) }
@@ -415,18 +411,18 @@ class ChatMessageListDelegate @AssistedInject constructor(
             ).handle(
                 onSuccess = { messages ->
                     val elapsed = System.currentTimeMillis() - startTime
-                    Log.d("ChatScroll", "[Delegate] loadMoreMessages SUCCESS: synced ${messages.size} messages in ${elapsed}ms")
+                    Timber.tag("ChatScroll").d("[Delegate] loadMoreMessages SUCCESS: synced ${messages.size} messages in ${elapsed}ms")
 
                     pagingController.refresh()
 
                     onUiStateUpdate {
                         copy(isLoadingMore = false, canLoadMore = messages.size == 50)
                     }
-                    Log.d("ChatScroll", "[Delegate] loadMoreMessages COMPLETE: canLoadMore=${messages.size == 50}")
+                    Timber.tag("ChatScroll").d("[Delegate] loadMoreMessages COMPLETE: canLoadMore=${messages.size == 50}")
                 },
                 onError = { appError ->
                     val elapsed = System.currentTimeMillis() - startTime
-                    Log.e("ChatScroll", "[Delegate] loadMoreMessages FAILED after ${elapsed}ms: ${appError.technicalMessage}")
+                    Timber.tag("ChatScroll").e("[Delegate] loadMoreMessages FAILED after ${elapsed}ms: ${appError.technicalMessage}")
                     onUiStateUpdate { copy(isLoadingMore = false, appError = appError) }
                 }
             )
@@ -454,9 +450,9 @@ class ChatMessageListDelegate @AssistedInject constructor(
             // Ensure chat exists in local DB before syncing messages
             val chatExists = chatRepository.getChat(chatGuid) != null
             if (!chatExists) {
-                Log.d(TAG, "Chat $chatGuid not in local DB, fetching from server first")
+                Timber.d("Chat $chatGuid not in local DB, fetching from server first")
                 chatRepository.fetchChat(chatGuid).onFailure { e ->
-                    Log.e(TAG, "Failed to fetch chat $chatGuid from server", e)
+                    Timber.e(e, "Failed to fetch chat $chatGuid from server")
                     if (_messagesState.value.isEmpty()) {
                         onUiStateUpdate { copy(error = "Failed to load chat: ${e.message}") }
                     }
@@ -485,7 +481,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
             smsRepository.importMessagesForChat(chatGuid, limit = 100).fold(
                 onSuccess = { count ->
                     // Messages are now in Room and will be picked up by the paging controller
-                    Log.d(TAG, "Imported $count SMS messages for $chatGuid")
+                    Timber.d("Imported $count SMS messages for $chatGuid")
                 },
                 onFailure = { e ->
                     if (_messagesState.value.isEmpty()) {
@@ -521,21 +517,21 @@ class ChatMessageListDelegate @AssistedInject constructor(
                 .collect { messageModels ->
                     val collectStart = System.currentTimeMillis()
                     val newestGuid = messageModels.firstOrNull()?.guid?.takeLast(12) ?: "none"
-                    Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate COLLECTING ${messageModels.size} messages ──")
-                    Log.i(TAG, "[SEND_TRACE] Newest message guid=...$newestGuid")
+                    Timber.i("[SEND_TRACE] ── ChatMessageListDelegate COLLECTING ${messageModels.size} messages ──")
+                    Timber.i("[SEND_TRACE] Newest message guid=...$newestGuid")
 
                     val collectId = PerformanceProfiler.start("Chat.messagesCollected", "${messageModels.size} messages")
 
                     // Update separate messages flow FIRST (triggers list recomposition only)
                     val stableMessages = messageModels.toStable()
-                    Log.i(TAG, "[SEND_TRACE] Setting _messagesState with ${stableMessages.size} messages")
+                    Timber.i("[SEND_TRACE] Setting _messagesState with ${stableMessages.size} messages")
                     _messagesState.value = stableMessages
 
                     // Update main UI state
                     val canLoad = messageModels.size < pagingController.totalCount.value
                     onUiStateUpdate { copy(isLoading = false, canLoadMore = canLoad) }
                     PerformanceProfiler.end(collectId)
-                    Log.i(TAG, "[SEND_TRACE] ── ChatMessageListDelegate COLLECT DONE: ${System.currentTimeMillis() - collectStart}ms ──")
+                    Timber.i("[SEND_TRACE] ── ChatMessageListDelegate COLLECT DONE: ${System.currentTimeMillis() - collectStart}ms ──")
                 }
         }
 
@@ -543,7 +539,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
         scope.launch {
             _attachmentRefreshTrigger.collect { trigger ->
                 if (trigger > 0) {
-                    Log.d(TAG, "Attachment refresh triggered, refreshing paging controller")
+                    Timber.d("Attachment refresh triggered, refreshing paging controller")
                     pagingController.refresh()
                 }
             }
@@ -563,7 +559,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
                 .filterIsInstance<SocketEvent.NewMessage>()
                 .filter { event -> isEventForThisChat(event.chatGuid) }
                 .collect { event ->
-                    Log.d(TAG, "Socket: New message received for ${event.chatGuid}, guid=${event.message.guid}")
+                    Timber.d("Socket: New message received for ${event.chatGuid}, guid=${event.message.guid}")
 
                     // Update socket activity timestamp (for adaptive polling)
                     lastSocketMessageTime = System.currentTimeMillis()
@@ -586,7 +582,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
                 .filterIsInstance<SocketEvent.MessageUpdated>()
                 .filter { event -> isEventForThisChat(event.chatGuid) }
                 .collect { event ->
-                    Log.d(TAG, "Socket: Message updated for ${event.chatGuid}, guid=${event.message.guid}")
+                    Timber.d("Socket: Message updated for ${event.chatGuid}, guid=${event.message.guid}")
                     pagingController.updateMessage(event.message.guid)
                 }
         }
@@ -676,11 +672,11 @@ class ChatMessageListDelegate @AssistedInject constructor(
                     )
                     result.onSuccess { messages ->
                         if (messages.isNotEmpty()) {
-                            Log.d(TAG, "Adaptive polling found ${messages.size} missed message(s)")
+                            Timber.d("Adaptive polling found ${messages.size} missed message(s)")
                         }
                     }
                 } catch (e: Exception) {
-                    Log.d(TAG, "Adaptive polling error: ${e.message}")
+                    Timber.d("Adaptive polling error: ${e.message}")
                 }
             }
         }
@@ -697,7 +693,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
             appLifecycleTracker.foregroundState
                 .collect { isInForeground ->
                     if (isInForeground) {
-                        Log.d(TAG, "App resumed - syncing for missed messages")
+                        Timber.d("App resumed - syncing for missed messages")
                         lastSocketMessageTime = System.currentTimeMillis()
 
                         if (chatRepository.getChat(chatGuid) == null) {
@@ -715,11 +711,11 @@ class ChatMessageListDelegate @AssistedInject constructor(
                             )
                             result.onSuccess { messages ->
                                 if (messages.isNotEmpty()) {
-                                    Log.d(TAG, "Foreground sync found ${messages.size} missed message(s)")
+                                    Timber.d("Foreground sync found ${messages.size} missed message(s)")
                                 }
                             }
                         } catch (e: Exception) {
-                            Log.d(TAG, "Foreground sync error: ${e.message}")
+                            Timber.d("Foreground sync error: ${e.message}")
                         }
                     }
                 }
@@ -835,7 +831,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
                         chatRepository.markChatAsRead(guid)
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to mark $guid as read", e)
+                    Timber.w(e, "Failed to mark $guid as read")
                     // Continue with other chats
                 }
             }
@@ -861,7 +857,7 @@ class ChatMessageListDelegate @AssistedInject constructor(
 
         // Save scroll position to DataStore
         val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
-        Log.d(TAG, "onChatLeave: saving chatGuid=$chatGuid, scroll=($lastScrollPosition, $lastScrollOffset)")
+        Timber.d("onChatLeave: saving chatGuid=$chatGuid, scroll=($lastScrollPosition, $lastScrollOffset)")
         settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
         settingsDataStore.setLastScrollPosition(lastScrollPosition, lastScrollOffset)
 

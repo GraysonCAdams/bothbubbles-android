@@ -2,7 +2,7 @@ package com.bothbubbles.services.contacts
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
@@ -17,10 +17,6 @@ import javax.inject.Singleton
 class VCardService @Inject constructor(
     @ApplicationContext private val context: Context
 ) : VCardExporter {
-    companion object {
-        private const val TAG = "VCardService"
-    }
-
     private val contactDataExtractor = ContactDataExtractor(context)
 
     /**
@@ -33,7 +29,7 @@ class VCardService @Inject constructor(
             val vCardContent = VCardGenerator.generateVCard(contactData)
             saveVCardToFile(contactData.displayName, vCardContent)
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating vCard from contact", e)
+            Timber.e(e, "Error creating vCard from contact")
             null
         }
     }
@@ -47,7 +43,7 @@ class VCardService @Inject constructor(
             val vCardContent = VCardGenerator.generateVCardWithOptions(contactData, options)
             saveVCardToFile(contactData.displayName, vCardContent)
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating vCard from contact data", e)
+            Timber.e(e, "Error creating vCard from contact data")
             null
         }
     }
@@ -85,7 +81,7 @@ class VCardService @Inject constructor(
                 vcardFile
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error saving vCard to file", e)
+            Timber.e(e, "Error saving vCard to file")
             null
         }
     }

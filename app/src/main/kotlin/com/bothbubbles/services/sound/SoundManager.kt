@@ -6,7 +6,7 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.SoundPool
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.R
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.di.ApplicationScope
@@ -53,7 +53,6 @@ class SoundManager @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) : SoundPlayer {
     companion object {
-        private const val TAG = "SoundManager"
         private const val MAX_STREAMS = 2
     }
 
@@ -94,7 +93,7 @@ class SoundManager @Inject constructor(
                 setOnLoadCompleteListener { _, _, status ->
                     if (status == 0) {
                         isLoaded = true
-                        Log.d(TAG, "Sounds loaded successfully")
+                        Timber.d("Sounds loaded successfully")
                     }
                 }
             }
@@ -140,7 +139,7 @@ class SoundManager @Inject constructor(
     override fun playSendSound() {
         applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
-                Log.d(TAG, "App in background - skipping send sound (use system notification)")
+                Timber.d("App in background - skipping send sound (use system notification)")
                 return@launch
             }
             if (settingsDataStore.messageSoundsEnabled.first()) {
@@ -161,12 +160,12 @@ class SoundManager @Inject constructor(
     override fun playReceiveSound(chatGuid: String) {
         applicationScope.launch(ioDispatcher) {
             if (!appLifecycleTracker.get().isAppInForeground) {
-                Log.d(TAG, "App in background - skipping receive sound (use system notification)")
+                Timber.d("App in background - skipping receive sound (use system notification)")
                 return@launch
             }
             // Only play in-app sound if user is viewing this conversation
             if (!activeConversationManager.isConversationActive(chatGuid)) {
-                Log.d(TAG, "Chat $chatGuid not active - skipping receive sound (use system notification)")
+                Timber.d("Chat $chatGuid not active - skipping receive sound (use system notification)")
                 return@launch
             }
             if (settingsDataStore.messageSoundsEnabled.first()) {
@@ -192,12 +191,12 @@ class SoundManager @Inject constructor(
 
     private fun playSound(soundId: Int) {
         if (!isLoaded || soundId == 0) {
-            Log.d(TAG, "Sound not loaded yet")
+            Timber.d("Sound not loaded yet")
             return
         }
 
         if (!canPlaySound()) {
-            Log.d(TAG, "Sound blocked by DND or sound mode")
+            Timber.d("Sound blocked by DND or sound mode")
             return
         }
 
@@ -210,7 +209,7 @@ class SoundManager @Inject constructor(
      */
     private fun playSoundDirect(soundId: Int) {
         if (!isLoaded || soundId == 0) {
-            Log.d(TAG, "Sound not loaded yet")
+            Timber.d("Sound not loaded yet")
             return
         }
 

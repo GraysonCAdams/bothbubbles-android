@@ -1,6 +1,6 @@
 package com.bothbubbles.services.socket
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.BuildConfig
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.di.IoDispatcher
@@ -35,8 +35,6 @@ class SocketIOConnection(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
-        private const val TAG = "SocketIOConnection"
-
         // Socket.IO event names from BlueBubbles server
         const val EVENT_NEW_MESSAGE = "new-message"
         const val EVENT_MESSAGE_UPDATED = "updated-message"
@@ -78,16 +76,16 @@ class SocketIOConnection(
      * Connect to the BlueBubbles server
      */
     fun connect() {
-        Log.i(TAG, "connect() called - attempting to connect to server")
+        Timber.i("connect() called - attempting to connect to server")
 
         if (socket?.connected() == true) {
-            Log.d(TAG, "Already connected")
+            Timber.d("Already connected")
             return
         }
 
         // Prevent duplicate connection attempts
         if (isConnecting) {
-            Log.d(TAG, "Connection already in progress, skipping duplicate attempt")
+            Timber.d("Connection already in progress, skipping duplicate attempt")
             return
         }
 
@@ -103,15 +101,15 @@ class SocketIOConnection(
                 val password = settingsDataStore.serverPassword.first()
 
                 if (serverAddress.isBlank() || password.isBlank()) {
-                    Log.e(TAG, "Server address or password not configured")
+                    Timber.e("Server address or password not configured")
                     connectionState.value = ConnectionState.NOT_CONFIGURED
                     return@launch
                 }
 
                 // Log sanitized server address (hide credentials/full URL for security)
                 val uri = URI.create(serverAddress)
-                Log.i(TAG, "Connecting to server: ${uri.scheme}://${uri.host}:${uri.port}")
-                Log.d(TAG, "Password length: ${password.length}, first 4 chars: ${password.take(4)}...")
+                Timber.i("Connecting to server: ${uri.scheme}://${uri.host}:${uri.port}")
+                Timber.d("Password length: ${password.length}, first 4 chars: ${password.take(4)}...")
 
                 // URL-encode the password for use in query string
                 val encodedPassword = URLEncoder.encode(password, "UTF-8")
@@ -133,7 +131,7 @@ class SocketIOConnection(
                     webSocketFactory = okHttpClient
                 }
 
-                Log.d(TAG, "Creating socket with options: transports=${options.transports?.joinToString()}, timeout=${options.timeout}")
+                Timber.d("Creating socket with options: transports=${options.transports?.joinToString()}, timeout=${options.timeout}")
 
                 socket = IO.socket(URI.create(serverAddress), options).apply {
                     on(Socket.EVENT_CONNECT, onConnect)
@@ -144,10 +142,10 @@ class SocketIOConnection(
                     if (BuildConfig.DEBUG) {
                         onAnyIncoming { args: Array<Any?> ->
                             val eventName = args.getOrNull(0)?.toString() ?: "unknown"
-                            Log.i(TAG, ">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
+                            Timber.i(">>> SOCKET EVENT: '$eventName' with ${args.size - 1} args")
                             args.drop(1).forEachIndexed { index: Int, arg: Any? ->
                                 val preview = arg?.toString()?.take(200) ?: "null"
-                                Log.d(TAG, "    arg[$index]: $preview")
+                                Timber.d("    arg[$index]: $preview")
                             }
                         }
                     }
@@ -174,13 +172,13 @@ class SocketIOConnection(
                     on(EVENT_SCHEDULED_MESSAGE_ERROR, eventParser.onScheduledMessageError)
                     on(EVENT_SCHEDULED_MESSAGE_DELETED, eventParser.onScheduledMessageDeleted)
 
-                    Log.i(TAG, "Socket created, calling connect()...")
+                    Timber.i("Socket created, calling connect()...")
                     connect()
-                    Log.d(TAG, "Socket.connect() called, waiting for connection events...")
+                    Timber.d("Socket.connect() called, waiting for connection events...")
                 }
                 // Note: isConnecting will be reset by onConnect or onConnectError handlers
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to connect", e)
+                Timber.e(e, "Failed to connect")
                 isConnecting = false
                 connectionState.value = ConnectionState.ERROR
                 events.tryEmit(SocketEvent.Error(e.message ?: "Connection failed"))
@@ -238,7 +236,7 @@ class SocketIOConnection(
     // ===== Socket Event Handlers =====
 
     private val onConnect = Emitter.Listener {
-        Log.d(TAG, "Connected to server")
+        Timber.d("Connected to server")
         isConnecting = false
         resetRetryState()
         connectionState.value = ConnectionState.CONNECTED
@@ -246,7 +244,7 @@ class SocketIOConnection(
     }
 
     private val onDisconnect = Emitter.Listener { args ->
-        Log.d(TAG, "Disconnected from server: ${args.firstOrNull()}")
+        Timber.d("Disconnected from server: ${args.firstOrNull()}")
         isConnecting = false
         connectionState.value = ConnectionState.DISCONNECTED
         developerEventLog.get().logSocketEvent("DISCONNECTED", args.firstOrNull()?.toString())
@@ -255,7 +253,7 @@ class SocketIOConnection(
 
     private val onConnectError = Emitter.Listener { args ->
         val error = args.firstOrNull()
-        Log.e(TAG, "Connection error: $error")
+        Timber.e("Connection error: $error")
         isConnecting = false
         connectionState.value = ConnectionState.ERROR
         events.tryEmit(SocketEvent.Error(error?.toString() ?: "Connection error"))

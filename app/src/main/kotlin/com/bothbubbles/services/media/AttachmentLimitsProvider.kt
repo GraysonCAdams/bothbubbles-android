@@ -5,7 +5,7 @@ import android.os.Build
 import android.os.PersistableBundle
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionManager
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -22,8 +22,6 @@ class AttachmentLimitsProvider @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        private const val TAG = "AttachmentLimitsProvider"
-
         // MMS defaults (conservative, carriers may allow more)
         private const val DEFAULT_MMS_MAX_SIZE = 300 * 1024L // 300KB
         private const val DEFAULT_MMS_MAX_IMAGE_SIZE = 250 * 1024L // 250KB per image
@@ -191,10 +189,10 @@ class AttachmentLimitsProvider @Inject constructor(
 
             // Sanity check - don't trust absurd values
             val sanitizedSize = maxSize.coerceIn(DEFAULT_MMS_MAX_SIZE, MMS_MAX_REASONABLE_SIZE)
-            Log.d(TAG, "Carrier MMS max size: $sanitizedSize bytes (raw: $maxSize)")
+            Timber.d("Carrier MMS max size: $sanitizedSize bytes (raw: $maxSize)")
             sanitizedSize
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get carrier config, using default", e)
+            Timber.w(e, "Failed to get carrier config, using default")
             DEFAULT_MMS_MAX_SIZE
         }
     }

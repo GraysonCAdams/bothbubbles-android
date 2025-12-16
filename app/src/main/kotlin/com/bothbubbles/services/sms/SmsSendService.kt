@@ -8,7 +8,7 @@ import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -111,7 +111,7 @@ class SmsSendService @Inject constructor(
                 )
             }
 
-            Log.d(TAG, "SMS queued for sending: $messageGuid (${parts.size} parts)")
+            Timber.d("SMS queued for sending: $messageGuid (${parts.size} parts)")
             message
         }
     }
@@ -140,7 +140,7 @@ class SmsSendService @Inject constructor(
                 )
                 messageDao.updateMessage(updatedMessage)
                 updateProviderMessageStatus(updatedMessage.smsId, status)
-                Log.d(TAG, "Updated message $messageGuid status to $status" +
+                Timber.d("Updated message $messageGuid status to $status" +
                     if (errorMessage != null) " (error: $errorMessage)" else "")
             }
         }
@@ -159,14 +159,14 @@ class SmsSendService @Inject constructor(
 
         // Only retry LOCAL_SMS messages
         if (message.messageSource != MessageSource.LOCAL_SMS.name) {
-            Log.d(TAG, "Cannot retry non-SMS message: $messageGuid")
+            Timber.d("Cannot retry non-SMS message: $messageGuid")
             return@withContext false
         }
 
         // Check retry metadata
         val retryMetadata = SmsRetryMetadata.fromJson(message.metadata)
         if (!retryMetadata.canRetry()) {
-            Log.d(TAG, "Max retries exceeded for message: $messageGuid (${retryMetadata.retryCount}/${SmsRetryMetadata.MAX_RETRIES})")
+            Timber.d("Max retries exceeded for message: $messageGuid (${retryMetadata.retryCount}/${SmsRetryMetadata.MAX_RETRIES})")
             return@withContext false
         }
 
@@ -186,7 +186,7 @@ class SmsSendService @Inject constructor(
         )
         messageDao.updateMessage(retryingMessage)
 
-        Log.d(TAG, "Retrying SMS $messageGuid (attempt ${newMetadata.retryCount}/${SmsRetryMetadata.MAX_RETRIES})")
+        Timber.d("Retrying SMS $messageGuid (attempt ${newMetadata.retryCount}/${SmsRetryMetadata.MAX_RETRIES})")
 
         // Exponential backoff: 2s, 4s, 8s
         val delayMs = (1L shl newMetadata.retryCount) * 1000L
@@ -211,10 +211,10 @@ class SmsSendService @Inject constructor(
                 smsManager.sendMultipartTextMessage(address, null, parts, sentIntents, deliveredIntents)
             }
 
-            Log.d(TAG, "SMS retry queued for sending: $messageGuid")
+            Timber.d("SMS retry queued for sending: $messageGuid")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "SMS retry failed: $messageGuid", e)
+            Timber.e(e, "SMS retry failed: $messageGuid")
             val failedMessage = retryingMessage.copy(
                 smsStatus = "failed",
                 error = 1,
@@ -250,7 +250,7 @@ class SmsSendService @Inject constructor(
                 )
             } ?: emptyList()
         } catch (e: SecurityException) {
-            Log.w(TAG, "No permission to read subscription info", e)
+            Timber.w(e, "No permission to read subscription info")
             emptyList()
         }
     }
@@ -327,10 +327,10 @@ class SmsSendService @Inject constructor(
             val uri = context.contentResolver.insert(Telephony.Sms.Sent.CONTENT_URI, values) ?: return null
             queryProviderMessage(uri)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Missing permission to write SMS provider", e)
+            Timber.w(e, "Missing permission to write SMS provider")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Unable to insert SMS into provider", e)
+            Timber.e(e, "Unable to insert SMS into provider")
             null
         }
     }
@@ -381,9 +381,9 @@ class SmsSendService @Inject constructor(
             val uri = Uri.withAppendedPath(Telephony.Sms.CONTENT_URI, smsId.toString())
             context.contentResolver.update(uri, values, null, null)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Missing permission to update SMS provider", e)
+            Timber.w(e, "Missing permission to update SMS provider")
         } catch (e: Exception) {
-            Log.e(TAG, "Unable to update SMS provider status", e)
+            Timber.e(e, "Unable to update SMS provider status")
         }
     }
 

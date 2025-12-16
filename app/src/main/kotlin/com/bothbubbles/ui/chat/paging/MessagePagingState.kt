@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.paging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.ui.components.message.MessageUiModel
 
 /**
@@ -15,12 +15,8 @@ data class SparseMessageList(
     private val loadedData: Map<Int, MessageUiModel>,
     val loadedRanges: List<IntRange>
 ) {
-    companion object {
-        private const val TAG = "SparseMessageList"
 
         fun empty() = SparseMessageList(0, emptyMap(), emptyList())
-    }
-
     val size: Int get() = totalSize
 
     val isEmpty: Boolean get() = totalSize == 0
@@ -54,7 +50,7 @@ data class SparseMessageList(
             .mapNotNull { (position, model) ->
                 if (model.guid in seenGuids) {
                     // This should never happen if upstream mutex logic works correctly
-                    Log.w(TAG, "DEDUP: Duplicate GUID ${model.guid} at position $position - skipping")
+                    Timber.w("DEDUP: Duplicate GUID ${model.guid} at position $position - skipping")
                     null
                 } else {
                     seenGuids.add(model.guid)

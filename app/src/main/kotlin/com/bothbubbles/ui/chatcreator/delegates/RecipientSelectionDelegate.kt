@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.services.socket.ConnectionState
@@ -26,9 +26,6 @@ class RecipientSelectionDelegate @Inject constructor(
     private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore
 ) {
-    companion object {
-        private const val TAG = "RecipientSelectionDelegate"
-    }
 
     private val _selectedRecipients = MutableStateFlow<List<SelectedRecipient>>(emptyList())
     val selectedRecipients: StateFlow<List<SelectedRecipient>> = _selectedRecipients.asStateFlow()
@@ -137,16 +134,16 @@ class RecipientSelectionDelegate @Inject constructor(
         scope.launch {
             val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
             val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
-            Log.d(TAG, "checkAndUpdateRecipientService: address=$address, smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
+            Timber.d("checkAndUpdateRecipientService: address=$address, smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
 
             if (!smsOnlyMode && isConnected) {
                 try {
                     val response = api.checkIMessageAvailability(address)
-                    Log.d(TAG, "checkIMessageAvailability response: code=${response.code()}, data=${response.body()?.data}")
+                    Timber.d("checkIMessageAvailability response: code=${response.code()}, data=${response.body()?.data}")
                     if (response.isSuccessful) {
                         val isIMessageAvailable = response.body()?.data?.available == true
                         val newService = if (isIMessageAvailable) "iMessage" else "SMS"
-                        Log.d(TAG, "Updating recipient $address service to $newService")
+                        Timber.d("Updating recipient $address service to $newService")
 
                         val updated = _selectedRecipients.value.map { recipient ->
                             if (recipient.address == address) {
@@ -158,7 +155,7 @@ class RecipientSelectionDelegate @Inject constructor(
                         _selectedRecipients.value = updated
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to check iMessage availability for $address", e)
+                    Timber.e(e, "Failed to check iMessage availability for $address")
                 }
             }
         }

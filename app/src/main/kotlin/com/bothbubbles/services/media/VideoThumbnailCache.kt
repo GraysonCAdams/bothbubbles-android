@@ -2,7 +2,7 @@ package com.bothbubbles.services.media
 
 import android.graphics.Bitmap
 import android.media.MediaMetadataRetriever
-import android.util.Log
+import timber.log.Timber
 import android.util.LruCache
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -71,14 +71,14 @@ class VideoThumbnailCache @Inject constructor() {
                         cache.put(attachmentGuid, scaledBitmap)
                         scaledBitmap
                     } else {
-                        Log.w(TAG, "Could not extract frame from video: $videoPath")
+                        Timber.w("Could not extract frame from video: $videoPath")
                         null
                     }
                 } finally {
                     retriever.release()
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to generate video thumbnail for $attachmentGuid", e)
+                Timber.e(e, "Failed to generate video thumbnail for $attachmentGuid")
                 null
             }
         }

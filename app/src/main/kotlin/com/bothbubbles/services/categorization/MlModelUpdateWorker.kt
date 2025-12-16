@@ -3,7 +3,7 @@ package com.bothbubbles.services.categorization
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.util.Log
+import timber.log.Timber
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -63,7 +63,7 @@ class MlModelUpdateWorker @AssistedInject constructor(
                 updateRequest
             )
 
-            Log.d(TAG, "Scheduled ML model update worker")
+            Timber.d("Scheduled ML model update worker")
         }
 
         /**
@@ -71,17 +71,17 @@ class MlModelUpdateWorker @AssistedInject constructor(
          */
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-            Log.d(TAG, "Cancelled ML model update worker")
+            Timber.d("Cancelled ML model update worker")
         }
     }
 
     override suspend fun doWork(): Result {
-        Log.d(TAG, "Starting ML model update check")
+        Timber.d("Starting ML model update check")
 
         // Check if categorization is enabled
         val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
         if (!categorizationEnabled) {
-            Log.d(TAG, "Categorization disabled, skipping update")
+            Timber.d("Categorization disabled, skipping update")
             return Result.success()
         }
 
@@ -90,7 +90,7 @@ class MlModelUpdateWorker @AssistedInject constructor(
         val allowCellular = settingsDataStore.mlAutoUpdateOnCellular.first()
 
         if (!isOnWifi && !allowCellular) {
-            Log.d(TAG, "Not on WiFi and cellular updates disabled, skipping")
+            Timber.d("Not on WiFi and cellular updates disabled, skipping")
             return Result.success()
         }
 
@@ -100,14 +100,14 @@ class MlModelUpdateWorker @AssistedInject constructor(
 
             if (success) {
                 settingsDataStore.setMlModelDownloaded(true)
-                Log.i(TAG, "ML model updated successfully")
+                Timber.i("ML model updated successfully")
                 Result.success()
             } else {
-                Log.w(TAG, "ML model update failed, will retry")
+                Timber.w("ML model update failed, will retry")
                 Result.retry()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating ML model", e)
+            Timber.e(e, "Error updating ML model")
             Result.retry()
         }
     }

@@ -2,8 +2,8 @@ package com.bothbubbles.data.repository
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.core.content.FileProvider
+import timber.log.Timber
 import com.bothbubbles.data.remote.api.TenorApi
 import com.bothbubbles.data.remote.api.TenorGif
 import com.bothbubbles.ui.chat.composer.panels.GifItem
@@ -25,7 +25,6 @@ class GifRepository @Inject constructor(
     private val tenorApi: TenorApi
 ) {
     companion object {
-        private const val TAG = "GifRepository"
         // TODO: Move to BuildConfig or secure storage
         private const val TENOR_API_KEY = "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"
     }
@@ -52,7 +51,7 @@ class GifRepository @Inject constructor(
             nextPosition = response.next
             _state.value = GifPickerState.Success(response.results.mapToGifItems())
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading featured GIFs", e)
+            Timber.e(e, "Error loading featured GIFs")
             _state.value = GifPickerState.Error("Failed to load GIFs")
         }
     }
@@ -73,7 +72,7 @@ class GifRepository @Inject constructor(
             nextPosition = response.next
             _state.value = GifPickerState.Success(response.results.mapToGifItems())
         } catch (e: Exception) {
-            Log.e(TAG, "Error searching GIFs", e)
+            Timber.e(e, "Error searching GIFs")
             _state.value = GifPickerState.Error("Search failed")
         }
     }
@@ -102,7 +101,7 @@ class GifRepository @Inject constructor(
                 currentState.gifs + response.results.mapToGifItems()
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error loading more GIFs", e)
+            Timber.e(e, "Error loading more GIFs")
         }
     }
 
@@ -129,7 +128,7 @@ class GifRepository @Inject constructor(
                 gifFile
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error downloading GIF", e)
+            Timber.e(e, "Error downloading GIF")
             null
         }
     }

@@ -2,7 +2,7 @@ package com.bothbubbles.services.developer
 
 import android.app.NotificationManager
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
@@ -81,11 +81,11 @@ class ConnectionModeManager @Inject constructor(
      */
     fun initialize() {
         if (isInitialized) {
-            Log.d(TAG, "Already initialized")
+            Timber.d("Already initialized")
             return
         }
         isInitialized = true
-        Log.d(TAG, "Initializing ConnectionModeManager")
+        Timber.d("Initializing ConnectionModeManager")
 
         // Register for app lifecycle events
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
@@ -115,13 +115,13 @@ class ConnectionModeManager @Inject constructor(
         applicationScope.launch(mainDispatcher) {
             try {
                 if (!firebaseConfigManager.isInitialized()) {
-                    Log.d(TAG, "Initializing Firebase for FCM")
+                    Timber.d("Initializing Firebase for FCM")
                     firebaseConfigManager.initializeFromServer()
                 }
                 fcmTokenManager.initialize()
                 developerEventLog.logFcmEvent("INIT", "FCM initialized for background notifications")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to initialize FCM", e)
+                Timber.w(e, "Failed to initialize FCM")
                 developerEventLog.logFcmEvent("INIT_ERROR", e.message)
             }
         }
@@ -129,7 +129,7 @@ class ConnectionModeManager @Inject constructor(
 
     override fun onStart(owner: LifecycleOwner) {
         // App came to foreground
-        Log.d(TAG, "App foregrounded - switching to Socket mode")
+        Timber.d("App foregrounded - switching to Socket mode")
         _isAppInForeground.value = true
 
         // Cancel any pending background disconnect
@@ -151,16 +151,16 @@ class ConnectionModeManager @Inject constructor(
 
     override fun onStop(owner: LifecycleOwner) {
         // App went to background
-        Log.d(TAG, "onStop: App backgrounded - scheduling switch to FCM mode in ${BACKGROUND_DISCONNECT_DELAY_MS}ms")
+        Timber.d("onStop: App backgrounded - scheduling switch to FCM mode in ${BACKGROUND_DISCONNECT_DELAY_MS}ms")
         _isAppInForeground.value = false
 
         // Delay disconnect to handle quick app switches
         backgroundDisconnectJob?.cancel()
         backgroundDisconnectJob = applicationScope.launch(mainDispatcher) {
-            Log.d(TAG, "onStop: Waiting ${BACKGROUND_DISCONNECT_DELAY_MS}ms before switching to FCM...")
+            Timber.d("onStop: Waiting ${BACKGROUND_DISCONNECT_DELAY_MS}ms before switching to FCM...")
             delay(BACKGROUND_DISCONNECT_DELAY_MS)
 
-            Log.d(TAG, "onStop: Delay complete, disconnecting socket and switching to FCM mode")
+            Timber.d("onStop: Delay complete, disconnecting socket and switching to FCM mode")
             socketService.disconnect()
             _currentMode.value = ConnectionMode.FCM
             developerEventLog.logConnectionChange(
@@ -176,11 +176,11 @@ class ConnectionModeManager @Inject constructor(
      */
     private suspend fun showFcmStatusNotification(success: Boolean) {
         val developerMode = settingsDataStore.developerModeEnabled.first()
-        Log.d(TAG, "showFcmStatusNotification: success=$success, developerMode=$developerMode")
+        Timber.d("showFcmStatusNotification: success=$success, developerMode=$developerMode")
 
         // Only show in developer mode
         if (!developerMode) {
-            Log.d(TAG, "Developer mode not enabled, skipping notification")
+            Timber.d("Developer mode not enabled, skipping notification")
             return
         }
 
@@ -197,7 +197,7 @@ class ConnectionModeManager @Inject constructor(
             .setAutoCancel(true)
             .build()
 
-        Log.d(TAG, "Posting FCM status notification")
+        Timber.d("Posting FCM status notification")
         notificationManager.notify(FCM_STATUS_NOTIFICATION_ID, notification)
     }
 
@@ -214,7 +214,7 @@ class ConnectionModeManager @Inject constructor(
      * Force reconnect (e.g., after server config change)
      */
     fun forceReconnect() {
-        Log.d(TAG, "Force reconnecting")
+        Timber.d("Force reconnecting")
         if (_isAppInForeground.value) {
             socketService.reconnect()
         }

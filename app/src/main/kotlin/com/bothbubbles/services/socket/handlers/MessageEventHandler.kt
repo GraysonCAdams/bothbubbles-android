@@ -1,6 +1,6 @@
 package com.bothbubbles.services.socket.handlers
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.displayName
@@ -78,7 +78,7 @@ class MessageEventHandler @Inject constructor(
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>,
         scope: CoroutineScope
     ) {
-        Log.d(TAG, "Handling new message: ${event.message.guid}")
+        Timber.d("Handling new message: ${event.message.guid}")
 
         // Save message to database via IncomingMessageHandler (services layer)
         val savedMessage = incomingMessageHandler.handleIncomingMessage(event.message, event.chatGuid)
@@ -91,13 +91,13 @@ class MessageEventHandler @Inject constructor(
         if (!savedMessage.isFromMe) {
             // Check for duplicate notification (message may arrive via both socket and FCM)
             if (!messageDeduplicator.shouldNotifyForMessage(savedMessage.guid)) {
-                Log.i(TAG, "Message ${savedMessage.guid} already notified, skipping duplicate notification")
+                Timber.i("Message ${savedMessage.guid} already notified, skipping duplicate notification")
                 return
             }
 
             // Check if user is currently viewing this conversation
             if (activeConversationManager.isConversationActive(event.chatGuid)) {
-                Log.i(TAG, "Chat ${event.chatGuid} is currently active, skipping notification")
+                Timber.i("Chat ${event.chatGuid} is currently active, skipping notification")
                 return
             }
 
@@ -107,20 +107,20 @@ class MessageEventHandler @Inject constructor(
 
             // Check if notifications are disabled for this chat
             if (chat?.notificationsEnabled == false) {
-                Log.i(TAG, "Notifications disabled for chat ${event.chatGuid}, skipping notification")
+                Timber.i("Notifications disabled for chat ${event.chatGuid}, skipping notification")
                 return
             }
 
             // Check if chat is snoozed - if snoozed, skip notification
             if (chat?.isSnoozed == true) {
-                Log.i(TAG, "Chat ${event.chatGuid} is snoozed, skipping notification")
+                Timber.i("Chat ${event.chatGuid} is snoozed, skipping notification")
                 return
             }
 
             // Check for spam - if spam, skip notification
             val spamResult = spamRepository.evaluateAndMarkSpam(event.chatGuid, senderAddress, messageText)
             if (spamResult.isSpam) {
-                Log.i(TAG, "iMessage from $senderAddress detected as spam (score: ${spamResult.score}), skipping notification")
+                Timber.i("iMessage from $senderAddress detected as spam (score: ${spamResult.score}), skipping notification")
                 return
             }
 
@@ -212,7 +212,7 @@ class MessageEventHandler @Inject constructor(
         event: SocketEvent.MessageUpdated,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Handling message update: ${event.message.guid}")
+        Timber.d("Handling message update: ${event.message.guid}")
         incomingMessageHandler.handleMessageUpdate(event.message, event.chatGuid)
 
         // Emit UI refresh events for immediate updates (read receipts, delivery status, edits)
@@ -224,7 +224,7 @@ class MessageEventHandler @Inject constructor(
         event: SocketEvent.MessageDeleted,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Handling message deletion: ${event.messageGuid}")
+        Timber.d("Handling message deletion: ${event.messageGuid}")
         messageRepository.deleteMessageLocally(event.messageGuid)
 
         // Emit UI refresh events
@@ -236,7 +236,7 @@ class MessageEventHandler @Inject constructor(
         event: SocketEvent.MessageSendError,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.e(TAG, "Message send error: ${event.tempGuid} - ${event.errorMessage}")
+        Timber.e("Message send error: ${event.tempGuid} - ${event.errorMessage}")
 
         // Update the message in database to mark as failed
         messageRepository.markMessageAsFailed(event.tempGuid, event.errorMessage)

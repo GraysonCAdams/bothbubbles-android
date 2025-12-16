@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.chat
 
 import android.Manifest
-import android.util.Log
+import timber.log.Timber
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts

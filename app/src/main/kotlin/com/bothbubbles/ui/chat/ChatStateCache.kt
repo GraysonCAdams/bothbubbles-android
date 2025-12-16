@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.ui.chat.paging.MessagePagingController
 import com.bothbubbles.ui.chat.paging.SparseMessageList
 import javax.inject.Inject
@@ -23,11 +23,7 @@ import javax.inject.Singleton
 @Singleton
 class ChatStateCache @Inject constructor() {
 
-    companion object {
-        private const val TAG = "ChatStateCache"
         private const val MAX_SIZE = 5
-    }
-
     /**
      * Cached state for a chat conversation.
      *
@@ -54,7 +50,7 @@ class ChatStateCache @Inject constructor() {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, CachedChatState>?): Boolean {
             val shouldRemove = size > MAX_SIZE
             if (shouldRemove && eldest != null) {
-                Log.d(TAG, "Evicting oldest chat from cache: ${eldest.key}")
+                Timber.d("Evicting oldest chat from cache: ${eldest.key}")
             }
             return shouldRemove
         }
@@ -71,7 +67,7 @@ class ChatStateCache @Inject constructor() {
     fun get(chatGuid: String): CachedChatState? {
         val state = cache[chatGuid]
         if (state != null) {
-            Log.d(TAG, "Cache hit for chat: $chatGuid")
+            Timber.d("Cache hit for chat: $chatGuid")
             // Update access time
             cache[chatGuid] = state.copy(lastAccessTime = System.currentTimeMillis())
         }
@@ -86,7 +82,7 @@ class ChatStateCache @Inject constructor() {
      */
     @Synchronized
     fun put(state: CachedChatState) {
-        Log.d(TAG, "Caching chat state: ${state.chatGuid}, messages=${state.messages.size}, scrollPos=${state.scrollPosition}")
+        Timber.d("Caching chat state: ${state.chatGuid}, messages=${state.messages.size}, scrollPos=${state.scrollPosition}")
         cache[state.chatGuid] = state.copy(lastAccessTime = System.currentTimeMillis())
     }
 
@@ -99,7 +95,7 @@ class ChatStateCache @Inject constructor() {
     @Synchronized
     fun remove(chatGuid: String) {
         cache.remove(chatGuid)?.let {
-            Log.d(TAG, "Removed chat from cache: $chatGuid")
+            Timber.d("Removed chat from cache: $chatGuid")
         }
     }
 
@@ -109,7 +105,7 @@ class ChatStateCache @Inject constructor() {
      */
     @Synchronized
     fun clear() {
-        Log.d(TAG, "Clearing all cached chat states (${cache.size} entries)")
+        Timber.d("Clearing all cached chat states (${cache.size} entries)")
         cache.clear()
     }
 

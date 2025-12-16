@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.conversations.delegates
 
 import android.app.Application
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.repository.AttachmentRepository
@@ -45,9 +45,6 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         fun create(scope: CoroutineScope): ConversationLoadingDelegate
     }
 
-    companion object {
-        private const val TAG = "ConversationLoadingDelegate"
-    }
 
     // Create UnifiedGroupMappingDelegate via factory (Phase 8: delegate composition)
     private val unifiedGroupMappingDelegate: UnifiedGroupMappingDelegate =
@@ -120,7 +117,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             PerformanceProfiler.end(loadId, "${conversations.size} conversations")
             return LoadResult.Success(conversations, hasMore, 0)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load conversations", e)
+            Timber.e(e, "Failed to load conversations")
             _isLoading.value = false
             _error.value = e.message
             PerformanceProfiler.end(loadId, "ERROR: ${e.message}")
@@ -177,7 +174,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             PerformanceProfiler.end(refreshId, "${filtered.size} items")
             return filtered
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to refresh conversations", e)
+            Timber.e(e, "Failed to refresh conversations")
             PerformanceProfiler.end(refreshId, "ERROR")
             return emptyList()
         }
@@ -231,7 +228,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
 
             return LoadResult.Success(merged, newConversations.isNotEmpty(), nextPage)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load more conversations", e)
+            Timber.e(e, "Failed to load more conversations")
             _isLoadingMore.value = false
             return LoadResult.Error(e.message)
         }

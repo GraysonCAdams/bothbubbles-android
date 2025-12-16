@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.MessageRepository
@@ -60,7 +60,7 @@ class MessageSyncHelper @Inject constructor(
                             progressTracker.syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
                             settingsDataStore.markChatSynced(task.guid)
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to sync messages for chat ${task.guid}", e)
+                            Timber.e(e, "Failed to sync messages for chat ${task.guid}")
                             // Mark as synced to avoid retry loop
                             settingsDataStore.markChatSynced(task.guid)
                         }
@@ -122,7 +122,7 @@ class MessageSyncHelper @Inject constructor(
                             progressTracker.syncedMessages.addAndGet(result.getOrNull()?.size ?: 0)
                             settingsDataStore.markChatSynced(chat.guid)
                         } catch (e: Exception) {
-                            Log.e(TAG, "Failed to sync messages for chat ${chat.guid}", e)
+                            Timber.e(e, "Failed to sync messages for chat ${chat.guid}")
                             settingsDataStore.markChatSynced(chat.guid)
                         }
 

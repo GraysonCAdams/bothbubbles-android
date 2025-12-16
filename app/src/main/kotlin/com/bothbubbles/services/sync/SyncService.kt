@@ -1,7 +1,7 @@
 package com.bothbubbles.services.sync
 
 import android.database.sqlite.SQLiteException
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -72,7 +72,7 @@ class SyncService @Inject constructor(
         initialDelayMs = NetworkConfig.DEFAULT_INITIAL_DELAY_MS,
         maxDelayMs = NetworkConfig.DEFAULT_MAX_DELAY_MS
     ) {
-        Log.i(TAG, "Starting initial sync (concurrent mode)")
+        Timber.i("Starting initial sync (concurrent mode)")
 
         // Mark sync as started and store settings for potential resume
         settingsDataStore.setInitialSyncStarted(true)
@@ -84,7 +84,7 @@ class SyncService @Inject constructor(
         val shouldImportSms = smsEnabled && !smsAlreadyImported && onProgress == null
 
         if (shouldImportSms) {
-            Log.i(TAG, "SMS enabled and not imported - will run concurrent SMS import")
+            Timber.i("SMS enabled and not imported - will run concurrent SMS import")
         }
 
         // Only update internal state if no external progress handler
@@ -99,9 +99,9 @@ class SyncService @Inject constructor(
         // Fetch total message count upfront for accurate progress tracking
         val totalMessageCount = chatRepository.getServerMessageCount()
         if (totalMessageCount != null) {
-            Log.i(TAG, "Total messages to sync: $totalMessageCount")
+            Timber.i("Total messages to sync: $totalMessageCount")
         } else {
-            Log.w(TAG, "Could not fetch message count - using chat-based progress estimation")
+            Timber.w("Could not fetch message count - using chat-based progress estimation")
         }
 
         // Get already synced chats (for resume scenario)
@@ -152,7 +152,7 @@ class SyncService @Inject constructor(
             // Optional: Run SMS import concurrently if enabled
             val smsJob = if (shouldImportSms) {
                 async {
-                    Log.i(TAG, "Starting concurrent SMS import")
+                    Timber.i("Starting concurrent SMS import")
                     smsRepository.importAllThreads(
                         onProgress = { current, total ->
                             progressTracker.smsCurrentThread.set(current)
@@ -162,10 +162,10 @@ class SyncService @Inject constructor(
                         onSuccess = { count ->
                             progressTracker.smsComplete.set(1)
                             settingsDataStore.setHasCompletedInitialSmsImport(true)
-                            Log.i(TAG, "Concurrent SMS import completed: $count threads")
+                            Timber.i("Concurrent SMS import completed: $count threads")
                         },
                         onFailure = { e ->
-                            Log.e(TAG, "Concurrent SMS import failed", e)
+                            Timber.e(e, "Concurrent SMS import failed")
                             // Don't mark as complete so it can retry later
                         }
                     )
@@ -213,7 +213,7 @@ class SyncService @Inject constructor(
             smsJob?.await()
         }
 
-        Log.i(TAG, "Synced messages for ${progressTracker.processedChats.get()}/${progressTracker.totalChatsFound.get()} chats (${progressTracker.syncedMessages.get()} messages)")
+        Timber.i("Synced messages for ${progressTracker.processedChats.get()}/${progressTracker.totalChatsFound.get()} chats (${progressTracker.syncedMessages.get()} messages)")
 
         // Update last sync time
         val syncTime = System.currentTimeMillis()
@@ -231,10 +231,10 @@ class SyncService @Inject constructor(
         } else {
             onProgress(100, progressTracker.processedChats.get(), progressTracker.totalChatsFound.get(), progressTracker.syncedMessages.get())
         }
-        Log.i(TAG, "Initial sync completed")
+        Timber.i("Initial sync completed")
         Unit
     }.onFailure { e ->
-        Log.e(TAG, "Initial sync failed", e)
+        Timber.e(e, "Initial sync failed")
         // Only update internal state on error if no external handler
         // (caller should handle errors from Result)
         if (onProgress == null) {
@@ -249,7 +249,7 @@ class SyncService @Inject constructor(
      * Uses concurrent message syncing for better performance.
      */
     suspend fun resumeInitialSync(): Result<Unit> = runCatching {
-        Log.i(TAG, "Resuming interrupted initial sync (concurrent mode)")
+        Timber.i("Resuming interrupted initial sync (concurrent mode)")
 
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
         val messagesPerChat = settingsDataStore.initialSyncMessagesPerChat.first()
@@ -257,13 +257,13 @@ class SyncService @Inject constructor(
         val remainingChats = allChats.filter { it.guid !in alreadySynced }
 
         if (remainingChats.isEmpty()) {
-            Log.i(TAG, "No remaining chats to sync - marking complete")
+            Timber.i("No remaining chats to sync - marking complete")
             settingsDataStore.setInitialSyncComplete(true)
             _syncState.value = SyncState.Completed
             return@runCatching
         }
 
-        Log.i(TAG, "Resuming sync: ${remainingChats.size} chats remaining (${alreadySynced.size} already synced)")
+        Timber.i("Resuming sync: ${remainingChats.size} chats remaining (${alreadySynced.size} already synced)")
 
         val totalChats = allChats.size
         val progressTracker = SyncProgressTracker().apply {
@@ -293,7 +293,7 @@ class SyncService @Inject constructor(
             onProgressUpdate = { state -> _syncState.value = state }
         )
 
-        Log.i(TAG, "Resume sync completed: ${progressTracker.syncedMessages.get()} messages synced")
+        Timber.i("Resume sync completed: ${progressTracker.syncedMessages.get()} messages synced")
 
         val syncTime = System.currentTimeMillis()
         settingsDataStore.setLastSyncTime(syncTime)
@@ -305,7 +305,7 @@ class SyncService @Inject constructor(
 
         _syncState.value = SyncState.Completed
     }.onFailure { e ->
-        Log.e(TAG, "Resume sync failed", e)
+        Timber.e(e, "Resume sync failed")
         _syncState.value = createErrorState(e)
     }
 
@@ -317,7 +317,7 @@ class SyncService @Inject constructor(
     fun prioritizeChatSync(chatGuid: String, limit: Int = MESSAGE_PAGE_SIZE) {
         applicationScope.launch(ioDispatcher) {
             try {
-                Log.i(TAG, "Priority syncing chat: $chatGuid")
+                Timber.i("Priority syncing chat: $chatGuid")
                 messageRepository.syncMessagesForChat(
                     chatGuid = chatGuid,
                     limit = limit
@@ -329,7 +329,7 @@ class SyncService @Inject constructor(
                     settingsDataStore.markChatSynced(chatGuid)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Priority sync failed for chat $chatGuid", e)
+                Timber.e(e, "Priority sync failed for chat $chatGuid")
             }
         }
     }
@@ -437,7 +437,7 @@ class SyncService @Inject constructor(
     fun startInitialSync(messagesPerChat: Int = MESSAGE_PAGE_SIZE) {
         // Skip if sync already in progress (coalescing)
         if (_syncState.value !is SyncState.Idle) {
-            Log.d(TAG, "Skipping initial sync - sync already in progress")
+            Timber.d("Skipping initial sync - sync already in progress")
             return
         }
         applicationScope.launch(ioDispatcher) {
@@ -451,7 +451,7 @@ class SyncService @Inject constructor(
     fun startBackgroundSync() {
         // Skip if sync already in progress (coalescing)
         if (_syncState.value !is SyncState.Idle) {
-            Log.d(TAG, "Skipping background sync - sync already in progress")
+            Timber.d("Skipping background sync - sync already in progress")
             return
         }
         applicationScope.launch(ioDispatcher) {

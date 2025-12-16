@@ -2,7 +2,7 @@ package com.bothbubbles.services.shortcut
 
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.Person
 import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
@@ -70,7 +70,7 @@ class ShortcutService @Inject constructor(
     fun startObserving() {
         if (_isObserving.value) return
 
-        Log.d(TAG, "Starting share target observation")
+        Timber.d("Starting share target observation")
 
         observationJob = applicationScope.launch(ioDispatcher) {
             // Combine unified groups (1:1 chats) and group chats into a single stream
@@ -93,7 +93,7 @@ class ShortcutService @Inject constructor(
      * Stop observing conversation changes.
      */
     fun stopObserving() {
-        Log.d(TAG, "Stopping share target observation")
+        Timber.d("Stopping share target observation")
 
         observationJob?.cancel()
         observationJob = null
@@ -127,7 +127,7 @@ class ShortcutService @Inject constructor(
         try {
             // Check if rate limiting is active
             if (ShortcutManagerCompat.isRateLimitingActive(context)) {
-                Log.w(TAG, "Shortcut rate limiting active, skipping update")
+                Timber.w("Shortcut rate limiting active, skipping update")
                 return
             }
 
@@ -135,7 +135,7 @@ class ShortcutService @Inject constructor(
             val conversations = buildConversationList(unifiedGroups, groupChats)
 
             if (conversations.isEmpty()) {
-                Log.d(TAG, "No conversations to publish as shortcuts")
+                Timber.d("No conversations to publish as shortcuts")
                 ShortcutManagerCompat.removeAllDynamicShortcuts(context)
                 return
             }
@@ -143,7 +143,7 @@ class ShortcutService @Inject constructor(
             // Take top N conversations
             val topConversations = conversations.take(MAX_SHORTCUTS)
 
-            Log.d(TAG, "Publishing ${topConversations.size} share target shortcuts")
+            Timber.d("Publishing ${topConversations.size} share target shortcuts")
 
             // Build and publish shortcuts
             topConversations.forEachIndexed { index, conversation ->
@@ -152,7 +152,7 @@ class ShortcutService @Inject constructor(
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating sharing shortcuts", e)
+            Timber.e(e, "Error updating sharing shortcuts")
         }
     }
 

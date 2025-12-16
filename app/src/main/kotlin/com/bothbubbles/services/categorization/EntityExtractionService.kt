@@ -3,7 +3,7 @@ package com.bothbubbles.services.categorization
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.util.Log
+import timber.log.Timber
 import com.google.mlkit.nl.entityextraction.Entity
 import com.google.mlkit.nl.entityextraction.EntityAnnotation
 import com.google.mlkit.nl.entityextraction.EntityExtraction
@@ -38,8 +38,6 @@ class EntityExtractionService @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        private const val TAG = "EntityExtractionService"
-
         // Estimated model size for user display
         const val MODEL_SIZE_MB = 20
     }
@@ -92,23 +90,23 @@ class EntityExtractionService @Inject constructor(
     suspend fun downloadModel(allowCellular: Boolean = false): Boolean = withContext(Dispatchers.IO) {
         // Check network type
         if (!allowCellular && !isOnWifi()) {
-            Log.d(TAG, "Not on WiFi and cellular download not allowed")
+            Timber.d("Not on WiFi and cellular download not allowed")
             _downloadProgress.value = DownloadState.Failed("WiFi required for download")
             return@withContext false
         }
 
         try {
             _downloadProgress.value = DownloadState.Downloading
-            Log.d(TAG, "Starting ML model download...")
+            Timber.d("Starting ML model download...")
 
             entityExtractor.downloadModelIfNeeded().await()
 
             _modelDownloaded.value = true
             _downloadProgress.value = DownloadState.Completed
-            Log.i(TAG, "ML model downloaded successfully")
+            Timber.i("ML model downloaded successfully")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to download ML model", e)
+            Timber.e(e, "Failed to download ML model")
             _downloadProgress.value = DownloadState.Failed(e.message ?: "Unknown error")
             false
         }
@@ -126,7 +124,7 @@ class EntityExtractionService @Inject constructor(
         if (!_modelDownloaded.value) {
             // Try to check if model is available
             if (!checkModelDownloaded()) {
-                Log.d(TAG, "Model not downloaded, skipping entity extraction")
+                Timber.d("Model not downloaded, skipping entity extraction")
                 return@withContext ExtractedEntities.EMPTY
             }
         }
@@ -137,7 +135,7 @@ class EntityExtractionService @Inject constructor(
 
             parseAnnotations(annotations)
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting entities", e)
+            Timber.e(e, "Error extracting entities")
             ExtractedEntities.EMPTY
         }
     }
@@ -169,7 +167,7 @@ class EntityExtractionService @Inject constructor(
                         val trackingEntity = entity.asTrackingNumberEntity()
                         if (trackingEntity != null) {
                             trackingNumbers.add(annotatedText)
-                            Log.d(TAG, "Found tracking number: $annotatedText (carrier: ${trackingEntity.parcelCarrier})")
+                            Timber.d("Found tracking number: $annotatedText (carrier: ${trackingEntity.parcelCarrier})")
                         }
                     }
                     Entity.TYPE_DATE_TIME -> {

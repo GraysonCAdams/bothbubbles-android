@@ -3,7 +3,7 @@ package com.bothbubbles.services.messaging
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Log
+import timber.log.Timber
 import android.webkit.MimeTypeMap
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -72,7 +72,7 @@ class AttachmentPersistenceManager @Inject constructor(
                 }
             } ?: throw Exception("Cannot open input stream for $uri")
 
-            Log.d(TAG, "Persisted attachment: $uri -> ${destFile.absolutePath} (${destFile.length()} bytes)")
+            Timber.d("Persisted attachment: $uri -> ${destFile.absolutePath} (${destFile.length()} bytes)")
 
             PersistenceResult(
                 persistedPath = destFile.absolutePath,
@@ -93,10 +93,10 @@ class AttachmentPersistenceManager @Inject constructor(
             try {
                 val file = File(path)
                 if (file.exists() && file.delete()) {
-                    Log.d(TAG, "Cleaned up attachment: $path")
+                    Timber.d("Cleaned up attachment: $path")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to delete $path", e)
+                Timber.w(e, "Failed to delete $path")
             }
         }
     }
@@ -114,7 +114,7 @@ class AttachmentPersistenceManager @Inject constructor(
             val orphanedCount = pendingDir.listFiles()?.count { file ->
                 if (file.absolutePath !in referencedPaths) {
                     file.delete()
-                    Log.d(TAG, "Cleaned up orphaned attachment: ${file.absolutePath}")
+                    Timber.d("Cleaned up orphaned attachment: ${file.absolutePath}")
                     true
                 } else {
                     false
@@ -122,7 +122,7 @@ class AttachmentPersistenceManager @Inject constructor(
             } ?: 0
 
             if (orphanedCount > 0) {
-                Log.i(TAG, "Cleaned up $orphanedCount orphaned attachments")
+                Timber.i("Cleaned up $orphanedCount orphaned attachments")
             }
         }
     }

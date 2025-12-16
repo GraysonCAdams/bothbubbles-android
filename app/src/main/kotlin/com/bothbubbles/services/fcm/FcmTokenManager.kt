@@ -2,7 +2,7 @@ package com.bothbubbles.services.fcm
 
 import android.content.Context
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -64,7 +64,7 @@ class FcmTokenManager @Inject constructor(
             // Check if setup is complete before trying to initialize Firebase
             val setupComplete = settingsDataStore.isSetupComplete.first()
             if (!setupComplete) {
-                Log.d(TAG, "Setup not complete, skipping FCM initialization")
+                Timber.d("Setup not complete, skipping FCM initialization")
                 _tokenState.value = FcmTokenState.NotConfigured
                 return@launch
             }
@@ -76,12 +76,12 @@ class FcmTokenManager @Inject constructor(
 
                 if (!initialized) {
                     // No cache - try to fetch from server
-                    Log.d(TAG, "No cached Firebase config, fetching from server...")
+                    Timber.d("No cached Firebase config, fetching from server...")
                     val result = firebaseConfigManager.initializeFromServer()
                     initialized = result.isSuccess
 
                     if (!initialized) {
-                        Log.w(TAG, "Failed to initialize Firebase from server: ${result.exceptionOrNull()?.message}")
+                        Timber.w("Failed to initialize Firebase from server: ${result.exceptionOrNull()?.message}")
                         _tokenState.value = FcmTokenState.NotConfigured
                         return@launch
                     }
@@ -93,11 +93,11 @@ class FcmTokenManager @Inject constructor(
             val isRegistered = settingsDataStore.fcmTokenRegistered.first()
 
             if (storedToken.isNotBlank() && isRegistered) {
-                Log.d(TAG, "Using stored FCM token")
+                Timber.d("Using stored FCM token")
                 _tokenState.value = FcmTokenState.Registered(storedToken)
             } else if (storedToken.isNotBlank()) {
                 // Token exists but not registered, re-register
-                Log.d(TAG, "Token exists but not registered, enqueueing registration")
+                Timber.d("Token exists but not registered, enqueueing registration")
                 _tokenState.value = FcmTokenState.Available(storedToken)
                 enqueueTokenRegistration(storedToken)
             } else {
@@ -113,7 +113,7 @@ class FcmTokenManager @Inject constructor(
      */
     suspend fun refreshToken() {
         if (!firebaseConfigManager.isInitialized()) {
-            Log.w(TAG, "Firebase not initialized, cannot refresh token")
+            Timber.w("Firebase not initialized, cannot refresh token")
             _tokenState.value = FcmTokenState.NotConfigured
             return
         }
@@ -123,7 +123,7 @@ class FcmTokenManager @Inject constructor(
         try {
             val firebaseApp = firebaseConfigManager.getFirebaseApp()
             if (firebaseApp == null) {
-                Log.e(TAG, "Firebase app is null")
+                Timber.e("Firebase app is null")
                 _tokenState.value = FcmTokenState.Error("Firebase not initialized")
                 return
             }
@@ -131,7 +131,7 @@ class FcmTokenManager @Inject constructor(
             val messaging = FirebaseMessaging.getInstance()
             val token = messaging.token.await()
 
-            Log.d(TAG, "Got FCM token: ${token.take(10)}...")
+            Timber.d("Got FCM token: ${token.take(10)}...")
 
             // Store the token
             val storedToken = settingsDataStore.fcmToken.first()
@@ -146,7 +146,7 @@ class FcmTokenManager @Inject constructor(
             enqueueTokenRegistration(token)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting FCM token", e)
+            Timber.e(e, "Error getting FCM token")
             _tokenState.value = FcmTokenState.Error(e.message ?: "Unknown error")
         }
     }
@@ -155,7 +155,7 @@ class FcmTokenManager @Inject constructor(
      * Called when FirebaseMessagingService receives a new token.
      */
     fun onTokenRefreshed(newToken: String) {
-        Log.d(TAG, "Token refreshed: ${newToken.take(10)}...")
+        Timber.d("Token refreshed: ${newToken.take(10)}...")
         applicationScope.launch(ioDispatcher) {
             settingsDataStore.setFcmToken(newToken)
             settingsDataStore.setFcmTokenRegistered(false)
@@ -173,7 +173,7 @@ class FcmTokenManager @Inject constructor(
         if (token == currentToken) {
             settingsDataStore.setFcmTokenRegistered(true)
             _tokenState.value = FcmTokenState.Registered(token)
-            Log.i(TAG, "Token marked as registered")
+            Timber.i("Token marked as registered")
         }
     }
 
@@ -217,7 +217,7 @@ class FcmTokenManager @Inject constructor(
                 workRequest
             )
 
-        Log.d(TAG, "Enqueued token registration work")
+        Timber.d("Enqueued token registration work")
     }
 }
 

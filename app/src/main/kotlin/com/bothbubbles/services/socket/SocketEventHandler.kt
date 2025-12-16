@@ -1,6 +1,6 @@
 package com.bothbubbles.services.socket
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.socket.handlers.ChatEventHandler
 import com.bothbubbles.services.socket.handlers.MessageEventHandler
@@ -71,10 +71,6 @@ class SocketEventHandler @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
-    companion object {
-        private const val TAG = "SocketEventHandler"
-    }
-
     private var isListening = false
 
     /**
@@ -119,20 +115,20 @@ class SocketEventHandler @Inject constructor(
             // Only run incremental sync if initial sync is complete
             val initialSyncComplete = settingsDataStore.initialSyncComplete.first()
             if (!initialSyncComplete) {
-                Log.d(TAG, "Socket connected but initial sync not complete - skipping incremental sync")
+                Timber.d("Socket connected but initial sync not complete - skipping incremental sync")
                 return
             }
 
-            Log.i(TAG, "Socket connected - triggering incremental sync to catch missed messages")
+            Timber.i("Socket connected - triggering incremental sync to catch missed messages")
             syncService.get().performIncrementalSync()
                 .onSuccess {
-                    Log.i(TAG, "Incremental sync on reconnect completed successfully")
+                    Timber.i("Incremental sync on reconnect completed successfully")
                 }
                 .onFailure { e ->
-                    Log.e(TAG, "Incremental sync on reconnect failed", e)
+                    Timber.e(e, "Incremental sync on reconnect failed")
                 }
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling socket connected", e)
+            Timber.e(e, "Error handling socket connected")
         }
     }
 
@@ -174,7 +170,7 @@ class SocketEventHandler @Inject constructor(
                 is SocketEvent.Error -> systemEventHandler.handleError(event)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling event: $event", e)
+            Timber.e(e, "Error handling event: $event")
         }
     }
 }

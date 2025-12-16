@@ -9,7 +9,7 @@ import android.os.Handler
 import android.os.Looper
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
@@ -69,19 +69,19 @@ class NavigationListenerService : NotificationListenerService() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "NavigationListenerService created")
+        Timber.d("NavigationListenerService created")
         createNotificationChannels()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "NavigationListenerService destroyed")
+        Timber.d("NavigationListenerService destroyed")
         pendingPromptRunnable?.let { handler.removeCallbacks(it) }
     }
 
     override fun onListenerConnected() {
         super.onListenerConnected()
-        Log.d(TAG, "Notification listener connected")
+        Timber.d("Notification listener connected")
 
         // Check for any existing navigation notifications
         try {
@@ -89,7 +89,7 @@ class NavigationListenerService : NotificationListenerService() {
                 checkNavigationNotification(sbn)
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking existing notifications", e)
+            Timber.e(e, "Error checking existing notifications")
         }
     }
 
@@ -102,7 +102,7 @@ class NavigationListenerService : NotificationListenerService() {
 
         if (activeNavigationNotifications.contains(key)) {
             activeNavigationNotifications.remove(key)
-            Log.d(TAG, "Navigation notification removed: $key")
+            Timber.d("Navigation notification removed: $key")
 
             // If no more navigation notifications, navigation has stopped
             if (activeNavigationNotifications.isEmpty()) {
@@ -130,13 +130,13 @@ class NavigationListenerService : NotificationListenerService() {
         }
 
         val isNewSession = activeNavigationNotifications.isEmpty()
-        Log.d(TAG, "Navigation notification from ${app.name}: ${sbn.key} (new session: $isNewSession)")
+        Timber.d("Navigation notification from ${app.name}: ${sbn.key} (new session: $isNewSession)")
         activeNavigationNotifications.add(sbn.key)
 
         // Parse ETA data
         val etaData = etaParser.parse(sbn)
         if (etaData != null) {
-            Log.d(TAG, "Parsed ETA: ${etaData.etaMinutes} min")
+            Timber.d("Parsed ETA: ${etaData.etaMinutes} min")
             etaSharingManager.onEtaUpdate(etaData)
             updateSharingNotificationIfActive(etaData)
 
@@ -145,7 +145,7 @@ class NavigationListenerService : NotificationListenerService() {
                 schedulePromptNotification(etaData)
             }
         } else {
-            Log.d(TAG, "Could not parse ETA from notification")
+            Timber.d("Could not parse ETA from notification")
         }
     }
 
@@ -169,7 +169,7 @@ class NavigationListenerService : NotificationListenerService() {
         }
 
         handler.postDelayed(pendingPromptRunnable!!, NAVIGATION_STABLE_DELAY_MS)
-        Log.d(TAG, "Scheduled prompt notification in ${NAVIGATION_STABLE_DELAY_MS}ms")
+        Timber.d("Scheduled prompt notification in ${NAVIGATION_STABLE_DELAY_MS}ms")
     }
 
     /**
@@ -275,7 +275,7 @@ class NavigationListenerService : NotificationListenerService() {
 
             val notificationManager = getSystemService(NotificationManager::class.java)
             notificationManager.notify(NOTIFICATION_ID_ETA_PROMPT, notification)
-            Log.d(TAG, "Showed prompt notification (suggested: $recipientName)")
+            Timber.d("Showed prompt notification (suggested: $recipientName)")
         }
     }
 

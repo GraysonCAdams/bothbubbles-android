@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator
 
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.ui.chatcreator.delegates.ChatCreationDelegate
@@ -28,10 +28,6 @@ class ChatCreatorViewModel @Inject constructor(
     private val recipientSelectionDelegate: RecipientSelectionDelegate,
     private val chatCreationDelegate: ChatCreationDelegate
 ) : ViewModel() {
-
-    companion object {
-        private const val TAG = "ChatCreatorViewModel"
-    }
 
     private val _uiState = MutableStateFlow(ChatCreatorUiState())
     val uiState: StateFlow<ChatCreatorUiState> = _uiState.asStateFlow()
@@ -151,7 +147,7 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun startConversationWithAddress(address: String, service: String) {
         viewModelScope.launch {
-            Log.d(TAG, "startConversationWithAddress: address=$address, service=$service")
+            Timber.d("startConversationWithAddress: address=$address, service=$service")
             _uiState.update { it.copy(isLoading = true) }
 
             when (val result = chatCreationDelegate.startConversationWithAddress(address, service)) {
@@ -246,7 +242,7 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun onContinue() {
         val recipients = _uiState.value.selectedRecipients
-        Log.d(TAG, "onContinue called with ${recipients.size} recipients")
+        Timber.d("onContinue called with ${recipients.size} recipients")
 
         when {
             recipients.isEmpty() -> {
@@ -255,7 +251,7 @@ class ChatCreatorViewModel @Inject constructor(
             recipients.size == 1 -> {
                 // Single recipient - create direct chat
                 val recipient = recipients.first()
-                Log.d(TAG, "Starting conversation with ${recipient.address} (${recipient.service})")
+                Timber.d("Starting conversation with ${recipient.address} (${recipient.service})")
                 startConversationWithAddress(recipient.address, recipient.service)
             }
             else -> {
@@ -263,7 +259,7 @@ class ChatCreatorViewModel @Inject constructor(
                 when (val result = chatCreationDelegate.handleContinue(recipients)) {
                     is ChatCreationDelegate.ChatCreationResult.NavigateToGroupSetup -> {
                         // Navigation state is already updated by delegate
-                        Log.d(TAG, "Navigating to group setup")
+                        Timber.d("Navigating to group setup")
                     }
                     is ChatCreationDelegate.ChatCreationResult.Error -> {
                         _uiState.update { it.copy(error = result.message) }

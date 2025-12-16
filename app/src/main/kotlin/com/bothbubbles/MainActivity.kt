@@ -37,6 +37,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
+import timber.log.Timber
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -66,15 +67,15 @@ class MainActivity : ComponentActivity() {
         val stateRestorationData = runBlocking {
             withTimeoutOrNull(2000L) {
                 val shouldSkipRestore = settingsDataStore.recordLaunchAndCheckCrashProtection()
-                android.util.Log.d("StateRestore", "shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
+                Timber.tag("StateRestore").d("shouldSkipRestore=$shouldSkipRestore, shareIntent=${shareIntentData != null}, notificationDeepLink=${notificationDeepLinkData != null}")
                 if (shouldSkipRestore || shareIntentData != null || notificationDeepLinkData != null) {
                     // Skip restoration if crash protection triggered, handling share intent, or notification deep link
-                    android.util.Log.d("StateRestore", "Skipping restoration")
+                    Timber.tag("StateRestore").d("Skipping restoration")
                     null
                 } else {
                     // Try to restore previous state
                     val lastChatGuid = settingsDataStore.lastOpenChatGuid.first()
-                    android.util.Log.d("StateRestore", "lastChatGuid=$lastChatGuid")
+                    Timber.tag("StateRestore").d("lastChatGuid=$lastChatGuid")
                     if (lastChatGuid != null) {
                         val data = StateRestorationData(
                             chatGuid = lastChatGuid,
@@ -82,10 +83,10 @@ class MainActivity : ComponentActivity() {
                             scrollPosition = settingsDataStore.lastScrollPosition.first(),
                             scrollOffset = settingsDataStore.lastScrollOffset.first()
                         )
-                        android.util.Log.d("StateRestore", "Restoring: $data")
+                        Timber.tag("StateRestore").d("Restoring: $data")
                         data
                     } else {
-                        android.util.Log.d("StateRestore", "No chat to restore")
+                        Timber.tag("StateRestore").d("No chat to restore")
                         null
                     }
                 }

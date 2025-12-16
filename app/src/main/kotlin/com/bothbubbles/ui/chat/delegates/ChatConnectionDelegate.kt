@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
@@ -57,10 +57,6 @@ class ChatConnectionDelegate @AssistedInject constructor(
             sendModeManager: ChatSendModeManager,
             mergedChatGuids: List<String>
         ): ChatConnectionDelegate
-    }
-
-    companion object {
-        private const val TAG = "ChatConnectionDelegate"
     }
 
     private val isMergedChat: Boolean = mergedChatGuids.size > 1
@@ -169,7 +165,7 @@ class ChatConnectionDelegate @AssistedInject constructor(
     fun checkAndRepairCounterpart() {
         // Only run for non-merged conversations (single chat in unified group)
         if (isMergedChat) {
-            Log.d(TAG, "Skipping counterpart check - already merged conversation")
+            Timber.d("Skipping counterpart check - already merged conversation")
             return
         }
 
@@ -178,32 +174,32 @@ class ChatConnectionDelegate @AssistedInject constructor(
                 // Find unified group for this chat
                 val unifiedGroup = chatRepository.getUnifiedGroupForChat(chatGuid)
                 if (unifiedGroup == null) {
-                    Log.d(TAG, "No unified group for $chatGuid - skipping counterpart check")
+                    Timber.d("No unified group for $chatGuid - skipping counterpart check")
                     return@launch
                 }
 
                 val result = counterpartSyncService.checkAndRepairCounterpart(unifiedGroup.id)
                 when (result) {
                     is CounterpartSyncService.CheckResult.Found -> {
-                        Log.i(TAG, "Found and synced counterpart: ${result.chatGuid}")
+                        Timber.i("Found and synced counterpart: ${result.chatGuid}")
                         // Emit event to refresh conversation (will include new chat's messages on next open)
                         setCounterpartSynced(true)
                     }
                     is CounterpartSyncService.CheckResult.NotFound -> {
-                        Log.d(TAG, "No counterpart exists for this contact (likely Android user)")
+                        Timber.d("No counterpart exists for this contact (likely Android user)")
                     }
                     is CounterpartSyncService.CheckResult.AlreadyVerified -> {
-                        Log.d(TAG, "Already verified: hasCounterpart=${result.hasCounterpart}")
+                        Timber.d("Already verified: hasCounterpart=${result.hasCounterpart}")
                     }
                     is CounterpartSyncService.CheckResult.Skipped -> {
-                        Log.d(TAG, "Counterpart check skipped (group already complete)")
+                        Timber.d("Counterpart check skipped (group already complete)")
                     }
                     is CounterpartSyncService.CheckResult.Error -> {
-                        Log.w(TAG, "Counterpart check failed: ${result.message}")
+                        Timber.w("Counterpart check failed: ${result.message}")
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error checking for counterpart", e)
+                Timber.e(e, "Error checking for counterpart")
             }
         }
     }
@@ -215,7 +211,7 @@ class ChatConnectionDelegate @AssistedInject constructor(
      */
     fun setCounterpartSynced(synced: Boolean) {
         _counterpartSynced.value = synced
-        Log.d(TAG, "Counterpart synced: $synced for chat $chatGuid")
+        Timber.d("Counterpart synced: $synced for chat $chatGuid")
     }
 
     // ============================================================================

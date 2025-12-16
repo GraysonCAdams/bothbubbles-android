@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat
 
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -384,10 +384,10 @@ class ChatViewModel @Inject constructor(
      * Called in init so state is persisted as soon as chat opens.
      */
     private fun saveCurrentChatState() {
-        android.util.Log.e("StateRestore", "saveCurrentChatState CALLED: chatGuid=$chatGuid")
+        android.util.Timber.tag("StateRestore").e("saveCurrentChatState CALLED: chatGuid=$chatGuid")
         viewModelScope.launch {
             val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
-            android.util.Log.e("StateRestore", "saveCurrentChatState SAVING: chatGuid=$chatGuid")
+            android.util.Timber.tag("StateRestore").e("saveCurrentChatState SAVING: chatGuid=$chatGuid")
             settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
         }
     }
@@ -445,7 +445,7 @@ class ChatViewModel @Inject constructor(
                         else -> null
                     }
                     if (persistedMode != null) {
-                        Log.d(TAG, "Loaded persisted send mode: $persistedMode for chat $chatGuid")
+                        Timber.d("Loaded persisted send mode: $persistedMode for chat $chatGuid")
                         _uiState.update {
                             it.copy(
                                 currentSendMode = persistedMode,
@@ -455,7 +455,7 @@ class ChatViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load persisted send mode", e)
+                Timber.e(e, "Failed to load persisted send mode")
             }
         }
     }
@@ -544,7 +544,7 @@ class ChatViewModel @Inject constructor(
      * This clears the saved chat state so the app opens to conversation list next time.
      */
     fun onNavigateBack() {
-        android.util.Log.d("StateRestore", "onNavigateBack: clearing saved chat state")
+        android.util.Timber.tag("StateRestore").d("onNavigateBack: clearing saved chat state")
         viewModelScope.launch {
             settingsDataStore.clearLastOpenChat()
         }
@@ -608,7 +608,7 @@ class ChatViewModel @Inject constructor(
                 // Step 7: Clear draft from database
                 composer.clearDraftFromDatabase()
             }.onFailure { error ->
-                Log.e(TAG, "Failed to queue message", error)
+                Timber.e(error, "Failed to queue message")
                 // Error state is updated by ChatSendDelegate
             }
         }
@@ -663,10 +663,10 @@ class ChatViewModel @Inject constructor(
             // Success: Get the real server data
             // Failure: Rollback the optimistic update
             result.onSuccess {
-                Log.d(TAG, "toggleReaction: API success for $messageGuid")
+                Timber.d("toggleReaction: API success for $messageGuid")
                 messageList.updateMessage(messageGuid)
             }.onFailure { error ->
-                Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back", error)
+                Timber.e(error, "toggleReaction: API failed for $messageGuid, rolling back")
                 messageList.updateMessage(messageGuid)
             }
         }

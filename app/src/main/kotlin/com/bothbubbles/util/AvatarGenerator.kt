@@ -10,7 +10,7 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import androidx.core.graphics.drawable.IconCompat
 import kotlin.math.abs
 import kotlin.math.min
@@ -20,8 +20,6 @@ import kotlin.math.min
  * and notifications (NotificationService.kt) to ensure consistent avatar appearance.
  */
 object AvatarGenerator {
-    private const val TAG = "AvatarGenerator"
-
     // Google Messages-style avatar colors - muted pastels that work in light and dark mode
     private val avatarColors = listOf(
         0xFF5C6BC0.toInt(), // Soft Indigo
@@ -183,12 +181,12 @@ object AvatarGenerator {
     fun loadContactPhotoBitmap(context: Context, photoUri: String, sizePx: Int): Bitmap? {
         return try {
             val uri = Uri.parse(photoUri)
-            Log.d(TAG, "Loading contact photo: $photoUri")
+            Timber.d("Loading contact photo: $photoUri")
 
             // Try direct ContentResolver access first
             val inputStream = context.contentResolver.openInputStream(uri)
             if (inputStream == null) {
-                Log.w(TAG, "openInputStream returned null for: $photoUri, trying alternative method")
+                Timber.w("openInputStream returned null for: $photoUri, trying alternative method")
                 // Try alternative: use openContactPhotoInputStream which may handle permissions better
                 return loadContactPhotoAlternative(context, uri, sizePx)
             }
@@ -197,7 +195,7 @@ object AvatarGenerator {
                 // Decode bitmap
                 val sourceBitmap = BitmapFactory.decodeStream(stream)
                 if (sourceBitmap == null) {
-                    Log.w(TAG, "Failed to decode contact photo: $photoUri")
+                    Timber.w("Failed to decode contact photo: $photoUri")
                     return null
                 }
 
@@ -216,7 +214,7 @@ object AvatarGenerator {
                 circularBitmap
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to load contact photo: $photoUri", e)
+            Timber.w(e, "Failed to load contact photo: $photoUri")
             null
         }
     }
@@ -251,7 +249,7 @@ object AvatarGenerator {
             }
 
             if (contactId == null) {
-                Log.w(TAG, "Could not extract contact ID from URI: $photoUri")
+                Timber.w("Could not extract contact ID from URI: $photoUri")
                 return null
             }
 
@@ -268,14 +266,14 @@ object AvatarGenerator {
             )
 
             if (photoStream == null) {
-                Log.w(TAG, "openContactPhotoInputStream also returned null for contact: $contactId")
+                Timber.w("openContactPhotoInputStream also returned null for contact: $contactId")
                 return null
             }
 
             photoStream.use { stream ->
                 val sourceBitmap = BitmapFactory.decodeStream(stream)
                 if (sourceBitmap == null) {
-                    Log.w(TAG, "Failed to decode photo from alternative method")
+                    Timber.w("Failed to decode photo from alternative method")
                     return null
                 }
 
@@ -289,11 +287,11 @@ object AvatarGenerator {
                     scaledBitmap.recycle()
                 }
 
-                Log.d(TAG, "Successfully loaded photo via alternative method for contact: $contactId")
+                Timber.d("Successfully loaded photo via alternative method for contact: $contactId")
                 circularBitmap
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Alternative photo load failed for: $photoUri", e)
+            Timber.w(e, "Alternative photo load failed for: $photoUri")
             null
         }
     }

@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.settings.autoresponder
 
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -34,10 +34,6 @@ class AutoResponderSettingsViewModel @Inject constructor(
     private val autoResponderService: AutoResponderService,
     private val api: BothBubblesApi
 ) : ViewModel() {
-
-    companion object {
-        private const val TAG = "AutoResponderSettingsVM"
-    }
 
     private val _availableAliases = MutableStateFlow<List<String>>(emptyList())
     private val _isLoadingAliases = MutableStateFlow(false)
@@ -92,12 +88,12 @@ class AutoResponderSettingsViewModel @Inject constructor(
                         ?.map { it.alias }
                         ?: emptyList()
                     _availableAliases.value = aliases
-                    Log.d(TAG, "Loaded ${aliases.size} aliases: $aliases")
+                    Timber.d("Loaded ${aliases.size} aliases: $aliases")
                 } else {
-                    Log.w(TAG, "Failed to load aliases: ${response.code()}")
+                    Timber.w("Failed to load aliases: ${response.code()}")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error loading aliases", e)
+                Timber.e(e, "Error loading aliases")
             } finally {
                 _isLoadingAliases.value = false
             }

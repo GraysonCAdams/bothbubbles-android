@@ -3,7 +3,7 @@ package com.bothbubbles.services.contacts
 import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,10 +15,6 @@ import javax.inject.Singleton
 class ContactPhotoLoader @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    companion object {
-        private const val TAG = "ContactPhotoLoader"
-    }
-
     /**
      * Get the photo URI for a contact by phone number or email address.
      * Returns null if contact not found, no photo set, or if address is a short code.
@@ -79,7 +75,7 @@ class ContactPhotoLoader @Inject constructor(
 
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting photo URI for $address", e)
+            Timber.w(e, "Error getting photo URI for $address")
             null
         }
     }

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.linkpreview
 
-import android.util.Log
+import timber.log.Timber
 import okhttp3.OkHttpClient
 import okhttp3.Request
 
@@ -15,10 +15,6 @@ internal class OpenGraphParser(
     private val userAgent: String,
     private val maxContentLength: Int
 ) {
-    companion object {
-        private const val TAG = "OpenGraphParser"
-    }
-
     /**
      * Fetches and parses Open Graph metadata from a URL
      */
@@ -33,7 +29,7 @@ internal class OpenGraphParser(
         val response = httpClient.newCall(request).execute()
 
         if (!response.isSuccessful) {
-            Log.w(TAG, "HTTP error ${response.code} for $url")
+            Timber.w("HTTP error ${response.code} for $url")
             return LinkMetadataResult.Error("HTTP ${response.code}")
         }
 
@@ -42,7 +38,7 @@ internal class OpenGraphParser(
 
         // Check content length
         if (contentLength > maxContentLength) {
-            Log.w(TAG, "Content too large ($contentLength bytes) for $url")
+            Timber.w("Content too large ($contentLength bytes) for $url")
             return LinkMetadataResult.Error("Content too large")
         }
 
@@ -73,7 +69,7 @@ internal class OpenGraphParser(
                 )
             }
             !contentType.contains("html") -> {
-                Log.d(TAG, "Non-HTML content type: $contentType for $url")
+                Timber.d("Non-HTML content type: $contentType for $url")
                 return LinkMetadataResult.NoPreview
             }
         }

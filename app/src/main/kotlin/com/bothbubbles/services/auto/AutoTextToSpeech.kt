@@ -3,7 +3,7 @@ package com.bothbubbles.services.auto
 import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
-import android.util.Log
+import timber.log.Timber
 import kotlinx.coroutines.suspendCancellableCoroutine
 import java.util.Locale
 import kotlin.coroutines.resume
@@ -43,9 +43,9 @@ class AutoTextToSpeech(private val context: Context) {
             if (isInitialized) {
                 tts?.language = Locale.getDefault()
                 tts?.setOnUtteranceProgressListener(utteranceListener)
-                Log.d(TAG, "TTS initialized successfully")
+                Timber.d("TTS initialized successfully")
             } else {
-                Log.e(TAG, "TTS initialization failed with status: $status")
+                Timber.e("TTS initialization failed with status: $status")
             }
             initCallback?.invoke(isInitialized)
             initCallback = null
@@ -67,7 +67,7 @@ class AutoTextToSpeech(private val context: Context) {
         onError: (String) -> Unit = {}
     ) {
         if (!isInitialized) {
-            Log.w(TAG, "TTS not initialized, initializing now...")
+            Timber.w("TTS not initialized, initializing now...")
             initialize { success ->
                 if (success) {
                     speakInternal(text, onStart, onDone, onError)
@@ -92,7 +92,7 @@ class AutoTextToSpeech(private val context: Context) {
 
         val result = tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
         if (result != TextToSpeech.SUCCESS) {
-            Log.e(TAG, "TTS speak failed with result: $result")
+            Timber.e("TTS speak failed with result: $result")
             onError("Failed to start speech")
             currentCallbacks = null
         }
@@ -132,7 +132,7 @@ class AutoTextToSpeech(private val context: Context) {
         tts?.stop()
         isSpeaking = false
         currentCallbacks = null
-        Log.d(TAG, "TTS stopped")
+        Timber.d("TTS stopped")
     }
 
     /**
@@ -143,7 +143,7 @@ class AutoTextToSpeech(private val context: Context) {
         tts?.shutdown()
         tts = null
         isInitialized = false
-        Log.d(TAG, "TTS shutdown")
+        Timber.d("TTS shutdown")
     }
 
     // Internal state for callbacks
@@ -159,14 +159,14 @@ class AutoTextToSpeech(private val context: Context) {
         override fun onStart(utteranceId: String?) {
             isSpeaking = true
             currentCallbacks?.onStart?.invoke()
-            Log.d(TAG, "TTS started: $utteranceId")
+            Timber.d("TTS started: $utteranceId")
         }
 
         override fun onDone(utteranceId: String?) {
             isSpeaking = false
             currentCallbacks?.onDone?.invoke()
             currentCallbacks = null
-            Log.d(TAG, "TTS done: $utteranceId")
+            Timber.d("TTS done: $utteranceId")
         }
 
         @Deprecated("Deprecated in API 21+")
@@ -174,14 +174,14 @@ class AutoTextToSpeech(private val context: Context) {
             isSpeaking = false
             currentCallbacks?.onError?.invoke("Speech error")
             currentCallbacks = null
-            Log.e(TAG, "TTS error: $utteranceId")
+            Timber.e("TTS error: $utteranceId")
         }
 
         override fun onError(utteranceId: String?, errorCode: Int) {
             isSpeaking = false
             currentCallbacks?.onError?.invoke("Speech error: $errorCode")
             currentCallbacks = null
-            Log.e(TAG, "TTS error: $utteranceId, code: $errorCode")
+            Timber.e("TTS error: $utteranceId, code: $errorCode")
         }
     }
 

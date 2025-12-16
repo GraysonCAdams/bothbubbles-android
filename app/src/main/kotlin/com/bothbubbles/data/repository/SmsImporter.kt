@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
@@ -34,9 +34,6 @@ class SmsImporter(
     private val smsContentProvider: SmsContentProvider,
     private val androidContactsService: AndroidContactsService
 ) {
-    companion object {
-        private const val TAG = "SmsImporter"
-    }
 
     /**
      * Import all SMS/MMS threads from the system
@@ -48,9 +45,9 @@ class SmsImporter(
         onProgress: ((Int, Int) -> Unit)? = null
     ): Result<Int> = withContext(Dispatchers.IO) {
         runCatching {
-            Log.d(TAG, "Getting SMS threads (limit=$limit)...")
+            Timber.d("Getting SMS threads (limit=$limit)...")
             val threads = smsContentProvider.getThreads(limit = limit)
-            Log.d(TAG, "Found ${threads.size} SMS threads to import")
+            Timber.d("Found ${threads.size} SMS threads to import")
             var imported = 0
 
             // If there are no threads, report completion immediately
@@ -64,7 +61,7 @@ class SmsImporter(
                 onProgress?.invoke(index + 1, threads.size)
             }
 
-            Log.d(TAG, "SMS import finished: $imported threads imported")
+            Timber.d("SMS import finished: $imported threads imported")
             imported
         }
     }
@@ -84,7 +81,7 @@ class SmsImporter(
             .distinct()
 
         if (addresses.isEmpty()) {
-            Log.d(TAG, "Skipping thread ${thread.threadId} - no valid phone addresses")
+            Timber.d("Skipping thread ${thread.threadId} - no valid phone addresses")
             return
         }
 
@@ -195,21 +192,21 @@ class SmsImporter(
         // Skip if identifier is empty or looks like an email/RCS address (not a phone)
         // This prevents all non-phone chats from being lumped into a single group
         if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
-            Log.d(TAG, "linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
+            Timber.d("linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
             return
         }
 
-        Log.d(TAG, "linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
+        Timber.d("linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
 
         try {
             // Check if unified group already exists for this phone number
             var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            Log.d(TAG, "linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
+            Timber.d("linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
 
             if (group == null) {
                 // Check if there's an existing iMessage chat for this phone
                 val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-                Log.d(TAG, "linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
+                Timber.d("linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
 
                 // Create new unified group and add this chat atomically
                 val primaryGuid = existingIMessageChat?.guid ?: chatGuid
@@ -221,26 +218,26 @@ class SmsImporter(
 
                 // Use atomic method to prevent FOREIGN KEY errors
                 group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
-                Log.d(TAG, "linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
+                Timber.d("linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
 
                 // Add existing iMessage chat to group if found (separate from SMS chat)
                 if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
-                    Log.d(TAG, "linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
+                    Timber.d("linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
                     unifiedChatGroupDao.insertMember(
                         UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
                     )
                 }
             } else {
                 // Group exists, just add this SMS chat to it
-                Log.d(TAG, "linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
+                Timber.d("linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
                 unifiedChatGroupDao.insertMember(
                     UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
                 )
             }
 
-            Log.d(TAG, "linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+            Timber.d("linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
         } catch (e: Exception) {
-            Log.e(TAG, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'", e)
+            Timber.e(e, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'")
             throw e
         }
     }

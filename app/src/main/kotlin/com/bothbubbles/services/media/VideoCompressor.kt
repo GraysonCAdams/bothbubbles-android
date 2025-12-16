@@ -8,7 +8,7 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -65,14 +65,14 @@ class VideoCompressor @Inject constructor(
         onProgress: ((Float) -> Unit)? = null
     ): String? = withContext(Dispatchers.IO) {
         if (quality == Quality.ORIGINAL) {
-            Log.d(TAG, "ORIGINAL quality selected, skipping compression")
+            Timber.d("ORIGINAL quality selected, skipping compression")
             return@withContext null
         }
 
         val inputFd = try {
             context.contentResolver.openFileDescriptor(inputUri, "r")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to open input URI: $inputUri", e)
+            Timber.e(e, "Failed to open input URI: $inputUri")
             return@withContext null
         } ?: return@withContext null
 
@@ -112,7 +112,7 @@ class VideoCompressor @Inject constructor(
             }
 
             if (videoTrackIndex == -1) {
-                Log.e(TAG, "No video track found")
+                Timber.e("No video track found")
                 return@withContext null
             }
 
@@ -126,8 +126,8 @@ class VideoCompressor @Inject constructor(
                 sourceWidth, sourceHeight, quality.maxWidth, quality.maxHeight
             )
 
-            Log.d(TAG, "Compressing video: ${sourceWidth}x${sourceHeight} -> ${outputWidth}x${outputHeight}")
-            Log.d(TAG, "Bitrate: ${quality.videoBitrate}, Frame rate: ${quality.frameRate}")
+            Timber.d("Compressing video: ${sourceWidth}x${sourceHeight} -> ${outputWidth}x${outputHeight}")
+            Timber.d("Bitrate: ${quality.videoBitrate}, Frame rate: ${quality.frameRate}")
 
             // Create output format for video encoder
             val outputVideoFormat = MediaFormat.createVideoFormat(
@@ -178,12 +178,12 @@ class VideoCompressor @Inject constructor(
             }
 
             muxer.stop()
-            Log.d(TAG, "Compression complete: ${outputFile.absolutePath}")
-            Log.d(TAG, "Output size: ${outputFile.length() / 1024} KB")
+            Timber.d("Compression complete: ${outputFile.absolutePath}")
+            Timber.d("Output size: ${outputFile.length() / 1024} KB")
 
             outputFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Video compression failed", e)
+            Timber.e(e, "Video compression failed")
             outputFile.delete()
             null
         } finally {
@@ -215,7 +215,7 @@ class VideoCompressor @Inject constructor(
                 return compressed
             }
             // If still too large, video might be too long for MMS
-            Log.w(TAG, "Compressed video (${file.length()} bytes) exceeds MMS limit ($maxSizeBytes bytes)")
+            Timber.w("Compressed video (${file.length()} bytes) exceeds MMS limit ($maxSizeBytes bytes)")
             file.delete()
         }
         return null
@@ -254,7 +254,7 @@ class VideoCompressor @Inject constructor(
             val audioBits = quality.audioBitrate * durationSeconds
             ((videoBits + audioBits) / 8).toLong()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to estimate compressed size", e)
+            Timber.e(e, "Failed to estimate compressed size")
             null
         }
     }

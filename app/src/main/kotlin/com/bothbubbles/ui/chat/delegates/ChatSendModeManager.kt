@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.repository.ChatRepository
@@ -66,7 +66,6 @@ class ChatSendModeManager @AssistedInject constructor(
     }
 
     companion object {
-        private const val TAG = "ChatSendModeManager"
         private const val AVAILABILITY_CHECK_COOLDOWN = 5 * 60 * 1000L // 5 minutes
         private const val SERVER_STABILITY_PERIOD_MS = 30_000L // 30 seconds stable before allowing iMessage
         private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
@@ -140,19 +139,19 @@ class ChatSendModeManager @AssistedInject constructor(
     ) {
         // Skip for ALL group chats
         if (isGroup) {
-            Log.d(TAG, "Skipping iMessage check: group chat (isIMessage=$isIMessageChat)")
+            Timber.d("Skipping iMessage check: group chat (isIMessage=$isIMessageChat)")
             return
         }
 
         if (participantPhone == null) {
-            Log.w(TAG, "participantPhone is null, cannot check availability")
+            Timber.w("participantPhone is null, cannot check availability")
             return
         }
 
         // For existing iMessage 1-on-1 chats with phone numbers: enable toggle immediately
         val isEmailAddress = participantPhone.contains("@")
         if (isIMessageChat && !isGroup && !isEmailAddress) {
-            Log.d(TAG, "iMessage chat with phone number - enabling SMS toggle immediately")
+            Timber.d("iMessage chat with phone number - enabling SMS toggle immediately")
             _contactIMessageAvailable.value = true
             _canToggleSendMode.value = true
             _showSendModeRevealAnimation.value = !_sendModeManuallySet.value
@@ -161,7 +160,7 @@ class ChatSendModeManager @AssistedInject constructor(
             return
         }
 
-        Log.d(TAG, "Starting iMessage availability check for: $participantPhone")
+        Timber.d("Starting iMessage availability check for: $participantPhone")
 
         scope.launch {
             _isCheckingIMessageAvailability.value = true
@@ -208,7 +207,7 @@ class ChatSendModeManager @AssistedInject constructor(
                         }
                     },
                     onFailure = { e ->
-                        Log.w(TAG, "iMessage availability check FAILED: ${e.message}", e)
+                        Timber.w(e, "iMessage availability check FAILED: ${e.message}")
                         val newMode = if (isEmailAddress) ChatSendMode.IMESSAGE else _currentSendMode.value
                         _contactIMessageAvailable.value = if (isEmailAddress) true else null
                         _isCheckingIMessageAvailability.value = false
@@ -217,7 +216,7 @@ class ChatSendModeManager @AssistedInject constructor(
                     }
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error checking iMessage availability: ${e.message}", e)
+                Timber.e(e, "Unexpected error checking iMessage availability: ${e.message}")
                 _isCheckingIMessageAvailability.value = false
                 onUpdateState(null, false, _currentSendMode.value, false, false, false)
             }
@@ -235,31 +234,31 @@ class ChatSendModeManager @AssistedInject constructor(
 
         val now = System.currentTimeMillis()
         if (now - lastAvailabilityCheck < AVAILABILITY_CHECK_COOLDOWN) {
-            Log.d(TAG, "Skipping availability check - cooldown not passed")
+            Timber.d("Skipping availability check - cooldown not passed")
             return
         }
         lastAvailabilityCheck = now
 
         scope.launch {
             if (participantPhone.isNullOrBlank()) {
-                Log.d(TAG, "No address found for availability check")
+                Timber.d("No address found for availability check")
                 return@launch
             }
 
             if (socketConnection.connectionState.value != ConnectionState.CONNECTED) {
-                Log.d(TAG, "Server not connected, skipping availability check")
+                Timber.d("Server not connected, skipping availability check")
                 return@launch
             }
 
             try {
-                Log.d(TAG, "Checking iMessage availability for $participantPhone")
+                Timber.d("Checking iMessage availability for $participantPhone")
                 val response = api.checkIMessageAvailability(participantPhone)
                 if (response.isSuccessful && response.body()?.data?.available == true) {
-                    Log.d(TAG, "iMessage now available, exiting fallback mode")
+                    Timber.d("iMessage now available, exiting fallback mode")
                     chatFallbackTracker.exitFallbackMode(chatGuid)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to check iMessage availability", e)
+                Timber.e(e, "Failed to check iMessage availability")
             }
         }
     }
@@ -270,11 +269,11 @@ class ChatSendModeManager @AssistedInject constructor(
     fun setSendMode(mode: ChatSendMode, persist: Boolean = true): Boolean {
         if (mode == ChatSendMode.IMESSAGE) {
             if (_contactIMessageAvailable.value != true) {
-                Log.w(TAG, "Cannot switch to iMessage: contact doesn't support it")
+                Timber.w("Cannot switch to iMessage: contact doesn't support it")
                 return false
             }
             if (!isServerStable()) {
-                Log.w(TAG, "Cannot switch to iMessage: server not stable yet")
+                Timber.w("Cannot switch to iMessage: server not stable yet")
                 return false
             }
         }
@@ -293,7 +292,7 @@ class ChatSendModeManager @AssistedInject constructor(
                         manuallySet = true
                     )
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to persist send mode preference", e)
+                    Timber.e(e, "Failed to persist send mode preference")
                 }
             }
         }
@@ -408,7 +407,7 @@ class ChatSendModeManager @AssistedInject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load persisted send mode", e)
+                Timber.e(e, "Failed to load persisted send mode")
             }
         }
     }

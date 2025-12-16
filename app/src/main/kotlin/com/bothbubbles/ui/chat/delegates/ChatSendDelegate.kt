@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
@@ -72,9 +72,6 @@ class ChatSendDelegate @AssistedInject constructor(
         fun create(chatGuid: String, scope: CoroutineScope): ChatSendDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatSendDelegate"
-    }
 
     // Phase 4: Delegate references removed - ChatViewModel now coordinates all cross-delegate interactions.
     // The sendCurrentMessage() method has been replaced with queueMessage() which returns QueuedMessageInfo
@@ -128,10 +125,10 @@ class ChatSendDelegate @AssistedInject constructor(
         }
 
         val sendStartTime = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
-        Log.i(TAG, "[SEND_TRACE] STEP 1: queueMessageForSending() CALLED at $sendStartTime")
-        Log.i(TAG, "[SEND_TRACE] Text: \"${trimmedText.take(50)}${if (trimmedText.length > 50) "..." else ""}\"")
-        Log.i(TAG, "[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
+        Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
+        Timber.i("[SEND_TRACE] STEP 1: queueMessageForSending() CALLED at $sendStartTime")
+        Timber.i("[SEND_TRACE] Text: \"${trimmedText.take(50)}${if (trimmedText.length > 50) "..." else ""}\"")
+        Timber.i("[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
 
         val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
         val replyToGuid = _state.value.replyingToGuid
@@ -149,7 +146,7 @@ class ChatSendDelegate @AssistedInject constructor(
         // Generate GUID for optimistic UI
         val tempGuid = "temp-${java.util.UUID.randomUUID()}"
         val creationTime = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] STEP 2: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
+        Timber.i("[SEND_TRACE] STEP 2: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
 
         // Determine message source for the optimistic model
         val messageSource = when {
@@ -171,7 +168,7 @@ class ChatSendDelegate @AssistedInject constructor(
 
         // Queue message for offline-first delivery via WorkManager (on IO dispatcher)
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            Log.i(TAG, "[SEND_TRACE] STEP 3: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
+            Timber.i("[SEND_TRACE] STEP 3: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
             val queueStart = System.currentTimeMillis()
             pendingMessageSource.queueMessage(
                 chatGuid = chatGuid,
@@ -183,8 +180,8 @@ class ChatSendDelegate @AssistedInject constructor(
                 forcedLocalId = tempGuid
             ).fold(
                 onSuccess = { localId ->
-                    Log.i(TAG, "[SEND_TRACE] STEP 4: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
-                    Log.i(TAG, "[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                    Timber.i("[SEND_TRACE] STEP 4: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
+                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                     PerformanceProfiler.end(sendId, "queued")
 
                     // Play sound for SMS delivery (optimistic)
@@ -196,7 +193,7 @@ class ChatSendDelegate @AssistedInject constructor(
                     Result.success(queuedInfo)
                 },
                 onFailure = { e ->
-                    Log.e(TAG, "[SEND_TRACE] STEP 4: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
+                    Timber.e("[SEND_TRACE] STEP 4: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
                     _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                     PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
                     Result.failure(e)
@@ -266,10 +263,10 @@ class ChatSendDelegate @AssistedInject constructor(
         cancelTypingIndicator()
 
         val sendStartTime = System.currentTimeMillis()
-        Log.d(TAG, "⏱️ [DELEGATE] sendMessage() CALLED on thread: ${Thread.currentThread().name}")
+        Timber.d("⏱️ [DELEGATE] sendMessage() CALLED on thread: ${Thread.currentThread().name}")
 
         scope.launch {
-            Log.d(TAG, "⏱️ [DELEGATE] coroutine START: +${System.currentTimeMillis() - sendStartTime}ms, thread: ${Thread.currentThread().name}")
+            Timber.d("⏱️ [DELEGATE] coroutine START: +${System.currentTimeMillis() - sendStartTime}ms, thread: ${Thread.currentThread().name}")
             val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
             val replyToGuid = _state.value.replyingToGuid
 
@@ -277,7 +274,7 @@ class ChatSendDelegate @AssistedInject constructor(
             onClearInput()
             _state.update { it.copy(replyingToGuid = null) }
             onDraftCleared()
-            Log.d(TAG, "⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
+            Timber.d("⏱️ [DELEGATE] UI cleared: +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Determine delivery mode based on chat type and current send mode
             val deliveryMode = determineDeliveryMode(
@@ -292,7 +289,7 @@ class ChatSendDelegate @AssistedInject constructor(
             val tempGuid = "temp-${java.util.UUID.randomUUID()}"
             val creationTime = System.currentTimeMillis()
 
-            Log.d(TAG, "⏱️ [DELEGATE] calling onQueued callback (OPTIMISTIC): +${System.currentTimeMillis() - sendStartTime}ms")
+            Timber.d("⏱️ [DELEGATE] calling onQueued callback (OPTIMISTIC): +${System.currentTimeMillis() - sendStartTime}ms")
             onQueued?.invoke(
                 QueuedMessageInfo(
                     guid = tempGuid,
@@ -303,13 +300,13 @@ class ChatSendDelegate @AssistedInject constructor(
                     effectId = effectId
                 )
             )
-            Log.d(TAG, "⏱️ [DELEGATE] onQueued callback returned: +${System.currentTimeMillis() - sendStartTime}ms")
+            Timber.d("⏱️ [DELEGATE] onQueued callback returned: +${System.currentTimeMillis() - sendStartTime}ms")
 
             // Queue message for offline-first delivery via WorkManager
             // CRITICAL: Run on IO dispatcher to prevent blocking the main thread (which delays UI rendering)
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 val queueStart = System.currentTimeMillis()
-                Log.d(TAG, "⏱️ [DELEGATE] calling queueMessage (IO): +${System.currentTimeMillis() - sendStartTime}ms")
+                Timber.d("⏱️ [DELEGATE] calling queueMessage (IO): +${System.currentTimeMillis() - sendStartTime}ms")
                 pendingMessageSource.queueMessage(
                     chatGuid = chatGuid,
                     text = trimmedText,
@@ -320,8 +317,8 @@ class ChatSendDelegate @AssistedInject constructor(
                     forcedLocalId = tempGuid // Pass the GUID we already displayed
                 ).fold(
                     onSuccess = { localId ->
-                        Log.d(TAG, "⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
-                        Log.d(TAG, "Message queued successfully: $localId")
+                        Timber.d("⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
+                        Timber.d("Message queued successfully: $localId")
                         PerformanceProfiler.end(sendId, "queued")
 
                         // Play sound for SMS delivery (optimistic)
@@ -331,7 +328,7 @@ class ChatSendDelegate @AssistedInject constructor(
                         }
                     },
                     onFailure = { e ->
-                        Log.e(TAG, "Failed to queue message", e)
+                        Timber.e(e, "Failed to queue message")
                         _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                         PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
                         // TODO: We should probably remove the optimistic message here if DB failed
@@ -370,13 +367,13 @@ class ChatSendDelegate @AssistedInject constructor(
                 deliveryMode = deliveryMode
             ).fold(
                 onSuccess = { localId ->
-                    Log.d(TAG, "Message queued via $deliveryMode: $localId")
+                    Timber.d("Message queued via $deliveryMode: $localId")
                     if (isLocalSms) {
                         soundPlayer.playSendSound()
                     }
                 },
                 onFailure = { e ->
-                    Log.e(TAG, "Failed to queue message via $deliveryMode", e)
+                    Timber.e(e, "Failed to queue message via $deliveryMode")
                     _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                 }
             )
@@ -555,7 +552,7 @@ class ChatSendDelegate @AssistedInject constructor(
         scope.launch {
             pendingMessageSource.retryMessage(localId)
                 .onFailure { e ->
-                    Log.e(TAG, "Failed to retry message: $localId", e)
+                    Timber.e(e, "Failed to retry message: $localId")
                     _state.update { it.copy(sendError = "Failed to retry: ${e.message}") }
                 }
         }
@@ -568,7 +565,7 @@ class ChatSendDelegate @AssistedInject constructor(
         scope.launch {
             pendingMessageSource.cancelMessage(localId)
                 .onFailure { e ->
-                    Log.e(TAG, "Failed to cancel message: $localId", e)
+                    Timber.e(e, "Failed to cancel message: $localId")
                     _state.update { it.copy(sendError = "Failed to cancel: ${e.message}") }
                 }
         }

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.linkpreview
 
-import android.util.Log
+import timber.log.Timber
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -16,8 +16,6 @@ internal class OEmbedProviderHandler(
     private val userAgent: String
 ) {
     companion object {
-        private const val TAG = "OEmbedProviderHandler"
-
         // oEmbed providers with their endpoints and URL patterns
         private val OEMBED_PROVIDERS = listOf(
             OEmbedProvider(
@@ -100,7 +98,7 @@ internal class OEmbedProviderHandler(
             provider.urlPatterns.any { pattern -> pattern.containsMatchIn(url) }
         } ?: return null
 
-        Log.d(TAG, "Using oEmbed provider: ${provider.name} for $url")
+        Timber.d("Using oEmbed provider: ${provider.name} for $url")
 
         return try {
             val encodedUrl = URLEncoder.encode(url, "UTF-8")
@@ -115,20 +113,20 @@ internal class OEmbedProviderHandler(
             val response = httpClient.newCall(request).execute()
 
             if (!response.isSuccessful) {
-                Log.w(TAG, "oEmbed HTTP error ${response.code} for ${provider.name}")
+                Timber.w("oEmbed HTTP error ${response.code} for ${provider.name}")
                 return null
             }
 
             val body = response.body?.string()
             if (body.isNullOrBlank()) {
-                Log.w(TAG, "Empty oEmbed response for ${provider.name}")
+                Timber.w("Empty oEmbed response for ${provider.name}")
                 return null
             }
 
             parseOEmbedResponse(body, provider.name)
 
         } catch (e: Exception) {
-            Log.w(TAG, "oEmbed failed for ${provider.name}: ${e.message}")
+            Timber.w("oEmbed failed for ${provider.name}: ${e.message}")
             null
         }
     }
@@ -157,7 +155,7 @@ internal class OEmbedProviderHandler(
 
             // Check if we got useful metadata
             if (title == null && thumbnailUrl == null) {
-                Log.d(TAG, "No useful metadata from oEmbed for $providerName")
+                Timber.d("No useful metadata from oEmbed for $providerName")
                 return LinkMetadataResult.NoPreview
             }
 
@@ -175,7 +173,7 @@ internal class OEmbedProviderHandler(
                 )
             )
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to parse oEmbed JSON: ${e.message}")
+            Timber.w("Failed to parse oEmbed JSON: ${e.message}")
             LinkMetadataResult.Error("Failed to parse oEmbed response")
         }
     }

@@ -2,7 +2,7 @@ package com.bothbubbles.services.sms
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.util.Log
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
 
 /**
@@ -41,7 +41,7 @@ object MmsImageCompressor {
                     bitmap.recycle()
                     bitmap = resized
                 }
-                Log.d(TAG, "Resized image to ${newWidth}x${newHeight}")
+                Timber.d("Resized image to ${newWidth}x${newHeight}")
             }
 
             // Binary search for optimal quality
@@ -73,7 +73,7 @@ object MmsImageCompressor {
 
             result
         } catch (e: Exception) {
-            Log.e(TAG, "Error compressing image", e)
+            Timber.e(e, "Error compressing image")
             null
         }
     }
@@ -111,7 +111,7 @@ object MmsImageCompressor {
 
             output.toByteArray()
         } catch (e: Exception) {
-            Log.e(TAG, "Error with aggressive resize", e)
+            Timber.e(e, "Error with aggressive resize")
             null
         }
     }

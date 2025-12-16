@@ -2,7 +2,7 @@ package com.bothbubbles.services.eta
 
 import android.app.Notification
 import android.service.notification.StatusBarNotification
-import android.util.Log
+import timber.log.Timber
 import android.widget.RemoteViews
 import java.lang.reflect.Field
 import java.util.Calendar
@@ -18,8 +18,6 @@ import javax.inject.Singleton
 class NavigationEtaParser @Inject constructor() {
 
     companion object {
-        private const val TAG = "NavigationEtaParser"
-
         // Regex patterns for parsing ETA and distance
         private val ETA_MINUTES_PATTERN = Regex("""(\d+)\s*min""", RegexOption.IGNORE_CASE)
         private val ETA_HOURS_PATTERN = Regex("""(\d+)\s*hr""", RegexOption.IGNORE_CASE)
@@ -35,23 +33,23 @@ class NavigationEtaParser @Inject constructor() {
         val app = NavigationApp.fromPackage(sbn.packageName) ?: return null
         val notification = sbn.notification ?: return null
 
-        Log.d(TAG, "Parsing notification from ${app.name}")
+        Timber.d("Parsing notification from ${app.name}")
 
         // Layer 1: Try standard notification extras first
         val layer1Result = parseFromExtras(notification, app)
         if (layer1Result != null && layer1Result.etaMinutes > 0) {
-            Log.d(TAG, "Layer 1 success: ${layer1Result.etaMinutes} min")
+            Timber.d("Layer 1 success: ${layer1Result.etaMinutes} min")
             return layer1Result
         }
 
         // Layer 2: Try RemoteViews reflection
         val layer2Result = parseFromRemoteViews(notification, app)
         if (layer2Result != null && layer2Result.etaMinutes > 0) {
-            Log.d(TAG, "Layer 2 success: ${layer2Result.etaMinutes} min")
+            Timber.d("Layer 2 success: ${layer2Result.etaMinutes} min")
             return layer2Result
         }
 
-        Log.d(TAG, "Failed to parse ETA from notification")
+        Timber.d("Failed to parse ETA from notification")
         return null
     }
 
@@ -60,15 +58,15 @@ class NavigationEtaParser @Inject constructor() {
      */
     private fun parseFromExtras(notification: Notification, app: NavigationApp): ParsedEtaData? {
         val extras = notification.extras ?: run {
-            Log.d(TAG, "No extras in notification")
+            Timber.d("No extras in notification")
             return null
         }
 
         // Log ALL keys to see what's available
-        Log.d(TAG, "=== Notification Extras Keys ===")
+        Timber.d("=== Notification Extras Keys ===")
         extras.keySet().forEach { key ->
             val value = extras.get(key)
-            Log.d(TAG, "  $key = $value (${value?.javaClass?.simpleName})")
+            Timber.d("  $key = $value (${value?.javaClass?.simpleName})")
         }
 
         // Common fields used by navigation apps
@@ -79,7 +77,7 @@ class NavigationEtaParser @Inject constructor() {
         val infoText = extras.getCharSequence(Notification.EXTRA_INFO_TEXT)?.toString()
         val summaryText = extras.getCharSequence(Notification.EXTRA_SUMMARY_TEXT)?.toString()
 
-        Log.d(TAG, "Parsed fields - title: $title, text: $text, subText: $subText, bigText: $bigText, infoText: $infoText")
+        Timber.d("Parsed fields - title: $title, text: $text, subText: $subText, bigText: $bigText, infoText: $infoText")
 
         // Combine all text sources for parsing
         val combinedText = listOfNotNull(title, text, subText, bigText).joinToString(" ")
@@ -111,7 +109,7 @@ class NavigationEtaParser @Inject constructor() {
         if (textValues.isEmpty()) return null
 
         val combinedText = textValues.joinToString(" ")
-        Log.d(TAG, "RemoteViews text: $combinedText")
+        Timber.d("RemoteViews text: $combinedText")
 
         val etaMinutes = parseEtaMinutes(combinedText)
         val destination = textValues.firstOrNull { it.contains("to ", ignoreCase = true) }
@@ -200,7 +198,7 @@ class NavigationEtaParser @Inject constructor() {
         } catch (t: Throwable) {
             // Catch all Throwables including LinkageError, NoSuchFieldError, etc.
             // This can happen on certain ROMs or Android versions
-            Log.w(TAG, "Failed to extract text from RemoteViews: ${t.javaClass.simpleName}: ${t.message}")
+            Timber.w("Failed to extract text from RemoteViews: ${t.javaClass.simpleName}: ${t.message}")
         }
 
         return texts
@@ -231,7 +229,7 @@ class NavigationEtaParser @Inject constructor() {
         // Try parsing arrival time format like "Arrive 17:30" or "17:30"
         val arrivalMinutes = parseArrivalTimeToMinutes(text)
         if (arrivalMinutes != null && arrivalMinutes > 0) {
-            Log.d(TAG, "Parsed arrival time to $arrivalMinutes minutes")
+            Timber.d("Parsed arrival time to $arrivalMinutes minutes")
             return arrivalMinutes
         }
 
@@ -274,7 +272,7 @@ class NavigationEtaParser @Inject constructor() {
         val diffMs = arrival.timeInMillis - now.timeInMillis
         val diffMinutes = (diffMs / 60000).toInt()
 
-        Log.d(TAG, "Arrival time parsed: $hour24:$minute, diff from now: $diffMinutes min")
+        Timber.d("Arrival time parsed: $hour24:$minute, diff from now: $diffMinutes min")
         return if (diffMinutes > 0) diffMinutes else null
     }
 

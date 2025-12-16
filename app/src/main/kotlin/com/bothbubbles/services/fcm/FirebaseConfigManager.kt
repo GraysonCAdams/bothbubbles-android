@@ -1,7 +1,7 @@
 package com.bothbubbles.services.fcm
 
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.google.android.gms.common.ConnectionResult
@@ -89,7 +89,7 @@ class FirebaseConfigManager @Inject constructor(
     suspend fun initializeFromServer(): Result<Unit> = mutex.withLock {
         // Check if already initialized
         if (isInitialized()) {
-            Log.d(TAG, "Firebase already initialized")
+            Timber.d("Firebase already initialized")
             _state.value = FirebaseConfigState.Initialized
             return@withLock Result.success(Unit)
         }
@@ -97,7 +97,7 @@ class FirebaseConfigManager @Inject constructor(
         // Check Google Play Services
         if (!isGooglePlayServicesAvailable()) {
             val errorCode = getGooglePlayServicesErrorCode()
-            Log.w(TAG, "Google Play Services not available: $errorCode")
+            Timber.w("Google Play Services not available: $errorCode")
             _state.value = FirebaseConfigState.Error("Google Play Services not available")
             return@withLock Result.failure(Exception("Google Play Services not available (error: $errorCode)"))
         }
@@ -108,19 +108,19 @@ class FirebaseConfigManager @Inject constructor(
             // Try to use cached config first
             val cachedConfig = getCachedConfig()
             if (cachedConfig != null) {
-                Log.d(TAG, "Using cached Firebase config")
+                Timber.d("Using cached Firebase config")
                 initializeFirebaseApp(cachedConfig)
                 _state.value = FirebaseConfigState.Initialized
                 return@withLock Result.success(Unit)
             }
 
             // Fetch config from server
-            Log.d(TAG, "Fetching Firebase config from server")
+            Timber.d("Fetching Firebase config from server")
             val response = api.getFcmClient()
 
             if (!response.isSuccessful) {
                 val error = "Failed to fetch FCM config: ${response.code()}"
-                Log.e(TAG, error)
+                Timber.e( error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
@@ -128,7 +128,7 @@ class FirebaseConfigManager @Inject constructor(
             val fcmClientResponse = response.body()?.data
             if (fcmClientResponse == null) {
                 val error = "FCM config response was empty"
-                Log.e(TAG, error)
+                Timber.e( error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
@@ -140,12 +140,12 @@ class FirebaseConfigManager @Inject constructor(
                     it.clientInfo?.androidClientInfo?.packageName
                 }?.joinToString() ?: "none"
                 val error = "FCM config missing for package $PACKAGE_NAME. Available: $availablePackages"
-                Log.e(TAG, error)
+                Timber.e( error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
 
-            Log.d(TAG, "Found FCM config for $PACKAGE_NAME: appId=${appConfig.appId.take(20)}...")
+            Timber.d("Found FCM config for $PACKAGE_NAME: appId=${appConfig.appId.take(20)}...")
 
             val config = FirebaseConfig(
                 projectNumber = appConfig.projectNumber,
@@ -167,11 +167,11 @@ class FirebaseConfigManager @Inject constructor(
             // Initialize Firebase
             initializeFirebaseApp(config)
             _state.value = FirebaseConfigState.Initialized
-            Log.i(TAG, "Firebase initialized successfully")
+            Timber.i("Firebase initialized successfully")
             Result.success(Unit)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing Firebase", e)
+            Timber.e(e, "Error initializing Firebase")
             _state.value = FirebaseConfigState.Error(e.message ?: "Unknown error")
             Result.failure(e)
         }
@@ -194,17 +194,17 @@ class FirebaseConfigManager @Inject constructor(
 
         val config = getCachedConfig()
         if (config == null) {
-            Log.d(TAG, "No cached Firebase config available")
+            Timber.d("No cached Firebase config available")
             return@withLock false
         }
 
         return@withLock try {
             initializeFirebaseApp(config)
             _state.value = FirebaseConfigState.Initialized
-            Log.i(TAG, "Firebase initialized from cache")
+            Timber.i("Firebase initialized from cache")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing Firebase from cache", e)
+            Timber.e(e, "Error initializing Firebase from cache")
             _state.value = FirebaseConfigState.Error(e.message ?: "Unknown error")
             false
         }
@@ -221,7 +221,7 @@ class FirebaseConfigManager @Inject constructor(
         }
         settingsDataStore.clearFirebaseConfig()
         _state.value = FirebaseConfigState.NotInitialized
-        Log.d(TAG, "Firebase config reset")
+        Timber.d("Firebase config reset")
     }
 
     private suspend fun getCachedConfig(): FirebaseConfig? {

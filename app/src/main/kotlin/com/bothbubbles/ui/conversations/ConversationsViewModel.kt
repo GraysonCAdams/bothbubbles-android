@@ -199,7 +199,7 @@ class ConversationsViewModel @Inject constructor(
                     }
                     is ConversationEvent.ActionError -> {
                         // Could show a snackbar or toast here
-                        android.util.Log.e("ConversationsViewModel", "Action error: ${event.message}")
+                        android.util.Timber.tag("ConversationsViewModel").e("Action error: ${event.message}")
                     }
                     // Observer events are not emitted by actions delegate
                     else -> { /* Ignore other events */ }
@@ -605,7 +605,7 @@ class ConversationsViewModel @Inject constructor(
             val syncStarted = settingsDataStore.initialSyncStarted.first()
             val syncComplete = settingsDataStore.initialSyncComplete.first()
             if (syncStarted && !syncComplete) {
-                android.util.Log.i("ConversationsViewModel", "Resuming interrupted initial sync")
+                android.util.Timber.tag("ConversationsViewModel").i("Resuming interrupted initial sync")
                 syncService.resumeInitialSync()
             }
         }
@@ -648,7 +648,7 @@ class ConversationsViewModel @Inject constructor(
      */
     private fun startCategorization() {
         viewModelScope.launch {
-            android.util.Log.i("ConversationsViewModel", "Starting retroactive categorization")
+            android.util.Timber.tag("ConversationsViewModel").i("Starting retroactive categorization")
             observerDelegate.updateCategorizationState(CategorizationState.Categorizing(0f, 0, 0))
 
             try {
@@ -661,13 +661,13 @@ class ConversationsViewModel @Inject constructor(
                         )
                     )
                 }
-                android.util.Log.i("ConversationsViewModel", "Categorization complete: $categorized chats")
+                android.util.Timber.tag("ConversationsViewModel").i("Categorization complete: $categorized chats")
                 observerDelegate.updateCategorizationState(CategorizationState.Complete)
                 // Clear completion state after a delay
                 delay(2000)
                 observerDelegate.updateCategorizationState(CategorizationState.Idle)
             } catch (e: Exception) {
-                android.util.Log.e("ConversationsViewModel", "Categorization failed", e)
+                android.util.Timber.tag("ConversationsViewModel").e(e, "Categorization failed")
                 observerDelegate.updateCategorizationState(CategorizationState.Error(e.message ?: "Unknown error"))
             }
         }
@@ -792,12 +792,12 @@ class ConversationsViewModel @Inject constructor(
 
     fun startSmsImport() {
         viewModelScope.launch {
-            android.util.Log.d("ConversationsViewModel", "Starting SMS import...")
+            android.util.Timber.tag("ConversationsViewModel").d("Starting SMS import...")
             observerDelegate.updateSmsImportState(SmsImportState.Importing(0f, 0, 0))
             smsRepository.importAllThreads(
                 limit = 500,
                 onProgress = { current, total ->
-                    android.util.Log.d("ConversationsViewModel", "SMS import progress: $current of $total")
+                    android.util.Timber.tag("ConversationsViewModel").d("SMS import progress: $current of $total")
                     // Avoid division by zero when there are no threads
                     val progress = if (total > 0) current.toFloat() / total.toFloat() else 0f
                     observerDelegate.updateSmsImportState(
@@ -810,7 +810,7 @@ class ConversationsViewModel @Inject constructor(
                 }
             ).fold(
                 onSuccess = { count ->
-                    android.util.Log.d("ConversationsViewModel", "SMS import completed: $count threads imported")
+                    android.util.Timber.tag("ConversationsViewModel").d("SMS import completed: $count threads imported")
                     observerDelegate.updateSmsImportState(SmsImportState.Complete)
                     settingsDataStore.setHasCompletedInitialSmsImport(true)
                     notificationService.showSmsImportCompleteNotification()
@@ -819,7 +819,7 @@ class ConversationsViewModel @Inject constructor(
                     observerDelegate.updateSmsImportState(SmsImportState.Idle)
                 },
                 onFailure = { e ->
-                    android.util.Log.e("ConversationsViewModel", "SMS import failed", e)
+                    android.util.Timber.tag("ConversationsViewModel").e(e, "SMS import failed")
                     observerDelegate.updateSmsImportState(SmsImportState.Error(e.message ?: "Unknown error"))
                 }
             )
@@ -881,7 +881,7 @@ class ConversationsViewModel @Inject constructor(
                     onReset()
                 }
             } catch (e: Exception) {
-                android.util.Log.e("ConversationsViewModel", "Failed to reset app data", e)
+                android.util.Timber.tag("ConversationsViewModel").e(e, "Failed to reset app data")
             }
         }
     }

@@ -3,8 +3,8 @@ package com.bothbubbles.data.repository
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
@@ -39,9 +39,6 @@ class SmsRepository @Inject constructor(
     private val smsContentObserver: SmsContentObserver,
     private val androidContactsService: AndroidContactsService
 ) {
-    companion object {
-        private const val TAG = "SmsRepository"
-    }
 
     // Delegate instances for modular operations
     private val importer = SmsImporter(
@@ -78,7 +75,7 @@ class SmsRepository @Inject constructor(
     suspend fun markExistingMmsDrafts() = withContext(Dispatchers.IO) {
         try {
             val mmsWithoutStatus = messageDao.getLocalMmsWithoutStatus()
-            Log.d(TAG, "Checking ${mmsWithoutStatus.size} MMS messages for draft status")
+            Timber.d("Checking ${mmsWithoutStatus.size} MMS messages for draft status")
 
             for (message in mmsWithoutStatus) {
                 // Extract MMS ID from guid (format: "mms-{id}")
@@ -98,13 +95,13 @@ class SmsRepository @Inject constructor(
                         val status = if (isDraft) "draft" else "complete"
                         messageDao.updateSmsStatus(message.guid, status)
                         if (isDraft) {
-                            Log.d(TAG, "Marked MMS ${message.guid} as draft")
+                            Timber.d("Marked MMS ${message.guid} as draft")
                         }
                     }
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error marking MMS drafts", e)
+            Timber.e(e, "Error marking MMS drafts")
         }
     }
 

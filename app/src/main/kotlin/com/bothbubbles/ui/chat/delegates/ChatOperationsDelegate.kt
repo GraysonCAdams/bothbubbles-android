@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.contacts.ContactBlocker
 import com.bothbubbles.services.contacts.DiscordContactService
@@ -52,9 +52,6 @@ class ChatOperationsDelegate @AssistedInject constructor(
         fun create(chatGuid: String, scope: CoroutineScope): ChatOperationsDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatOperationsDelegate"
-    }
 
     // Phase 4: messageListDelegate reference removed - ViewModel coordinates reaction toggling
 
@@ -373,7 +370,7 @@ class ChatOperationsDelegate @AssistedInject constructor(
         isRemoving: Boolean,
         messageText: String
     ): Result<Unit> {
-        Log.d(TAG, "sendReactionToggle: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
+        Timber.d("sendReactionToggle: messageGuid=$messageGuid, tapback=${tapback.apiName}, isRemoving=$isRemoving")
 
         return if (isRemoving) {
             messageSender.removeReaction(

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.entity.SyncRangeEntity
 import com.bothbubbles.data.local.db.entity.SyncSource
@@ -22,10 +22,6 @@ import javax.inject.Singleton
 class SyncRangeTracker @Inject constructor(
     private val syncRangeDao: SyncRangeDao
 ) {
-    companion object {
-        private const val TAG = "SyncRangeTracker"
-    }
-
     /**
      * Record that a timestamp range has been synced from the server.
      * Automatically merges with any overlapping ranges.
@@ -42,11 +38,11 @@ class SyncRangeTracker @Inject constructor(
         source: SyncSource = SyncSource.ON_DEMAND
     ) {
         if (startTimestamp > endTimestamp) {
-            Log.w(TAG, "Invalid range: start ($startTimestamp) > end ($endTimestamp)")
+            Timber.w("Invalid range: start ($startTimestamp) > end ($endTimestamp)")
             return
         }
 
-        Log.d(TAG, "Recording synced range for $chatGuid: $startTimestamp - $endTimestamp (${source.name})")
+        Timber.d("Recording synced range for $chatGuid: $startTimestamp - $endTimestamp (${source.name})")
         syncRangeDao.recordSyncedRange(
             chatGuid = chatGuid,
             startTimestamp = startTimestamp,
@@ -176,7 +172,7 @@ class SyncRangeTracker @Inject constructor(
      * Use this when re-syncing a chat from scratch.
      */
     suspend fun clearRangesForChat(chatGuid: String) {
-        Log.d(TAG, "Clearing sync ranges for $chatGuid")
+        Timber.d("Clearing sync ranges for $chatGuid")
         syncRangeDao.deleteRangesForChat(chatGuid)
     }
 
@@ -185,7 +181,7 @@ class SyncRangeTracker @Inject constructor(
      * Use this when resetting the entire app.
      */
     suspend fun clearAllRanges() {
-        Log.d(TAG, "Clearing all sync ranges")
+        Timber.d("Clearing all sync ranges")
         syncRangeDao.deleteAllRanges()
     }
 

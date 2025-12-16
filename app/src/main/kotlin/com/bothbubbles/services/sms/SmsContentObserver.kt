@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.Handler
 import android.os.Looper
 import android.provider.Telephony
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -65,7 +65,7 @@ class SmsContentObserver @Inject constructor(
     fun startObserving() {
         if (_isObserving.value) return
 
-        Log.d(TAG, "Starting SMS/MMS content observers")
+        Timber.d("Starting SMS/MMS content observers")
 
         // Initialize last IDs
         applicationScope.launch(ioDispatcher) {
@@ -78,7 +78,7 @@ class SmsContentObserver @Inject constructor(
         // SMS observer
         smsObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                Log.d(TAG, "SMS content changed: $uri")
+                Timber.d("SMS content changed: $uri")
                 debounceAndProcess { processSmsChanges() }
             }
         }
@@ -86,7 +86,7 @@ class SmsContentObserver @Inject constructor(
         // MMS observer
         mmsObserver = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
-                Log.d(TAG, "MMS content changed: $uri")
+                Timber.d("MMS content changed: $uri")
                 debounceAndProcess { processMmsChanges() }
             }
         }
@@ -114,7 +114,7 @@ class SmsContentObserver @Inject constructor(
      * Stop observing SMS/MMS content changes
      */
     fun stopObserving() {
-        Log.d(TAG, "Stopping SMS/MMS content observers")
+        Timber.d("Stopping SMS/MMS content observers")
 
         smsObserver?.let { context.contentResolver.unregisterContentObserver(it) }
         mmsObserver?.let { context.contentResolver.unregisterContentObserver(it) }
@@ -139,7 +139,7 @@ class SmsContentObserver @Inject constructor(
             val latestId = getLatestSmsId()
             if (latestId <= lastSmsId) return
 
-            Log.d(TAG, "Processing new SMS messages (last: $lastSmsId, current: $latestId)")
+            Timber.d("Processing new SMS messages (last: $lastSmsId, current: $latestId)")
 
             // Query for new messages
             context.contentResolver.query(
@@ -191,13 +191,13 @@ class SmsContentObserver @Inject constructor(
 
                         // Check if notifications are disabled for this chat
                         if (chat?.notificationsEnabled == false) {
-                            Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping SMS notification")
+                            Timber.i("Notifications disabled for chat $chatGuid, skipping SMS notification")
                         } else if (chat?.isSnoozed == true) {
                             // Check if chat is snoozed
-                            Log.i(TAG, "Chat $chatGuid is snoozed, skipping SMS notification")
+                            Timber.i("Chat $chatGuid is snoozed, skipping SMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
                             // Check if user is currently viewing this conversation
-                            Log.i(TAG, "Chat $chatGuid is currently active, skipping SMS notification")
+                            Timber.i("Chat $chatGuid is currently active, skipping SMS notification")
                         } else {
                             // Resolve sender name and avatar from contacts
                             val senderName = androidContactsService.getContactDisplayName(address)
@@ -215,13 +215,13 @@ class SmsContentObserver @Inject constructor(
                         }
                     }
 
-                    Log.d(TAG, "Imported SMS $id from content observer")
+                    Timber.d("Imported SMS $id from content observer")
                 }
             }
 
             lastSmsId = latestId
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing SMS changes", e)
+            Timber.e(e, "Error processing SMS changes")
         }
     }
 
@@ -230,7 +230,7 @@ class SmsContentObserver @Inject constructor(
             val latestId = getLatestMmsId()
             if (latestId <= lastMmsId) return
 
-            Log.d(TAG, "Processing new MMS messages (last: $lastMmsId, current: $latestId)")
+            Timber.d("Processing new MMS messages (last: $lastMmsId, current: $latestId)")
 
             // Query for new MMS messages
             context.contentResolver.query(
@@ -260,7 +260,7 @@ class SmsContentObserver @Inject constructor(
                     // Filter addresses to only valid phone numbers (exclude RCS, email, etc.)
                     val validAddresses = mmsMessage.addresses.filter { isValidPhoneAddress(it.address) }
                     if (validAddresses.isEmpty()) {
-                        Log.d(TAG, "Skipping MMS $id - no valid phone addresses (RCS or email-only message)")
+                        Timber.d("Skipping MMS $id - no valid phone addresses (RCS or email-only message)")
                         continue
                     }
 
@@ -273,7 +273,7 @@ class SmsContentObserver @Inject constructor(
                     }
 
                     if (rawPrimaryAddress == null) {
-                        Log.d(TAG, "Skipping MMS $id - no valid primary address found")
+                        Timber.d("Skipping MMS $id - no valid primary address found")
                         continue
                     }
 
@@ -308,7 +308,7 @@ class SmsContentObserver @Inject constructor(
                             toleranceMs = 10000 // 10 second window for MMS which can have delayed timestamps
                         )
                         if (matchingMessage != null) {
-                            Log.d(TAG, "Skipping duplicate MMS $id - matches existing message ${matchingMessage.guid}")
+                            Timber.d("Skipping duplicate MMS $id - matches existing message ${matchingMessage.guid}")
                             continue
                         }
                     }
@@ -326,13 +326,13 @@ class SmsContentObserver @Inject constructor(
 
                         // Check if notifications are disabled for this chat
                         if (chat?.notificationsEnabled == false) {
-                            Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping MMS notification")
+                            Timber.i("Notifications disabled for chat $chatGuid, skipping MMS notification")
                         } else if (chat?.isSnoozed == true) {
                             // Check if chat is snoozed
-                            Log.i(TAG, "Chat $chatGuid is snoozed, skipping MMS notification")
+                            Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
                             // Check if user is currently viewing this conversation
-                            Log.i(TAG, "Chat $chatGuid is currently active, skipping MMS notification")
+                            Timber.i("Chat $chatGuid is currently active, skipping MMS notification")
                         } else {
                             // Resolve sender name and avatar from contacts
                             val senderName = androidContactsService.getContactDisplayName(primaryAddress)
@@ -350,13 +350,13 @@ class SmsContentObserver @Inject constructor(
                         }
                     }
 
-                    Log.d(TAG, "Imported MMS $id from content observer")
+                    Timber.d("Imported MMS $id from content observer")
                 }
             }
 
             lastMmsId = latestId
         } catch (e: Exception) {
-            Log.e(TAG, "Error processing MMS changes", e)
+            Timber.e(e, "Error processing MMS changes")
         }
     }
 

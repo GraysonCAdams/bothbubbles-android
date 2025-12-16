@@ -1,6 +1,6 @@
 package com.bothbubbles.services.messaging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -36,10 +36,6 @@ class IncomingMessageHandler @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService
 ) : IncomingMessageProcessor {
-    companion object {
-        private const val TAG = "IncomingMessageHandler"
-    }
-
     /**
      * Handle a new message from server (via Socket.IO or push)
      *
@@ -53,7 +49,7 @@ class IncomingMessageHandler @Inject constructor(
         // This prevents duplicate unread count increments when message arrives via both FCM and Socket.IO
         val existingMessage = messageDao.getMessageByGuid(message.guid)
         if (existingMessage != null) {
-            Log.d(TAG, "Message ${message.guid} already exists, skipping duplicate processing")
+            Timber.d("Message ${message.guid} already exists, skipping duplicate processing")
             return existingMessage
         }
 
@@ -62,7 +58,7 @@ class IncomingMessageHandler @Inject constructor(
         val insertResult = messageDao.insertMessage(message)
         if (insertResult == -1L) {
             // Another thread inserted this message first - return the existing one
-            Log.d(TAG, "Message ${message.guid} was inserted by another thread")
+            Timber.d("Message ${message.guid} was inserted by another thread")
             return messageDao.getMessageByGuid(message.guid) ?: message
         }
 

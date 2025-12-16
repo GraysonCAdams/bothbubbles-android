@@ -1,7 +1,7 @@
 package com.bothbubbles.services.scheduled
 
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -36,23 +36,23 @@ class ScheduledMessageWorker @AssistedInject constructor(
         val scheduledMessageId = inputData.getLong(KEY_SCHEDULED_MESSAGE_ID, -1)
 
         if (scheduledMessageId == -1L) {
-            Log.e(TAG, "Scheduled message ID is missing")
+            Timber.e("Scheduled message ID is missing")
             return Result.failure()
         }
 
         val scheduledMessage = scheduledMessageDao.getById(scheduledMessageId)
         if (scheduledMessage == null) {
-            Log.e(TAG, "Scheduled message not found: $scheduledMessageId")
+            Timber.e("Scheduled message not found: $scheduledMessageId")
             return Result.failure()
         }
 
         // Check if already sent or cancelled
         if (scheduledMessage.status != ScheduledMessageStatus.PENDING) {
-            Log.d(TAG, "Scheduled message already processed: ${scheduledMessage.status}")
+            Timber.d("Scheduled message already processed: ${scheduledMessage.status}")
             return Result.success()
         }
 
-        Log.d(TAG, "Sending scheduled message $scheduledMessageId (attempt ${runAttemptCount + 1})")
+        Timber.d("Sending scheduled message $scheduledMessageId (attempt ${runAttemptCount + 1})")
 
         // Mark as sending
         scheduledMessageDao.updateStatus(scheduledMessageId, ScheduledMessageStatus.SENDING)
@@ -75,12 +75,12 @@ class ScheduledMessageWorker @AssistedInject constructor(
             )
 
             if (result.isSuccess) {
-                Log.i(TAG, "Scheduled message sent successfully: $scheduledMessageId")
+                Timber.i("Scheduled message sent successfully: $scheduledMessageId")
                 scheduledMessageDao.updateStatus(scheduledMessageId, ScheduledMessageStatus.SENT)
                 Result.success()
             } else {
                 val error = result.exceptionOrNull()?.message ?: "Unknown error"
-                Log.w(TAG, "Failed to send scheduled message: $error")
+                Timber.w("Failed to send scheduled message: $error")
 
                 if (runAttemptCount < MAX_RETRY_COUNT) {
                     scheduledMessageDao.updateStatus(scheduledMessageId, ScheduledMessageStatus.PENDING)
@@ -95,7 +95,7 @@ class ScheduledMessageWorker @AssistedInject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending scheduled message", e)
+            Timber.e(e, "Error sending scheduled message")
 
             if (runAttemptCount < MAX_RETRY_COUNT) {
                 scheduledMessageDao.updateStatus(scheduledMessageId, ScheduledMessageStatus.PENDING)

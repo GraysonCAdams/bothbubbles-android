@@ -6,7 +6,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
@@ -31,8 +31,6 @@ class AndroidContactsService @Inject constructor(
     private val contactBlocker: ContactBlocker
 ) {
     companion object {
-        private const val TAG = "AndroidContactsService"
-
         /**
          * Check if an address is a short code or alphanumeric sender ID.
          * These should not be looked up in contacts as Android's fuzzy phone matching
@@ -51,7 +49,7 @@ class AndroidContactsService @Inject constructor(
      */
     suspend fun getAllContacts(): List<PhoneContact> {
         if (!hasReadPermission()) {
-            Log.w(TAG, "READ_CONTACTS permission not granted")
+            Timber.w("READ_CONTACTS permission not granted")
             return emptyList()
         }
         return contactParser.getAllContacts()
@@ -63,7 +61,7 @@ class AndroidContactsService @Inject constructor(
      */
     suspend fun getAllStarredAddresses(): Set<String> {
         if (!hasReadPermission()) {
-            Log.w(TAG, "READ_CONTACTS permission not granted")
+            Timber.w("READ_CONTACTS permission not granted")
             return emptySet()
         }
         return contactParser.getAllStarredAddresses()
@@ -75,7 +73,7 @@ class AndroidContactsService @Inject constructor(
      */
     fun isContactStarred(address: String): Boolean {
         if (!hasReadPermission()) {
-            Log.w(TAG, "READ_CONTACTS permission not granted")
+            Timber.w("READ_CONTACTS permission not granted")
             return false
         }
 
@@ -83,7 +81,7 @@ class AndroidContactsService @Inject constructor(
             val contactId = contactQueryHelper.getContactId(address) ?: return false
             isContactIdStarred(contactId)
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking starred status for $address", e)
+            Timber.w(e, "Error checking starred status for $address")
             false
         }
     }
@@ -94,14 +92,14 @@ class AndroidContactsService @Inject constructor(
      */
     fun setContactStarred(address: String, starred: Boolean): Boolean {
         if (!hasWritePermission()) {
-            Log.w(TAG, "WRITE_CONTACTS permission not granted")
+            Timber.w("WRITE_CONTACTS permission not granted")
             return false
         }
 
         return try {
             val contactId = contactQueryHelper.getContactId(address)
             if (contactId == null) {
-                Log.w(TAG, "Contact not found for address: $address")
+                Timber.w("Contact not found for address: $address")
                 return false
             }
 
@@ -122,14 +120,14 @@ class AndroidContactsService @Inject constructor(
             )
 
             if (rowsUpdated > 0) {
-                Log.d(TAG, "Successfully set starred=$starred for contact $address (id: $contactId)")
+                Timber.d("Successfully set starred=$starred for contact $address (id: $contactId)")
                 true
             } else {
-                Log.w(TAG, "Failed to update starred status for contact $address")
+                Timber.w("Failed to update starred status for contact $address")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting starred status for $address", e)
+            Timber.e(e, "Error setting starred status for $address")
             false
         }
     }
@@ -157,7 +155,7 @@ class AndroidContactsService @Inject constructor(
      */
     fun getContactPhotoUri(address: String): String? {
         if (!hasReadPermission()) {
-            Log.w(TAG, "READ_CONTACTS permission not granted")
+            Timber.w("READ_CONTACTS permission not granted")
             return null
         }
         return contactPhotoLoader.getContactPhotoUri(address)
@@ -170,7 +168,7 @@ class AndroidContactsService @Inject constructor(
      */
     fun getContactDisplayName(address: String): String? {
         if (!hasReadPermission()) {
-            Log.w(TAG, "READ_CONTACTS permission not granted")
+            Timber.w("READ_CONTACTS permission not granted")
             return null
         }
         return contactQueryHelper.getContactDisplayName(address)

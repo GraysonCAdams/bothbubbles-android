@@ -1,6 +1,6 @@
 package com.bothbubbles.services.imessage
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.entity.CheckResult
 import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity
@@ -56,10 +56,6 @@ class IMessageAvailabilityService @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
-    companion object {
-        private const val TAG = "IMessageAvailability"
-    }
-
     // Unique ID for this app session - used to detect cache from previous sessions
     private val sessionId = UUID.randomUUID().toString()
 
@@ -98,33 +94,33 @@ class IMessageAvailabilityService @Inject constructor(
      */
     suspend fun checkAvailability(address: String, forceRecheck: Boolean = false): Result<Boolean> {
         val normalizedAddress = normalizeAddress(address)
-        Log.d(TAG, "DEBUG checkAvailability: address=$address, normalizedAddress=$normalizedAddress, forceRecheck=$forceRecheck")
+        Timber.d("DEBUG checkAvailability: address=$address, normalizedAddress=$normalizedAddress, forceRecheck=$forceRecheck")
 
         // Check cache first (unless forcing re-check)
         if (!forceRecheck) {
             val cached = getCachedResult(normalizedAddress)
-            Log.d(TAG, "DEBUG: cached result for $normalizedAddress: $cached")
+            Timber.d("DEBUG: cached result for $normalizedAddress: $cached")
             if (cached != null) {
-                Log.d(TAG, "Cache hit for $normalizedAddress: $cached")
+                Timber.d("Cache hit for $normalizedAddress: $cached")
                 updateObservableState(normalizedAddress, cached)
                 return Result.success(cached)
             }
         } else {
-            Log.d(TAG, "DEBUG: forceRecheck=true, skipping cache lookup")
+            Timber.d("DEBUG: forceRecheck=true, skipping cache lookup")
         }
 
         // Check if server is connected
         val connectionState = socketService.connectionState.value
-        Log.d(TAG, "DEBUG: connectionState=$connectionState")
+        Timber.d("DEBUG: connectionState=$connectionState")
         if (connectionState != ConnectionState.CONNECTED) {
-            Log.d(TAG, "Server not connected, marking $normalizedAddress as UNREACHABLE")
+            Timber.d("Server not connected, marking $normalizedAddress as UNREACHABLE")
             cacheResult(normalizedAddress, CheckResult.UNREACHABLE, null)
             updateObservableState(normalizedAddress, null)
             return Result.failure(Exception("Server not connected"))
         }
 
         // Perform the check
-        Log.d(TAG, "DEBUG: Calling performCheck for $normalizedAddress")
+        Timber.d("DEBUG: Calling performCheck for $normalizedAddress")
         return performCheck(normalizedAddress)
     }
 
@@ -158,7 +154,7 @@ class IMessageAvailabilityService @Inject constructor(
             cacheDao.delete(normalizedAddress)
         }
         updateObservableState(normalizedAddress, null)
-        Log.d(TAG, "Invalidated cache for $normalizedAddress")
+        Timber.d("Invalidated cache for $normalizedAddress")
     }
 
     /**
@@ -171,7 +167,7 @@ class IMessageAvailabilityService @Inject constructor(
 
         if (unreachable.isEmpty()) return
 
-        Log.i(TAG, "Server reconnected, re-checking ${unreachable.size} unreachable addresses")
+        Timber.i("Server reconnected, re-checking ${unreachable.size} unreachable addresses")
 
         unreachable.forEach { entry ->
             applicationScope.launch(ioDispatcher) {
@@ -187,7 +183,7 @@ class IMessageAvailabilityService @Inject constructor(
     private suspend fun performCheck(normalizedAddress: String): Result<Boolean> {
         return withContext(ioDispatcher) {
             try {
-                Log.d(TAG, "DEBUG performCheck: Calling API via HttpURLConnection for $normalizedAddress")
+                Timber.d("DEBUG performCheck: Calling API via HttpURLConnection for $normalizedAddress")
 
                 // Disable HTTP keep-alive to prevent stale connection reuse
                 System.setProperty("http.keepAlive", "false")
@@ -201,7 +197,7 @@ class IMessageAvailabilityService @Inject constructor(
                 val cacheBuster = System.currentTimeMillis()
                 val urlString = "$serverAddress/api/v1/handle/availability/imessage?address=$encodedAddress&guid=$encodedAuth&_=$cacheBuster"
 
-                Log.d(TAG, "DEBUG performCheck: URL = $urlString")
+                Timber.d("DEBUG performCheck: URL = $urlString")
 
                 val url = URL(urlString)
                 val connection = url.openConnection() as HttpsURLConnection
@@ -227,25 +223,25 @@ class IMessageAvailabilityService @Inject constructor(
                     connection.setRequestProperty("Cache-Control", "no-cache, no-store")
 
                     val responseCode = connection.responseCode
-                    Log.d(TAG, "DEBUG performCheck: responseCode=$responseCode")
+                    Timber.d("DEBUG performCheck: responseCode=$responseCode")
 
                     if (responseCode == HttpURLConnection.HTTP_OK) {
                         val responseBody = connection.inputStream.bufferedReader().use { it.readText() }
-                        Log.d(TAG, "DEBUG performCheck: responseBody=$responseBody")
+                        Timber.d("DEBUG performCheck: responseBody=$responseBody")
 
                         val json = JSONObject(responseBody)
                         val data = json.optJSONObject("data")
                         val available = data?.optBoolean("available", false) == true
 
                         val result = if (available) CheckResult.AVAILABLE else CheckResult.NOT_AVAILABLE
-                        Log.d(TAG, "DEBUG performCheck: available=$available, caching as $result")
+                        Timber.d("DEBUG performCheck: available=$available, caching as $result")
                         cacheResult(normalizedAddress, result, available)
                         updateObservableState(normalizedAddress, available)
-                        Log.d(TAG, "iMessage availability for $normalizedAddress: $available")
+                        Timber.d("iMessage availability for $normalizedAddress: $available")
                         Result.success(available)
                     } else {
                         val errorBody = try { connection.errorStream?.bufferedReader()?.use { it.readText() } } catch (e: Exception) { null }
-                        Log.w(TAG, "DEBUG performCheck: API failed with code $responseCode, errorBody=$errorBody")
+                        Timber.w("DEBUG performCheck: API failed with code $responseCode, errorBody=$errorBody")
                         cacheResult(normalizedAddress, CheckResult.ERROR, null)
                         updateObservableState(normalizedAddress, null)
                         Result.failure(Exception("API error: $responseCode"))
@@ -255,11 +251,11 @@ class IMessageAvailabilityService @Inject constructor(
                 }
             } catch (e: Exception) {
                 val isTimeout = e is java.net.SocketTimeoutException
-                Log.w(TAG, "DEBUG performCheck: Exception occurred: ${e.message}, isTimeout=$isTimeout", e)
+                Timber.w(e, "DEBUG performCheck: Exception occurred: ${e.message}, isTimeout=$isTimeout")
 
                 if (isTimeout) {
                     // Timeout = server instability, don't cache - will retry next time
-                    Log.d(TAG, "DEBUG performCheck: Timeout detected, NOT caching (server instability)")
+                    Timber.d("DEBUG performCheck: Timeout detected, NOT caching (server instability)")
                     updateObservableState(normalizedAddress, null)
                 } else {
                     // Other errors - cache as ERROR or UNREACHABLE
@@ -283,30 +279,30 @@ class IMessageAvailabilityService @Inject constructor(
         val cached = cacheMutex.withLock {
             cacheDao.getCache(normalizedAddress)
         }
-        Log.d(TAG, "DEBUG getCachedResult: normalizedAddress=$normalizedAddress, cached=$cached")
+        Timber.d("DEBUG getCachedResult: normalizedAddress=$normalizedAddress, cached=$cached")
         if (cached == null) {
-            Log.d(TAG, "DEBUG getCachedResult: No cache entry found")
+            Timber.d("DEBUG getCachedResult: No cache entry found")
             return null
         }
 
-        Log.d(TAG, "DEBUG getCachedResult: checkResult=${cached.checkResult}, isIMessageAvailable=${cached.isIMessageAvailable}, expiresAt=${cached.expiresAt}, sessionId=${cached.sessionId}")
+        Timber.d("DEBUG getCachedResult: checkResult=${cached.checkResult}, isIMessageAvailable=${cached.isIMessageAvailable}, expiresAt=${cached.expiresAt}, sessionId=${cached.sessionId}")
 
         // UNREACHABLE entries are not valid cache hits
         if (cached.checkResult == CheckResult.UNREACHABLE.name) {
-            Log.d(TAG, "DEBUG getCachedResult: Cache entry is UNREACHABLE, returning null")
+            Timber.d("DEBUG getCachedResult: Cache entry is UNREACHABLE, returning null")
             return null
         }
 
         // Check expiration
         if (cached.isExpired()) {
-            Log.d(TAG, "Cache expired for $normalizedAddress")
+            Timber.d("Cache expired for $normalizedAddress")
             cacheMutex.withLock {
                 cacheDao.delete(normalizedAddress)
             }
             return null
         }
 
-        Log.d(TAG, "DEBUG getCachedResult: Returning cached value ${cached.isIMessageAvailable}")
+        Timber.d("DEBUG getCachedResult: Returning cached value ${cached.isIMessageAvailable}")
         return cached.isIMessageAvailable
     }
 
@@ -358,7 +354,7 @@ class IMessageAvailabilityService @Inject constructor(
         cacheMutex.withLock {
             cacheDao.deleteExpired()
         }
-        Log.d(TAG, "Cleaned up expired cache entries")
+        Timber.d("Cleaned up expired cache entries")
     }
 
     /**

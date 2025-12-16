@@ -4,7 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
@@ -37,10 +37,6 @@ class NotificationBuilder @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
-    companion object {
-        private const val TAG = "NotificationBuilder"
-    }
-
     // Cached values to avoid blocking calls
     @Volatile
     private var cachedTemplateChoices: Array<CharSequence> = emptyArray()
@@ -171,7 +167,7 @@ class NotificationBuilder @Inject constructor(
                     val displayName = senderName ?: chatTitle
                     AvatarGenerator.generateIconCompat(displayName, 128)
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to generate avatar bitmap", e)
+                    Timber.w(e, "Failed to generate avatar bitmap")
                     null
                 }
             }
@@ -181,7 +177,7 @@ class NotificationBuilder @Inject constructor(
                 val displayName = senderName ?: chatTitle
                 AvatarGenerator.generateIconCompat(displayName, 128)
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to generate avatar bitmap", e)
+                Timber.w(e, "Failed to generate avatar bitmap")
                 null
             }
         }
@@ -211,7 +207,7 @@ class NotificationBuilder @Inject constructor(
 
         // Create bubble metadata if bubbles are enabled for this conversation
         val shouldBubble = bubbleMetadataHelper.shouldShowBubble(chatGuid, senderAddress)
-        Log.d(TAG, "Bubble check: shouldBubble=$shouldBubble, chatGuid=$chatGuid")
+        Timber.d("Bubble check: shouldBubble=$shouldBubble, chatGuid=$chatGuid")
         val bubbleMetadata = if (shouldBubble) {
             bubbleMetadataHelper.createBubbleMetadata(chatGuid, chatTitle, isGroup, participantNames)
         } else {
@@ -243,9 +239,9 @@ class NotificationBuilder @Inject constructor(
         // Add bubble metadata if available (Android Q+)
         if (bubbleMetadata != null) {
             notificationBuilder.setBubbleMetadata(bubbleMetadata)
-            Log.d(TAG, "Attached bubble metadata to notification for chat: $chatGuid")
+            Timber.d("Attached bubble metadata to notification for chat: $chatGuid")
         } else {
-            Log.d(TAG, "No bubble metadata for notification (chatGuid=$chatGuid)")
+            Timber.d("No bubble metadata for notification (chatGuid=$chatGuid)")
         }
 
         // Add copy code action if a verification code was detected

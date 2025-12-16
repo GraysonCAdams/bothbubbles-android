@@ -6,7 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
-import android.util.Log
+import timber.log.Timber
 import android.view.ViewGroup
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -335,7 +335,7 @@ private fun CameraPreview(
             )
             onImageCaptureReady(imageCapture)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to bind camera", e)
+            Timber.e(e, "Failed to bind camera")
         }
     }
 
@@ -348,11 +348,11 @@ private fun CameraPreview(
                     try {
                         cameraProviderFuture.get().unbindAll()
                     } catch (e: Exception) {
-                        Log.e(TAG, "Failed to unbind camera on dispose", e)
+                        Timber.e(e, "Failed to unbind camera on dispose")
                     }
                 }, ContextCompat.getMainExecutor(context))
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to get camera provider on dispose", e)
+                Timber.e(e, "Failed to get camera provider on dispose")
             }
         }
     }
@@ -493,7 +493,7 @@ private fun takePhoto(
             }
 
             override fun onError(exception: ImageCaptureException) {
-                Log.e(TAG, "Photo capture failed", exception)
+                Timber.e(exception, "Photo capture failed")
                 onError("Failed to capture photo: ${exception.message}")
             }
         }

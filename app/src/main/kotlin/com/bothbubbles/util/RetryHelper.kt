@@ -1,6 +1,6 @@
 package com.bothbubbles.util
 
-import android.util.Log
+import timber.log.Timber
 import kotlinx.coroutines.delay
 import retrofit2.HttpException
 import java.io.IOException
@@ -37,16 +37,16 @@ suspend fun <T> retryWithBackoff(
             lastException = e
 
             if (!shouldRetry(e)) {
-                Log.d("RetryHelper", "Non-retryable exception on attempt ${attempt + 1}: ${e.javaClass.simpleName}")
+                Timber.d("Non-retryable exception on attempt ${attempt + 1}: ${e.javaClass.simpleName}")
                 throw e
             }
 
             if (attempt == times - 1) {
-                Log.w("RetryHelper", "Final attempt ${attempt + 1} failed: ${e.javaClass.simpleName}")
+                Timber.w("Final attempt ${attempt + 1} failed: ${e.javaClass.simpleName}")
                 throw e
             }
 
-            Log.d("RetryHelper", "Attempt ${attempt + 1} failed, retrying in ${currentDelay}ms: ${e.javaClass.simpleName}")
+            Timber.d("Attempt ${attempt + 1} failed, retrying in ${currentDelay}ms: ${e.javaClass.simpleName}")
             delay(currentDelay)
             currentDelay = (currentDelay * factor).toLong().coerceAtMost(maxDelayMs)
         }
@@ -145,7 +145,7 @@ suspend fun <T> retryWithRateLimitAwareness(
             }
 
             if (attempt < times - 1) {
-                Log.d("RetryHelper", "Rate limited, waiting ${delayMs}ms before retry")
+                Timber.d("Rate limited, waiting ${delayMs}ms before retry")
                 delay(delayMs)
                 currentDelay = (currentDelay * 2).coerceAtMost(30000)
                 return@repeat

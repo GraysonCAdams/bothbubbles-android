@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator
 
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -35,9 +35,6 @@ class GroupCreatorViewModel @Inject constructor(
     private val androidContactsService: AndroidContactsService
 ) : ViewModel() {
 
-    companion object {
-        private const val TAG = "GroupCreatorViewModel"
-    }
 
     private val route: Screen.GroupCreator = savedStateHandle.toRoute()
 
@@ -204,7 +201,7 @@ class GroupCreatorViewModel @Inject constructor(
                         service = "iMessage"
                     }
                 } catch (e: Exception) {
-                    Log.e(TAG, "Failed to check iMessage availability", e)
+                    Timber.e(e, "Failed to check iMessage availability")
                 }
             } else if (!smsOnlyMode && isConnected && trimmedQuery.isEmail()) {
                 isIMessageAvailable = true
@@ -389,7 +386,7 @@ class GroupCreatorViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to create group", e)
+                Timber.e(e, "Failed to create group")
                 _uiState.update {
                     it.copy(
                         isLoading = false,

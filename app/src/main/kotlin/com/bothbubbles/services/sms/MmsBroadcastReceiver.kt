@@ -7,7 +7,7 @@ import android.content.Intent
 import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -53,8 +53,6 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     }
 
     companion object {
-        private const val TAG = "MmsBroadcastReceiver"
-
         // MMS provider columns
         private const val MMS_CONTENT_LOCATION = "ct_l"
         private const val MMS_EXPIRY = "exp"
@@ -109,18 +107,18 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         // Only handle MMS when we are the default SMS app
         if (!smsPermissionHelper.isDefaultSmsApp()) {
-            Log.d(TAG, "Ignoring MMS - not default SMS app")
+            Timber.d("Ignoring MMS - not default SMS app")
             return
         }
 
         when (intent.action) {
             Telephony.Sms.Intents.WAP_PUSH_RECEIVED_ACTION -> {
-                Log.d(TAG, "WAP_PUSH_RECEIVED_ACTION - waiting for DELIVER")
+                Timber.d("WAP_PUSH_RECEIVED_ACTION - waiting for DELIVER")
                 // When we're the default app, we wait for DELIVER action
             }
 
             Telephony.Sms.Intents.WAP_PUSH_DELIVER_ACTION -> {
-                Log.d(TAG, "WAP_PUSH_DELIVER_ACTION - processing MMS")
+                Timber.d("WAP_PUSH_DELIVER_ACTION - processing MMS")
                 handleMmsDeliver(context, intent)
             }
         }
@@ -134,18 +132,18 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         )
 
         if (pdu == null) {
-            Log.w(TAG, "No PDU data in MMS intent")
+            Timber.w("No PDU data in MMS intent")
             return
         }
 
         // Parse the MMS notification PDU
         val notification = MmsPduParser.parseNotificationInd(pdu)
         if (notification == null || !notification.isValid) {
-            Log.w(TAG, "Failed to parse MMS notification PDU")
+            Timber.w("Failed to parse MMS notification PDU")
             return
         }
 
-        Log.d(TAG, "MMS notification from: ${notification.from}, subject: ${notification.subject}, size: ${notification.messageSize}")
+        Timber.d("MMS notification from: ${notification.from}, subject: ${notification.subject}, size: ${notification.messageSize}")
 
         val pendingResult = goAsync()
 
@@ -158,7 +156,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
             try {
                 processMmsNotification(context, notification, pdu, subscriptionId)
             } catch (e: Exception) {
-                Log.e(TAG, "Error processing MMS notification", e)
+                Timber.e(e, "Error processing MMS notification")
             } finally {
                 pendingResult.finish()
             }
@@ -173,7 +171,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     ) {
         val rawAddress = notification.from
         if (rawAddress.isNullOrBlank()) {
-            Log.w(TAG, "No sender address in MMS notification")
+            Timber.w("No sender address in MMS notification")
             // Still write to provider to trigger download - we'll get address later
             writeMmsToProvider(context, notification, subscriptionId)
             return
@@ -181,7 +179,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
         // Check if this is a valid phone number (not RCS or email)
         if (!isValidPhoneAddress(rawAddress)) {
-            Log.d(TAG, "MMS from non-phone address: $rawAddress - writing to provider but skipping chat creation")
+            Timber.d("MMS from non-phone address: $rawAddress - writing to provider but skipping chat creation")
             // Still write to provider to trigger download, but don't create a chat
             // The SmsContentObserver will handle this message properly when it arrives
             writeMmsToProvider(context, notification, subscriptionId)
@@ -194,7 +192,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         // Check if sender is blocked
         val isBlocked = spamRepository.isBlocked(address)
         if (isBlocked) {
-            Log.i(TAG, "MMS from $address is blocked - rejecting")
+            Timber.i("MMS from $address is blocked - rejecting")
             // Don't write to provider, effectively blocking the MMS
             return
         }
@@ -204,7 +202,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         if (blockUnknown) {
             val isKnownContact = isKnownContact(context, address)
             if (!isKnownContact) {
-                Log.i(TAG, "MMS from unknown sender $address - blocking per settings")
+                Timber.i("MMS from unknown sender $address - blocking per settings")
                 return
             }
         }
@@ -225,13 +223,13 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
             // Check if notifications are disabled for this chat
             if (chat?.notificationsEnabled == false) {
-                Log.i(TAG, "Notifications disabled for chat $chatGuid, skipping MMS notification")
+                Timber.i("Notifications disabled for chat $chatGuid, skipping MMS notification")
             } else if (chat?.isSnoozed == true) {
                 // Check if chat is snoozed
-                Log.i(TAG, "Chat $chatGuid is snoozed, skipping MMS notification")
+                Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
             } else if (activeConversationManager.isConversationActive(chatGuid)) {
                 // Check if user is currently viewing this conversation
-                Log.i(TAG, "Chat $chatGuid is currently active, skipping MMS notification")
+                Timber.i("Chat $chatGuid is currently active, skipping MMS notification")
             } else {
                 val notificationText = notification.subject?.takeIf { it.isNotBlank() }
                     ?: "Incoming MMS"
@@ -251,7 +249,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 )
             }
 
-            Log.i(TAG, "MMS from $address written to provider (ID: $mmsId), awaiting download")
+            Timber.i("MMS from $address written to provider (ID: $mmsId), awaiting download")
         }
     }
 
@@ -314,10 +312,10 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
             mmsId
         } catch (e: SecurityException) {
-            Log.e(TAG, "Security exception writing MMS to provider - not default app?", e)
+            Timber.e(e, "Security exception writing MMS to provider - not default app?")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Error writing MMS to provider", e)
+            Timber.e(e, "Error writing MMS to provider")
             null
         }
     }
@@ -336,7 +334,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
             val uri = Uri.parse("content://mms/$mmsId/addr")
             context.contentResolver.insert(uri, values)
         } catch (e: Exception) {
-            Log.e(TAG, "Error writing MMS address", e)
+            Timber.e(e, "Error writing MMS address")
         }
     }
 
@@ -359,7 +357,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 cursor.count > 0
             } ?: false
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking if contact is known", e)
+            Timber.e(e, "Error checking if contact is known")
             false
         }
     }
@@ -404,7 +402,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, it.id))
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error ensuring handle exists", e)
+            Timber.e(e, "Error ensuring handle exists")
         }
     }
 }

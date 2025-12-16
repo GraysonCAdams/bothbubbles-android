@@ -4,7 +4,7 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import androidx.core.app.Person
 import androidx.core.content.LocusIdCompat
@@ -36,10 +36,6 @@ class BubbleMetadataHelper @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
-    companion object {
-        private const val TAG = "BubbleMetadataHelper"
-    }
-
     // Cached values to avoid blocking calls
     @Volatile
     private var cachedBubbleFilterMode: String = "all"
@@ -185,7 +181,7 @@ class BubbleMetadataHelper @Inject constructor(
     ): NotificationCompat.BubbleMetadata? {
         // Bubbles require Android Q (API 29) or higher
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-            Log.d(TAG, "Bubbles not supported: API level ${Build.VERSION.SDK_INT} < 29")
+            Timber.d("Bubbles not supported: API level ${Build.VERSION.SDK_INT} < 29")
             return null
         }
 
@@ -235,7 +231,7 @@ class BubbleMetadataHelper @Inject constructor(
             .setSuppressNotification(false)
             .build()
 
-        Log.d(TAG, "Created bubble metadata for chat: $chatGuid (title: $chatTitle)")
+        Timber.d("Created bubble metadata for chat: $chatGuid (title: $chatTitle)")
         return metadata
     }
 }

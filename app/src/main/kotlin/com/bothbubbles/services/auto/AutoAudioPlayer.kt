@@ -5,7 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
-import android.util.Log
+import timber.log.Timber
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -71,17 +71,17 @@ class AutoAudioPlayer(private val context: Context) {
                 setOnPreparedListener {
                     this@AutoAudioPlayer.isPlaying = true
                     start()
-                    Log.d(TAG, "Started audio playback: $filePath")
+                    Timber.d("Started audio playback: $filePath")
                 }
 
                 setOnCompletionListener {
-                    Log.d(TAG, "Audio playback completed")
+                    Timber.d("Audio playback completed")
                     stop()
                     onComplete()
                 }
 
                 setOnErrorListener { _, what, extra ->
-                    Log.e(TAG, "MediaPlayer error: what=$what, extra=$extra")
+                    Timber.e("MediaPlayer error: what=$what, extra=$extra")
                     stop()
                     onError(Exception("Playback error: $what"))
                     true
@@ -90,7 +90,7 @@ class AutoAudioPlayer(private val context: Context) {
                 prepareAsync()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to play audio", e)
+            Timber.e(e, "Failed to play audio")
             stop()
             onError(e)
         }
@@ -113,9 +113,9 @@ class AutoAudioPlayer(private val context: Context) {
 
             // Abandon audio focus
             abandonAudioFocus()
-            Log.d(TAG, "Stopped audio playback")
+            Timber.d("Stopped audio playback")
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping audio", e)
+            Timber.e(e, "Error stopping audio")
         }
     }
 
@@ -135,7 +135,7 @@ class AutoAudioPlayer(private val context: Context) {
                 when (focusChange) {
                     AudioManager.AUDIOFOCUS_LOSS,
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
-                        Log.d(TAG, "Audio focus lost, stopping playback")
+                        Timber.d("Audio focus lost, stopping playback")
                         stop()
                     }
                     AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
@@ -148,7 +148,7 @@ class AutoAudioPlayer(private val context: Context) {
         audioFocusRequest = focusRequest
         val result = audioManager.requestAudioFocus(focusRequest)
         val granted = result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED
-        Log.d(TAG, "Audio focus request result: $result (granted=$granted)")
+        Timber.d("Audio focus request result: $result (granted=$granted)")
         return granted
     }
 
@@ -159,7 +159,7 @@ class AutoAudioPlayer(private val context: Context) {
         audioFocusRequest?.let { request ->
             audioManager.abandonAudioFocusRequest(request)
             audioFocusRequest = null
-            Log.d(TAG, "Audio focus abandoned")
+            Timber.d("Audio focus abandoned")
         }
     }
 

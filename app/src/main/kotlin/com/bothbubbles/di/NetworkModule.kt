@@ -1,6 +1,5 @@
 package com.bothbubbles.di
 
-import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.AuthInterceptor

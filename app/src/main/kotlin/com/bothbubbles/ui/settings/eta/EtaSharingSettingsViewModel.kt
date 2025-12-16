@@ -2,7 +2,7 @@ package com.bothbubbles.ui.settings.eta
 
 import android.content.Context
 import android.provider.Settings
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -106,15 +106,15 @@ class EtaSharingSettingsViewModel @Inject constructor(
     }
 
     fun refreshNotificationAccess() {
-        Log.d("EtaSettings", "refreshNotificationAccess() called")
+        Timber.tag("EtaSettings").d("refreshNotificationAccess() called")
         _hasNotificationAccess.value = checkNotificationAccess()
     }
 
     private fun checkNotificationAccess(): Boolean {
         val enabledPackages = NotificationManagerCompat.getEnabledListenerPackages(context)
         val hasAccess = enabledPackages.contains(context.packageName)
-        Log.d("EtaSettings", "checkNotificationAccess: enabledPackages = $enabledPackages")
-        Log.d("EtaSettings", "checkNotificationAccess: looking for '${context.packageName}', hasAccess = $hasAccess")
+        Timber.tag("EtaSettings").d("checkNotificationAccess: enabledPackages = $enabledPackages")
+        Timber.tag("EtaSettings").d("checkNotificationAccess: looking for '${context.packageName}', hasAccess = $hasAccess")
         return hasAccess
     }
 
@@ -138,7 +138,7 @@ class EtaSharingSettingsViewModel @Inject constructor(
                     contact.phoneNumbers.isNotEmpty() || contact.emails.isNotEmpty()
                 }.sortedBy { it.displayName.lowercase() }
             } catch (e: Exception) {
-                Log.e("EtaSettings", "Failed to load contacts", e)
+                Timber.tag("EtaSettings").e(e, "Failed to load contacts")
             } finally {
                 _isLoadingContacts.value = false
             }
@@ -153,9 +153,9 @@ class EtaSharingSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val success = autoShareContactRepository.add(chatGuid, displayName)
             if (success) {
-                Log.d("EtaSettings", "Added auto-share contact: $displayName")
+                Timber.tag("EtaSettings").d("Added auto-share contact: $displayName")
             } else {
-                Log.w("EtaSettings", "Failed to add auto-share contact (max reached or duplicate)")
+                Timber.tag("EtaSettings").w("Failed to add auto-share contact (max reached or duplicate)")
             }
         }
     }
@@ -175,7 +175,7 @@ class EtaSharingSettingsViewModel @Inject constructor(
     fun removeAutoShareContact(contact: AutoShareContact) {
         viewModelScope.launch {
             autoShareContactRepository.remove(contact.chatGuid)
-            Log.d("EtaSettings", "Removed auto-share contact: ${contact.displayName}")
+            Timber.tag("EtaSettings").d("Removed auto-share contact: ${contact.displayName}")
         }
     }
 

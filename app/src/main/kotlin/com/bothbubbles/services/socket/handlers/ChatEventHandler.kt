@@ -1,6 +1,6 @@
 package com.bothbubbles.services.socket.handlers
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.socket.SocketEvent
@@ -21,21 +21,17 @@ class ChatEventHandler @Inject constructor(
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao
 ) {
-    companion object {
-        private const val TAG = "ChatEventHandler"
-    }
-
     fun handleTypingIndicator(event: SocketEvent.TypingIndicator) {
         // Typing indicators are typically handled at the UI layer via a shared flow
         // The UI can observe socketService.events directly for typing indicators
-        Log.d(TAG, "Typing indicator: ${event.chatGuid} = ${event.isTyping}")
+        Timber.d("Typing indicator: ${event.chatGuid} = ${event.isTyping}")
     }
 
     suspend fun handleChatRead(
         event: SocketEvent.ChatRead,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Chat read: ${event.chatGuid}")
+        Timber.d("Chat read: ${event.chatGuid}")
         chatDao.updateUnreadCount(event.chatGuid, 0)
 
         // Emit UI refresh event for immediate unread badge update
@@ -47,7 +43,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.ParticipantAdded,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Participant added: ${event.handleAddress} to ${event.chatGuid}")
+        Timber.d("Participant added: ${event.handleAddress} to ${event.chatGuid}")
         // Re-fetch chat to get updated participants
         chatRepository.fetchChat(event.chatGuid)
 
@@ -60,7 +56,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.ParticipantRemoved,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Participant removed: ${event.handleAddress} from ${event.chatGuid}")
+        Timber.d("Participant removed: ${event.handleAddress} from ${event.chatGuid}")
         // Re-fetch chat to get updated participants
         chatRepository.fetchChat(event.chatGuid)
 
@@ -73,7 +69,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.ParticipantLeft,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Participant left: ${event.handleAddress} from ${event.chatGuid}")
+        Timber.d("Participant left: ${event.handleAddress} from ${event.chatGuid}")
         // Re-fetch chat to get updated participants
         chatRepository.fetchChat(event.chatGuid)
 
@@ -86,7 +82,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.GroupNameChanged,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Group name changed: ${event.chatGuid} = ${event.newName}")
+        Timber.d("Group name changed: ${event.chatGuid} = ${event.newName}")
         chatDao.updateDisplayName(event.chatGuid, event.newName)
 
         // Emit UI refresh event
@@ -98,7 +94,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.GroupIconChanged,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Group icon changed: ${event.chatGuid}")
+        Timber.d("Group icon changed: ${event.chatGuid}")
         // Re-fetch chat to get updated icon
         chatRepository.fetchChat(event.chatGuid)
 
@@ -111,7 +107,7 @@ class ChatEventHandler @Inject constructor(
         event: SocketEvent.GroupIconRemoved,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Log.d(TAG, "Group icon removed: ${event.chatGuid}")
+        Timber.d("Group icon removed: ${event.chatGuid}")
         // Clear the group icon by re-fetching chat
         chatRepository.fetchChat(event.chatGuid)
 

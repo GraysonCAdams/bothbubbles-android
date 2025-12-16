@@ -4,7 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -51,7 +51,7 @@ class ThumbnailManager @Inject constructor(
         try {
             val sourceFile = File(sourcePath)
             if (!sourceFile.exists()) {
-                Log.w(TAG, "Source file doesn't exist: $sourcePath")
+                Timber.w("Source file doesn't exist: $sourcePath")
                 return@withContext null
             }
 
@@ -90,7 +90,7 @@ class ThumbnailManager @Inject constructor(
 
             thumbnailFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to generate image thumbnail for $attachmentGuid", e)
+            Timber.e(e, "Failed to generate image thumbnail for $attachmentGuid")
             null
         }
     }
@@ -109,7 +109,7 @@ class ThumbnailManager @Inject constructor(
         try {
             val sourceFile = File(sourcePath)
             if (!sourceFile.exists()) {
-                Log.w(TAG, "Source video doesn't exist: $sourcePath")
+                Timber.w("Source video doesn't exist: $sourcePath")
                 return@withContext null
             }
 
@@ -129,7 +129,7 @@ class ThumbnailManager @Inject constructor(
                 ) ?: retriever.getFrameAtTime(0)
 
                 if (bitmap == null) {
-                    Log.w(TAG, "Could not extract frame from video: $sourcePath")
+                    Timber.w("Could not extract frame from video: $sourcePath")
                     return@withContext null
                 }
 
@@ -146,7 +146,7 @@ class ThumbnailManager @Inject constructor(
                 retriever.release()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to generate video thumbnail for $attachmentGuid", e)
+            Timber.e(e, "Failed to generate video thumbnail for $attachmentGuid")
             null
         }
     }

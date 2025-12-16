@@ -1,6 +1,6 @@
 package com.bothbubbles.services.categorization
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -56,7 +56,7 @@ class CategorizationRepository @Inject constructor(
                 confidence = result.confidence,
                 timestamp = System.currentTimeMillis()
             )
-            Log.d(TAG, "Categorized chat $chatGuid as ${result.category} (confidence: ${result.confidence})")
+            Timber.d("Categorized chat $chatGuid as ${result.category} (confidence: ${result.confidence})")
         }
 
         return result
@@ -67,7 +67,7 @@ class CategorizationRepository @Inject constructor(
      */
     suspend fun clearCategory(chatGuid: String) {
         chatDao.clearCategory(chatGuid)
-        Log.d(TAG, "Cleared category for chat $chatGuid")
+        Timber.d("Cleared category for chat $chatGuid")
     }
 
     /**
@@ -81,7 +81,7 @@ class CategorizationRepository @Inject constructor(
             confidence = 0,
             timestamp = System.currentTimeMillis()
         )
-        Log.d(TAG, "Marked chat $chatGuid as uncategorized (no confident match)")
+        Timber.d("Marked chat $chatGuid as uncategorized (no confident match)")
     }
 
     /**
@@ -97,11 +97,11 @@ class CategorizationRepository @Inject constructor(
     ): Int {
         val uncategorizedChats = chatDao.getUncategorizedChats()
         if (uncategorizedChats.isEmpty()) {
-            Log.d(TAG, "No uncategorized chats found")
+            Timber.d("No uncategorized chats found")
             return 0
         }
 
-        Log.d(TAG, "Starting retroactive categorization of ${uncategorizedChats.size} chats")
+        Timber.d("Starting retroactive categorization of ${uncategorizedChats.size} chats")
         var categorizedCount = 0
 
         uncategorizedChats.forEachIndexed { index, chat ->
@@ -139,7 +139,7 @@ class CategorizationRepository @Inject constructor(
                             timestamp = System.currentTimeMillis()
                         )
                         categorizedCount++
-                        Log.d(TAG, "Categorized chat ${chat.guid} as ${result.category}")
+                        Timber.d("Categorized chat ${chat.guid} as ${result.category}")
                         return@forEachIndexed
                     }
                 }
@@ -157,7 +157,7 @@ class CategorizationRepository @Inject constructor(
                             timestamp = System.currentTimeMillis()
                         )
                         categorizedCount++
-                        Log.d(TAG, "Categorized chat ${chat.guid} as ${result.category} (multi-message)")
+                        Timber.d("Categorized chat ${chat.guid} as ${result.category} (multi-message)")
                         return@forEachIndexed
                     }
                 }
@@ -165,14 +165,14 @@ class CategorizationRepository @Inject constructor(
                 // Couldn't categorize with confidence - mark as uncategorized so we don't retry
                 markAsUncategorized(chat.guid)
             } catch (e: Exception) {
-                Log.e(TAG, "Error categorizing chat ${chat.guid}", e)
+                Timber.e(e, "Error categorizing chat ${chat.guid}")
                 // Mark as uncategorized on error so we don't retry indefinitely
                 markAsUncategorized(chat.guid)
             }
         }
 
         onProgress?.invoke(uncategorizedChats.size, uncategorizedChats.size)
-        Log.d(TAG, "Retroactive categorization complete: $categorizedCount of ${uncategorizedChats.size} chats categorized")
+        Timber.d("Retroactive categorization complete: $categorizedCount of ${uncategorizedChats.size} chats categorized")
         return categorizedCount
     }
 }

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sms
 
-import android.util.Log
+import timber.log.Timber
 import java.io.ByteArrayInputStream
 
 /**
@@ -61,7 +61,7 @@ object MmsPduParser {
      */
     fun parseNotificationInd(pdu: ByteArray?): MmsNotificationInfo? {
         if (pdu == null || pdu.isEmpty()) {
-            Log.w(TAG, "Empty PDU data")
+            Timber.w("Empty PDU data")
             return null
         }
 
@@ -69,7 +69,7 @@ object MmsPduParser {
             val stream = ByteArrayInputStream(pdu)
             parsePdu(stream)
         } catch (e: Exception) {
-            Log.e(TAG, "Error parsing MMS PDU", e)
+            Timber.e(e, "Error parsing MMS PDU")
             null
         }
     }
@@ -91,12 +91,12 @@ object MmsPduParser {
             when (header) {
                 MMS_MESSAGE_TYPE -> {
                     messageType = stream.read()
-                    Log.d(TAG, "Message type: $messageType")
+                    Timber.d("Message type: $messageType")
                 }
 
                 MMS_TRANSACTION_ID -> {
                     transactionId = readTextString(stream)
-                    Log.d(TAG, "Transaction ID: $transactionId")
+                    Timber.d("Transaction ID: $transactionId")
                 }
 
                 MMS_VERSION -> {
@@ -106,12 +106,12 @@ object MmsPduParser {
 
                 MMS_FROM -> {
                     from = readEncodedAddress(stream)
-                    Log.d(TAG, "From: $from")
+                    Timber.d("From: $from")
                 }
 
                 MMS_SUBJECT -> {
                     subject = readEncodedString(stream)
-                    Log.d(TAG, "Subject: $subject")
+                    Timber.d("Subject: $subject")
                 }
 
                 MMS_MESSAGE_CLASS -> {
@@ -120,17 +120,17 @@ object MmsPduParser {
 
                 MMS_MESSAGE_SIZE -> {
                     messageSize = readLongInteger(stream)
-                    Log.d(TAG, "Message size: $messageSize")
+                    Timber.d("Message size: $messageSize")
                 }
 
                 MMS_EXPIRY -> {
                     expiry = readValueLengthLongInteger(stream)
-                    Log.d(TAG, "Expiry: $expiry")
+                    Timber.d("Expiry: $expiry")
                 }
 
                 MMS_CONTENT_LOCATION -> {
                     contentLocation = readTextString(stream)
-                    Log.d(TAG, "Content location: $contentLocation")
+                    Timber.d("Content location: $contentLocation")
                 }
 
                 MMS_CONTENT_TYPE -> {

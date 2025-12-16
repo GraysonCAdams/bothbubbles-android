@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -37,9 +37,6 @@ class MessageRepository @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val chatSyncOperations: ChatSyncOperations
 ) {
-    companion object {
-        private const val TAG = "MessageRepository"
-    }
 
     // ===== Local Query Operations =====
 
@@ -195,9 +192,9 @@ class MessageRepository @Inject constructor(
             // Ensure chat exists before inserting messages (foreign key constraint)
             // This is a fast indexed lookup - only fetches from server if missing
             if (chatDao.getChatByGuid(chatGuid) == null) {
-                Log.d(TAG, "Chat $chatGuid missing from local DB, fetching from server first")
+                Timber.d("Chat $chatGuid missing from local DB, fetching from server first")
                 chatSyncOperations.fetchChat(chatGuid).onFailure { e ->
-                    Log.e(TAG, "Failed to fetch chat $chatGuid: ${e.message}")
+                    Timber.e(e, "Failed to fetch chat $chatGuid")
                     throw e
                 }
             }
@@ -260,7 +257,7 @@ class MessageRepository @Inject constructor(
     ): Result<List<MessageEntity>> {
         // Check if range is already synced
         if (syncRangeTracker.isRangeFullySynced(chatGuid, startTimestamp, endTimestamp)) {
-            Log.d(TAG, "Range already synced for $chatGuid: $startTimestamp - $endTimestamp")
+            Timber.d("Range already synced for $chatGuid: $startTimestamp - $endTimestamp")
             return Result.success(emptyList())
         }
 
@@ -323,7 +320,7 @@ class MessageRepository @Inject constructor(
                 if (chatGuid != null) {
                     messageDto to messageDto.toEntity(chatGuid)
                 } else {
-                    Log.w(TAG, "Message ${messageDto.guid} has no associated chat, skipping")
+                    Timber.w("Message ${messageDto.guid} has no associated chat, skipping")
                     null
                 }
             }
@@ -338,7 +335,7 @@ class MessageRepository @Inject constructor(
             }
 
             val syncedCount = messagesWithChats.size
-            Log.i(TAG, "Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
+            Timber.i("Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
             syncedCount
         }
     }
@@ -380,7 +377,7 @@ class MessageRepository @Inject constructor(
     suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String) {
         // Update the message error code and error message
         messageDao.updateMessageError(messageGuid, 1, errorMessage)
-        Log.d(TAG, "Marked message $messageGuid as failed: $errorMessage")
+        Timber.d("Marked message $messageGuid as failed: $errorMessage")
     }
 
     /**

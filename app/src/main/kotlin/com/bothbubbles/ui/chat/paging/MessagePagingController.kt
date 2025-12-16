@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.paging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.ui.components.message.MessageUiModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,10 +37,6 @@ class MessagePagingController(
     private val config: PagingConfig,
     private val scope: CoroutineScope
 ) {
-    companion object {
-        private const val TAG = "MessagePagingController"
-    }
-
     // BitSet tracking which positions are loaded
     // true = loaded, false = not loaded
     private val loadStatus = BitSet()
@@ -103,7 +99,7 @@ class MessagePagingController(
      * Must be called once before using the controller.
      */
     fun initialize() {
-        Log.d(TAG, "Initializing paging controller")
+        Timber.d("Initializing paging controller")
 
         // Observe size changes
         sizeObserverJob?.cancel()
@@ -157,7 +153,7 @@ class MessagePagingController(
     suspend fun jumpToMessage(guid: String): Int? {
         // Check if we already have the position cached
         guidToPosition[guid]?.let { cachedPosition ->
-            Log.d(TAG, "Jump to message: $guid found in cache at position $cachedPosition")
+            Timber.d("Jump to message: $guid found in cache at position $cachedPosition")
             // Ensure data around this position is loaded
             loadAroundPosition(cachedPosition)
             return cachedPosition
@@ -167,11 +163,11 @@ class MessagePagingController(
         val position = dataSource.getMessagePosition(guid)
 
         if (position < 0) {
-            Log.d(TAG, "Jump to message: $guid not found in database")
+            Timber.d("Jump to message: $guid not found in database")
             return null
         }
 
-        Log.d(TAG, "Jump to message: $guid found at position $position")
+        Timber.d("Jump to message: $guid found at position $position")
 
         // Cache the position
         guidToPosition[guid] = position
@@ -223,12 +219,12 @@ class MessagePagingController(
                         if (currentPosition != null) {
                             sparseData[currentPosition] = updatedModel
                             emitMessagesLocked()
-                            Log.d(TAG, "Updated message at position $currentPosition: $guid")
+                            Timber.d("Updated message at position $currentPosition: $guid")
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to update message: $guid", e)
+                Timber.e(e, "Failed to update message: $guid")
             }
         }
     }
@@ -249,7 +245,7 @@ class MessagePagingController(
             val updatedModel = transform(currentModel)
             sparseData[position] = updatedModel
             emitMessagesLocked()
-            Log.d(TAG, "Locally updated message at position $position: $guid")
+            Timber.d("Locally updated message at position $position: $guid")
             true
         }
     }
@@ -262,7 +258,7 @@ class MessagePagingController(
      * all existing positions by 1.
      */
     fun onNewMessageInserted(guid: String) {
-        Log.d(TAG, "New message inserted: $guid")
+        Timber.d("New message inserted: $guid")
 
         // The size observer will detect the change and trigger reload
         // For now, we'll let the size change handler deal with it
@@ -282,18 +278,18 @@ class MessagePagingController(
      */
     fun insertMessageOptimistically(model: MessageUiModel) {
         val insertStart = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically START ──")
-        Log.i(TAG, "[SEND_TRACE] guid=${model.guid}, text=\"${model.text?.take(30) ?: ""}...\"")
+        Timber.i("[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically START ──")
+        Timber.i("[SEND_TRACE] guid=${model.guid}, text=\"${model.text?.take(30) ?: ""}...\"")
 
         // Check if already inserted (prevent duplicates)
         if (guidToPosition.containsKey(model.guid)) {
-            Log.i(TAG, "[SEND_TRACE] SKIPPED - already exists: ${model.guid}")
+            Timber.i("[SEND_TRACE] SKIPPED - already exists: ${model.guid}")
             return
         }
 
         // Increment generation to invalidate any in-flight loads
         state.generation++
-        Log.i(TAG, "[SEND_TRACE] Incrementing generation to ${state.generation} +${System.currentTimeMillis() - insertStart}ms")
+        Timber.i("[SEND_TRACE] Incrementing generation to ${state.generation} +${System.currentTimeMillis() - insertStart}ms")
 
         // Shift all existing positions by 1 (in memory, no DB)
         val shiftStart = System.currentTimeMillis()
@@ -307,7 +303,7 @@ class MessagePagingController(
                 newGuidToPosition[existingModel.guid] = newPosition
             }
         }
-        Log.i(TAG, "[SEND_TRACE] Shifted ${sparseData.size} positions in ${System.currentTimeMillis() - shiftStart}ms")
+        Timber.i("[SEND_TRACE] Shifted ${sparseData.size} positions in ${System.currentTimeMillis() - shiftStart}ms")
 
         // Insert new message at position 0
         newSparseData[0] = model
@@ -335,14 +331,14 @@ class MessagePagingController(
         // Mark as optimistically inserted
         optimisticallyInsertedGuids.add(model.guid)
 
-        Log.i(TAG, "[SEND_TRACE] State updated, totalSize=${state.totalSize} +${System.currentTimeMillis() - insertStart}ms")
+        Timber.i("[SEND_TRACE] State updated, totalSize=${state.totalSize} +${System.currentTimeMillis() - insertStart}ms")
 
         // Emit immediately
         val emitStart = System.currentTimeMillis()
         emitMessagesLocked()
-        Log.i(TAG, "[SEND_TRACE] emitMessagesLocked() took ${System.currentTimeMillis() - emitStart}ms")
+        Timber.i("[SEND_TRACE] emitMessagesLocked() took ${System.currentTimeMillis() - emitStart}ms")
 
-        Log.i(TAG, "[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically END: ${System.currentTimeMillis() - insertStart}ms total ──")
+        Timber.i("[SEND_TRACE] ── MessagePagingController.insertMessageOptimistically END: ${System.currentTimeMillis() - insertStart}ms total ──")
     }
 
     /**
@@ -350,7 +346,7 @@ class MessagePagingController(
      * Use sparingly as it reloads everything.
      */
     fun refresh() {
-        Log.d(TAG, "Force refresh requested")
+        Timber.d("Force refresh requested")
 
         scope.launch {
             stateMutex.withLock {
@@ -384,7 +380,7 @@ class MessagePagingController(
             // Get total size
             state.totalSize = dataSource.size()
             _totalCount.value = state.totalSize
-            Log.d(TAG, "Initial size: ${state.totalSize}")
+            Timber.d("Initial size: ${state.totalSize}")
 
             if (state.totalSize == 0) {
                 emitMessages()
@@ -396,7 +392,7 @@ class MessagePagingController(
             loadRange(0, loadCount)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Initial load failed", e)
+            Timber.e(e, "Initial load failed")
             _error.value = "Failed to load messages: ${e.message}"
         } finally {
             _isLoading.value = false
@@ -409,14 +405,14 @@ class MessagePagingController(
         if (newSize == oldSize) {
             // If sizes match, it means our optimistic update (if any) is now consistent with DB
             if (optimisticallyInsertedGuids.isNotEmpty()) {
-                Log.d(TAG, "onSizeChanged: Size matched ($newSize), clearing ${optimisticallyInsertedGuids.size} optimistic GUIDs")
+                Timber.d("onSizeChanged: Size matched ($newSize), clearing ${optimisticallyInsertedGuids.size} optimistic GUIDs")
                 optimisticallyInsertedGuids.clear()
             }
             return
         }
 
         val sizeChangeTime = System.currentTimeMillis()
-        Log.d(TAG, "⏱️ onSizeChanged: $oldSize -> $newSize")
+        Timber.d("⏱️ onSizeChanged: $oldSize -> $newSize")
         state.totalSize = newSize
         _totalCount.value = newSize
 
@@ -429,13 +425,13 @@ class MessagePagingController(
                     // Shift existing positions (atomic with mutex)
                     val shiftStart = System.currentTimeMillis()
                     shiftPositions(addedCount)
-                    Log.d(TAG, "⏱️ shiftPositions took: ${System.currentTimeMillis() - shiftStart}ms")
+                    Timber.d("⏱️ shiftPositions took: ${System.currentTimeMillis() - shiftStart}ms")
 
                     // Load the new messages at the beginning
                     val loadStart = System.currentTimeMillis()
                     loadRange(0, minOf(addedCount + config.prefetchDistance, newSize))
-                    Log.d(TAG, "⏱️ loadRange took: ${System.currentTimeMillis() - loadStart}ms")
-                    Log.d(TAG, "⏱️ TOTAL from size change: ${System.currentTimeMillis() - sizeChangeTime}ms")
+                    Timber.d("⏱️ loadRange took: ${System.currentTimeMillis() - loadStart}ms")
+                    Timber.d("⏱️ TOTAL from size change: ${System.currentTimeMillis() - sizeChangeTime}ms")
                 }
                 newSize < oldSize -> {
                     // Messages deleted
@@ -496,7 +492,7 @@ class MessagePagingController(
         // Step 3: Atomic swap under mutex (fast)
         stateMutex.withLock {
             if (state.generation != expectedGeneration) {
-                Log.w(TAG, "State changed during shiftPositions (gen $expectedGeneration -> ${state.generation}), aborting swap")
+                Timber.w("State changed during shiftPositions (gen $expectedGeneration -> ${state.generation}), aborting swap")
                 return@withLock
             }
 
@@ -507,7 +503,7 @@ class MessagePagingController(
             loadStatus.clear()
             loadStatus.or(newLoadStatus)
 
-            Log.d(TAG, "Shifted ${newSparseData.size} positions by $shiftBy (generation=${state.generation})")
+            Timber.d("Shifted ${newSparseData.size} positions by $shiftBy (generation=${state.generation})")
 
             // NOTE: Don't emit here - wait for loadRange() to complete so we have consistent data
             // Emitting here with position 0 empty causes IndexOutOfBoundsException during scroll
@@ -526,7 +522,7 @@ class MessagePagingController(
         val gaps = MessagePagingHelpers.findGaps(loadStart, loadEnd, loadStatus)
 
         if (gaps.isEmpty()) {
-            Log.d(TAG, "No gaps to load in range [$loadStart, $loadEnd]")
+            Timber.d("No gaps to load in range [$loadStart, $loadEnd]")
             return
         }
 
@@ -555,7 +551,7 @@ class MessagePagingController(
         val gaps = MessagePagingHelpers.findGaps(loadStart, loadEnd, loadStatus)
 
         if (gaps.isEmpty()) {
-            Log.d(TAG, "No gaps to load around position $position")
+            Timber.d("No gaps to load around position $position")
             return
         }
 
@@ -578,7 +574,7 @@ class MessagePagingController(
         val shouldProceed = stateMutex.withLock {
             // Check if this exact range is already being loaded
             if (activeLoadJobs.any { it.first <= start && it.last >= end - 1 }) {
-                Log.d(TAG, "Skipping load for range [$start, $end) - already in progress")
+                Timber.d("Skipping load for range [$start, $end) - already in progress")
                 return
             }
             activeLoadJobs.add(range)
@@ -589,7 +585,7 @@ class MessagePagingController(
         if (!shouldProceed) return
 
         try {
-            Log.d(TAG, "Loading range [$start, $end) ($count messages) at generation $loadGeneration")
+            Timber.d("Loading range [$start, $end) ($count messages) at generation $loadGeneration")
             _isLoading.value = true
 
             // Async DB query - this is where we yield and races can happen
@@ -599,7 +595,7 @@ class MessagePagingController(
             stateMutex.withLock {
                 // If generation changed, our positions are stale - discard
                 if (state.generation != loadGeneration) {
-                    Log.d(TAG, "Discarding stale load for [$start, $end): gen $loadGeneration != ${state.generation}")
+                    Timber.d("Discarding stale load for [$start, $end): gen $loadGeneration != ${state.generation}")
                     activeLoadJobs.remove(range)
                     return
                 }
@@ -612,7 +608,7 @@ class MessagePagingController(
                     val existingPosition = guidToPosition[model.guid]
                     if (existingPosition != null && existingPosition != position) {
                         // Remove the OLD entry to prevent duplicates
-                        Log.w(TAG, "GUID CONFLICT: ${model.guid} exists at position $existingPosition, storing at $position - removing old entry")
+                        Timber.w("GUID CONFLICT: ${model.guid} exists at position $existingPosition, storing at $position - removing old entry")
                         sparseData.remove(existingPosition)
                         loadStatus.clear(existingPosition)
                     }
@@ -624,13 +620,13 @@ class MessagePagingController(
                 }
 
                 activeLoadJobs.remove(range)
-                Log.d(TAG, "Loaded ${models.size} messages for range [$start, $end)")
+                Timber.d("Loaded ${models.size} messages for range [$start, $end)")
 
                 emitMessagesLocked()
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to load range [$start, $end)", e)
+            Timber.e(e, "Failed to load range [$start, $end)")
             _error.value = "Failed to load messages: ${e.message}"
             stateMutex.withLock {
                 activeLoadJobs.remove(range)
@@ -664,7 +660,7 @@ class MessagePagingController(
                 loadStatus.clear(position)
             }
 
-            Log.d(TAG, "Evicted ${toEvict.size} messages outside range [$keepStart, $keepEnd)")
+            Timber.d("Evicted ${toEvict.size} messages outside range [$keepStart, $keepEnd)")
 
             emitMessagesLocked()
         }
@@ -691,7 +687,7 @@ class MessagePagingController(
             loadedRanges = MessagePagingHelpers.computeLoadedRanges(loadStatus, state.totalSize)
         )
         val firstMessage = sparseData[0]
-        android.util.Log.d("ChatScroll", "📜 [EMIT] PagingController._messages: ${list.totalSize} total, " +
+        Timber.tag("ChatScroll").d("📜 [EMIT] PagingController._messages: ${list.totalSize} total, " +
             "${sparseData.size} loaded, first=${firstMessage?.guid?.takeLast(8)}, " +
             "isFromMe=${firstMessage?.isFromMe}")
         _messages.value = list

@@ -7,7 +7,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
 import android.provider.MediaStore
-import android.util.Log
+import timber.log.Timber
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
@@ -39,11 +39,7 @@ sealed class EditResult {
  * Helper class for editing attachments using system or fallback editors.
  */
 class AttachmentEditor(private val context: Context) {
-    companion object {
-        private const val TAG = "AttachmentEditor"
         private const val AUTHORITY = "com.bothbubbles.fileprovider"
-    }
-
     private val editCacheDir: File by lazy {
         File(context.cacheDir, "edited_attachments").apply { mkdirs() }
     }
@@ -88,7 +84,7 @@ class AttachmentEditor(private val context: Context) {
             return cropIntent
         }
 
-        Log.w(TAG, "No system editor found")
+        Timber.w("No system editor found")
         return null
     }
 
@@ -122,7 +118,7 @@ class AttachmentEditor(private val context: Context) {
 
             FileProvider.getUriForFile(context, AUTHORITY, outputFile)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to rotate image", e)
+            Timber.e(e, "Failed to rotate image")
             null
         }
     }
@@ -148,7 +144,7 @@ class AttachmentEditor(private val context: Context) {
 
             FileProvider.getUriForFile(context, AUTHORITY, outputFile)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to crop image", e)
+            Timber.e(e, "Failed to crop image")
             null
         }
     }

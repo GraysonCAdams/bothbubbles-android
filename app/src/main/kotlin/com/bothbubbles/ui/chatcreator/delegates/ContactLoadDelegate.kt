@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
@@ -30,10 +30,6 @@ class ContactLoadDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
     private val androidContactsService: AndroidContactsService
 ) {
-    companion object {
-        private const val TAG = "ContactLoadDelegate"
-    }
-
     /**
      * Data class containing loaded contacts data
      */

@@ -5,7 +5,7 @@ import android.os.Build
 import android.os.PersistableBundle
 import android.telephony.CarrierConfigManager
 import android.telephony.SubscriptionManager
-import android.util.Log
+import timber.log.Timber
 import java.io.ByteArrayOutputStream
 
 /**
@@ -17,8 +17,6 @@ import java.io.ByteArrayOutputStream
 class MmsPduBuilder(private val context: Context) {
 
     companion object {
-        private const val TAG = "MmsPduBuilder"
-
         // Default size limits
         private const val DEFAULT_MAX_MESSAGE_SIZE = 300 * 1024 // 300KB
         private const val DEFAULT_MAX_IMAGE_SIZE = 250 * 1024 // 250KB for single image
@@ -38,7 +36,7 @@ class MmsPduBuilder(private val context: Context) {
         priority: MmsPduHeaders.Priority = MmsPduHeaders.Priority.NORMAL
     ): ByteArray {
         val maxSize = getCarrierMaxMmsSize(subscriptionId)
-        Log.d(TAG, "Building MMS PDU with max size: $maxSize bytes")
+        Timber.d("Building MMS PDU with max size: $maxSize bytes")
 
         // Process attachments with compression if needed
         val processedAttachments = processAttachments(attachments, text, maxSize)
@@ -174,7 +172,7 @@ class MmsPduBuilder(private val context: Context) {
         val headerOverhead = 2048 // Approximate header overhead
         val availableSize = maxSize - textSize - smilOverhead - headerOverhead
 
-        Log.d(TAG, "Available size for attachments: $availableSize bytes")
+        Timber.d("Available size for attachments: $availableSize bytes")
 
         // Calculate target size per attachment
         val targetPerAttachment = (availableSize / attachments.size).coerceAtLeast(10 * 1024)
@@ -204,7 +202,7 @@ class MmsPduBuilder(private val context: Context) {
         ) {
             val compressed = MmsImageCompressor.compressImage(data, targetSize, attachment.mimeType)
             if (compressed != null) {
-                Log.d(TAG, "Compressed image from ${data.size} to ${compressed.size} bytes")
+                Timber.d("Compressed image from ${data.size} to ${compressed.size} bytes")
                 val newFileName = if (attachment.fileName.endsWith(".png")) {
                     attachment.fileName.replace(".png", ".jpg")
                 } else {
@@ -219,7 +217,7 @@ class MmsPduBuilder(private val context: Context) {
         }
 
         // Return original if compression not possible
-        Log.w(TAG, "Could not compress attachment ${attachment.fileName}, using original")
+        Timber.w("Could not compress attachment ${attachment.fileName}, using original")
         return ProcessedAttachment(
             mimeType = attachment.mimeType,
             fileName = attachment.fileName,
@@ -257,10 +255,10 @@ class MmsPduBuilder(private val context: Context) {
                 DEFAULT_MAX_MESSAGE_SIZE
             ) ?: DEFAULT_MAX_MESSAGE_SIZE
 
-            Log.d(TAG, "Carrier max MMS size: $maxSize bytes")
+            Timber.d("Carrier max MMS size: $maxSize bytes")
             maxSize
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get carrier config, using default", e)
+            Timber.w(e, "Failed to get carrier config, using default")
             DEFAULT_MAX_MESSAGE_SIZE
         }
     }

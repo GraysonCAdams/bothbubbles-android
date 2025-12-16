@@ -1,6 +1,6 @@
 package com.bothbubbles.services.autoresponder
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -39,10 +39,6 @@ class AutoResponderService @Inject constructor(
     private val smsRepository: SmsRepository,
     private val settingsDataStore: SettingsDataStore
 ) {
-    companion object {
-        private const val TAG = "AutoResponderService"
-    }
-
     /**
      * Check if we should auto-respond to this message and send response if appropriate.
      *
@@ -58,51 +54,51 @@ class AutoResponderService @Inject constructor(
     ): Boolean {
         // 1. Check feature enabled
         if (!settingsDataStore.autoResponderEnabled.first()) {
-            Log.d(TAG, "Auto-responder disabled")
+            Timber.d("Auto-responder disabled")
             return false
         }
 
         // 2. Skip if initial sync not complete (avoid responding to historical messages)
         if (!settingsDataStore.initialSyncComplete.first()) {
-            Log.d(TAG, "Initial sync not complete, skipping auto-response")
+            Timber.d("Initial sync not complete, skipping auto-response")
             return false
         }
 
         // 3. Skip messages from self
         if (isFromMe) {
-            Log.d(TAG, "Message is from self, skipping")
+            Timber.d("Message is from self, skipping")
             return false
         }
 
         // 4. Skip group chats
         val chat = chatDao.getChatByGuid(chatGuid)
         if (chat?.isGroup == true) {
-            Log.d(TAG, "Chat is group chat, skipping")
+            Timber.d("Chat is group chat, skipping")
             return false
         }
 
         // 5. Only respond to SMS messages (not iMessage)
         if (chat?.isSmsChat != true) {
-            Log.d(TAG, "Chat is not SMS, skipping auto-responder")
+            Timber.d("Chat is not SMS, skipping auto-responder")
             return false
         }
 
         // 6. Skip if user has already replied via iMessage to this sender
         if (messageDao.hasOutboundIMessageToAddress(senderAddress)) {
-            Log.d(TAG, "User already replied via iMessage to $senderAddress, skipping")
+            Timber.d("User already replied via iMessage to $senderAddress, skipping")
             return false
         }
 
         // 7. Already responded to this SENDER? (persists even if chat deleted)
         if (autoRespondedSenderDao.get(senderAddress) != null) {
-            Log.d(TAG, "Already auto-responded to sender: $senderAddress")
+            Timber.d("Already auto-responded to sender: $senderAddress")
             return false
         }
 
         // 8. Check iMessage availability (only respond if sender can receive iMessage)
         val availabilityResult = iMessageAvailabilityService.checkAvailability(senderAddress)
         if (availabilityResult.isFailure || availabilityResult.getOrNull() != true) {
-            Log.d(TAG, "Sender not iMessage registered: $senderAddress")
+            Timber.d("Sender not iMessage registered: $senderAddress")
             return false
         }
 
@@ -115,7 +111,7 @@ class AutoResponderService @Inject constructor(
             else -> false
         }
         if (!passesFilter) {
-            Log.d(TAG, "Sender doesn't pass filter ($filter): $senderAddress")
+            Timber.d("Sender doesn't pass filter ($filter): $senderAddress")
             return false
         }
 
@@ -124,7 +120,7 @@ class AutoResponderService @Inject constructor(
         val oneHourAgo = System.currentTimeMillis() - 3600_000
         val recentCount = autoRespondedSenderDao.countSince(oneHourAgo)
         if (recentCount >= limit) {
-            Log.w(TAG, "Rate limit exceeded ($recentCount/$limit per hour)")
+            Timber.w("Rate limit exceeded ($recentCount/$limit per hour)")
             return false
         }
 
@@ -132,21 +128,21 @@ class AutoResponderService @Inject constructor(
         val recommendedAlias = settingsDataStore.autoResponderRecommendedAlias.first()
             .takeIf { it.isNotBlank() }
         val message = buildMessage(recommendedAlias)
-        Log.d(TAG, "Sending auto-response to $senderAddress: $message")
+        Timber.d("Sending auto-response to $senderAddress: $message")
 
         return try {
             val sendResult = messageSendingService.sendMessage(chatGuid, message)
             if (sendResult.isSuccess) {
                 // Track by SENDER ADDRESS so it persists even if chat is deleted
                 autoRespondedSenderDao.insert(AutoRespondedSenderEntity(senderAddress = senderAddress))
-                Log.i(TAG, "Auto-response sent successfully to $senderAddress")
+                Timber.i("Auto-response sent successfully to $senderAddress")
                 true
             } else {
-                Log.e(TAG, "Failed to send auto-response: ${sendResult.exceptionOrNull()?.message}")
+                Timber.e("Failed to send auto-response: ${sendResult.exceptionOrNull()?.message}")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Exception sending auto-response", e)
+            Timber.e(e, "Exception sending auto-response")
             false
         }
     }

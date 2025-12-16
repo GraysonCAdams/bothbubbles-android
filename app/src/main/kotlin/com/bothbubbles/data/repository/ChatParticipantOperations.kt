@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.remote.api.dto.ChatDto
@@ -23,9 +23,6 @@ class ChatParticipantOperations @Inject constructor(
     private val handleDao: HandleDao,
     private val androidContactsService: AndroidContactsService
 ) {
-    companion object {
-        private const val TAG = "ChatParticipantOps"
-    }
 
     suspend fun getParticipantsForChat(chatGuid: String): List<HandleEntity> =
         chatDao.getParticipantsForChat(chatGuid)
@@ -111,14 +108,14 @@ class ChatParticipantOperations @Inject constructor(
      */
     suspend fun refreshAllContactInfo(): Int {
         if (!androidContactsService.hasReadPermission()) {
-            Log.d(TAG, "refreshAllContactInfo: No READ_CONTACTS permission, skipping")
+            Timber.d("refreshAllContactInfo: No READ_CONTACTS permission, skipping")
             return 0
         }
 
         var updatedCount = 0
         try {
             val allHandles = handleDao.getAllHandlesOnce()
-            Log.d(TAG, "refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
+            Timber.d("refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
 
             for (handle in allHandles) {
                 val displayName = androidContactsService.getContactDisplayName(handle.address)
@@ -131,9 +128,9 @@ class ChatParticipantOperations @Inject constructor(
                 }
             }
 
-            Log.d(TAG, "refreshAllContactInfo: Updated $updatedCount handles")
+            Timber.d("refreshAllContactInfo: Updated $updatedCount handles")
         } catch (e: Exception) {
-            Log.e(TAG, "refreshAllContactInfo: Error refreshing contact info", e)
+            Timber.e(e, "refreshAllContactInfo: Error refreshing contact info")
         }
 
         return updatedCount

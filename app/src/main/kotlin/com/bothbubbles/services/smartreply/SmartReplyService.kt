@@ -1,6 +1,6 @@
 package com.bothbubbles.services.smartreply
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.google.mlkit.nl.smartreply.SmartReply
 import com.google.mlkit.nl.smartreply.SmartReplySuggestionResult
@@ -73,7 +73,7 @@ class SmartReplyService @Inject constructor() {
                     )
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to create TextMessage: ${e.message}")
+                Timber.w("Failed to create TextMessage: ${e.message}")
                 null
             }
         }
@@ -89,23 +89,23 @@ class SmartReplyService @Inject constructor() {
                     result.suggestions
                         .take(maxSuggestions)
                         .map { it.text }
-                        .also { Log.d(TAG, "Generated ${it.size} suggestions") }
+                        .also { Timber.d("Generated ${it.size} suggestions") }
                 }
                 SmartReplySuggestionResult.STATUS_NOT_SUPPORTED_LANGUAGE -> {
-                    Log.d(TAG, "Language not supported for smart replies")
+                    Timber.d("Language not supported for smart replies")
                     emptyList()
                 }
                 SmartReplySuggestionResult.STATUS_NO_REPLY -> {
-                    Log.d(TAG, "No smart reply suggestions available")
+                    Timber.d("No smart reply suggestions available")
                     emptyList()
                 }
                 else -> {
-                    Log.w(TAG, "Smart reply failed with status: ${result.status}")
+                    Timber.w("Smart reply failed with status: ${result.status}")
                     emptyList()
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error generating smart replies", e)
+            Timber.e(e, "Error generating smart replies")
             emptyList()
         }
     }

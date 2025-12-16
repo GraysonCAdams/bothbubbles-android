@@ -2,7 +2,7 @@ package com.bothbubbles.services.messaging
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -86,10 +86,6 @@ class MessageSendingService @Inject constructor(
     private val chatFallbackTracker: ChatFallbackTracker,
     private val strategies: Set<@JvmSuppressWildcards MessageSenderStrategy>
 ) : MessageSender {
-    companion object {
-        private const val TAG = "MessageSendingService"
-    }
-
     // ===== Upload Progress Tracking =====
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
@@ -120,16 +116,16 @@ class MessageSendingService @Inject constructor(
         tempGuid: String? // Stable ID for retry idempotency
     ): Result<MessageEntity> {
         val sendStart = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] ── MessageSendingService.sendUnified START ──")
-        Log.i(TAG, "[SEND_TRACE] chatGuid=$chatGuid, text=\"${text.take(30)}...\", tempGuid=$tempGuid")
-        Log.i(TAG, "[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachments.size}")
+        Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified START ──")
+        Timber.i("[SEND_TRACE] chatGuid=$chatGuid, text=\"${text.take(30)}...\", tempGuid=$tempGuid")
+        Timber.i("[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachments.size}")
 
         // Determine actual delivery mode
         val actualMode = when (deliveryMode) {
             MessageDeliveryMode.AUTO -> determineDeliveryMode(chatGuid, attachments.isNotEmpty())
             else -> deliveryMode
         }
-        Log.i(TAG, "[SEND_TRACE] actualMode=$actualMode +${System.currentTimeMillis() - sendStart}ms")
+        Timber.i("[SEND_TRACE] actualMode=$actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         // Find strategy that can handle this delivery mode
         val strategy = strategies.firstOrNull { it.canHandle(actualMode) }
@@ -137,7 +133,7 @@ class MessageSendingService @Inject constructor(
                 IllegalStateException("No strategy found for delivery mode: $actualMode")
             )
 
-        Log.i(TAG, "[SEND_TRACE] Using ${strategy::class.simpleName} for $actualMode +${System.currentTimeMillis() - sendStart}ms")
+        Timber.i("[SEND_TRACE] Using ${strategy::class.simpleName} for $actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         val options = SendOptions(
             chatGuid = chatGuid,
@@ -150,10 +146,10 @@ class MessageSendingService @Inject constructor(
             tempGuid = tempGuid
         )
 
-        Log.i(TAG, "[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
+        Timber.i("[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
         val result = strategy.send(options).toResult()
-        Log.i(TAG, "[SEND_TRACE] strategy.send() returned: success=${result.isSuccess} +${System.currentTimeMillis() - sendStart}ms")
-        Log.i(TAG, "[SEND_TRACE] ── MessageSendingService.sendUnified END: ${System.currentTimeMillis() - sendStart}ms ──")
+        Timber.i("[SEND_TRACE] strategy.send() returned: success=${result.isSuccess} +${System.currentTimeMillis() - sendStart}ms")
+        Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified END: ${System.currentTimeMillis() - sendStart}ms ──")
         return result
     }
 
@@ -194,7 +190,7 @@ class MessageSendingService @Inject constructor(
 
         if (autoRetry && canFallback) {
             ensureCarrierReadyOrThrow()
-            Log.i(TAG, "iMessage failed, auto-retrying as SMS for chat: $chatGuid")
+            Timber.i("iMessage failed, auto-retrying as SMS for chat: $chatGuid")
 
             // Enter fallback mode for this chat
             chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.IMESSAGE_FAILED)
@@ -222,7 +218,7 @@ class MessageSendingService @Inject constructor(
         selectedMessageText: String?,
         partIndex: Int
     ): Result<MessageEntity> = safeCall {
-        Log.d(TAG, "sendReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
+        Timber.d("sendReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
 
         val response = api.sendReaction(
             SendReactionRequest(
@@ -234,16 +230,16 @@ class MessageSendingService @Inject constructor(
             )
         )
 
-        Log.d(TAG, "sendReaction: response code=${response.code()}, isSuccessful=${response.isSuccessful}")
+        Timber.d("sendReaction: response code=${response.code()}, isSuccessful=${response.isSuccessful}")
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {
-            Log.e(TAG, "sendReaction: failed - code=${response.code()}, message=${body?.message}")
+            Timber.e("sendReaction: failed - code=${response.code()}, message=${body?.message}")
             throw NetworkError.ServerError(response.code(), body?.message ?: "Failed to send reaction")
         }
 
         val reactionMessage = body.data ?: throw NetworkError.ServerError(response.code(), "No reaction returned")
-        Log.d(TAG, "sendReaction: success - reactionGuid=${reactionMessage.guid}")
+        Timber.d("sendReaction: success - reactionGuid=${reactionMessage.guid}")
 
         val entity = reactionMessage.toEntity(chatGuid)
         messageDao.insertMessage(entity)
@@ -264,7 +260,7 @@ class MessageSendingService @Inject constructor(
         selectedMessageText: String?,
         partIndex: Int
     ): Result<Unit> = safeCall {
-        Log.d(TAG, "removeReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
+        Timber.d("removeReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
 
         // In iMessage, sending the same reaction again removes it
         val removeReaction = "-$reaction" // Prefix with - to remove
@@ -384,7 +380,7 @@ class MessageSendingService @Inject constructor(
 
         ensureCarrierReadyOrThrow(requireMms = deliveryMode == MessageDeliveryMode.LOCAL_MMS)
 
-        Log.i(TAG, "Retrying message $messageGuid as $deliveryMode")
+        Timber.i("Retrying message $messageGuid as $deliveryMode")
 
         // Re-send via SMS/MMS
         sendUnified(
@@ -442,7 +438,7 @@ class MessageSendingService @Inject constructor(
             // Skip web URLs - would need to download first
         }
 
-        Log.d(TAG, "Forwarding message $messageGuid to $targetChatGuid with ${attachmentInputs.size} attachments")
+        Timber.d("Forwarding message $messageGuid to $targetChatGuid with ${attachmentInputs.size} attachments")
 
         // Send the message to the target chat
         sendUnified(
@@ -520,7 +516,7 @@ class MessageSendingService @Inject constructor(
                         MessageDeliveryMode.LOCAL_SMS
                     }
                 } else {
-                    Log.w(TAG, "Cannot enter SMS fallback for $chatGuid: default SMS role missing")
+                    Timber.w("Cannot enter SMS fallback for $chatGuid: default SMS role missing")
                 }
             }
         }

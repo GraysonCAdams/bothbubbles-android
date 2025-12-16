@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
@@ -53,12 +53,8 @@ class ChatSyncDelegate @AssistedInject constructor(
         ): ChatSyncDelegate
     }
 
-    companion object {
-        private const val TAG = "ChatSyncDelegate"
         private const val POLL_INTERVAL_MS = 2000L // Poll every 2 seconds when socket is quiet
         private const val SOCKET_QUIET_THRESHOLD_MS = 5000L // Start polling after 5s of socket silence
-    }
-
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
 
@@ -168,11 +164,11 @@ class ChatSyncDelegate @AssistedInject constructor(
             )
             result.onSuccess { messages ->
                 if (messages.isNotEmpty()) {
-                    Log.d(TAG, "Adaptive polling found ${messages.size} missed message(s)")
+                    Timber.d("Adaptive polling found ${messages.size} missed message(s)")
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "Adaptive polling error: ${e.message}")
+            Timber.d("Adaptive polling error: ${e.message}")
         }
     }
 
@@ -183,7 +179,7 @@ class ChatSyncDelegate @AssistedInject constructor(
         scope.launch {
             appLifecycleTracker.foregroundState.collect { isInForeground ->
                 if (isInForeground) {
-                    Log.d(TAG, "App resumed - syncing for missed messages")
+                    Timber.d("App resumed - syncing for missed messages")
                     // Reset socket activity timer
                     lastSocketMessageTime = System.currentTimeMillis()
                 }
@@ -211,11 +207,11 @@ class ChatSyncDelegate @AssistedInject constructor(
             )
             result.onSuccess { messages ->
                 if (messages.isNotEmpty()) {
-                    Log.d(TAG, "Foreground sync found ${messages.size} missed message(s)")
+                    Timber.d("Foreground sync found ${messages.size} missed message(s)")
                 }
             }
         } catch (e: Exception) {
-            Log.d(TAG, "Foreground sync error: ${e.message}")
+            Timber.d("Foreground sync error: ${e.message}")
         }
     }
 

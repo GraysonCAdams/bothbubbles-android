@@ -4,7 +4,7 @@ import android.app.Application
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
-import android.util.Log
+import timber.log.Timber
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import coil.ImageLoader
@@ -115,6 +115,12 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     override fun onCreate() {
         val startupId = PerformanceProfiler.start("App.onCreate")
         super.onCreate()
+
+        // Initialize Timber logging for debug builds
+        if (BuildConfig.DEBUG) {
+            Timber.plant(Timber.DebugTree())
+        }
+
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
 
@@ -150,7 +156,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
         initializeBackgroundSync()
 
         PerformanceProfiler.end(startupId)
-        Log.d("PerfProfiler", "App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
+        Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
     }
 
     /**
@@ -163,10 +169,10 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 val developerModeEnabled = settingsDataStore.developerModeEnabled.first()
                 developerEventLog.setEnabled(developerModeEnabled)
                 if (developerModeEnabled) {
-                    Log.d(TAG, "Developer mode is enabled - event logging active")
+                    Timber.d("Developer mode is enabled - event logging active")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Error initializing developer mode", e)
+                Timber.w(e, "Error initializing developer mode")
             }
         }
     }
@@ -190,7 +196,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
                 // Check if we need to do a one-time SMS re-sync (app update recovery)
                 checkAndPerformSmsResync()
             } catch (e: Exception) {
-                Log.w(TAG, "Error initializing SMS observer", e)
+                Timber.w(e, "Error initializing SMS observer")
             }
         }
     }
@@ -215,21 +221,21 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
             // Only resync if this is a new version AND we've never done a resync before
             // (lastResyncVersion == 0 means first time, or pre-update install)
             if (lastResyncVersion == 0 || currentVersionCode > lastResyncVersion) {
-                Log.i(TAG, "Performing one-time SMS re-sync (version $lastResyncVersion -> $currentVersionCode)")
+                Timber.i("Performing one-time SMS re-sync (version $lastResyncVersion -> $currentVersionCode)")
 
                 // Import all SMS threads to recover any missed external messages
                 val result = smsRepository.importAllThreads(limit = 500)
                 result.onSuccess { imported ->
-                    Log.i(TAG, "SMS re-sync complete: $imported threads imported")
+                    Timber.i("SMS re-sync complete: $imported threads imported")
                 }.onFailure { error ->
-                    Log.w(TAG, "SMS re-sync failed", error)
+                    Timber.w(error, "SMS re-sync failed")
                 }
 
                 // Update version to prevent re-syncing on next launch
                 settingsDataStore.setLastSmsResyncVersion(currentVersionCode)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking SMS re-sync", e)
+            Timber.w(e, "Error checking SMS re-sync")
         }
     }
 
@@ -245,9 +251,9 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
 
                 // Start observing contacts for changes
                 contactsContentObserver.startObserving()
-                Log.d(TAG, "Contacts content observer started")
+                Timber.d("Contacts content observer started")
             } catch (e: Exception) {
-                Log.w(TAG, "Error initializing contacts observer", e)
+                Timber.w(e, "Error initializing contacts observer")
             }
         }
     }
@@ -264,9 +270,9 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
 
                 // Start observing conversations for share targets
                 shortcutService.startObserving()
-                Log.d(TAG, "Shortcut service started")
+                Timber.d("Shortcut service started")
             } catch (e: Exception) {
-                Log.w(TAG, "Error initializing shortcut service", e)
+                Timber.w(e, "Error initializing shortcut service")
             }
         }
     }
@@ -287,10 +293,10 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
 
                 val unsentCount = pendingMessageSource.getUnsentCount()
                 if (unsentCount > 0) {
-                    Log.i(TAG, "Found $unsentCount unsent messages in queue")
+                    Timber.i("Found $unsentCount unsent messages in queue")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Error initializing pending message queue", e)
+                Timber.w(e, "Error initializing pending message queue")
             }
         }
     }
@@ -308,7 +314,7 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
 
                 BackgroundSyncWorker.schedule(this@BothBubblesApp)
             } catch (e: Exception) {
-                Log.w(TAG, "Error scheduling background sync", e)
+                Timber.w(e, "Error scheduling background sync")
             }
         }
     }
@@ -341,7 +347,6 @@ class BothBubblesApp : Application(), Configuration.Provider, ImageLoaderFactory
     }
 
     companion object {
-        private const val TAG = "BothBubblesApp"
         const val CHANNEL_MESSAGES = "messages"
         const val CHANNEL_SERVICE = "service"
     }

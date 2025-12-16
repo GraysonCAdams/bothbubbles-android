@@ -6,7 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import android.widget.Toast
 import androidx.core.app.RemoteInput
 import com.bothbubbles.data.repository.ChatRepository
@@ -34,10 +34,6 @@ class NotificationReceiver : BroadcastReceiver() {
     interface NotificationReceiverEntryPoint {
         @ApplicationScope
         fun applicationScope(): CoroutineScope
-    }
-
-    companion object {
-        private const val TAG = "NotificationReceiver"
     }
 
     @Inject
@@ -90,7 +86,7 @@ class NotificationReceiver : BroadcastReceiver() {
             // Clear the notification after successful reply
             notificationService.cancelNotification(chatGuid)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send reply for chat $chatGuid", e)
+            Timber.e(e, "Failed to send reply for chat $chatGuid")
         }
     }
 
@@ -101,7 +97,7 @@ class NotificationReceiver : BroadcastReceiver() {
             chatRepository.markChatAsRead(chatGuid)
             notificationService.cancelNotification(chatGuid)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to mark chat $chatGuid as read", e)
+            Timber.e(e, "Failed to mark chat $chatGuid as read")
         }
     }
 

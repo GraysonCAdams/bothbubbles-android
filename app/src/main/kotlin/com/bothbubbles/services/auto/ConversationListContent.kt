@@ -29,6 +29,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import java.io.File
 
 /**
@@ -174,7 +175,7 @@ class ConversationListContent(
                 // Start async avatar loading
                 loadAvatarsAsync(chatsToDisplay, participantsByChat)
             } catch (e: Exception) {
-                android.util.Log.e(TAG, "Failed to refresh data", e)
+                Timber.e(e, "Failed to refresh data")
                 isLoading = false
             }
         }
@@ -211,7 +212,7 @@ class ConversationListContent(
                             }
                         } else null
                     } catch (e: Exception) {
-                        android.util.Log.d(TAG, "Failed to load avatar for ${chat.guid}", e)
+                        Timber.d(e, "Failed to load avatar for ${chat.guid}")
                         null
                     }
                 }
@@ -262,7 +263,7 @@ class ConversationListContent(
             val totalItems = cachedConversations.size
             // If we're showing items near the end and there are more, auto-load
             if (hasMoreConversations && !isLoading && endIndex >= totalItems - SCROLL_THRESHOLD) {
-                android.util.Log.d(TAG, "Auto-loading more conversations (visible: $startIndex-$endIndex, total: $totalItems)")
+                Timber.d("Auto-loading more conversations (visible: $startIndex-$endIndex, total: $totalItems)")
                 loadMoreConversations()
             }
         }
@@ -333,7 +334,7 @@ class ConversationListContent(
                 }
                 .build()
         } catch (e: Exception) {
-            android.util.Log.e(TAG, "Failed to build Row for ${chat.guid}", e)
+            Timber.e(e, "Failed to build Row for ${chat.guid}")
             null
         }
     }
@@ -371,7 +372,6 @@ class ConversationListContent(
     }
 
     companion object {
-        private const val TAG = "ConversationListContent"
         private const val PAGE_SIZE = 15
         private const val AVATAR_SIZE = 64 // Pixels, suitable for car displays
         private const val SCROLL_THRESHOLD = 3 // Load more when within 3 items of end

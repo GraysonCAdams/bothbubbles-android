@@ -1,7 +1,7 @@
 package com.bothbubbles.data.remote.api
 
-import android.util.Log
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import timber.log.Timber
 import com.bothbubbles.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -118,8 +118,8 @@ class AuthInterceptor @Inject constructor(
         }
 
         val finalRequest = requestBuilder.build()
-        Log.d(TAG, "Request URL = ${finalRequest.url}")
-        Log.d(TAG, "Request method = ${finalRequest.method}")
+        Timber.d("Request URL = ${finalRequest.url}")
+        Timber.d("Request method = ${finalRequest.method}")
         return chain.proceed(finalRequest)
     }
 
@@ -145,14 +145,13 @@ class AuthInterceptor @Inject constructor(
                 _initialized.first { it }
                 _credentials.value
             } ?: run {
-                Log.w(TAG, "Credentials initialization timed out")
+                Timber.w("Credentials initialization timed out")
                 _credentials.value
             }
         }
     }
 
     companion object {
-        private const val TAG = "AuthInterceptor"
         private const val INIT_TIMEOUT_MS = 3000L
     }
 }

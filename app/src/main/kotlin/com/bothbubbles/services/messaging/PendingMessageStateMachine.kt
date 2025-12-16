@@ -1,6 +1,6 @@
 package com.bothbubbles.services.messaging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import javax.inject.Inject
@@ -41,10 +41,6 @@ import javax.inject.Singleton
 class PendingMessageStateMachine @Inject constructor(
     private val pendingMessageDao: PendingMessageDao
 ) {
-    companion object {
-        private const val TAG = "PendingMessageStateMachine"
-    }
-
     /**
      * Result of a state transition attempt.
      */
@@ -83,12 +79,12 @@ class PendingMessageStateMachine @Inject constructor(
                 PendingSyncStatus.PENDING.name, PendingSyncStatus.FAILED.name -> {
                     // Valid transition
                     pendingMessageDao.updateStatusWithTimestamp(messageId, PendingSyncStatus.SENDING.name, System.currentTimeMillis())
-                    Log.d(TAG, "Message $messageId: $currentStatus -> SENDING")
+                    Timber.d("Message $messageId: $currentStatus -> SENDING")
                     TransitionResult.Success(PendingSyncStatus.SENDING)
                 }
                 PendingSyncStatus.SENDING.name -> {
                     // Already sending - could be a retry, allow it
-                    Log.w(TAG, "Message $messageId already SENDING, allowing re-entry")
+                    Timber.w("Message $messageId already SENDING, allowing re-entry")
                     TransitionResult.Success(PendingSyncStatus.SENDING)
                 }
                 PendingSyncStatus.SENT.name -> {
@@ -108,7 +104,7 @@ class PendingMessageStateMachine @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error transitioning message $messageId to SENDING", e)
+            Timber.e(e, "Error transitioning message $messageId to SENDING")
             TransitionResult.Error(e)
         }
     }
@@ -131,12 +127,12 @@ class PendingMessageStateMachine @Inject constructor(
                 PendingSyncStatus.SENDING.name -> {
                     // Valid transition
                     pendingMessageDao.markAsSent(messageId, serverGuid)
-                    Log.d(TAG, "Message $messageId: SENDING -> SENT (server: $serverGuid)")
+                    Timber.d("Message $messageId: SENDING -> SENT (server: $serverGuid)")
                     TransitionResult.Success(PendingSyncStatus.SENT)
                 }
                 PendingSyncStatus.SENT.name -> {
                     // Already sent - idempotent, just return success
-                    Log.w(TAG, "Message $messageId already SENT")
+                    Timber.w("Message $messageId already SENT")
                     TransitionResult.Success(PendingSyncStatus.SENT)
                 }
                 else -> {
@@ -148,7 +144,7 @@ class PendingMessageStateMachine @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error transitioning message $messageId to SENT", e)
+            Timber.e(e, "Error transitioning message $messageId to SENT")
             TransitionResult.Error(e)
         }
     }
@@ -176,7 +172,7 @@ class PendingMessageStateMachine @Inject constructor(
                         errorMessage,
                         System.currentTimeMillis()
                     )
-                    Log.d(TAG, "Message $messageId: SENDING -> FAILED ($errorMessage)")
+                    Timber.d("Message $messageId: SENDING -> FAILED ($errorMessage)")
                     TransitionResult.Success(PendingSyncStatus.FAILED)
                 }
                 PendingSyncStatus.FAILED.name -> {
@@ -187,7 +183,7 @@ class PendingMessageStateMachine @Inject constructor(
                         errorMessage,
                         System.currentTimeMillis()
                     )
-                    Log.w(TAG, "Message $messageId already FAILED, updating error")
+                    Timber.w("Message $messageId already FAILED, updating error")
                     TransitionResult.Success(PendingSyncStatus.FAILED)
                 }
                 else -> {
@@ -199,7 +195,7 @@ class PendingMessageStateMachine @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error transitioning message $messageId to FAILED", e)
+            Timber.e(e, "Error transitioning message $messageId to FAILED")
             TransitionResult.Error(e)
         }
     }
@@ -221,12 +217,12 @@ class PendingMessageStateMachine @Inject constructor(
                 PendingSyncStatus.FAILED.name -> {
                     // Valid transition - reset to PENDING for re-queue
                     pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
-                    Log.d(TAG, "Message $messageId: FAILED -> PENDING (retry)")
+                    Timber.d("Message $messageId: FAILED -> PENDING (retry)")
                     TransitionResult.Success(PendingSyncStatus.PENDING)
                 }
                 PendingSyncStatus.PENDING.name -> {
                     // Already pending - idempotent
-                    Log.w(TAG, "Message $messageId already PENDING")
+                    Timber.w("Message $messageId already PENDING")
                     TransitionResult.Success(PendingSyncStatus.PENDING)
                 }
                 PendingSyncStatus.SENDING.name -> {
@@ -254,7 +250,7 @@ class PendingMessageStateMachine @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error retrying message $messageId", e)
+            Timber.e(e, "Error retrying message $messageId")
             TransitionResult.Error(e)
         }
     }
@@ -275,15 +271,15 @@ class PendingMessageStateMachine @Inject constructor(
                 return 0
             }
 
-            Log.w(TAG, "Found ${stuckMessages.size} stuck SENDING messages, resetting to PENDING")
+            Timber.w("Found ${stuckMessages.size} stuck SENDING messages, resetting to PENDING")
             for (message in stuckMessages) {
                 pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING.name)
-                Log.d(TAG, "Reset stuck message ${message.id} (localId: ${message.localId})")
+                Timber.d("Reset stuck message ${message.id} (localId: ${message.localId})")
             }
 
             stuckMessages.size
         } catch (e: Exception) {
-            Log.e(TAG, "Error resetting stuck messages", e)
+            Timber.e(e, "Error resetting stuck messages")
             0
         }
     }

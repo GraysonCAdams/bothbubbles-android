@@ -7,7 +7,7 @@ import android.content.Intent
 import android.provider.Telephony.Sms
 import android.telephony.SmsManager
 import android.telephony.SmsMessage
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.di.ApplicationScope
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -71,47 +71,47 @@ class SmsStatusReceiver : BroadcastReceiver() {
 
         val (status, errorMessage) = when (resultCode) {
             Activity.RESULT_OK -> {
-                Log.d(TAG, "SMS sent successfully: $messageGuid part $partIndex")
+                Timber.d("SMS sent successfully: $messageGuid part $partIndex")
                 "sent" to null
             }
             SmsManager.RESULT_ERROR_GENERIC_FAILURE -> {
-                Log.e(TAG, "SMS send failed (generic, errorCode=$errorCode): $messageGuid")
+                Timber.e("SMS send failed (generic, errorCode=$errorCode): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode, errorCode)
             }
             SmsManager.RESULT_ERROR_NO_SERVICE -> {
-                Log.e(TAG, "SMS send failed (no service): $messageGuid")
+                Timber.e("SMS send failed (no service): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_NULL_PDU -> {
-                Log.e(TAG, "SMS send failed (null PDU): $messageGuid")
+                Timber.e("SMS send failed (null PDU): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_RADIO_OFF -> {
-                Log.e(TAG, "SMS send failed (radio off): $messageGuid")
+                Timber.e("SMS send failed (radio off): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_LIMIT_EXCEEDED -> {
-                Log.e(TAG, "SMS send failed (limit exceeded): $messageGuid")
+                Timber.e("SMS send failed (limit exceeded): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_SHORT_CODE_NOT_ALLOWED -> {
-                Log.e(TAG, "SMS send failed (short code not allowed): $messageGuid")
+                Timber.e("SMS send failed (short code not allowed): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_SHORT_CODE_NEVER_ALLOWED -> {
-                Log.e(TAG, "SMS send failed (short code never allowed): $messageGuid")
+                Timber.e("SMS send failed (short code never allowed): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_ERROR_FDN_CHECK_FAILURE -> {
-                Log.e(TAG, "SMS send failed (FDN check failure): $messageGuid")
+                Timber.e("SMS send failed (FDN check failure): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             SmsManager.RESULT_NO_DEFAULT_SMS_APP -> {
-                Log.e(TAG, "SMS send failed (not default app): $messageGuid")
+                Timber.e("SMS send failed (not default app): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
             else -> {
-                Log.e(TAG, "SMS send failed (code $resultCode): $messageGuid")
+                Timber.e("SMS send failed (code $resultCode): $messageGuid")
                 "failed" to SmsErrorHelper.getSmsErrorMessage(context, resultCode)
             }
         }
@@ -120,11 +120,11 @@ class SmsStatusReceiver : BroadcastReceiver() {
         if (status == "failed" && SmsErrorHelper.isRetryable(resultCode)) {
             val retryInitiated = smsSendService.retrySms(messageGuid, resultCode)
             if (retryInitiated) {
-                Log.d(TAG, "Auto-retry initiated for message: $messageGuid")
+                Timber.d("Auto-retry initiated for message: $messageGuid")
                 return // Don't update status - retrySms handles it
             }
             // If retry not initiated (max retries exceeded), fall through to update as failed
-            Log.d(TAG, "Auto-retry not possible for message: $messageGuid (max retries exceeded)")
+            Timber.d("Auto-retry not possible for message: $messageGuid (max retries exceeded)")
         }
 
         smsSendService.updateMessageStatus(
@@ -140,19 +140,19 @@ class SmsStatusReceiver : BroadcastReceiver() {
 
         val (status, errorMessage) = when (deliveryStatus) {
             Sms.STATUS_COMPLETE -> {
-                Log.d(TAG, "SMS delivered: $messageGuid part $partIndex")
+                Timber.d("SMS delivered: $messageGuid part $partIndex")
                 "delivered" to null
             }
             Sms.STATUS_PENDING -> {
-                Log.d(TAG, "SMS delivery pending: $messageGuid part $partIndex")
+                Timber.d("SMS delivery pending: $messageGuid part $partIndex")
                 "sent" to null // Keep as sent while pending
             }
             Sms.STATUS_FAILED -> {
-                Log.w(TAG, "SMS delivery failed: $messageGuid part $partIndex")
+                Timber.w("SMS delivery failed: $messageGuid part $partIndex")
                 "delivery_failed" to SmsErrorHelper.getDeliveryFailedMessage(context)
             }
             else -> {
-                Log.w(TAG, "SMS delivery unknown (status: $deliveryStatus): $messageGuid")
+                Timber.w("SMS delivery unknown (status: $deliveryStatus): $messageGuid")
                 "sent" to null // Keep as sent if delivery status unknown
             }
         }
@@ -214,7 +214,7 @@ class SmsStatusReceiver : BroadcastReceiver() {
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse delivery PDU", e)
+            Timber.e(e, "Failed to parse delivery PDU")
             // Fall back to result code on parse failure
             when (resultCode) {
                 Activity.RESULT_OK -> Sms.STATUS_COMPLETE

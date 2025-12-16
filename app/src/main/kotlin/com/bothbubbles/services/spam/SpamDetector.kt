@@ -3,7 +3,7 @@ package com.bothbubbles.services.spam
 import android.content.Context
 import android.provider.ContactsContract
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -35,8 +35,6 @@ class SpamDetector @Inject constructor(
     private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
-        private const val TAG = "SpamDetector"
-
         const val SPAM_THRESHOLD = 70
 
         // Score weights
@@ -116,7 +114,7 @@ class SpamDetector @Inject constructor(
         // Check if sender is whitelisted
         val handle = handleDao.getHandleByAddressAny(senderAddress)
         if (handle?.isWhitelisted == true) {
-            Log.d(TAG, "Sender $senderAddress is whitelisted, skipping spam detection")
+            Timber.d("Sender $senderAddress is whitelisted, skipping spam detection")
             return SpamResult(0, false, emptyList())
         }
 
@@ -186,9 +184,9 @@ class SpamDetector @Inject constructor(
         val isSpam = score >= threshold
 
         if (isSpam) {
-            Log.i(TAG, "Message from $senderAddress classified as spam (score: $score, threshold: $threshold, reasons: $reasons)")
+            Timber.i("Message from $senderAddress classified as spam (score: $score, threshold: $threshold, reasons: $reasons)")
         } else {
-            Log.d(TAG, "Message from $senderAddress not spam (score: $score, threshold: $threshold)")
+            Timber.d("Message from $senderAddress not spam (score: $score, threshold: $threshold)")
         }
 
         return SpamResult(score, isSpam, reasons)
@@ -233,7 +231,7 @@ class SpamDetector @Inject constructor(
 
             false
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking contacts for $address", e)
+            Timber.w(e, "Error checking contacts for $address")
             false
         }
     }

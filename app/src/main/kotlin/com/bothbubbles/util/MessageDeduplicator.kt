@@ -1,6 +1,6 @@
 package com.bothbubbles.util
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
@@ -30,7 +30,6 @@ class MessageDeduplicator @Inject constructor(
 ) {
 
     companion object {
-        private const val TAG = "MessageDeduplicator"
         private const val MAX_MEMORY_CACHE = 200
         // Keep seen messages for 24 hours (sufficient for dedup across restarts)
         private val RETENTION_DURATION_MS = TimeUnit.HOURS.toMillis(24)
@@ -58,7 +57,7 @@ class MessageDeduplicator @Inject constructor(
         // First check in-memory cache (fast path)
         synchronized(lock) {
             if (guid in memoryCache) {
-                Log.d(TAG, "Message $guid in memory cache, skipping notification")
+                Timber.d("Message $guid in memory cache, skipping notification")
                 return false
             }
         }
@@ -71,13 +70,13 @@ class MessageDeduplicator @Inject constructor(
             synchronized(lock) {
                 addToMemoryCache(guid)
             }
-            Log.d(TAG, "Message $guid in database, skipping notification")
+            Timber.d("Message $guid in database, skipping notification")
             return false
         }
 
         // New message - mark as seen
         markAsHandled(guid)
-        Log.d(TAG, "New message $guid, will notify")
+        Timber.d("New message $guid, will notify")
         return true
     }
 
@@ -137,6 +136,6 @@ class MessageDeduplicator @Inject constructor(
     private suspend fun cleanupOldEntries() {
         val cutoffTime = System.currentTimeMillis() - RETENTION_DURATION_MS
         seenMessageDao.deleteOlderThan(cutoffTime)
-        Log.d(TAG, "Cleaned up seen messages older than 24 hours")
+        Timber.d("Cleaned up seen messages older than 24 hours")
     }
 }

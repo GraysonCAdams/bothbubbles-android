@@ -1,6 +1,6 @@
 package com.bothbubbles.services
 
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
@@ -24,10 +24,6 @@ import javax.inject.Singleton
 @Singleton
 class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver {
 
-    companion object {
-        private const val TAG = "ActiveConversationMgr"
-    }
-
     private var isInitialized = false
 
     /**
@@ -37,12 +33,12 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
         if (isInitialized) return
         isInitialized = true
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
-        Log.d(TAG, "Initialized with ProcessLifecycleOwner")
+        Timber.d("Initialized with ProcessLifecycleOwner")
     }
 
     override fun onStop(owner: LifecycleOwner) {
         // App went to background - clear active conversation so notifications show
-        Log.d(TAG, "App backgrounded - clearing active conversation")
+        Timber.d("App backgrounded - clearing active conversation")
         clearActiveConversation()
     }
 
@@ -63,7 +59,7 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
      *                    (e.g., iMessage and SMS GUIDs for same contact)
      */
     fun setActiveConversation(chatGuid: String, mergedGuids: Set<String> = emptySet()) {
-        Log.d(TAG, "Setting active conversation: $chatGuid (merged: ${mergedGuids.size})")
+        Timber.d("Setting active conversation: $chatGuid (merged: ${mergedGuids.size})")
         activeChatGuid = chatGuid
         activeMergedGuids = mergedGuids + chatGuid // Include primary in merged set
     }
@@ -72,7 +68,7 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
      * Clear the active conversation when user leaves a chat.
      */
     fun clearActiveConversation() {
-        Log.d(TAG, "Clearing active conversation (was: $activeChatGuid)")
+        Timber.d("Clearing active conversation (was: $activeChatGuid)")
         activeChatGuid = null
         activeMergedGuids = emptySet()
     }

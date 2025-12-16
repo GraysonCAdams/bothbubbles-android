@@ -1,6 +1,6 @@
 package com.bothbubbles.util
 
-import android.util.Log
+import timber.log.Timber
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,8 +11,6 @@ import kotlinx.coroutines.flow.StateFlow
  * Enable via Settings > Developer Mode > Performance Logging
  */
 object PerformanceProfiler {
-    private const val TAG = "PerfProfiler"
-
     var enabled = true // Toggle this to enable/disable logging
 
     // Track ongoing operations by ID
@@ -48,9 +46,9 @@ object PerformanceProfiler {
         val id = "$operation-${System.nanoTime()}"
         activeTimers[id] = System.nanoTime()
         if (details != null) {
-            Log.d(TAG, "▶ START: $operation ($details)")
+            Timber.d("▶ START: $operation ($details)")
         } else {
-            Log.d(TAG, "▶ START: $operation")
+            Timber.d("▶ START: $operation")
         }
         return id
     }
@@ -80,7 +78,7 @@ object PerformanceProfiler {
         }
 
         val detailStr = details?.let { " ($it)" } ?: ""
-        Log.d(TAG, "$emoji END: $operation took ${durationMs}ms$detailStr")
+        Timber.d("$emoji END: $operation took ${durationMs}ms$detailStr")
 
         // Add to observable log
         val newLog = PerfLog(System.currentTimeMillis(), operation, durationMs, details)
@@ -120,22 +118,22 @@ object PerformanceProfiler {
      */
     fun printStats() {
         if (stats.isEmpty()) {
-            Log.d(TAG, "No performance stats collected yet")
+            Timber.d("No performance stats collected yet")
             return
         }
 
-        Log.d(TAG, "═══════════════════════════════════════════")
-        Log.d(TAG, "📊 PERFORMANCE SUMMARY")
-        Log.d(TAG, "═══════════════════════════════════════════")
+        Timber.d("═══════════════════════════════════════════")
+        Timber.d("📊 PERFORMANCE SUMMARY")
+        Timber.d("═══════════════════════════════════════════")
 
         stats.entries
             .sortedByDescending { it.value.totalMs.get() }
             .forEach { (op, s) ->
-                Log.d(TAG, "  $op:")
-                Log.d(TAG, "    calls: ${s.count.get()}, avg: ${s.avgMs}ms, max: ${s.maxMs.get()}ms, total: ${s.totalMs.get()}ms")
+                Timber.d("  $op:")
+                Timber.d("    calls: ${s.count.get()}, avg: ${s.avgMs}ms, max: ${s.maxMs.get()}ms, total: ${s.totalMs.get()}ms")
             }
 
-        Log.d(TAG, "═══════════════════════════════════════════")
+        Timber.d("═══════════════════════════════════════════")
     }
 
     /**
@@ -145,7 +143,7 @@ object PerformanceProfiler {
         activeTimers.clear()
         stats.clear()
         _logs.value = emptyList()
-        Log.d(TAG, "Performance stats reset")
+        Timber.d("Performance stats reset")
     }
 
     /**

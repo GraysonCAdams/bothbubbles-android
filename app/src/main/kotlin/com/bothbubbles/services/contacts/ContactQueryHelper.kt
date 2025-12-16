@@ -3,7 +3,7 @@ package com.bothbubbles.services.contacts
 import android.content.Context
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,8 +17,6 @@ class ContactQueryHelper @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        private const val TAG = "ContactQueryHelper"
-
         // Short codes (5-6 digit numbers) used by businesses for SMS
         private val SHORT_CODE_PATTERN = Regex("""^\d{5,6}$""")
 
@@ -90,7 +88,7 @@ class ContactQueryHelper @Inject constructor(
 
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting contact ID for $address", e)
+            Timber.w(e, "Error getting contact ID for $address")
             null
         }
     }
@@ -117,7 +115,7 @@ class ContactQueryHelper @Inject constructor(
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting nickname for contact $contactId", e)
+            Timber.w(e, "Error getting nickname for contact $contactId")
             null
         }
     }
@@ -205,7 +203,7 @@ class ContactQueryHelper @Inject constructor(
 
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting display name for $address", e)
+            Timber.w(e, "Error getting display name for $address")
             null
         }
     }

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.socket
 
-import android.util.Log
+import timber.log.Timber
 import io.socket.client.Socket
 import org.json.JSONObject
 
@@ -12,10 +12,6 @@ class SocketEventEmitter(
     private val getSocket: () -> Socket?,
     private val isConnected: () -> Boolean
 ) {
-    companion object {
-        private const val TAG = "SocketEventEmitter"
-    }
-
     // ===== Typing Indicators =====
 
     /**
@@ -25,7 +21,7 @@ class SocketEventEmitter(
      */
     fun sendStartedTyping(chatGuid: String) {
         if (!isConnected()) {
-            Log.d(TAG, "Cannot send typing indicator: not connected")
+            Timber.d("Cannot send typing indicator: not connected")
             return
         }
 
@@ -34,7 +30,7 @@ class SocketEventEmitter(
         }
 
         getSocket()?.emit("started-typing", payload)
-        Log.d(TAG, "Sent started-typing for chat: $chatGuid")
+        Timber.d("Sent started-typing for chat: $chatGuid")
     }
 
     /**
@@ -44,7 +40,7 @@ class SocketEventEmitter(
      */
     fun sendStoppedTyping(chatGuid: String) {
         if (!isConnected()) {
-            Log.d(TAG, "Cannot send typing indicator: not connected")
+            Timber.d("Cannot send typing indicator: not connected")
             return
         }
 
@@ -53,7 +49,7 @@ class SocketEventEmitter(
         }
 
         getSocket()?.emit("stopped-typing", payload)
-        Log.d(TAG, "Sent stopped-typing for chat: $chatGuid")
+        Timber.d("Sent stopped-typing for chat: $chatGuid")
     }
 
     // ===== Chat State Events =====
@@ -65,7 +61,7 @@ class SocketEventEmitter(
      */
     fun sendOpenChat(chatGuid: String) {
         if (!isConnected()) {
-            Log.d(TAG, "Cannot send open-chat: not connected")
+            Timber.d("Cannot send open-chat: not connected")
             return
         }
 
@@ -74,7 +70,7 @@ class SocketEventEmitter(
         }
 
         getSocket()?.emit("open-chat", payload)
-        Log.d(TAG, "Sent open-chat for: $chatGuid")
+        Timber.d("Sent open-chat for: $chatGuid")
     }
 
     /**
@@ -83,7 +79,7 @@ class SocketEventEmitter(
      */
     fun sendCloseChat(chatGuid: String) {
         if (!isConnected()) {
-            Log.d(TAG, "Cannot send close-chat: not connected")
+            Timber.d("Cannot send close-chat: not connected")
             return
         }
 
@@ -92,6 +88,6 @@ class SocketEventEmitter(
         }
 
         getSocket()?.emit("close-chat", payload)
-        Log.d(TAG, "Sent close-chat for: $chatGuid")
+        Timber.d("Sent close-chat for: $chatGuid")
     }
 }

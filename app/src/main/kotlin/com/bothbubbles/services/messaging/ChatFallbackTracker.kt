@@ -1,6 +1,6 @@
 package com.bothbubbles.services.messaging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
@@ -38,10 +38,6 @@ class ChatFallbackTracker @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
-    companion object {
-        private const val TAG = "ChatFallbackTracker"
-    }
-
     // In-memory map of chat GUIDs to their fallback state
     private val fallbackChats = ConcurrentHashMap<String, ChatFallbackEntry>()
 
@@ -79,7 +75,7 @@ class ChatFallbackTracker @Inject constructor(
         applicationScope.launch(ioDispatcher) {
             chatDao.updateFallbackState(chatGuid, true, reason.name, entry.updatedAt)
         }
-        Log.i(TAG, "Chat $chatGuid entered SMS fallback mode: $reason")
+        Timber.i("Chat $chatGuid entered SMS fallback mode: $reason")
     }
 
     /**
@@ -91,7 +87,7 @@ class ChatFallbackTracker @Inject constructor(
         applicationScope.launch(ioDispatcher) {
             chatDao.updateFallbackState(chatGuid, false, null, null)
         }
-        Log.i(TAG, "Chat $chatGuid exited SMS fallback mode")
+        Timber.i("Chat $chatGuid exited SMS fallback mode")
     }
 
     /**
@@ -118,7 +114,7 @@ class ChatFallbackTracker @Inject constructor(
         }
 
         if (chatsToRestore.isNotEmpty()) {
-            Log.i(TAG, "Server reconnected, restored ${chatsToRestore.size} chats to iMessage mode")
+            Timber.i("Server reconnected, restored ${chatsToRestore.size} chats to iMessage mode")
         }
     }
 
@@ -140,7 +136,7 @@ class ChatFallbackTracker @Inject constructor(
         }
 
         updateObservable()
-        Log.i(TAG, "Restored ${fallbackChats.size} chats in SMS fallback mode")
+        Timber.i("Restored ${fallbackChats.size} chats in SMS fallback mode")
     }
 
     private fun updateObservable() {

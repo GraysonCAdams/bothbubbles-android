@@ -5,7 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import androidx.exifinterface.media.ExifInterface
 import com.bothbubbles.data.model.AttachmentQuality
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -48,8 +48,6 @@ class ImageCompressor @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
     companion object {
-        private const val TAG = "ImageCompressor"
-
         // Supported formats that can be compressed
         private val COMPRESSIBLE_MIME_TYPES = setOf(
             "image/jpeg",
@@ -86,7 +84,7 @@ class ImageCompressor @Inject constructor(
         onProgress: ((Float) -> Unit)? = null
     ): CompressionResult? = withContext(Dispatchers.IO) {
         if (quality == AttachmentQuality.AUTO || quality == AttachmentQuality.ORIGINAL) {
-            Log.d(TAG, "${quality.name} quality selected, skipping compression")
+            Timber.d("${quality.name} quality selected, skipping compression")
             return@withContext null
         }
 
@@ -133,8 +131,8 @@ class ImageCompressor @Inject constructor(
 
             val compressedSize = outputFile.length()
 
-            Log.d(TAG, "Compression complete: ${originalSize / 1024}KB -> ${compressedSize / 1024}KB")
-            Log.d(TAG, "Dimensions: ${originalWidth}x${originalHeight} -> ${scaledBitmap.width}x${scaledBitmap.height}")
+            Timber.d("Compression complete: ${originalSize / 1024}KB -> ${compressedSize / 1024}KB")
+            Timber.d("Dimensions: ${originalWidth}x${originalHeight} -> ${scaledBitmap.width}x${scaledBitmap.height}")
 
             val result = CompressionResult(
                 path = outputFile.absolutePath,
@@ -151,7 +149,7 @@ class ImageCompressor @Inject constructor(
             onProgress?.invoke(1f)
             result
         } catch (e: Exception) {
-            Log.e(TAG, "Image compression failed", e)
+            Timber.e(e, "Image compression failed")
             onProgress?.invoke(1f)
             null
         }
@@ -189,7 +187,7 @@ class ImageCompressor @Inject constructor(
             val bytesPerPixel = 0.5f + (2.5f * qualityFactor) // 0.5 to 3 bytes per pixel
             (outputWidth * outputHeight * bytesPerPixel).toLong()
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to estimate compressed size", e)
+            Timber.e(e, "Failed to estimate compressed size")
             null
         }
     }
@@ -229,7 +227,7 @@ class ImageCompressor @Inject constructor(
         }
 
         if (options.outWidth <= 0 || options.outHeight <= 0) {
-            Log.e(TAG, "Failed to decode image dimensions")
+            Timber.e("Failed to decode image dimensions")
             return null
         }
 
@@ -289,7 +287,7 @@ class ImageCompressor @Inject constructor(
             val matrix = Matrix().apply { postRotate(rotation) }
             Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to read EXIF orientation", e)
+            Timber.w(e, "Failed to read EXIF orientation")
             bitmap
         }
     }

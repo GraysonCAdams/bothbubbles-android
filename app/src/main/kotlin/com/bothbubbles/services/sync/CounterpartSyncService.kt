@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
@@ -30,8 +30,6 @@ class CounterpartSyncService @Inject constructor(
     private val chatSyncOperations: ChatSyncOperations
 ) {
     companion object {
-        private const val TAG = "CounterpartSync"
-
         // Cache TTL: Re-check after 30 days (contact may have switched phones)
         private const val CACHE_TTL_MS = 30L * 24 * 60 * 60 * 1000 // 30 days
 
@@ -74,7 +72,7 @@ class CounterpartSyncService @Inject constructor(
         // Get group details
         val group = unifiedChatGroupDao.getGroupById(groupId)
         if (group == null) {
-            Log.w(TAG, "Group $groupId not found")
+            Timber.w("Group $groupId not found")
             return CheckResult.Error("Group not found")
         }
 
@@ -82,12 +80,12 @@ class CounterpartSyncService @Inject constructor(
         val memberGuids = unifiedChatGroupDao.getChatGuidsForGroup(groupId)
         if (memberGuids.size > 1) {
             // Already has both iMessage and SMS - nothing to repair
-            Log.d(TAG, "Group $groupId already complete (${memberGuids.size} members)")
+            Timber.d("Group $groupId already complete (${memberGuids.size} members)")
             return CheckResult.Skipped
         }
 
         if (memberGuids.isEmpty()) {
-            Log.w(TAG, "Group $groupId has no members")
+            Timber.w("Group $groupId has no members")
             return CheckResult.Error("Group has no members")
         }
 
@@ -97,25 +95,25 @@ class CounterpartSyncService @Inject constructor(
         // Check cache first
         val cachedCheck = verifiedCheckDao.get(identifier)
         if (cachedCheck != null && !isCacheExpired(cachedCheck)) {
-            Log.d(TAG, "Using cached result for $identifier: hasCounterpart=${cachedCheck.hasCounterpart}")
+            Timber.d("Using cached result for $identifier: hasCounterpart=${cachedCheck.hasCounterpart}")
             return CheckResult.AlreadyVerified(cachedCheck.hasCounterpart)
         }
 
         // Predict counterpart GUID
         val counterpartGuid = predictCounterpartGuid(existingChatGuid)
         if (counterpartGuid == null) {
-            Log.d(TAG, "Cannot predict counterpart for $existingChatGuid")
+            Timber.d("Cannot predict counterpart for $existingChatGuid")
             return CheckResult.Skipped
         }
 
-        Log.d(TAG, "Checking for counterpart: $counterpartGuid (existing: $existingChatGuid)")
+        Timber.d("Checking for counterpart: $counterpartGuid (existing: $existingChatGuid)")
 
         // Try to fetch counterpart from server
         return try {
             val result = chatSyncOperations.fetchChat(counterpartGuid)
             result.fold(
                 onSuccess = { chat ->
-                    Log.i(TAG, "Found counterpart $counterpartGuid for group $groupId")
+                    Timber.i("Found counterpart $counterpartGuid for group $groupId")
 
                     // Record positive verification
                     verifiedCheckDao.upsert(
@@ -144,7 +142,7 @@ class CounterpartSyncService @Inject constructor(
     suspend fun checkAndRepairCounterpartByIdentifier(identifier: String): CheckResult {
         val group = unifiedChatGroupDao.getGroupByIdentifier(identifier)
         if (group == null) {
-            Log.d(TAG, "No unified group found for identifier $identifier")
+            Timber.d("No unified group found for identifier $identifier")
             return CheckResult.Error("No group for identifier")
         }
         return checkAndRepairCounterpart(group.id)
@@ -173,7 +171,7 @@ class CounterpartSyncService @Inject constructor(
                 "$SMS_PREFIX$address"
             }
             else -> {
-                Log.d(TAG, "Unknown chat GUID format: $existingGuid")
+                Timber.d("Unknown chat GUID format: $existingGuid")
                 null
             }
         }
@@ -191,7 +189,7 @@ class CounterpartSyncService @Inject constructor(
             is NetworkError.ServerError -> {
                 if (error.statusCode == 404) {
                     // Chat doesn't exist on server - cache negative result
-                    Log.d(TAG, "No counterpart $counterpartGuid exists (404)")
+                    Timber.d("No counterpart $counterpartGuid exists (404)")
                     verifiedCheckDao.upsert(
                         VerifiedCounterpartCheckEntity(
                             normalizedAddress = identifier,
@@ -201,13 +199,13 @@ class CounterpartSyncService @Inject constructor(
                     CheckResult.NotFound
                 } else {
                     // Server error - don't cache, might be transient
-                    Log.w(TAG, "Server error checking counterpart: ${error.statusCode}")
+                    Timber.w("Server error checking counterpart: ${error.statusCode}")
                     CheckResult.Error("Server error: ${error.statusCode}")
                 }
             }
             else -> {
                 // Network error - don't cache, will retry later
-                Log.w(TAG, "Error checking counterpart $counterpartGuid: ${error.message}")
+                Timber.w("Error checking counterpart $counterpartGuid: ${error.message}")
                 CheckResult.Error(error.message ?: "Unknown error")
             }
         }
@@ -227,7 +225,7 @@ class CounterpartSyncService @Inject constructor(
      */
     suspend fun invalidateCache(identifier: String) {
         verifiedCheckDao.delete(identifier)
-        Log.d(TAG, "Invalidated cache for $identifier")
+        Timber.d("Invalidated cache for $identifier")
     }
 
     /**
@@ -236,7 +234,7 @@ class CounterpartSyncService @Inject constructor(
      */
     suspend fun clearAllCache() {
         verifiedCheckDao.deleteAll()
-        Log.d(TAG, "Cleared all counterpart verification cache")
+        Timber.d("Cleared all counterpart verification cache")
     }
 
     /**
@@ -246,6 +244,6 @@ class CounterpartSyncService @Inject constructor(
     suspend fun cleanupExpiredCache() {
         val expiredBefore = System.currentTimeMillis() - CACHE_TTL_MS
         verifiedCheckDao.deleteOlderThan(expiredBefore)
-        Log.d(TAG, "Cleaned up cache entries older than 30 days")
+        Timber.d("Cleaned up cache entries older than 30 days")
     }
 }

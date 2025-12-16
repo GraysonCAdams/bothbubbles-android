@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chat.paging
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.displayName
@@ -34,10 +34,6 @@ class RoomMessageDataSource(
     private val syncTrigger: SyncTrigger?
 ) : MessageDataSource {
 
-    companion object {
-        private const val TAG = "RoomMessageDataSource"
-    }
-
     // Cached participant data for sender name resolution
     private var cachedParticipants: List<HandleEntity> = emptyList()
     private var handleIdToName: Map<Long, String> = emptyMap()
@@ -53,15 +49,15 @@ class RoomMessageDataSource(
     }
 
     override suspend fun load(start: Int, count: Int): List<MessageUiModel> {
-        Log.d(TAG, "Loading messages: start=$start, count=$count")
+        Timber.d("Loading messages: start=$start, count=$count")
 
         // Fetch messages by position
         val entities = messageRepository.getMessagesByPosition(chatGuids, count, start)
-        Log.d(TAG, "Loaded ${entities.size} entities from Room")
+        Timber.d("Loaded ${entities.size} entities from Room")
 
         // If we got fewer than expected, might need to sync from server
         if (entities.size < count && syncTrigger != null) {
-            Log.d(TAG, "Got fewer messages than expected, triggering sync")
+            Timber.d("Got fewer messages than expected, triggering sync")
             syncTrigger.requestSyncForRange(chatGuids, start, count)
         }
 
@@ -72,7 +68,7 @@ class RoomMessageDataSource(
         // DEFENSIVE: Deduplicate by GUID (should never happen with proper DB constraints)
         val dedupedEntities = entities.distinctBy { it.guid }
         if (dedupedEntities.size != entities.size) {
-            Log.w(TAG, "DEDUP: Found ${entities.size - dedupedEntities.size} duplicate GUIDs in Room query result")
+            Timber.w("DEDUP: Found ${entities.size - dedupedEntities.size} duplicate GUIDs in Room query result")
         }
 
         // Ensure participant data is loaded
@@ -130,7 +126,7 @@ class RoomMessageDataSource(
         addressToName = cachedParticipants.associate { normalizeAddress(it.address) to it.displayName }
         addressToAvatarPath = cachedParticipants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
-        Log.d(TAG, "Loaded ${cachedParticipants.size} participants")
+        Timber.d("Loaded ${cachedParticipants.size} participants")
     }
 
     /**
@@ -204,7 +200,7 @@ class RoomMessageDataSource(
         }
 
         if (changedGuids.isNotEmpty()) {
-            Log.d(TAG, "Incremental update: ${changedGuids.size} changed, ${messageModels.size - changedGuids.size} reused")
+            Timber.d("Incremental update: ${changedGuids.size} changed, ${messageModels.size - changedGuids.size} reused")
         }
 
         return messageModels

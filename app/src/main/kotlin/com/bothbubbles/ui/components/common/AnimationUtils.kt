@@ -236,21 +236,21 @@ fun Modifier.newMessageEntrance(
     // Only incoming messages get the subtle slide-up animation
     if (isFromMe) {
         val entranceTime = System.currentTimeMillis()
-        android.util.Log.i("SEND_TRACE", "[ANIM] Outgoing message INSTANT appearance at $entranceTime")
+        android.util.Timber.tag("SEND_TRACE").i("[ANIM] Outgoing message INSTANT appearance at $entranceTime")
         return this // No animation - instant appearance
     }
 
     var hasAppeared by remember { mutableStateOf(false) }
 
     // DEBUG: Log animation state
-    android.util.Log.d("MessageAnim", "newMessageEntrance: shouldAnimate=$shouldAnimate hasAppeared=$hasAppeared isFromMe=$isFromMe")
+    android.util.Timber.tag("MessageAnim").d("newMessageEntrance: shouldAnimate=$shouldAnimate hasAppeared=$hasAppeared isFromMe=$isFromMe")
 
     LaunchedEffect(Unit) {
-        android.util.Log.d("MessageAnim", "newMessageEntrance: LaunchedEffect starting animation")
+        android.util.Timber.tag("MessageAnim").d("newMessageEntrance: LaunchedEffect starting animation")
         // Minimal delay to ensure layout is ready
         delay(8)
         hasAppeared = true
-        android.util.Log.d("MessageAnim", "newMessageEntrance: hasAppeared set to true")
+        android.util.Timber.tag("MessageAnim").d("newMessageEntrance: hasAppeared set to true")
     }
 
     // Faster fade-in for incoming messages (100ms instead of 250ms)

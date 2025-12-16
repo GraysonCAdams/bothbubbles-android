@@ -1,6 +1,6 @@
 package com.bothbubbles.services.nameinference
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -17,8 +17,6 @@ class NameInferenceService @Inject constructor(
     private val handleDao: HandleDao
 ) {
     companion object {
-        private const val TAG = "NameInferenceService"
-
         // Case-insensitive name pattern - captures letters, apostrophes, hyphens
         // Supports: John, O'Brien, Mary-Kate, John Smith, De Marco
         private const val NAME_PATTERN = """([a-zA-Z][a-zA-Z''\-]*(?:\s+(?:[dD]e\s+|[vV]an\s+|[vV]on\s+|[oO]'|[mM]c|[mM]ac)?[a-zA-Z][a-zA-Z''\-]*)?)"""
@@ -136,7 +134,7 @@ class NameInferenceService @Inject constructor(
         if (handle.cachedDisplayName != null || handle.inferredName != null) return
 
         extractNameFromMessage(messageText)?.let { name ->
-            Log.i(TAG, "Inferred name '$name' for handle ${handle.address}")
+            Timber.i("Inferred name '$name' for handle ${handle.address}")
             handleDao.updateInferredName(handleId, name)
         }
     }

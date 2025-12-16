@@ -6,7 +6,7 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
@@ -47,9 +47,6 @@ class ConversationActionsDelegate @AssistedInject constructor(
         fun create(scope: CoroutineScope): ConversationActionsDelegate
     }
 
-    companion object {
-        private const val TAG = "ConversationActionsDelegate"
-    }
 
     // ============================================================================
     // Event Flow - Phase 8: Replaces callbacks
@@ -239,7 +236,7 @@ class ConversationActionsDelegate @AssistedInject constructor(
                     chatRepository.updateCustomAvatarPath(chatGuid, avatarPath)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to set group photo", e)
+                Timber.e(e, "Failed to set group photo")
             }
         }
     }
@@ -269,7 +266,7 @@ class ConversationActionsDelegate @AssistedInject constructor(
 
             photoFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save group photo", e)
+            Timber.e(e, "Failed to save group photo")
             null
         }
     }

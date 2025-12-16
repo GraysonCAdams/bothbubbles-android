@@ -98,7 +98,7 @@ fun MessageBubble(
     // PERFORMANCE TRACKING: Log when a temporary message is actually composed (debug builds only)
     if (BuildConfig.DEBUG && message.guid.startsWith("temp-")) {
         androidx.compose.runtime.SideEffect {
-            android.util.Log.d("MessageBubble", "⏱️ [RENDER] MessageBubble composed for ${message.guid}")
+            android.util.Timber.tag("MessageBubble").d("⏱️ [RENDER] MessageBubble composed for ${message.guid}")
         }
     }
 

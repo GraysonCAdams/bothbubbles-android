@@ -1,7 +1,7 @@
 package com.bothbubbles.services.linkpreview
 
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -86,26 +86,26 @@ class LinkPreviewService @Inject constructor(
                 // First, try maps preview for Google Maps / Apple Maps URLs
                 val mapsResult = mapsHandler.tryMapsPreview(url)
                 if (mapsResult != null) {
-                    Log.d(TAG, "Maps preview successful for: $url")
+                    Timber.d("Maps preview successful for: $url")
                     return@withPermit mapsResult
                 }
 
                 // Second, try oEmbed for supported providers
                 val oembedResult = oembedHandler.tryOEmbed(url)
                 if (oembedResult != null) {
-                    Log.d(TAG, "oEmbed successful for: $url")
+                    Timber.d("oEmbed successful for: $url")
                     return@withPermit oembedResult
                 }
 
                 // Fall back to Open Graph parsing
-                Log.d(TAG, "Falling back to Open Graph for: $url")
+                Timber.d("Falling back to Open Graph for: $url")
                 openGraphParser.fetchOpenGraphMetadata(url, urlResolver)
 
             } catch (e: IOException) {
-                Log.w(TAG, "Network error fetching metadata for $url", e)
+                Timber.w(e, "Network error fetching metadata for $url")
                 LinkMetadataResult.Error(e.message ?: "Network error")
             } catch (e: Exception) {
-                Log.e(TAG, "Unexpected error fetching metadata for $url", e)
+                Timber.e(e, "Unexpected error fetching metadata for $url")
                 LinkMetadataResult.Error(e.message ?: "Unknown error")
             }
         }

@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.setup.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.fcm.FirebaseConfigManager
 import com.bothbubbles.services.fcm.FcmTokenManager
@@ -44,7 +44,7 @@ class SyncDelegate(
                         firebaseConfigManager.initializeFromServer()
                         fcmTokenManager.refreshToken()
                     } catch (e: Exception) {
-                        Log.w("SetupViewModel", "FCM init failed", e)
+                        Timber.w(e, "FCM init failed")
                     }
                 }
 

@@ -3,7 +3,7 @@ package com.bothbubbles.services.contacts
 import android.content.ContentValues
 import android.content.Context
 import android.provider.BlockedNumberContract
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,9 +16,6 @@ import javax.inject.Singleton
 class ContactBlockingService @Inject constructor(
     @ApplicationContext private val context: Context
 ) : ContactBlocker {
-    companion object {
-        private const val TAG = "ContactBlockingService"
-    }
 
     /**
      * Check if the app can block numbers.
@@ -28,7 +25,7 @@ class ContactBlockingService @Inject constructor(
         return try {
             BlockedNumberContract.canCurrentUserBlockNumbers(context)
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking if can block numbers", e)
+            Timber.w(e, "Error checking if can block numbers")
             false
         }
     }
@@ -41,7 +38,7 @@ class ContactBlockingService @Inject constructor(
      */
     override fun blockNumber(phoneNumber: String): Boolean {
         if (!canBlockNumbers()) {
-            Log.w(TAG, "App cannot block numbers - must be default dialer or SMS app")
+            Timber.w("App cannot block numbers - must be default dialer or SMS app")
             return false
         }
 
@@ -56,14 +53,14 @@ class ContactBlockingService @Inject constructor(
             )
 
             if (uri != null) {
-                Log.d(TAG, "Successfully blocked number: $phoneNumber")
+                Timber.d("Successfully blocked number: $phoneNumber")
                 true
             } else {
-                Log.w(TAG, "Failed to block number: $phoneNumber")
+                Timber.w("Failed to block number: $phoneNumber")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error blocking number: $phoneNumber", e)
+            Timber.e(e, "Error blocking number: $phoneNumber")
             false
         }
     }
@@ -75,7 +72,7 @@ class ContactBlockingService @Inject constructor(
         return try {
             BlockedNumberContract.isBlocked(context, phoneNumber)
         } catch (e: Exception) {
-            Log.w(TAG, "Error checking if number is blocked: $phoneNumber", e)
+            Timber.w(e, "Error checking if number is blocked: $phoneNumber")
             false
         }
     }
@@ -86,7 +83,7 @@ class ContactBlockingService @Inject constructor(
      */
     override fun unblockNumber(phoneNumber: String): Boolean {
         if (!canBlockNumbers()) {
-            Log.w(TAG, "App cannot unblock numbers - must be default dialer or SMS app")
+            Timber.w("App cannot unblock numbers - must be default dialer or SMS app")
             return false
         }
 
@@ -98,14 +95,14 @@ class ContactBlockingService @Inject constructor(
             )
 
             if (rowsDeleted > 0) {
-                Log.d(TAG, "Successfully unblocked number: $phoneNumber")
+                Timber.d("Successfully unblocked number: $phoneNumber")
                 true
             } else {
-                Log.w(TAG, "Number was not blocked: $phoneNumber")
+                Timber.w("Number was not blocked: $phoneNumber")
                 false
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error unblocking number: $phoneNumber", e)
+            Timber.e(e, "Error unblocking number: $phoneNumber")
             false
         }
     }
@@ -135,9 +132,9 @@ class ContactBlockingService @Inject constructor(
                 }
             }
         } catch (e: SecurityException) {
-            Log.w(TAG, "Not authorized to access blocked numbers", e)
+            Timber.w(e, "Not authorized to access blocked numbers")
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting blocked numbers", e)
+            Timber.e(e, "Error getting blocked numbers")
         }
 
         return numbers

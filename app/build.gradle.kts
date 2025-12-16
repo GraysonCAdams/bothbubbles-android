@@ -172,6 +172,9 @@ dependencies {
     // Phone Number Formatting
     implementation(libs.libphonenumber)
 
+    // Logging
+    implementation("com.jakewharton.timber:timber:5.0.1")
+
     // Testing
     testImplementation(libs.junit)
     testImplementation(libs.mockito.kotlin)

@@ -2,7 +2,7 @@ package com.bothbubbles.services.spam
 
 import android.content.Context
 import android.telephony.SmsManager
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -32,8 +32,6 @@ class SpamReportingService @Inject constructor(
     private val messageDao: MessageDao
 ) {
     companion object {
-        private const val TAG = "SpamReportingService"
-
         /** The universal carrier spam reporting short code */
         const val SPAM_SHORT_CODE = "7726"
 
@@ -63,20 +61,20 @@ class SpamReportingService @Inject constructor(
     suspend fun reportToCarrier(chatGuid: String): ReportResult {
         // Check if this is an SMS chat
         if (!chatGuid.startsWith("SMS;")) {
-            Log.w(TAG, "Cannot report non-SMS chat to carrier: $chatGuid")
+            Timber.w("Cannot report non-SMS chat to carrier: $chatGuid")
             return ReportResult.NotSmsChat
         }
 
         // Get the chat to find the sender's phone number
         val chat = chatDao.getChatByGuid(chatGuid)
         if (chat == null) {
-            Log.w(TAG, "Chat not found: $chatGuid")
+            Timber.w("Chat not found: $chatGuid")
             return ReportResult.Error("Chat not found")
         }
 
         val senderNumber = chat.chatIdentifier
         if (senderNumber.isNullOrBlank()) {
-            Log.w(TAG, "No sender number found for chat: $chatGuid")
+            Timber.w("No sender number found for chat: $chatGuid")
             return ReportResult.Error("Sender number not found")
         }
 
@@ -85,7 +83,7 @@ class SpamReportingService @Inject constructor(
         val spamMessage = messages.firstOrNull { msg -> !msg.isFromMe }
 
         if (spamMessage == null) {
-            Log.w(TAG, "No messages found from sender in chat: $chatGuid")
+            Timber.w("No messages found from sender in chat: $chatGuid")
             return ReportResult.NoMessagesFound
         }
 
@@ -93,7 +91,7 @@ class SpamReportingService @Inject constructor(
 
         return try {
             // Send the spam message content to 7726
-            Log.i(TAG, "Reporting spam to carrier: sending message content to 7726")
+            Timber.i("Reporting spam to carrier: sending message content to 7726")
             sendSms(SPAM_SHORT_CODE, messageContent)
 
             // Mark the chat as reported to carrier
@@ -103,13 +101,13 @@ class SpamReportingService @Inject constructor(
             // This is done asynchronously - the carrier will request the number
             kotlinx.coroutines.delay(REPLY_DELAY_MS)
 
-            Log.i(TAG, "Sending sender number to 7726: $senderNumber")
+            Timber.i("Sending sender number to 7726: $senderNumber")
             sendSms(SPAM_SHORT_CODE, senderNumber)
 
-            Log.i(TAG, "Successfully reported spam to carrier for chat: $chatGuid")
+            Timber.i("Successfully reported spam to carrier for chat: $chatGuid")
             ReportResult.Success
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to report spam to carrier", e)
+            Timber.e(e, "Failed to report spam to carrier")
             ReportResult.Error(e.message ?: "Unknown error")
         }
     }

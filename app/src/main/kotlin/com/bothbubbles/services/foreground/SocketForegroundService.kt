@@ -6,7 +6,7 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.os.IBinder
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
@@ -81,15 +81,15 @@ class SocketForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service created")
+        Timber.d("Service created")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service started")
+        Timber.d("Service started")
 
         when (intent?.action) {
             ACTION_STOP -> {
-                Log.d(TAG, "Stopping service via notification action")
+                Timber.d("Stopping service via notification action")
                 stopSelf()
                 return START_NOT_STICKY
             }
@@ -120,7 +120,7 @@ class SocketForegroundService : Service() {
                     updateNotification(statusText)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error in socket connection", e)
+                Timber.e(e, "Error in socket connection")
                 updateNotification("Error: ${e.message}")
             }
         }
@@ -130,7 +130,7 @@ class SocketForegroundService : Service() {
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "Service destroyed")
+        Timber.d("Service destroyed")
         // Cancel the notification update job - prevents zombie collectors
         notificationJob?.cancel()
         notificationJob = null

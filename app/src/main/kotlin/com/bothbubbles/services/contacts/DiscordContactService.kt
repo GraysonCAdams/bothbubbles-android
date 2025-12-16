@@ -4,7 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.pm.PackageManager
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -58,7 +58,7 @@ class DiscordContactService @Inject constructor(
                 } else null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting Discord channel ID for $address", e)
+            Timber.w(e, "Error getting Discord channel ID for $address")
             null
         }
     }
@@ -73,13 +73,13 @@ class DiscordContactService @Inject constructor(
      */
     fun setDiscordChannelId(address: String, channelId: String): Boolean {
         if (address.isBlank() || !isValidChannelId(channelId)) {
-            Log.w(TAG, "Invalid address or channel ID: address=$address, channelId=$channelId")
+            Timber.w("Invalid address or channel ID: address=$address, channelId=$channelId")
             return false
         }
 
         val contactId = contactQueryHelper.getContactId(address)
         if (contactId == null) {
-            Log.w(TAG, "Contact not found for address: $address")
+            Timber.w("Contact not found for address: $address")
             return false
         }
 
@@ -87,7 +87,7 @@ class DiscordContactService @Inject constructor(
             // Get the raw contact ID (needed for inserting data)
             val rawContactId = getRawContactId(contactId)
             if (rawContactId == null) {
-                Log.w(TAG, "Raw contact not found for contact ID: $contactId")
+                Timber.w("Raw contact not found for contact ID: $contactId")
                 return false
             }
 
@@ -105,7 +105,7 @@ class DiscordContactService @Inject constructor(
                     "${ContactsContract.Data._ID} = ?",
                     arrayOf(existingDataId.toString())
                 )
-                Log.d(TAG, "Updated Discord channel ID for contact $contactId: updated=$updated")
+                Timber.d("Updated Discord channel ID for contact $contactId: updated=$updated")
                 updated > 0
             } else {
                 // Insert new row
@@ -115,11 +115,11 @@ class DiscordContactService @Inject constructor(
                     put(ContactsContract.Data.DATA1, channelId)
                 }
                 val uri = context.contentResolver.insert(ContactsContract.Data.CONTENT_URI, values)
-                Log.d(TAG, "Inserted Discord channel ID for contact $contactId: uri=$uri")
+                Timber.d("Inserted Discord channel ID for contact $contactId: uri=$uri")
                 uri != null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error setting Discord channel ID for $address", e)
+            Timber.e(e, "Error setting Discord channel ID for $address")
             false
         }
     }
@@ -141,10 +141,10 @@ class DiscordContactService @Inject constructor(
                 "${ContactsContract.Data.CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
                 arrayOf(contactId.toString(), MIME_TYPE)
             )
-            Log.d(TAG, "Cleared Discord channel ID for contact $contactId: deleted=$deleted")
+            Timber.d("Cleared Discord channel ID for contact $contactId: deleted=$deleted")
             true
         } catch (e: Exception) {
-            Log.e(TAG, "Error clearing Discord channel ID for $address", e)
+            Timber.e(e, "Error clearing Discord channel ID for $address")
             false
         }
     }
@@ -189,7 +189,7 @@ class DiscordContactService @Inject constructor(
                 } else null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting raw contact ID for contact $contactId", e)
+            Timber.w(e, "Error getting raw contact ID for contact $contactId")
             null
         }
     }
@@ -212,7 +212,7 @@ class DiscordContactService @Inject constructor(
                 } else null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error getting existing data ID for contact $contactId", e)
+            Timber.w(e, "Error getting existing data ID for contact $contactId")
             null
         }
     }

@@ -4,7 +4,7 @@ import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,10 +15,6 @@ import javax.inject.Singleton
 class SmsContentProvider @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    companion object {
-        private const val TAG = "SmsContentProvider"
-    }
-
     private val contentResolver: ContentResolver = context.contentResolver
 
     // ===== Threads (Conversations) =====
@@ -27,7 +23,7 @@ class SmsContentProvider @Inject constructor(
      * Get all SMS/MMS threads (conversations)
      */
     suspend fun getThreads(limit: Int = 100, offset: Int = 0): List<SmsThread> = withContext(Dispatchers.IO) {
-        Log.d(TAG, "getThreads called (limit=$limit, offset=$offset)")
+        Timber.d("getThreads called (limit=$limit, offset=$offset)")
         val threads = mutableListOf<SmsThread>()
 
         val projection = arrayOf(
@@ -39,7 +35,7 @@ class SmsContentProvider @Inject constructor(
             Telephony.Threads.RECIPIENT_IDS
         )
 
-        Log.d(TAG, "Querying content resolver...")
+        Timber.d("Querying content resolver...")
         val cursor = contentResolver.query(
             Telephony.Threads.CONTENT_URI.buildUpon()
                 .appendQueryParameter("simple", "true")
@@ -49,7 +45,7 @@ class SmsContentProvider @Inject constructor(
             null,
             "${Telephony.Threads.DATE} DESC LIMIT $limit OFFSET $offset"
         )
-        Log.d(TAG, "Query returned, cursor count: ${cursor?.count ?: -1}")
+        Timber.d("Query returned, cursor count: ${cursor?.count ?: -1}")
 
         // First pass: collect thread info without addresses
         data class ThreadInfo(
@@ -76,13 +72,13 @@ class SmsContentProvider @Inject constructor(
             }
         }
 
-        Log.d(TAG, "Collected ${threadInfos.size} thread infos, fetching addresses in batch...")
+        Timber.d("Collected ${threadInfos.size} thread infos, fetching addresses in batch...")
 
         // Batch lookup addresses for all threads at once (much faster than N+1 queries)
         val threadIds = threadInfos.map { it.threadId }
         val addressMap = contentResolver.getAddressesForThreadsBatch(threadIds)
 
-        Log.d(TAG, "Batch address lookup complete, building thread objects...")
+        Timber.d("Batch address lookup complete, building thread objects...")
 
         // Build final thread objects
         for (info in threadInfos) {
@@ -98,7 +94,7 @@ class SmsContentProvider @Inject constructor(
             )
         }
 
-        Log.d(TAG, "Returning ${threads.size} threads")
+        Timber.d("Returning ${threads.size} threads")
         threads
     }
 

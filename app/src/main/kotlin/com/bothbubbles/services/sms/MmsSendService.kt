@@ -6,7 +6,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -36,8 +36,6 @@ class MmsSendService @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
-        private const val TAG = "MmsSendService"
-
         // MMS address types (from PduHeaders)
         private const val PDU_ADDR_TYPE_TO = 151
 
@@ -126,7 +124,7 @@ class MmsSendService @Inject constructor(
                 null // sentIntent - we'll use content observer to track status
             )
 
-            Log.d(TAG, "MMS queued for sending: $messageGuid")
+            Timber.d("MMS queued for sending: $messageGuid")
 
             // Clean up temp file after a delay (system needs it briefly for sending)
             // Using a coroutine with delay is more reliable than deleteOnExit()
@@ -135,10 +133,10 @@ class MmsSendService @Inject constructor(
                 try {
                     if (pduFile.exists()) {
                         pduFile.delete()
-                        Log.d(TAG, "Cleaned up temp PDU file: ${pduFile.name}")
+                        Timber.d("Cleaned up temp PDU file: ${pduFile.name}")
                     }
                 } catch (e: Exception) {
-                    Log.w(TAG, "Failed to clean up temp PDU file", e)
+                    Timber.w(e, "Failed to clean up temp PDU file")
                 }
             }
 
@@ -163,7 +161,7 @@ class MmsSendService @Inject constructor(
                 data = data
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to read attachment: $uri", e)
+            Timber.e(e, "Failed to read attachment: $uri")
             null
         }
     }
@@ -223,13 +221,13 @@ class MmsSendService @Inject constructor(
             attachments.forEach { insertMmsAttachmentPart(mmsId, it) }
 
             val threadId = queryMmsThreadId(mmsId)
-            Log.d(TAG, "Inserted MMS to provider: $mmsUri")
+            Timber.d("Inserted MMS to provider: $mmsUri")
             MmsProviderRef(mmsUri, mmsId, threadId)
         } catch (e: SecurityException) {
-            Log.w(TAG, "Missing permission to write MMS provider", e)
+            Timber.w(e, "Missing permission to write MMS provider")
             null
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to insert MMS to provider", e)
+            Timber.e(e, "Failed to insert MMS to provider")
             null
         }
     }
@@ -284,7 +282,7 @@ class MmsSendService @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to persist MMS attachment", e)
+            Timber.e(e, "Failed to persist MMS attachment")
         }
     }
 

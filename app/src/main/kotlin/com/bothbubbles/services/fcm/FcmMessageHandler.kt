@@ -1,6 +1,6 @@
 package com.bothbubbles.services.fcm
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.displayName
@@ -48,8 +48,6 @@ class FcmMessageHandler @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
-        private const val TAG = "FcmMessageHandler"
-
         // Debug flag: set to true to allow notifications for own messages (for testing)
         private const val DEBUG_ALLOW_OWN_MESSAGE_NOTIFICATIONS = false
 
@@ -74,11 +72,11 @@ class FcmMessageHandler @Inject constructor(
      */
     suspend fun handleMessage(message: RemoteMessage) {
         val type = message.data["type"]
-        Log.d(TAG, "Received FCM message type: $type")
+        Timber.d("Received FCM message type: $type")
         developerEventLog.get().logFcmEvent(type ?: "unknown", "FCM push received")
 
         if (type.isNullOrBlank()) {
-            Log.w(TAG, "FCM message has no type, ignoring")
+            Timber.w("FCM message has no type, ignoring")
             developerEventLog.get().logFcmEvent("IGNORED", "No type field")
             return
         }
@@ -91,11 +89,11 @@ class FcmMessageHandler @Inject constructor(
             TYPE_CHAT_READ_STATUS_CHANGED -> handleChatReadStatus(message.data)
             TYPE_TYPING_INDICATOR -> {
                 // Typing indicators are handled via socket only
-                Log.d(TAG, "Ignoring typing indicator from FCM")
+                Timber.d("Ignoring typing indicator from FCM")
                 developerEventLog.get().logFcmEvent(type, "Ignored (socket-only)")
             }
             else -> {
-                Log.d(TAG, "Unhandled FCM message type: $type")
+                Timber.d("Unhandled FCM message type: $type")
                 developerEventLog.get().logFcmEvent(type, "Unhandled type")
                 // Trigger socket reconnect for unhandled events that might need full data
                 triggerSocketReconnect()
@@ -107,7 +105,7 @@ class FcmMessageHandler @Inject constructor(
         // BlueBubbles server sends message data as a JSON string in the "data" field
         val dataJsonString = data["data"]
         if (dataJsonString.isNullOrBlank()) {
-            Log.w(TAG, "FCM new-message missing 'data' field")
+            Timber.w("FCM new-message missing 'data' field")
             triggerSocketReconnect()
             return
         }
@@ -117,7 +115,7 @@ class FcmMessageHandler @Inject constructor(
         try {
             messageJson = JSONObject(dataJsonString)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse FCM message JSON", e)
+            Timber.e(e, "Failed to parse FCM message JSON")
             triggerSocketReconnect()
             return
         }
@@ -138,36 +136,36 @@ class FcmMessageHandler @Inject constructor(
         val senderAddress = handleObj?.optString("address", null)
 
         // Always log FCM message details for debugging (even if socket handles it)
-        Log.d(TAG, "FCM new-message: guid=$messageGuid, text='$messageText', isFromMe=$isFromMe, chatGuid=$chatGuid")
+        Timber.d("FCM new-message: guid=$messageGuid, text='$messageText', isFromMe=$isFromMe, chatGuid=$chatGuid")
 
         if (chatGuid.isNullOrBlank() || messageGuid.isBlank()) {
-            Log.w(TAG, "FCM new-message missing required fields: chatGuid=$chatGuid, messageGuid=$messageGuid")
+            Timber.w("FCM new-message missing required fields: chatGuid=$chatGuid, messageGuid=$messageGuid")
             triggerSocketReconnect()
             return
         }
 
         // If socket is connected, it will handle the message with full data
         if (socketService.isConnected()) {
-            Log.d(TAG, "Socket connected, skipping FCM notification (socket will handle)")
+            Timber.d("Socket connected, skipping FCM notification (socket will handle)")
             return
         }
 
         // Skip if message is from me
         if (isFromMe) {
-            Log.d(TAG, "Skipping notification for own message")
+            Timber.d("Skipping notification for own message")
             return
         }
 
         // Check for duplicate notification (message may arrive via both FCM and socket)
         if (!messageDeduplicator.shouldNotifyForMessage(messageGuid)) {
-            Log.d(TAG, "Message $messageGuid already notified, skipping FCM duplicate notification")
+            Timber.d("Message $messageGuid already notified, skipping FCM duplicate notification")
             triggerSocketReconnect()
             return
         }
 
         // Check if user is currently viewing this conversation
         if (activeConversationManager.isConversationActive(chatGuid)) {
-            Log.d(TAG, "Chat $chatGuid is currently active, skipping FCM notification")
+            Timber.d("Chat $chatGuid is currently active, skipping FCM notification")
             triggerSocketReconnect()
             return
         }
@@ -177,14 +175,14 @@ class FcmMessageHandler @Inject constructor(
 
         // Check if notifications are disabled for this chat
         if (chat?.notificationsEnabled == false) {
-            Log.d(TAG, "Notifications disabled for chat $chatGuid, skipping FCM notification")
+            Timber.d("Notifications disabled for chat $chatGuid, skipping FCM notification")
             triggerSocketReconnect()
             return
         }
 
         // Check if chat is snoozed
         if (chat?.isSnoozed == true) {
-            Log.d(TAG, "Chat $chatGuid is snoozed, skipping FCM notification")
+            Timber.d("Chat $chatGuid is snoozed, skipping FCM notification")
             triggerSocketReconnect()
             return
         }
@@ -226,7 +224,7 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // Show notification
-        Log.d(TAG, "DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
+        Timber.d("DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
         notificationService.showMessageNotification(
             chatGuid = chatGuid,
             chatTitle = chatTitle,
@@ -238,7 +236,7 @@ class FcmMessageHandler @Inject constructor(
             avatarUri = senderAvatarUri,
             participantNames = participantNames
         )
-        Log.d(TAG, "DEBUG: Notification shown successfully!")
+        Timber.d("DEBUG: Notification shown successfully!")
 
         // Trigger socket reconnect to sync full data
         triggerSocketReconnect()
@@ -280,7 +278,7 @@ class FcmMessageHandler @Inject constructor(
     }
 
     private fun handleUpdatedMessage(data: Map<String, String>) {
-        Log.d(TAG, "Message updated via FCM: ${data["guid"]}")
+        Timber.d("Message updated via FCM: ${data["guid"]}")
         // Trigger socket reconnect to get full update
         triggerSocketReconnect()
     }
@@ -292,11 +290,11 @@ class FcmMessageHandler @Inject constructor(
         val callerAddress = data["handle"] ?: data["callerAddress"]
 
         if (callUuid.isNullOrBlank()) {
-            Log.w(TAG, "FaceTime call missing UUID")
+            Timber.w("FaceTime call missing UUID")
             return
         }
 
-        Log.d(TAG, "FaceTime call: $callUuid, status: $status")
+        Timber.d("FaceTime call: $callUuid, status: $status")
 
         when (status?.lowercase()) {
             "incoming", "ringing" -> {
@@ -310,19 +308,19 @@ class FcmMessageHandler @Inject constructor(
                 notificationService.dismissFaceTimeCallNotification(callUuid)
             }
             else -> {
-                Log.d(TAG, "Unknown FaceTime status: $status")
+                Timber.d("Unknown FaceTime status: $status")
             }
         }
     }
 
     private fun handleServerUpdate(data: Map<String, String>) {
         val version = data["version"]
-        Log.i(TAG, "Server update notification: $version")
+        Timber.i("Server update notification: $version")
         // Could show a notification about server update available
     }
 
     private fun handleChatReadStatus(data: Map<String, String>) {
-        Log.d(TAG, "Chat read status changed via FCM")
+        Timber.d("Chat read status changed via FCM")
         // Socket will handle the full update
         triggerSocketReconnect()
     }
@@ -333,7 +331,7 @@ class FcmMessageHandler @Inject constructor(
      */
     private fun triggerSocketReconnect() {
         if (!socketService.isConnected()) {
-            Log.d(TAG, "Triggering socket reconnect")
+            Timber.d("Triggering socket reconnect")
             applicationScope.launch(ioDispatcher) {
                 // Small delay to avoid immediate reconnect spam
                 delay(1000)

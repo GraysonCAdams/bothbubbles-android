@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.chat
 
 import android.widget.Toast
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.BuildConfig
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
@@ -65,7 +65,7 @@ private const val SCROLL_DEBUG_TAG = "ChatScroll"
 /** Debug-only scroll logging - compiles out in release builds */
 private inline fun scrollDebugLog(message: () -> String) {
     if (BuildConfig.DEBUG) {
-        Log.d(SCROLL_DEBUG_TAG, message())
+        Timber.tag(SCROLL_DEBUG_TAG).d(message())
     }
 }
 

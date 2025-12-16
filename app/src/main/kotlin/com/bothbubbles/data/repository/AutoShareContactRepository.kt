@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.AutoShareContactDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.AutoShareContactEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -31,7 +31,6 @@ class AutoShareContactRepository @Inject constructor(
     private val dao: AutoShareContactDao
 ) {
     companion object {
-        private const val TAG = "AutoShareContactRepo"
         const val MAX_CONTACTS = 5
     }
 
@@ -84,13 +83,13 @@ class AutoShareContactRepository @Inject constructor(
     suspend fun add(chatGuid: String, displayName: String): Boolean {
         // Check limit
         if (!canAddMore()) {
-            Log.w(TAG, "Cannot add contact: max limit of $MAX_CONTACTS reached")
+            Timber.w("Cannot add contact: max limit of $MAX_CONTACTS reached")
             return false
         }
 
         // Check if already exists
         if (exists(chatGuid)) {
-            Log.w(TAG, "Cannot add contact: already exists")
+            Timber.w("Cannot add contact: already exists")
             return false
         }
 
@@ -102,7 +101,7 @@ class AutoShareContactRepository @Inject constructor(
 
         val result = dao.insert(entity)
         if (result != -1L) {
-            Log.d(TAG, "Added auto-share contact: $displayName")
+            Timber.d("Added auto-share contact: $displayName")
             return true
         }
         return false
@@ -113,7 +112,7 @@ class AutoShareContactRepository @Inject constructor(
      */
     suspend fun remove(chatGuid: String) {
         dao.delete(chatGuid)
-        Log.d(TAG, "Removed auto-share contact: $chatGuid")
+        Timber.d("Removed auto-share contact: $chatGuid")
     }
 
     /**
@@ -121,7 +120,7 @@ class AutoShareContactRepository @Inject constructor(
      */
     suspend fun setEnabled(chatGuid: String, enabled: Boolean) {
         dao.updateEnabled(chatGuid, enabled)
-        Log.d(TAG, "Set auto-share contact $chatGuid enabled=$enabled")
+        Timber.d("Set auto-share contact $chatGuid enabled=$enabled")
     }
 
     /**
@@ -137,7 +136,7 @@ class AutoShareContactRepository @Inject constructor(
      */
     suspend fun removeAll() {
         dao.deleteAll()
-        Log.d(TAG, "Removed all auto-share contacts")
+        Timber.d("Removed all auto-share contacts")
     }
 
     // ===== Mapping =====

@@ -1,6 +1,6 @@
 package com.bothbubbles.services.linkpreview
 
-import android.util.Log
+import timber.log.Timber
 import java.net.URI
 
 /**
@@ -9,10 +9,6 @@ import java.net.URI
  * Handles relative URLs, protocol-relative URLs, and validates URL formats.
  */
 internal class UrlResolver {
-    companion object {
-        private const val TAG = "UrlResolver"
-    }
-
     /**
      * Resolves a potentially relative URL against a base URL
      */
@@ -33,7 +29,7 @@ internal class UrlResolver {
                 }
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to resolve URL: $url against $baseUrl", e)
+            Timber.w(e, "Failed to resolve URL: $url against $baseUrl")
             null
         }
     }

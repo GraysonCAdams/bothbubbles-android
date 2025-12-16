@@ -1,6 +1,6 @@
 package com.bothbubbles.services.media
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
@@ -41,7 +41,6 @@ class AttachmentDownloadQueue @Inject constructor(
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
     companion object {
-        private const val TAG = "AttachmentDownloadQueue"
         private const val MAX_CONCURRENT_DOWNLOADS = 2
 
         /** Maximum number of retry attempts before permanent failure */
@@ -161,7 +160,7 @@ class AttachmentDownloadQueue @Inject constructor(
         priority: Priority = Priority.BACKGROUND
     ) {
         if (queuedGuids.contains(attachmentGuid)) {
-            Log.d(TAG, "Attachment $attachmentGuid already queued, skipping")
+            Timber.d("Attachment $attachmentGuid already queued, skipping")
             return
         }
 
@@ -181,7 +180,7 @@ class AttachmentDownloadQueue @Inject constructor(
         pendingQueue.offer(request)
         updateQueueSize()
 
-        Log.d(TAG, "Enqueued download: $attachmentGuid with priority ${effectivePriority.name}")
+        Timber.d("Enqueued download: $attachmentGuid with priority ${effectivePriority.name}")
 
         // Start processing if not already running
         processQueue()
@@ -198,7 +197,7 @@ class AttachmentDownloadQueue @Inject constructor(
         pending.forEach { attachment ->
             enqueue(attachment.guid, chatGuid, priority)
         }
-        Log.d(TAG, "Enqueued ${pending.size} attachments for chat $chatGuid")
+        Timber.d("Enqueued ${pending.size} attachments for chat $chatGuid")
     }
 
     /**
@@ -220,7 +219,7 @@ class AttachmentDownloadQueue @Inject constructor(
         pendingQueue.removeIf { it.attachmentGuid == attachmentGuid }
         queuedGuids.remove(attachmentGuid)
         updateQueueSize()
-        Log.d(TAG, "Cancelled download: $attachmentGuid")
+        Timber.d("Cancelled download: $attachmentGuid")
     }
 
     /**
@@ -229,7 +228,7 @@ class AttachmentDownloadQueue @Inject constructor(
     fun cancelForChat(chatGuid: String) {
         pendingQueue.removeIf { it.chatGuid == chatGuid }
         updateQueueSize()
-        Log.d(TAG, "Cancelled all downloads for chat: $chatGuid")
+        Timber.d("Cancelled all downloads for chat: $chatGuid")
     }
 
     /**
@@ -239,7 +238,7 @@ class AttachmentDownloadQueue @Inject constructor(
         pendingQueue.clear()
         queuedGuids.clear()
         updateQueueSize()
-        Log.d(TAG, "Queue cleared")
+        Timber.d("Queue cleared")
     }
 
     /**
@@ -254,29 +253,29 @@ class AttachmentDownloadQueue @Inject constructor(
 
     private fun processQueue() {
         applicationScope.launch(ioDispatcher) {
-            Log.d("ChatScroll", "[DownloadQueue] processQueue started, pendingSize=${pendingQueue.size}")
+            Timber.tag("ChatScroll").d("[DownloadQueue] processQueue started, pendingSize=${pendingQueue.size}")
             while (pendingQueue.isNotEmpty()) {
                 val request = pendingQueue.poll() ?: break
 
                 // Skip if already downloaded or being downloaded
                 if (activeDownloads.containsKey(request.attachmentGuid)) {
-                    Log.d("ChatScroll", "[DownloadQueue] Skip ${request.attachmentGuid} - already downloading")
+                    Timber.tag("ChatScroll").d("[DownloadQueue] Skip ${request.attachmentGuid} - already downloading")
                     continue
                 }
 
                 // Check if already downloaded
                 val attachment = attachmentDao.getAttachmentByGuid(request.attachmentGuid)
                 if (attachment?.localPath != null) {
-                    Log.d("ChatScroll", "[DownloadQueue] Skip ${request.attachmentGuid} - already downloaded locally")
+                    Timber.tag("ChatScroll").d("[DownloadQueue] Skip ${request.attachmentGuid} - already downloaded locally")
                     queuedGuids.remove(request.attachmentGuid)
                     updateQueueSize()
                     continue
                 }
 
                 // Acquire semaphore (blocks if at max concurrent)
-                Log.d("ChatScroll", "[DownloadQueue] Waiting for semaphore, activeDownloads=${activeDownloads.size}")
+                Timber.tag("ChatScroll").d("[DownloadQueue] Waiting for semaphore, activeDownloads=${activeDownloads.size}")
                 semaphore.withPermit {
-                    Log.d("ChatScroll", "[DownloadQueue] >>> START download: ${request.attachmentGuid}, priority=${request.priority}")
+                    Timber.tag("ChatScroll").d("[DownloadQueue] >>> START download: ${request.attachmentGuid}, priority=${request.priority}")
                     activeDownloads[request.attachmentGuid] = request
                     updateQueueSize()
 
@@ -286,16 +285,16 @@ class AttachmentDownloadQueue @Inject constructor(
                         activeDownloads.remove(request.attachmentGuid)
                         queuedGuids.remove(request.attachmentGuid)
                         updateQueueSize()
-                        Log.d("ChatScroll", "[DownloadQueue] <<< END download: ${request.attachmentGuid}")
+                        Timber.tag("ChatScroll").d("[DownloadQueue] <<< END download: ${request.attachmentGuid}")
                     }
                 }
             }
-            Log.d("ChatScroll", "[DownloadQueue] processQueue finished")
+            Timber.tag("ChatScroll").d("[DownloadQueue] processQueue finished")
         }
     }
 
     private suspend fun downloadAttachment(request: DownloadRequest) {
-        Log.d(TAG, "Starting download: ${request.attachmentGuid}")
+        Timber.d("Starting download: ${request.attachmentGuid}")
 
         // Get current attachment to check retry count and size
         val attachment = attachmentDao.getAttachmentByGuid(request.attachmentGuid)
@@ -305,7 +304,7 @@ class AttachmentDownloadQueue @Inject constructor(
         val runtime = Runtime.getRuntime()
         val freeMemory = runtime.maxMemory() - (runtime.totalMemory() - runtime.freeMemory())
         if (freeMemory < MIN_FREE_MEMORY_BYTES) {
-            Log.w(TAG, "Low memory (${freeMemory / 1024 / 1024}MB free), skipping download: ${request.attachmentGuid}")
+            Timber.w("Low memory (${freeMemory / 1024 / 1024}MB free), skipping download: ${request.attachmentGuid}")
             // Don't mark as failed - will retry when memory is available
             return
         }
@@ -313,7 +312,7 @@ class AttachmentDownloadQueue @Inject constructor(
         // Skip auto-download of large files (user can manually download)
         val fileSize = attachment?.totalBytes ?: 0L
         if (fileSize > MAX_AUTO_DOWNLOAD_SIZE && request.priority != Priority.IMMEDIATE) {
-            Log.d(TAG, "Skipping large file (${fileSize / 1024 / 1024}MB) for auto-download: ${request.attachmentGuid}")
+            Timber.d("Skipping large file (${fileSize / 1024 / 1024}MB) for auto-download: ${request.attachmentGuid}")
             // Mark as requiring manual download
             attachmentDao.markTransferFailedWithError(
                 guid = request.attachmentGuid,
@@ -334,7 +333,7 @@ class AttachmentDownloadQueue @Inject constructor(
 
         // Check if max retries exceeded
         if (currentRetryCount >= MAX_RETRY_COUNT) {
-            Log.w(TAG, "Max retries exceeded for ${request.attachmentGuid}, skipping")
+            Timber.w("Max retries exceeded for ${request.attachmentGuid}, skipping")
             val errorState = AttachmentErrorState.MaxRetriesExceeded
             attachmentDao.markTransferFailedWithError(
                 guid = request.attachmentGuid,
@@ -356,7 +355,7 @@ class AttachmentDownloadQueue @Inject constructor(
         // Apply exponential backoff if this is a retry
         if (currentRetryCount > 0) {
             val backoffMs = calculateBackoff(currentRetryCount)
-            Log.d(TAG, "Retry #$currentRetryCount for ${request.attachmentGuid}, waiting ${backoffMs}ms")
+            Timber.d("Retry #$currentRetryCount for ${request.attachmentGuid}, waiting ${backoffMs}ms")
             delay(backoffMs)
         }
 
@@ -380,7 +379,7 @@ class AttachmentDownloadQueue @Inject constructor(
                     updateProgress(request.attachmentGuid, file.length(), file.length(), true)
                     // Emit completion event for UI refresh
                     _downloadCompletions.tryEmit(request.attachmentGuid)
-                    Log.d(TAG, "Download complete: ${request.attachmentGuid}")
+                    Timber.d("Download complete: ${request.attachmentGuid}")
                 },
                 onFailure = { error ->
                     handleDownloadError(request.attachmentGuid, error)
@@ -397,7 +396,7 @@ class AttachmentDownloadQueue @Inject constructor(
     private suspend fun handleDownloadError(attachmentGuid: String, error: Throwable) {
         val errorState = AttachmentErrorState.fromException(error)
 
-        Log.e(TAG, "Download failed: $attachmentGuid - ${errorState.type}: ${errorState.userMessage}", error)
+        Timber.e(error, "Download failed: $attachmentGuid - ${errorState.type}: ${errorState.userMessage}")
 
         // Update database with error details
         attachmentDao.markTransferFailedWithError(
@@ -476,7 +475,7 @@ class AttachmentDownloadQueue @Inject constructor(
         }
 
         if (toReprioritize.isNotEmpty()) {
-            Log.d(TAG, "Reprioritized ${toReprioritize.size} downloads for active chat $chatGuid")
+            Timber.d("Reprioritized ${toReprioritize.size} downloads for active chat $chatGuid")
         }
     }
 
@@ -493,7 +492,7 @@ class AttachmentDownloadQueue @Inject constructor(
         chatGuid: String,
         resetRetryCount: Boolean = true
     ) {
-        Log.d(TAG, "Retrying download: $attachmentGuid, resetRetryCount=$resetRetryCount")
+        Timber.d("Retrying download: $attachmentGuid, resetRetryCount=$resetRetryCount")
 
         // Clear error state in database
         attachmentDao.clearErrorForRetry(attachmentGuid)
@@ -524,7 +523,7 @@ class AttachmentDownloadQueue @Inject constructor(
      */
     suspend fun retryAllFailedForChat(chatGuid: String) {
         val failedAttachments = attachmentDao.getFailedAttachmentsForChat(chatGuid)
-        Log.d(TAG, "Retrying ${failedAttachments.size} failed downloads for chat $chatGuid")
+        Timber.d("Retrying ${failedAttachments.size} failed downloads for chat $chatGuid")
 
         failedAttachments.forEach { attachment ->
             retryDownload(attachment.guid, chatGuid, resetRetryCount = true)

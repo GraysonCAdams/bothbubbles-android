@@ -1,6 +1,6 @@
 package com.bothbubbles.services.fcm
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.di.ApplicationScope
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
@@ -52,7 +52,7 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "FirebaseMessagingService created")
+        Timber.d("FirebaseMessagingService created")
     }
 
     /**
@@ -60,7 +60,7 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
      */
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        Log.d(TAG, "FCM token refreshed: ${token.take(10)}...")
+        Timber.d("FCM token refreshed: ${token.take(10)}...")
         fcmTokenManager.onTokenRefreshed(token)
     }
 
@@ -78,7 +78,7 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
 
         val messageId = message.messageId
         val type = message.data["type"]
-        Log.d(TAG, "FCM message received: id=$messageId, type=$type")
+        Timber.d("FCM message received: id=$messageId, type=$type")
 
         // Use application scope for async processing.
         // FCM high-priority messages keep process alive for ~20 seconds.
@@ -88,30 +88,30 @@ class BothBubblesFirebaseService : FirebaseMessagingService() {
                     fcmMessageHandler.handleMessage(message)
                 }
                 if (result == null) {
-                    Log.w(TAG, "FCM message processing timed out after ${FCM_PROCESSING_TIMEOUT_MS}ms")
+                    Timber.w("FCM message processing timed out after ${FCM_PROCESSING_TIMEOUT_MS}ms")
                 } else {
-                    Log.d(TAG, "FCM message processed successfully: id=$messageId")
+                    Timber.d("FCM message processed successfully: id=$messageId")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error handling FCM message: id=$messageId", e)
+                Timber.e(e, "Error handling FCM message: id=$messageId")
             }
         }
     }
 
     override fun onDeletedMessages() {
         super.onDeletedMessages()
-        Log.d(TAG, "FCM messages deleted (too many pending)")
+        Timber.d("FCM messages deleted (too many pending)")
         // Could trigger a sync to fetch missed messages
     }
 
     override fun onMessageSent(msgId: String) {
         super.onMessageSent(msgId)
-        Log.d(TAG, "FCM message sent: $msgId")
+        Timber.d("FCM message sent: $msgId")
     }
 
     override fun onSendError(msgId: String, exception: Exception) {
         super.onSendError(msgId, exception)
-        Log.e(TAG, "FCM send error: $msgId", exception)
+        Timber.e(exception, "FCM send error: $msgId")
     }
 }
 

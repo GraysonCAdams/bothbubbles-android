@@ -4,8 +4,8 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
 import android.provider.OpenableColumns
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.AttachmentDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentWithDate
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.TransferState
@@ -40,8 +40,6 @@ class AttachmentRepository @Inject constructor(
     private val settingsDataStore: SettingsDataStore
 ) {
     companion object {
-        private const val TAG = "AttachmentRepository"
-
         /** Max file size for in-memory GIF processing (10MB) - larger GIFs skip speed fix */
         private const val MAX_GIF_PROCESS_SIZE = 10L * 1024 * 1024
 
@@ -241,29 +239,29 @@ class AttachmentRepository @Inject constructor(
         var succeeded = false
         var lastError: Exception? = null
 
-        Log.d(TAG, "Downloading attachment ${attachmentGuid}, isSticker=${attachment.isSticker}")
+        Timber.d("Downloading attachment $attachmentGuid, isSticker=${attachment.isSticker}")
 
         // Try download (with original=true for stickers first)
         try {
-            Log.d(TAG, "Attempting download from: $downloadUrl")
+            Timber.d("Attempting download from: $downloadUrl")
             downloadFile(downloadUrl, outputFile, onProgress)
             succeeded = true
-            Log.d(TAG, "Download succeeded, file size: ${outputFile.length()} bytes")
+            Timber.d("Download succeeded, file size: ${outputFile.length()} bytes")
         } catch (e: Exception) {
             lastError = e
-            Log.w(TAG, "Download failed with original=true, will retry without: ${e.message}")
+            Timber.w("Download failed with original=true, will retry without: ${e.message}")
         }
 
         // If sticker download failed with original=true, retry without it
         if (!succeeded && attachment.isSticker && downloadUrl != baseDownloadUrl) {
             try {
-                Log.d(TAG, "Retrying without original=true: $baseDownloadUrl")
+                Timber.d("Retrying without original=true: $baseDownloadUrl")
                 downloadFile(baseDownloadUrl, outputFile, onProgress)
                 succeeded = true
-                Log.d(TAG, "Fallback download succeeded, file size: ${outputFile.length()} bytes")
+                Timber.d("Fallback download succeeded, file size: ${outputFile.length()} bytes")
             } catch (e: Exception) {
                 lastError = e
-                Log.e(TAG, "Fallback download also failed: ${e.message}")
+                Timber.e(e, "Fallback download also failed")
             }
         }
 
@@ -274,16 +272,16 @@ class AttachmentRepository @Inject constructor(
         // Convert HEIC/HEIF to PNG for stickers (Android's HEIC support is unreliable)
         val isHeic = isHeicFile(outputFile)
         val fileSize = outputFile.length()
-        Log.d(TAG, "Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic, size=${fileSize}")
+        Timber.d("Checking if HEIC: isSticker=${attachment.isSticker}, isHeic=$isHeic, size=$fileSize")
         var finalFile = if (attachment.isSticker && isHeic) {
             // Skip in-memory conversion for large files to prevent OOM
             if (fileSize > MAX_HEIC_CONVERT_SIZE) {
-                Log.w(TAG, "HEIC file too large for conversion (${fileSize / 1024 / 1024}MB), using JPEG fallback")
+                Timber.w("HEIC file too large for conversion (${fileSize / 1024 / 1024}MB), using JPEG fallback")
                 outputFile.delete()
                 downloadFile(baseDownloadUrl, outputFile, onProgress)
                 outputFile
             } else {
-                Log.d(TAG, "Converting HEIC sticker to PNG...")
+                Timber.d("Converting HEIC sticker to PNG...")
                 val converted = convertHeicToPng(outputFile, attachmentGuid)
                 // Check if conversion actually succeeded (PNG file exists and is larger than 0)
                 if (converted.absolutePath.endsWith(".png") && converted.exists() && converted.length() > 0) {
@@ -291,10 +289,10 @@ class AttachmentRepository @Inject constructor(
                 } else {
                     // HEIC conversion failed - Android can't decode this HEIC (likely HEVC with alpha)
                     // Fall back to downloading JPEG version (no transparency but at least it displays)
-                    Log.w(TAG, "HEIC conversion failed, falling back to JPEG download")
+                    Timber.w("HEIC conversion failed, falling back to JPEG download")
                     outputFile.delete()
                     downloadFile(baseDownloadUrl, outputFile, onProgress)
-                    Log.d(TAG, "Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
+                    Timber.d("Fallback JPEG download succeeded, file size: ${outputFile.length()} bytes")
                     outputFile
                 }
             }
@@ -311,13 +309,13 @@ class AttachmentRepository @Inject constructor(
                 val fixedBytes = GifProcessor.fixSpeedyGif(originalBytes)
                 if (fixedBytes !== originalBytes) {
                     finalFile.writeBytes(fixedBytes)
-                    Log.d(TAG, "Applied GIF speed fix to ${attachment.guid}")
+                    Timber.d("Applied GIF speed fix to ${attachment.guid}")
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to apply GIF speed fix", e)
+                Timber.w(e, "Failed to apply GIF speed fix")
             }
         } else if (gifSize > MAX_GIF_PROCESS_SIZE) {
-            Log.d(TAG, "Skipping GIF speed fix for large file (${gifSize / 1024 / 1024}MB)")
+            Timber.d("Skipping GIF speed fix for large file (${gifSize / 1024 / 1024}MB)")
         }
 
         // Generate thumbnail for images and videos (skip GIFs - they're already small)
@@ -339,7 +337,7 @@ class AttachmentRepository @Inject constructor(
                 else -> null
             }
             if (thumbnailPath != null) {
-                Log.d(TAG, "Generated thumbnail for $attachmentGuid at $thumbnailPath")
+                Timber.d("Generated thumbnail for $attachmentGuid at $thumbnailPath")
             }
         }
 
@@ -426,11 +424,11 @@ class AttachmentRepository @Inject constructor(
             bitmap = heifCoder.decode(heicBytes)
 
             if (bitmap == null) {
-                Log.e(TAG, "HeifCoder failed to decode HEIC")
+                Timber.e("HeifCoder failed to decode HEIC")
                 return heicFile
             }
 
-            Log.d(TAG, "HeifCoder decoded bitmap: ${bitmap.width}x${bitmap.height}, hasAlpha=${bitmap.hasAlpha()}")
+            Timber.d("HeifCoder decoded bitmap: ${bitmap.width}x${bitmap.height}, hasAlpha=${bitmap.hasAlpha()}")
 
             FileOutputStream(pngFile).use { output ->
                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
@@ -439,10 +437,10 @@ class AttachmentRepository @Inject constructor(
             // Delete the original HEIC file
             heicFile.delete()
 
-            Log.d(TAG, "Converted HEIC to PNG: ${pngFile.absolutePath}, size: ${pngFile.length()} bytes")
+            Timber.d("Converted HEIC to PNG: ${pngFile.absolutePath}, size: ${pngFile.length()} bytes")
             return pngFile
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to convert HEIC to PNG with HeifCoder", e)
+            Timber.e(e, "Failed to convert HEIC to PNG with HeifCoder")
             // Return original file if conversion fails
             return heicFile
         } finally {
@@ -474,7 +472,7 @@ class AttachmentRepository @Inject constructor(
                     downloaded++
                 } catch (e: Exception) {
                     // Log but continue with other attachments
-                    android.util.Log.w("AttachmentRepository", "Failed to download ${attachment.guid}", e)
+                    Timber.w(e, "Failed to download ${attachment.guid}")
                 }
             }
             onProgress?.invoke(pending.size, pending.size)
@@ -506,7 +504,7 @@ class AttachmentRepository @Inject constructor(
                     downloaded++
                 } catch (e: Exception) {
                     // Log but continue with other attachments
-                    android.util.Log.w("AttachmentRepository", "Failed to download ${attachment.guid}", e)
+                    Timber.w(e, "Failed to download ${attachment.guid}")
                 }
             }
             onProgress?.invoke(pending.size, pending.size)
@@ -593,7 +591,7 @@ class AttachmentRepository @Inject constructor(
 
             null
         } catch (e: Exception) {
-            Log.w(TAG, "Could not determine size for $uri", e)
+            Timber.w(e, "Could not determine size for $uri")
             null
         }
     }

@@ -5,7 +5,7 @@ import android.database.ContentObserver
 import android.os.Handler
 import android.os.Looper
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
@@ -58,13 +58,13 @@ class ContactsContentObserver @Inject constructor(
     fun startObserving() {
         if (_isObserving.value) return
 
-        Log.d(TAG, "Starting contacts content observer")
+        Timber.d("Starting contacts content observer")
 
         val handler = Handler(Looper.getMainLooper())
 
         observer = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
-                Log.d(TAG, "Contacts database changed")
+                Timber.d("Contacts database changed")
                 debounceAndRefresh()
             }
         }
@@ -84,7 +84,7 @@ class ContactsContentObserver @Inject constructor(
      * Stop observing contacts database
      */
     fun stopObserving() {
-        Log.d(TAG, "Stopping contacts content observer")
+        Timber.d("Stopping contacts content observer")
 
         observer?.let { context.contentResolver.unregisterContentObserver(it) }
         observer = null
@@ -109,7 +109,7 @@ class ContactsContentObserver @Inject constructor(
      * Called when contacts database changes are detected.
      */
     private suspend fun refreshAllCachedContacts() {
-        Log.i(TAG, "Refreshing cached contact info for all handles")
+        Timber.i("Refreshing cached contact info for all handles")
 
         try {
             val handles = handleDao.getAllHandlesOnce()
@@ -129,18 +129,18 @@ class ContactsContentObserver @Inject constructor(
 
                     // Log significant changes
                     if (handle.cachedDisplayName != null && currentName == null) {
-                        Log.d(TAG, "Contact removed for ${handle.address}")
+                        Timber.d("Contact removed for ${handle.address}")
                     } else if (handle.cachedDisplayName == null && currentName != null) {
-                        Log.d(TAG, "Contact added for ${handle.address}: $currentName")
+                        Timber.d("Contact added for ${handle.address}: $currentName")
                     } else if (handle.cachedDisplayName != currentName) {
-                        Log.d(TAG, "Contact name changed for ${handle.address}: ${handle.cachedDisplayName} -> $currentName")
+                        Timber.d("Contact name changed for ${handle.address}: ${handle.cachedDisplayName} -> $currentName")
                     }
                 }
             }
 
-            Log.i(TAG, "Contact cache refresh complete. Updated $updated of ${handles.size} handles")
+            Timber.i("Contact cache refresh complete. Updated $updated of ${handles.size} handles")
         } catch (e: Exception) {
-            Log.e(TAG, "Error refreshing cached contacts", e)
+            Timber.e(e, "Error refreshing cached contacts")
         }
     }
 
@@ -149,7 +149,7 @@ class ContactsContentObserver @Inject constructor(
      * Can be called manually from settings or after permission grant.
      */
     suspend fun forceRefresh() {
-        Log.i(TAG, "Force refreshing cached contacts")
+        Timber.i("Force refreshing cached contacts")
         refreshAllCachedContacts()
     }
 }

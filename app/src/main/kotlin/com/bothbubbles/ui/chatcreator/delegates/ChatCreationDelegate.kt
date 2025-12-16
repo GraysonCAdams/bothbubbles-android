@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.remote.api.dto.CreateChatRequest
@@ -29,10 +29,6 @@ class ChatCreationDelegate @Inject constructor(
     private val api: BothBubblesApi,
     private val chatRepository: ChatRepository
 ) {
-    companion object {
-        private const val TAG = "ChatCreationDelegate"
-    }
-
     /**
      * Result of a chat creation operation
      */
@@ -78,7 +74,7 @@ class ChatCreationDelegate @Inject constructor(
      * Start a conversation with a manually entered address (phone number or email).
      */
     suspend fun startConversationWithAddress(address: String, service: String): ChatCreationResult {
-        Log.d(TAG, "startConversationWithAddress: address=$address, service=$service")
+        Timber.d("startConversationWithAddress: address=$address, service=$service")
 
         return try {
             // For SMS mode or when iMessage is not available, create a local SMS chat
@@ -107,12 +103,12 @@ class ChatCreationDelegate @Inject constructor(
                     chatRepository.insertChat(newChat)
                 }
 
-                Log.d(TAG, "SMS chat created/found: $chatGuid")
+                Timber.d("SMS chat created/found: $chatGuid")
                 _createdChatGuid.value = chatGuid
                 ChatCreationResult.Success(chatGuid)
             } else {
                 // Use BlueBubbles server to create iMessage chat
-                Log.d(TAG, "Creating iMessage chat via server API")
+                Timber.d("Creating iMessage chat via server API")
                 val response = api.createChat(
                     CreateChatRequest(
                         addresses = listOf(address),
@@ -121,20 +117,20 @@ class ChatCreationDelegate @Inject constructor(
                 )
 
                 val body = response.body()
-                Log.d(TAG, "createChat response: code=${response.code()}, message=${body?.message}, data=${body?.data}")
+                Timber.d("createChat response: code=${response.code()}, message=${body?.message}, data=${body?.data}")
                 if (response.isSuccessful && body?.data != null) {
                     val chatGuid = body.data.guid
-                    Log.d(TAG, "iMessage chat created: $chatGuid")
+                    Timber.d("iMessage chat created: $chatGuid")
                     _createdChatGuid.value = chatGuid
                     ChatCreationResult.Success(chatGuid)
                 } else {
                     val errorMsg = body?.message ?: "Failed to create chat"
-                    Log.e(TAG, "Failed to create iMessage chat: $errorMsg")
+                    Timber.e("Failed to create iMessage chat: $errorMsg")
                     ChatCreationResult.Error(errorMsg)
                 }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to start conversation", e)
+            Timber.e(e, "Failed to start conversation")
             ChatCreationResult.Error(e.message ?: "Failed to create chat")
         }
     }
@@ -143,7 +139,7 @@ class ChatCreationDelegate @Inject constructor(
      * Handle continue action with selected recipients
      */
     fun handleContinue(recipients: List<SelectedRecipient>): ChatCreationResult {
-        Log.d(TAG, "handleContinue called with ${recipients.size} recipients: ${recipients.map { "${it.displayName} (${it.service})" }}")
+        Timber.d("handleContinue called with ${recipients.size} recipients: ${recipients.map { "${it.displayName} (${it.service})" }}")
         return when {
             recipients.isEmpty() -> {
                 ChatCreationResult.Error("Please add at least one recipient")

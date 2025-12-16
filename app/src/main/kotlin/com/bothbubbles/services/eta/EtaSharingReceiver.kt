@@ -5,7 +5,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import timber.log.Timber
 import androidx.core.app.NotificationCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
@@ -29,8 +29,6 @@ import javax.inject.Inject
 class EtaSharingReceiver : BroadcastReceiver() {
 
     companion object {
-        private const val TAG = "EtaSharingReceiver"
-
         // Actions
         const val ACTION_START_SHARING = "com.bothbubbles.action.START_ETA_SHARING"
         const val ACTION_STOP_SHARING = "com.bothbubbles.action.STOP_ETA_SHARING"
@@ -54,7 +52,7 @@ class EtaSharingReceiver : BroadcastReceiver() {
     lateinit var chatQueryDao: ChatQueryDao
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "Received action: ${intent.action}")
+        Timber.d("Received action: ${intent.action}")
 
         val entryPoint = EntryPointAccessors.fromApplication(
             context.applicationContext,
@@ -75,7 +73,7 @@ class EtaSharingReceiver : BroadcastReceiver() {
 
         if (chatGuid != null && displayName != null) {
             // Start sharing with the specified chat
-            Log.d(TAG, "Starting ETA sharing with $displayName (guid: $chatGuid)")
+            Timber.d("Starting ETA sharing with $displayName (guid: $chatGuid)")
             val currentEta = etaSharingManager.state.value.currentEta
             etaSharingManager.startSharing(chatGuid, displayName, currentEta)
             showSharingNotification(context, displayName, currentEta?.etaMinutes ?: 0)
@@ -85,19 +83,19 @@ class EtaSharingReceiver : BroadcastReceiver() {
                 val recentChat = chatQueryDao.getRecentChats(1).firstOrNull()
                 if (recentChat != null) {
                     val name = recentChat.displayName ?: recentChat.chatIdentifier ?: "Unknown"
-                    Log.d(TAG, "Starting ETA sharing with recent chat: $name")
+                    Timber.d("Starting ETA sharing with recent chat: $name")
                     val currentEta = etaSharingManager.state.value.currentEta
                     etaSharingManager.startSharing(recentChat.guid, name, currentEta)
                     showSharingNotification(context, name, currentEta?.etaMinutes ?: 0)
                 } else {
-                    Log.w(TAG, "No chat available for ETA sharing")
+                    Timber.w("No chat available for ETA sharing")
                 }
             }
         }
     }
 
     private fun handleStopSharing(context: Context) {
-        Log.d(TAG, "Stopping ETA sharing")
+        Timber.d("Stopping ETA sharing")
         etaSharingManager.stopSharing(sendFinalMessage = true)
         cancelSharingNotification(context)
     }

@@ -2,7 +2,7 @@ package com.bothbubbles.ui.chatcreator
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
+import timber.log.Timber
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -33,10 +33,6 @@ class GroupSetupViewModel @Inject constructor(
     private val api: BothBubblesApi
 ) : ViewModel() {
 
-    companion object {
-        private const val TAG = "GroupSetupViewModel"
-    }
-
     private val route: Screen.GroupSetup = savedStateHandle.toRoute()
 
     private val _uiState = MutableStateFlow(GroupSetupUiState())
@@ -54,7 +50,7 @@ class GroupSetupViewModel @Inject constructor(
                 )
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to parse participants", e)
+            Timber.e(e, "Failed to parse participants")
             _uiState.update { it.copy(error = "Failed to load participants") }
         }
     }
@@ -154,7 +150,7 @@ class GroupSetupViewModel @Inject constructor(
                                 try {
                                     api.updateChat(chatGuid, UpdateChatRequest(displayName = groupName))
                                 } catch (e: Exception) {
-                                    Log.e(TAG, "Failed to set group name", e)
+                                    Timber.e(e, "Failed to set group name")
                                 }
                             }
 
@@ -192,7 +188,7 @@ class GroupSetupViewModel @Inject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to create group", e)
+                Timber.e(e, "Failed to create group")
                 _uiState.update {
                     it.copy(
                         isLoading = false,
@@ -226,7 +222,7 @@ class GroupSetupViewModel @Inject constructor(
 
             photoFile.absolutePath
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to save group photo", e)
+            Timber.e(e, "Failed to save group photo")
             null
         }
     }

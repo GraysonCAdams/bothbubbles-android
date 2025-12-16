@@ -1,6 +1,6 @@
 package com.bothbubbles.services.messaging.sender
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.sms.MmsSendService
@@ -24,10 +24,6 @@ class SmsSenderStrategy @Inject constructor(
     private val smsPermissionHelper: SmsPermissionHelper,
     private val chatDao: ChatDao
 ) : MessageSenderStrategy {
-
-    companion object {
-        private const val TAG = "SmsSenderStrategy"
-    }
 
     override fun canHandle(deliveryMode: MessageDeliveryMode): Boolean {
         return deliveryMode == MessageDeliveryMode.LOCAL_SMS ||
@@ -65,7 +61,7 @@ class SmsSenderStrategy @Inject constructor(
                 SmsError.PermissionDenied(Exception("Invalid chat GUID for SMS: ${options.chatGuid}"))
             )
 
-        Log.d(TAG, "Sending SMS to $address")
+        Timber.d("Sending SMS to $address")
 
         val result = smsSendService.sendSms(
             address = address,
@@ -102,7 +98,7 @@ class SmsSenderStrategy @Inject constructor(
             messageText += captions.joinToString("\n")
         }
 
-        Log.d(TAG, "Sending MMS to ${addresses.size} recipient(s) with ${options.attachments.size} attachment(s)")
+        Timber.d("Sending MMS to ${addresses.size} recipient(s) with ${options.attachments.size} attachment(s)")
 
         val result = mmsSendService.sendMms(
             recipients = addresses,

@@ -1,7 +1,7 @@
 package com.bothbubbles.services.media
 
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -63,11 +63,11 @@ class ExoPlayerPool @Inject constructor(
             // Try to get a player from the pool
             if (availablePlayers.isNotEmpty()) {
                 val pooled = availablePlayers.removeAt(availablePlayers.size - 1)
-                Log.d(TAG, "Reusing pooled player for $attachmentGuid")
+                Timber.d("Reusing pooled player for $attachmentGuid")
                 pooled
             } else {
                 // Create new player if under limit
-                Log.d(TAG, "Creating new player for $attachmentGuid")
+                Timber.d("Creating new player for $attachmentGuid")
                 createPlayer()
             }
         }
@@ -99,10 +99,10 @@ class ExoPlayerPool @Inject constructor(
 
             if (availablePlayers.size < MAX_POOL_SIZE) {
                 availablePlayers.add(player)
-                Log.d(TAG, "Returned player to pool, pool size: ${availablePlayers.size}")
+                Timber.d("Returned player to pool, pool size: ${availablePlayers.size}")
             } else {
                 player.release()
-                Log.d(TAG, "Released player (pool full)")
+                Timber.d("Released player (pool full)")
             }
         }
     }
@@ -129,7 +129,7 @@ class ExoPlayerPool @Inject constructor(
      * memory is low.
      */
     fun releaseAll() {
-        Log.d(TAG, "Releasing all players")
+        Timber.d("Releasing all players")
 
         // Release active players
         activePlayers.values.forEach { player ->
@@ -167,7 +167,7 @@ class ExoPlayerPool @Inject constructor(
     private fun evictOldestPlayer() {
         // Find the first (oldest) player and release it
         val oldestKey = activePlayers.keys.firstOrNull() ?: return
-        Log.d(TAG, "Evicting oldest player: $oldestKey")
+        Timber.d("Evicting oldest player: $oldestKey")
         release(oldestKey)
     }
 }

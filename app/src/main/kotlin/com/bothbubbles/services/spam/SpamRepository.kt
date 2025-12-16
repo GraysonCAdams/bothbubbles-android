@@ -1,6 +1,6 @@
 package com.bothbubbles.services.spam
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -23,10 +23,6 @@ class SpamRepository @Inject constructor(
     private val handleDao: HandleDao,
     private val spamDetector: SpamDetector
 ) {
-    companion object {
-        private const val TAG = "SpamRepository"
-    }
-
     /**
      * Get all spam conversations as a Flow.
      */
@@ -50,7 +46,7 @@ class SpamRepository @Inject constructor(
 
         if (result.isSpam) {
             chatDao.updateSpamStatus(chatGuid, true, result.score)
-            Log.i(TAG, "Marked chat $chatGuid as spam (score: ${result.score})")
+            Timber.i("Marked chat $chatGuid as spam (score: ${result.score})")
         }
 
         return result
@@ -77,7 +73,7 @@ class SpamRepository @Inject constructor(
             }
         }
 
-        Log.i(TAG, "Reported chat $chatGuid as spam, updated ${participants.size} participants")
+        Timber.i("Reported chat $chatGuid as spam, updated ${participants.size} participants")
     }
 
     /**
@@ -95,7 +91,7 @@ class SpamRepository @Inject constructor(
             handleDao.updateWhitelisted(handle.id, true)
         }
 
-        Log.i(TAG, "Marked chat $chatGuid as safe, whitelisted ${participants.size} participants")
+        Timber.i("Marked chat $chatGuid as safe, whitelisted ${participants.size} participants")
     }
 
     /**
@@ -103,7 +99,7 @@ class SpamRepository @Inject constructor(
      */
     suspend fun markReportedToCarrier(chatGuid: String) {
         chatDao.markAsReportedToCarrier(chatGuid)
-        Log.i(TAG, "Marked chat $chatGuid as reported to carrier")
+        Timber.i("Marked chat $chatGuid as reported to carrier")
     }
 
     /**

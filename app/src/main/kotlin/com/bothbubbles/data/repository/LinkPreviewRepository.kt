@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import android.util.LruCache
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.LinkPreviewFetchStatus
@@ -40,7 +40,6 @@ class LinkPreviewRepository @Inject constructor(
     private val linkPreviewService: LinkPreviewService
 ) {
     companion object {
-        private const val TAG = "LinkPreviewRepository"
         private const val MEMORY_CACHE_SIZE = 100
         private const val DB_CACHE_MAX_ENTRIES = 1000
         private const val RETRY_DELAY_MS = 60 * 60 * 1000L // 1 hour
@@ -245,24 +244,24 @@ class LinkPreviewRepository @Inject constructor(
 
                         linkPreviewDao.insert(entry)
                         memoryCache.put(urlHash, entry)
-                        Log.d(TAG, "Successfully fetched preview for: $url")
+                        Timber.d("Successfully fetched preview for: $url")
                         entry
                     }
 
                     is LinkMetadataResult.Error -> {
-                        Log.w(TAG, "Failed to fetch preview for $url: ${result.message}")
+                        Timber.w("Failed to fetch preview for $url: ${result.message}")
                         linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.FAILED.name)
                         null
                     }
 
                     is LinkMetadataResult.NoPreview -> {
-                        Log.d(TAG, "No preview available for: $url")
+                        Timber.d("No preview available for: $url")
                         linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.NO_PREVIEW.name)
                         null
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error fetching preview for $url", e)
+                Timber.e(e, "Error fetching preview for $url")
                 linkPreviewDao.updateFetchStatus(urlHash, LinkPreviewFetchStatus.FAILED.name)
                 null
             } finally {

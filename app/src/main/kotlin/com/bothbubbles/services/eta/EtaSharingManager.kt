@@ -1,6 +1,6 @@
 package com.bothbubbles.services.eta
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AutoShareContact
@@ -32,8 +32,6 @@ class EtaSharingManager @Inject constructor(
     private val autoShareContactRepository: AutoShareContactRepository
 ) {
     companion object {
-        private const val TAG = "EtaSharingManager"
-
         // Thresholds
         const val ARRIVING_SOON_THRESHOLD = 3   // Send "arriving soon" at 3 min
         const val ARRIVED_THRESHOLD = 1         // Consider "arrived" at 0-1 min
@@ -66,7 +64,7 @@ class EtaSharingManager @Inject constructor(
      * Start sharing ETA with a recipient
      */
     fun startSharing(chatGuid: String, displayName: String, initialEta: ParsedEtaData?) {
-        Log.d(TAG, "Starting ETA sharing with $displayName (chat: $chatGuid)")
+        Timber.d("Starting ETA sharing with $displayName (chat: $chatGuid)")
 
         val session = EtaSharingSession(
             recipientGuid = chatGuid,
@@ -102,7 +100,7 @@ class EtaSharingManager @Inject constructor(
             }
         }
 
-        Log.d(TAG, "Stopping ETA sharing")
+        Timber.d("Stopping ETA sharing")
         _state.value = EtaState(
             isSharing = false,
             session = null,
@@ -144,7 +142,7 @@ class EtaSharingManager @Inject constructor(
         // Terminal state check: If we already sent "arrived",
         // don't send any more updates until cooldown expires
         if (isInTerminalState()) {
-            Log.d(TAG, "Ignoring update - in terminal state (arrived already sent)")
+            Timber.d("Ignoring update - in terminal state (arrived already sent)")
             return
         }
 
@@ -172,7 +170,7 @@ class EtaSharingManager @Inject constructor(
 
         // Priority 1: Check for arrival (terminal state)
         if (newEtaMinutes <= ARRIVED_THRESHOLD && session.lastMessageType != EtaMessageType.ARRIVED) {
-            Log.d(TAG, "Update type: ARRIVED (ETA: $newEtaMinutes min)")
+            Timber.d("Update type: ARRIVED (ETA: $newEtaMinutes min)")
             return EtaMessageType.ARRIVED
         }
 
@@ -181,13 +179,13 @@ class EtaSharingManager @Inject constructor(
             session.lastEtaMinutes > ARRIVING_SOON_THRESHOLD &&
             session.lastMessageType != EtaMessageType.ARRIVING_SOON
         ) {
-            Log.d(TAG, "Update type: ARRIVING_SOON (ETA dropped to $newEtaMinutes min)")
+            Timber.d("Update type: ARRIVING_SOON (ETA dropped to $newEtaMinutes min)")
             return EtaMessageType.ARRIVING_SOON
         }
 
         // Priority 3: Significant ETA change (user-configurable threshold)
         if (etaDelta >= changeThreshold) {
-            Log.d(TAG, "Update type: CHANGE (delta: $etaDelta min, threshold: $changeThreshold)")
+            Timber.d("Update type: CHANGE (delta: $etaDelta min, threshold: $changeThreshold)")
             return EtaMessageType.CHANGE
         }
 
@@ -205,7 +203,7 @@ class EtaSharingManager @Inject constructor(
 
         // Reset terminal state if cooldown expired (30 min) - likely a new trip
         if (timeSinceArrived > TERMINAL_STATE_COOLDOWN_MS) {
-            Log.d(TAG, "Terminal state expired (cooldown)")
+            Timber.d("Terminal state expired (cooldown)")
             clearTerminalState()
             return false
         }
@@ -215,7 +213,7 @@ class EtaSharingManager @Inject constructor(
 
     private fun enterTerminalState() {
         arrivedSentTimestamp = System.currentTimeMillis()
-        Log.d(TAG, "Entered terminal state")
+        Timber.d("Entered terminal state")
     }
 
     private fun clearTerminalState() {
@@ -230,7 +228,7 @@ class EtaSharingManager @Inject constructor(
      * - Otherwise, assume trip was cancelled
      */
     fun onNavigationStopped() {
-        Log.d(TAG, "Navigation stopped")
+        Timber.d("Navigation stopped")
         _isNavigationActive.value = false
 
         val currentState = _state.value
@@ -256,7 +254,7 @@ class EtaSharingManager @Inject constructor(
 
             scope.launch {
                 if (wasNearDestination) {
-                    Log.d(TAG, "Navigation stopped near destination - sending arrived message")
+                    Timber.d("Navigation stopped near destination - sending arrived message")
                     // Create a fake ETA for the arrived message
                     val arrivedEta = ParsedEtaData(
                         etaMinutes = 0,
@@ -267,7 +265,7 @@ class EtaSharingManager @Inject constructor(
                     )
                     sendMessageForType(session, arrivedEta, EtaMessageType.ARRIVED)
                 } else {
-                    Log.d(TAG, "Navigation stopped - sending cancelled message")
+                    Timber.d("Navigation stopped - sending cancelled message")
                     sendStoppedMessage(session)
                     stopSharing(sendFinalMessage = false)
                 }
@@ -284,25 +282,25 @@ class EtaSharingManager @Inject constructor(
     private suspend fun checkAutoShareContacts(etaData: ParsedEtaData) {
         // Check if ETA sharing is enabled
         if (!settingsDataStore.etaSharingEnabled.first()) {
-            Log.d(TAG, "Auto-share: ETA sharing disabled, skipping")
+            Timber.d("Auto-share: ETA sharing disabled, skipping")
             return
         }
 
         // Check minimum ETA threshold
         val minimumEta = featurePreferences.autoShareMinimumEtaMinutes.first()
         if (etaData.etaMinutes < minimumEta) {
-            Log.d(TAG, "Auto-share: ETA ${etaData.etaMinutes} min below threshold ($minimumEta min), skipping")
+            Timber.d("Auto-share: ETA ${etaData.etaMinutes} min below threshold ($minimumEta min), skipping")
             return
         }
 
         // Get enabled auto-share contacts
         val contacts = autoShareContactRepository.getEnabled()
         if (contacts.isEmpty()) {
-            Log.d(TAG, "Auto-share: No enabled contacts configured")
+            Timber.d("Auto-share: No enabled contacts configured")
             return
         }
 
-        Log.d(TAG, "Auto-share: Starting with ${contacts.size} contacts, ETA: ${etaData.etaMinutes} min")
+        Timber.d("Auto-share: Starting with ${contacts.size} contacts, ETA: ${etaData.etaMinutes} min")
 
         // Create sessions for all contacts
         activeAutoShareSessions = contacts.map { contact ->
@@ -321,19 +319,19 @@ class EtaSharingManager @Inject constructor(
         // Send initial messages to all recipients
         for (session in activeAutoShareSessions) {
             val message = buildInitialMessage(etaData)
-            Log.d(TAG, "Auto-share: Sending initial message to ${session.recipientDisplayName}")
+            Timber.d("Auto-share: Sending initial message to ${session.recipientDisplayName}")
 
             pendingMessageSource.queueMessage(
                 chatGuid = session.recipientGuid,
                 text = message
             ).onSuccess {
-                Log.d(TAG, "Auto-share: Initial message sent to ${session.recipientDisplayName}")
+                Timber.d("Auto-share: Initial message sent to ${session.recipientDisplayName}")
             }.onFailure { e ->
-                Log.e(TAG, "Auto-share: Failed to send to ${session.recipientDisplayName}", e)
+                Timber.e(e, "Auto-share: Failed to send to ${session.recipientDisplayName}")
             }
         }
 
-        Log.d(TAG, "Auto-share: Started sharing with ${recipientNames.joinToString()}")
+        Timber.d("Auto-share: Started sharing with ${recipientNames.joinToString()}")
     }
 
     /**
@@ -355,7 +353,7 @@ class EtaSharingManager @Inject constructor(
                     EtaMessageType.ARRIVED -> buildArrivedMessage()
                 }
 
-                Log.d(TAG, "Auto-share: Sending $messageType to ${session.recipientDisplayName}")
+                Timber.d("Auto-share: Sending $messageType to ${session.recipientDisplayName}")
 
                 pendingMessageSource.queueMessage(
                     chatGuid = session.recipientGuid,
@@ -395,7 +393,7 @@ class EtaSharingManager @Inject constructor(
                 buildCancelledMessage()
             }
 
-            Log.d(TAG, "Auto-share: Sending ${if (wasNearDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName}")
+            Timber.d("Auto-share: Sending ${if (wasNearDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName}")
 
             pendingMessageSource.queueMessage(
                 chatGuid = session.recipientGuid,
@@ -407,7 +405,7 @@ class EtaSharingManager @Inject constructor(
         activeAutoShareSessions.clear()
         _autoShareState.value = AutoShareState.Inactive
 
-        Log.d(TAG, "Auto-share: Session ended")
+        Timber.d("Auto-share: Session ended")
     }
 
     /**
@@ -429,7 +427,7 @@ class EtaSharingManager @Inject constructor(
             activeAutoShareSessions.clear()
             _autoShareState.value = AutoShareState.Inactive
 
-            Log.d(TAG, "Auto-share: Manually stopped")
+            Timber.d("Auto-share: Manually stopped")
         }
     }
 
@@ -448,7 +446,7 @@ class EtaSharingManager @Inject constructor(
             EtaMessageType.ARRIVED -> buildArrivedMessage()
         }
 
-        Log.d(TAG, "Sending $messageType message: $message")
+        Timber.d("Sending $messageType message: $message")
 
         pendingMessageSource.queueMessage(
             chatGuid = session.recipientGuid,
@@ -469,7 +467,7 @@ class EtaSharingManager @Inject constructor(
                 stopSharing(sendFinalMessage = false)
             }
         }.onFailure { e ->
-            Log.e(TAG, "Failed to send $messageType message", e)
+            Timber.e(e, "Failed to send $messageType message")
         }
     }
 
@@ -528,7 +526,7 @@ class EtaSharingManager @Inject constructor(
             chatGuid = session.recipientGuid,
             text = message
         ).onFailure { e ->
-            Log.e(TAG, "Failed to queue stopped message", e)
+            Timber.e(e, "Failed to queue stopped message")
         }
     }
 
@@ -549,7 +547,7 @@ class EtaSharingManager @Inject constructor(
      * Only works in debug builds.
      */
     fun simulateNavigation(etaMinutes: Int) {
-        Log.d(TAG, "[DEBUG] Simulating navigation: $etaMinutes min")
+        Timber.d("[DEBUG] Simulating navigation: $etaMinutes min")
 
         val fakeEta = ParsedEtaData(
             etaMinutes = etaMinutes,
@@ -566,7 +564,7 @@ class EtaSharingManager @Inject constructor(
      * Simulate stopping navigation
      */
     fun simulateNavigationStop() {
-        Log.d(TAG, "[DEBUG] Simulating navigation stop")
+        Timber.d("[DEBUG] Simulating navigation stop")
         onNavigationStopped()
     }
 
@@ -574,7 +572,7 @@ class EtaSharingManager @Inject constructor(
      * Reset terminal state (for testing)
      */
     fun debugResetTerminalState() {
-        Log.d(TAG, "[DEBUG] Resetting terminal state")
+        Timber.d("[DEBUG] Resetting terminal state")
         clearTerminalState()
     }
 }

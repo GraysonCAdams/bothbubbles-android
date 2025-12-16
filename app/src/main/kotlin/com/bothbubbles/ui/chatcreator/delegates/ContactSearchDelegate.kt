@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.remote.api.BothBubblesApi
 import com.bothbubbles.data.repository.HandleRepository
@@ -28,9 +28,6 @@ class ContactSearchDelegate @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val handleRepository: HandleRepository
 ) {
-    companion object {
-        private const val TAG = "ContactSearchDelegate"
-    }
 
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery.asStateFlow()
@@ -95,7 +92,7 @@ class ContactSearchDelegate @Inject constructor(
                     service = "iMessage"
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to check iMessage availability", e)
+                Timber.e(e, "Failed to check iMessage availability")
             }
         } else if (!smsOnlyMode && isConnected && trimmedQuery.isEmail()) {
             // Emails are always iMessage

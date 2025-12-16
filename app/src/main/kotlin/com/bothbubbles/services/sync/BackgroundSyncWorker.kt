@@ -1,7 +1,7 @@
 package com.bothbubbles.services.sync
 
 import android.content.Context
-import android.util.Log
+import timber.log.Timber
 import androidx.hilt.work.HiltWorker
 import androidx.work.Constraints
 import androidx.work.CoroutineWorker
@@ -85,7 +85,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 workRequest
             )
 
-            Log.i(TAG, "Background sync scheduled (every 15 minutes)")
+            Timber.i("Background sync scheduled (every 15 minutes)")
         }
 
         /**
@@ -93,24 +93,24 @@ class BackgroundSyncWorker @AssistedInject constructor(
          */
         fun cancel(context: Context) {
             WorkManager.getInstance(context).cancelUniqueWork(WORK_NAME)
-            Log.i(TAG, "Background sync cancelled")
+            Timber.i("Background sync cancelled")
         }
     }
 
     override suspend fun doWork(): Result {
-        Log.d(TAG, "Starting background sync")
+        Timber.d("Starting background sync")
 
         // Check if setup is complete
         val setupComplete = settingsDataStore.isSetupComplete.first()
         if (!setupComplete) {
-            Log.d(TAG, "Setup not complete, skipping sync")
+            Timber.d("Setup not complete, skipping sync")
             return Result.success()
         }
 
         // Check if server is configured
         val serverAddress = settingsDataStore.serverAddress.first()
         if (serverAddress.isBlank()) {
-            Log.d(TAG, "Server not configured, skipping sync")
+            Timber.d("Server not configured, skipping sync")
             return Result.success()
         }
 
@@ -118,7 +118,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
             syncRecentChats()
             Result.success()
         } catch (e: Exception) {
-            Log.e(TAG, "Background sync failed", e)
+            Timber.e(e, "Background sync failed")
             Result.retry() // WorkManager will handle backoff
         }
     }
@@ -127,11 +127,11 @@ class BackgroundSyncWorker @AssistedInject constructor(
         val recentChats = chatDao.getRecentChats(limit = MAX_CHATS_TO_SYNC)
 
         if (recentChats.isEmpty()) {
-            Log.d(TAG, "No recent chats to sync")
+            Timber.d("No recent chats to sync")
             return
         }
 
-        Log.d(TAG, "Syncing ${recentChats.size} recent chats")
+        Timber.d("Syncing ${recentChats.size} recent chats")
 
         var totalNewMessages = 0
 
@@ -155,7 +155,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
                 result.onSuccess { newMessages ->
                     if (newMessages.isNotEmpty()) {
-                        Log.d(TAG, "Chat ${chat.guid}: found ${newMessages.size} new messages")
+                        Timber.d("Chat ${chat.guid}: found ${newMessages.size} new messages")
                         totalNewMessages += newMessages.size
 
                         // Show notifications for new messages from others if app is not in foreground
@@ -166,12 +166,12 @@ class BackgroundSyncWorker @AssistedInject constructor(
                     }
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to sync chat ${chat.guid}: ${e.message}")
+                Timber.w("Failed to sync chat ${chat.guid}: ${e.message}")
                 // Continue with other chats
             }
         }
 
-        Log.d(TAG, "Background sync complete: $totalNewMessages new messages across ${recentChats.size} chats")
+        Timber.d("Background sync complete: $totalNewMessages new messages across ${recentChats.size} chats")
     }
 
     /**
@@ -186,11 +186,11 @@ class BackgroundSyncWorker @AssistedInject constructor(
     ) {
         // Check notification settings for this chat
         if (chat.notificationsEnabled == false) {
-            Log.d(TAG, "Notifications disabled for chat ${chat.guid}")
+            Timber.d("Notifications disabled for chat ${chat.guid}")
             return
         }
         if (chat.isSnoozed) {
-            Log.d(TAG, "Chat ${chat.guid} is snoozed")
+            Timber.d("Chat ${chat.guid} is snoozed")
             return
         }
 
@@ -238,7 +238,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 handleDao.getHandleById(handleId)?.address
             }
 
-            Log.d(TAG, "Showing notification: chat=$chatTitle, message='${message.text?.take(30)}...'")
+            Timber.d("Showing notification: chat=$chatTitle, message='${message.text?.take(30)}...'")
 
             notificationService.showMessageNotification(
                 chatGuid = chat.guid,

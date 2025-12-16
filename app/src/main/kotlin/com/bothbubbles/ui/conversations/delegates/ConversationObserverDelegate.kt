@@ -1,6 +1,6 @@
 package com.bothbubbles.ui.conversations.delegates
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.UnifiedChatGroupRepository
@@ -51,9 +51,6 @@ class ConversationObserverDelegate @AssistedInject constructor(
         fun create(scope: CoroutineScope): ConversationObserverDelegate
     }
 
-    companion object {
-        private const val TAG = "ConversationObserverDelegate"
-    }
 
     // ============================================================================
     // Event Flow - Phase 8: Replaces callbacks
@@ -179,7 +176,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
         // Observe iMessage sync state
         scope.launch {
             syncService.syncState.collect { state ->
-                Log.d(TAG, "SyncState changed: $state")
+                Timber.d("SyncState changed: $state")
                 _iMessageSyncState.value = state
             }
         }
@@ -202,7 +199,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
                 buildUnifiedProgress(iMessageState, smsState, categState, expanded, initialSyncComplete)
             }.collect { unified ->
                 if (unified != null) {
-                    Log.d(TAG, "UnifiedProgress: stage=${unified.currentStage}, progress=${unified.overallProgress}, stages=${unified.stages.size}")
+                    Timber.d("UnifiedProgress: stage=${unified.currentStage}, progress=${unified.overallProgress}, stages=${unified.stages.size}")
                 }
                 _unifiedSyncProgress.value = unified
             }
@@ -497,7 +494,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
             socketConnection.events
                 .filterIsInstance<SocketEvent.NewMessage>()
                 .collect { event ->
-                    Log.d(TAG, "Socket: New message for ${event.chatGuid}")
+                    Timber.d("Socket: New message for ${event.chatGuid}")
                     _events.emit(ConversationEvent.NewMessage)
                 }
         }
@@ -512,7 +509,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
             socketConnection.events
                 .filterIsInstance<SocketEvent.MessageUpdated>()
                 .collect { event ->
-                    Log.d(TAG, "Socket: Message updated for ${event.chatGuid}")
+                    Timber.d("Socket: Message updated for ${event.chatGuid}")
                     _events.emit(ConversationEvent.MessageUpdated)
                 }
         }
@@ -527,7 +524,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
             socketConnection.events
                 .filterIsInstance<SocketEvent.ChatRead>()
                 .collect { event ->
-                    Log.d(TAG, "Socket: Chat read ${event.chatGuid}")
+                    Timber.d("Socket: Chat read ${event.chatGuid}")
                     _events.emit(ConversationEvent.ChatRead(event.chatGuid))
                 }
         }

@@ -2,8 +2,8 @@ package com.bothbubbles.data.repository
 
 import android.content.Context
 import android.net.Uri
-import android.util.Log
 import androidx.room.withTransaction
+import timber.log.Timber
 import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
@@ -67,9 +67,6 @@ class PendingMessageRepository @Inject constructor(
     @ApplicationScope private val applicationScope: CoroutineScope,
     private val messageSender: dagger.Lazy<MessageSender>  // Lazy to avoid circular dependency
 ) : PendingMessageSource {
-    companion object {
-        private const val TAG = "PendingMessageRepo"
-    }
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
 
@@ -97,27 +94,27 @@ class PendingMessageRepository @Inject constructor(
         forcedLocalId: String?
     ): Result<String> = runCatching {
         val startTime = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
-        Log.i(TAG, "[SEND_TRACE] chatGuid=$chatGuid, mode=$deliveryMode, attachments=${attachments.size}")
+        Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
+        Timber.i("[SEND_TRACE] chatGuid=$chatGuid, mode=$deliveryMode, attachments=${attachments.size}")
 
         // Use "temp-" prefix so MessageEntity.isSent correctly returns false
         val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] clientGuid=$clientGuid +${System.currentTimeMillis() - startTime}ms")
+        Timber.i("[SEND_TRACE] clientGuid=$clientGuid +${System.currentTimeMillis() - startTime}ms")
 
         // Determine message source based on delivery mode
         val messageSource = inferMessageSource(chatGuid, deliveryMode)
 
         // Persist attachments to internal storage first (outside transaction for I/O)
         val attachPersistStart = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] Persisting ${attachments.size} attachments +${System.currentTimeMillis() - startTime}ms")
+        Timber.i("[SEND_TRACE] Persisting ${attachments.size} attachments +${System.currentTimeMillis() - startTime}ms")
         val persistedAttachments = if (attachments.isNotEmpty()) {
             attachments.mapIndexedNotNull { index, input ->
                 val uri = input.uri
                 val attachmentLocalId = "$clientGuid-att-$index"
                 attachmentPersistenceManager.persistAttachment(uri, attachmentLocalId)
                     .onFailure { e ->
-                        Log.e(TAG, "[SEND_TRACE] Failed to persist attachment: $uri", e)
+                        Timber.e(e, "[SEND_TRACE] Failed to persist attachment: $uri")
                     }
                     .getOrNull()
                     ?.let { result ->
@@ -137,12 +134,12 @@ class PendingMessageRepository @Inject constructor(
             emptyList()
         }
         if (attachments.isNotEmpty()) {
-            Log.i(TAG, "[SEND_TRACE] Attachment persist DONE: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
+            Timber.i("[SEND_TRACE] Attachment persist DONE: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
         }
 
         // Use transaction to ensure atomicity: all-or-nothing for DB operations
         val txStart = System.currentTimeMillis()
-        Log.i(TAG, "[SEND_TRACE] Starting DB transaction +${System.currentTimeMillis() - startTime}ms")
+        Timber.i("[SEND_TRACE] Starting DB transaction +${System.currentTimeMillis() - startTime}ms")
         val messageId = database.withTransaction {
             // 1. Create pending message (durability/retry engine)
             val pendingMessage = PendingMessageEntity(
@@ -216,19 +213,19 @@ class PendingMessageRepository @Inject constructor(
 
             pendingId
         }
-        Log.i(TAG, "[SEND_TRACE] DB transaction DONE: ${System.currentTimeMillis() - txStart}ms")
-        Log.i(TAG, "[SEND_TRACE] Created pending message id=$messageId +${System.currentTimeMillis() - startTime}ms")
+        Timber.i("[SEND_TRACE] DB transaction DONE: ${System.currentTimeMillis() - txStart}ms")
+        Timber.i("[SEND_TRACE] Created pending message id=$messageId +${System.currentTimeMillis() - startTime}ms")
 
         if (persistedAttachments.isNotEmpty()) {
-            Log.i(TAG, "[SEND_TRACE] Created ${persistedAttachments.size} attachment echoes")
+            Timber.i("[SEND_TRACE] Created ${persistedAttachments.size} attachment echoes")
         }
 
         // Try immediate send first (bypasses WorkManager 300-400ms scheduling latency)
         // Fall back to WorkManager only if immediate send fails
-        Log.i(TAG, "[SEND_TRACE] Launching async IMMEDIATE SEND +${System.currentTimeMillis() - startTime}ms")
+        Timber.i("[SEND_TRACE] Launching async IMMEDIATE SEND +${System.currentTimeMillis() - startTime}ms")
         applicationScope.launch {
             val sendStart = System.currentTimeMillis()
-            Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Attempting immediate send...")
+            Timber.i("[SEND_TRACE] [IMMEDIATE] Attempting immediate send...")
 
             try {
                 // Build attachment inputs from persisted data
@@ -263,7 +260,7 @@ class PendingMessageRepository @Inject constructor(
 
                 if (result.isSuccess) {
                     val sentMessage = result.getOrThrow()
-                    Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] ✓ SUCCESS in ${System.currentTimeMillis() - sendStart}ms: $clientGuid -> ${sentMessage.guid}")
+                    Timber.i("[SEND_TRACE] [IMMEDIATE] ✓ SUCCESS in ${System.currentTimeMillis() - sendStart}ms: $clientGuid -> ${sentMessage.guid}")
 
                     // Mark as sent
                     pendingMessageDao.markAsSent(messageId, sentMessage.guid)
@@ -274,16 +271,16 @@ class PendingMessageRepository @Inject constructor(
                     }
                 } else {
                     val error = result.exceptionOrNull()
-                    Log.w(TAG, "[SEND_TRACE] [IMMEDIATE] ✗ FAILED in ${System.currentTimeMillis() - sendStart}ms: ${error?.message}")
-                    Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
+                    Timber.w("[SEND_TRACE] [IMMEDIATE] ✗ FAILED in ${System.currentTimeMillis() - sendStart}ms: ${error?.message}")
+                    Timber.i("[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
 
                     // Reset status and enqueue WorkManager for retry
                     pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
                     enqueueWorker(messageId, clientGuid)
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "[SEND_TRACE] [IMMEDIATE] ✗ EXCEPTION: ${e.message}")
-                Log.i(TAG, "[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
+                Timber.e(e, "[SEND_TRACE] [IMMEDIATE] ✗ EXCEPTION")
+                Timber.i("[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
 
                 // Reset status and enqueue WorkManager for retry
                 pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
@@ -291,7 +288,7 @@ class PendingMessageRepository @Inject constructor(
             }
         }
 
-        Log.i(TAG, "[SEND_TRACE] ── PendingMessageRepository.queueMessage RETURNING: ${System.currentTimeMillis() - startTime}ms total ──")
+        Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage RETURNING: ${System.currentTimeMillis() - startTime}ms total ──")
         clientGuid
     }
 
@@ -358,7 +355,7 @@ class PendingMessageRepository @Inject constructor(
         // Store work request ID for cancellation
         pendingMessageDao.updateWorkRequestId(pendingMessageId, workRequest.id.toString())
 
-        Log.d(TAG, "Enqueued send worker for $localId (workId=${workRequest.id})")
+        Timber.d("Enqueued send worker for $localId (workId=${workRequest.id})")
     }
 
     /**
@@ -376,7 +373,7 @@ class PendingMessageRepository @Inject constructor(
         pendingMessageDao.updateStatus(pending.id, PendingSyncStatus.PENDING.name)
         enqueueWorker(pending.id, localId)
 
-        Log.i(TAG, "Retrying message: $localId")
+        Timber.i("Retrying message: $localId")
     }
 
     /**
@@ -391,9 +388,9 @@ class PendingMessageRepository @Inject constructor(
         pending.workRequestId?.let { workId ->
             try {
                 workManager.cancelWorkById(UUID.fromString(workId))
-                Log.d(TAG, "Cancelled work request: $workId")
+                Timber.d("Cancelled work request: $workId")
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to cancel work request", e)
+                Timber.w(e, "Failed to cancel work request")
             }
         }
 
@@ -410,7 +407,7 @@ class PendingMessageRepository @Inject constructor(
             pendingMessageDao.delete(pending.id)
         }
 
-        Log.i(TAG, "Cancelled message: $localId")
+        Timber.i("Cancelled message: $localId")
     }
 
     /**
@@ -436,7 +433,7 @@ class PendingMessageRepository @Inject constructor(
         val staleThreshold = System.currentTimeMillis() - (2 * 60 * 1000)
         val staleSending = pendingMessageDao.getStaleSending(staleThreshold)
         if (staleSending.isNotEmpty()) {
-            Log.i(TAG, "Found ${staleSending.size} stale SENDING messages, resetting to PENDING")
+            Timber.i("Found ${staleSending.size} stale SENDING messages, resetting to PENDING")
             staleSending.forEach { message ->
                 pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING.name)
             }
@@ -454,7 +451,7 @@ class PendingMessageRepository @Inject constructor(
         }
 
         if (reEnqueuedCount > 0) {
-            Log.i(TAG, "Re-enqueued $reEnqueuedCount pending messages at startup")
+            Timber.i("Re-enqueued $reEnqueuedCount pending messages at startup")
         }
 
         // Clean up orphaned attachment files
@@ -469,7 +466,7 @@ class PendingMessageRepository @Inject constructor(
         val sentCount = pendingMessageDao.getByStatus(PendingSyncStatus.SENT.name).size
         if (sentCount > 0) {
             pendingMessageDao.deleteSent()
-            Log.d(TAG, "Cleaned up $sentCount sent messages")
+            Timber.d("Cleaned up $sentCount sent messages")
         }
     }
 

@@ -6,7 +6,7 @@ import android.net.Uri
 import android.os.IBinder
 import android.telephony.SmsManager
 import android.telephony.TelephonyManager
-import android.util.Log
+import timber.log.Timber
 
 /**
  * Headless service required for the app to be eligible as the default SMS app.
@@ -19,10 +19,6 @@ import android.util.Log
  * the app cannot be set as the default SMS app.
  */
 class HeadlessSmsSendService : Service() {
-
-    companion object {
-        private const val TAG = "HeadlessSmsSendService"
-    }
 
     override fun onBind(intent: Intent?): IBinder? {
         return null
@@ -47,24 +43,24 @@ class HeadlessSmsSendService : Service() {
         // Get the recipient address from the intent data (sms:+1234567890 or smsto:+1234567890)
         val uri: Uri? = intent.data
         if (uri == null) {
-            Log.e(TAG, "No URI in RESPOND_VIA_MESSAGE intent")
+            Timber.e("No URI in RESPOND_VIA_MESSAGE intent")
             return
         }
 
         val recipient = getRecipientFromUri(uri)
         if (recipient.isNullOrBlank()) {
-            Log.e(TAG, "Could not extract recipient from URI: $uri")
+            Timber.e("Could not extract recipient from URI: $uri")
             return
         }
 
         // Get the message text from the intent extra
         val message = intent.getStringExtra(Intent.EXTRA_TEXT)
         if (message.isNullOrBlank()) {
-            Log.e(TAG, "No message text in RESPOND_VIA_MESSAGE intent")
+            Timber.e("No message text in RESPOND_VIA_MESSAGE intent")
             return
         }
 
-        Log.d(TAG, "Sending quick-reply SMS to $recipient")
+        Timber.d("Sending quick-reply SMS to $recipient")
 
         try {
             val smsManager = getSystemService(SmsManager::class.java)
@@ -88,9 +84,9 @@ class HeadlessSmsSendService : Service() {
                 )
             }
 
-            Log.d(TAG, "Quick-reply SMS sent successfully")
+            Timber.d("Quick-reply SMS sent successfully")
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to send quick-reply SMS", e)
+            Timber.e(e, "Failed to send quick-reply SMS")
         }
     }
 

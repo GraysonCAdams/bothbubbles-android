@@ -2,7 +2,7 @@ package com.bothbubbles.services.contacts
 
 import android.content.Context
 import android.provider.ContactsContract
-import android.util.Log
+import timber.log.Timber
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,10 +29,6 @@ data class PhoneContact(
 class ContactParser @Inject constructor(
     @ApplicationContext private val context: Context
 ) {
-    companion object {
-        private const val TAG = "ContactParser"
-    }
-
     /**
      * Get all contacts from the phone with valid display names.
      * Returns contacts with at least one phone number or email address.
@@ -93,7 +89,7 @@ class ContactParser @Inject constructor(
             parseEmails(contactsMap)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching contacts", e)
+            Timber.e(e, "Error fetching contacts")
             return@withContext emptyList()
         }
 
@@ -125,7 +121,7 @@ class ContactParser @Inject constructor(
             parseStarredEmails(starredContactIds, starredAddresses)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error fetching starred addresses", e)
+            Timber.e(e, "Error fetching starred addresses")
         }
 
         starredAddresses

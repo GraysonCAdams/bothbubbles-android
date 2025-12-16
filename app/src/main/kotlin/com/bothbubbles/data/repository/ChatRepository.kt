@@ -1,7 +1,7 @@
 package com.bothbubbles.data.repository
 
-import android.util.Log
 import com.bothbubbles.data.local.db.dao.ChatDao
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -28,9 +28,6 @@ class ChatRepository @Inject constructor(
     private val syncOps: ChatSyncOperations,
     private val participantOps: ChatParticipantOperations
 ) {
-    companion object {
-        private const val TAG = "ChatRepository"
-    }
 
     // ===== Local Query Operations =====
 
@@ -195,11 +192,11 @@ class ChatRepository @Inject constructor(
             if (response.isSuccessful) {
                 response.body()?.data?.total
             } else {
-                Log.w(TAG, "Failed to get message count: ${response.code()}")
+                Timber.w("Failed to get message count: ${response.code()}")
                 null
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get message count", e)
+            Timber.w(e, "Failed to get message count")
             null
         }
     }
@@ -384,7 +381,7 @@ class ChatRepository @Inject constructor(
         val groupCount = unifiedChatGroupDao.clearInvalidDisplayNames()
         val totalCount = chatCount + groupCount
         if (totalCount > 0) {
-            Log.i(TAG, "Cleaned up $totalCount invalid display names (chats: $chatCount, groups: $groupCount)")
+            Timber.i("Cleaned up $totalCount invalid display names (chats: $chatCount, groups: $groupCount)")
         }
         return totalCount
     }

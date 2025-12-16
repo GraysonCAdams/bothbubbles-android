@@ -1,6 +1,6 @@
 package com.bothbubbles.services.sync
 
-import android.util.Log
+import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -53,7 +53,7 @@ class SyncOperations @Inject constructor(
         performInitialSync: suspend ((Int, Int, Int, Int) -> Unit) -> Result<Unit>,
         onStateUpdate: (SyncState) -> Unit
     ): Result<Unit> = runCatching {
-        Log.i(TAG, "Starting unified resync - purging all data (concurrent mode)")
+        Timber.i("Starting unified resync - purging all data (concurrent mode)")
         onStateUpdate(SyncState.Syncing(0f, "Clearing existing data..."))
 
         // Clear all existing data including unified groups
@@ -112,19 +112,19 @@ class SyncOperations @Inject constructor(
         coroutineScope {
             // iMessage sync (server data)
             val iMessageJob = async {
-                Log.i(TAG, "Starting concurrent iMessage sync")
+                Timber.i("Starting concurrent iMessage sync")
                 performInitialSync { progress, _, _, _ ->
                     progressTracker.iMessageProgress.set(progress)
                     updateProgress()
                 }.getOrThrow()
                 progressTracker.iMessageProgress.set(100)
                 updateProgress()
-                Log.i(TAG, "Concurrent iMessage sync completed")
+                Timber.i("Concurrent iMessage sync completed")
             }
 
             // SMS import (local device data)
             val smsJob = async {
-                Log.i(TAG, "Starting concurrent SMS import")
+                Timber.i("Starting concurrent SMS import")
                 smsRepository.importAllThreads(
                     onProgress = { current, total ->
                         progressTracker.smsCurrentThread.set(current)
@@ -135,7 +135,7 @@ class SyncOperations @Inject constructor(
                 )
                 progressTracker.smsProgress.set(100)
                 updateProgress()
-                Log.i(TAG, "Concurrent SMS import completed")
+                Timber.i("Concurrent SMS import completed")
             }
 
             // Wait for both to complete
@@ -144,10 +144,10 @@ class SyncOperations @Inject constructor(
         }
 
         onStateUpdate(SyncState.Completed)
-        Log.i(TAG, "Unified resync completed (concurrent)")
+        Timber.i("Unified resync completed (concurrent)")
         Unit
     }.onFailure { e ->
-        Log.e(TAG, "Unified resync failed", e)
+        Timber.e(e, "Unified resync failed")
         onStateUpdate(SyncState.Error(e.message ?: "Unified resync failed"))
     }
 
@@ -163,7 +163,7 @@ class SyncOperations @Inject constructor(
         onStateUpdate: (SyncState) -> Unit,
         onLastSyncTimeUpdate: (Long) -> Unit
     ): Result<Unit> = runCatching {
-        Log.i(TAG, "Performing clean sync - clearing local data")
+        Timber.i("Performing clean sync - clearing local data")
         onStateUpdate(
             SyncState.Syncing(
                 progress = 0f,
@@ -199,7 +199,7 @@ class SyncOperations @Inject constructor(
         onStateUpdate: (SyncState) -> Unit,
         onLastSyncTimeUpdate: (Long) -> Unit
     ): Result<Unit> = runCatching {
-        Log.i(TAG, "Cleaning up server data - keeping local SMS/MMS")
+        Timber.i("Cleaning up server data - keeping local SMS/MMS")
         onStateUpdate(SyncState.Syncing(0f, "Removing server data..."))
 
         // Delete server messages (iMessage)
@@ -218,10 +218,10 @@ class SyncOperations @Inject constructor(
         onLastSyncTimeUpdate(0L)
 
         onStateUpdate(SyncState.Completed)
-        Log.i(TAG, "Server data cleanup completed")
+        Timber.i("Server data cleanup completed")
         Unit
     }.onFailure { e ->
-        Log.e(TAG, "Server data cleanup failed", e)
+        Timber.e(e, "Server data cleanup failed")
         onStateUpdate(SyncState.Error(e.message ?: "Cleanup failed"))
     }
 
@@ -239,7 +239,7 @@ class SyncOperations @Inject constructor(
             throw IllegalStateException("Cannot perform incremental sync without initial sync")
         }
 
-        Log.i(TAG, "Starting incremental sync from $lastSync")
+        Timber.i("Starting incremental sync from $lastSync")
 
         // Sync chats first to get any new conversations
         chatRepository.syncChats(
@@ -252,7 +252,7 @@ class SyncOperations @Inject constructor(
             after = lastSync,
             limit = 1000
         ).getOrElse { e ->
-            Log.e(TAG, "Global message sync failed", e)
+            Timber.e(e, "Global message sync failed")
             0
         }
 
@@ -261,10 +261,10 @@ class SyncOperations @Inject constructor(
         settingsDataStore.setLastSyncTime(syncTime)
         onLastSyncTimeUpdate(syncTime)
 
-        Log.i(TAG, "Incremental sync completed: $newMessageCount new messages")
+        Timber.i("Incremental sync completed: $newMessageCount new messages")
         Unit
     }.onFailure { e ->
-        Log.e(TAG, "Incremental sync failed", e)
+        Timber.e(e, "Incremental sync failed")
         // Don't update syncState for background incremental sync failures
     }
 
@@ -275,9 +275,9 @@ class SyncOperations @Inject constructor(
     suspend fun runCategorizationIfEnabled() {
         val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
         if (categorizationEnabled) {
-            Log.i(TAG, "Starting retroactive categorization...")
+            Timber.i("Starting retroactive categorization...")
             val categorized = categorizationRepository.categorizeAllChats()
-            Log.i(TAG, "Retroactive categorization complete: $categorized chats")
+            Timber.i("Retroactive categorization complete: $categorized chats")
         }
     }
 }
