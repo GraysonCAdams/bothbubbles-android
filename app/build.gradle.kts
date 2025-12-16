@@ -66,6 +66,8 @@ dependencies {
     // Core modules
     implementation(project(":core:model"))
     implementation(project(":core:network"))
+    implementation(project(":core:data"))
+    implementation(project(":navigation"))
 
     // Core Android
     implementation(libs.androidx.core.ktx)

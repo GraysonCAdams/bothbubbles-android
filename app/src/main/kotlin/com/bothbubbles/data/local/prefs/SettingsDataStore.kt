@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.preferencesDataStore
+import com.bothbubbles.core.data.SettingsProvider
 import com.bothbubbles.data.ServerCapabilities
 import com.bothbubbles.services.sound.SoundTheme
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -17,11 +18,13 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 /**
  * Main SettingsDataStore that composes all specialized preference classes.
  * This class delegates to feature-specific preference stores for better organization.
+ *
+ * Implements [SettingsProvider] interface for feature module access.
  */
 @Singleton
 class SettingsDataStore @Inject constructor(
     @ApplicationContext private val context: Context
-) {
+) : SettingsProvider {
     private val dataStore = context.dataStore
 
     // Specialized preference stores
@@ -35,10 +38,10 @@ class SettingsDataStore @Inject constructor(
 
     // ===== Server Connection (delegated to ServerPreferences) =====
 
-    val serverAddress: Flow<String> get() = serverPrefs.serverAddress
+    override val serverAddress: Flow<String> get() = serverPrefs.serverAddress
     val guidAuthKey: Flow<String> get() = serverPrefs.guidAuthKey
     val customHeaders: Flow<Map<String, String>> get() = serverPrefs.customHeaders
-    val isSetupComplete: Flow<Boolean> get() = serverPrefs.isSetupComplete
+    override val isSetupComplete: Flow<Boolean> get() = serverPrefs.isSetupComplete
     val lastSyncTimestamp: Flow<Long> get() = serverPrefs.lastSyncTimestamp
     val serverPassword: Flow<String> get() = serverPrefs.serverPassword
     val lastSyncTime: Flow<Long> get() = serverPrefs.lastSyncTime
@@ -46,7 +49,7 @@ class SettingsDataStore @Inject constructor(
     // Server Capabilities
     val serverOsVersion: Flow<String> get() = serverPrefs.serverOsVersion
     val serverVersionStored: Flow<String> get() = serverPrefs.serverVersionStored
-    val serverPrivateApiEnabled: Flow<Boolean> get() = serverPrefs.serverPrivateApiEnabled
+    override val serverPrivateApiEnabled: Flow<Boolean> get() = serverPrefs.serverPrivateApiEnabled
     val serverHelperConnected: Flow<Boolean> get() = serverPrefs.serverHelperConnected
     val serverCapabilities: Flow<ServerCapabilities> get() = serverPrefs.serverCapabilities
 
@@ -56,7 +59,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setSetupComplete(complete: Boolean) = serverPrefs.setSetupComplete(complete)
     suspend fun setLastSyncTimestamp(timestamp: Long) = serverPrefs.setLastSyncTimestamp(timestamp)
     suspend fun setLastSyncTime(timestamp: Long) = serverPrefs.setLastSyncTime(timestamp)
-    suspend fun setServerCapabilities(
+    override suspend fun setServerCapabilities(
         osVersion: String?,
         serverVersion: String?,
         privateApiEnabled: Boolean,
@@ -65,7 +68,7 @@ class SettingsDataStore @Inject constructor(
 
     // ===== Notification Settings (delegated to NotificationPreferences) =====
 
-    val notificationsEnabled: Flow<Boolean> get() = notificationPrefs.notificationsEnabled
+    override val notificationsEnabled: Flow<Boolean> get() = notificationPrefs.notificationsEnabled
     val notifyOnChatList: Flow<Boolean> get() = notificationPrefs.notifyOnChatList
     val bubbleFilterMode: Flow<String> get() = notificationPrefs.bubbleFilterMode
     val selectedBubbleChats: Flow<Set<String>> get() = notificationPrefs.selectedBubbleChats
@@ -77,7 +80,7 @@ class SettingsDataStore @Inject constructor(
     val firebaseAppId: Flow<String> get() = notificationPrefs.firebaseAppId
     val firebaseApiKey: Flow<String> get() = notificationPrefs.firebaseApiKey
     val firebaseStorageBucket: Flow<String> get() = notificationPrefs.firebaseStorageBucket
-    val keepAlive: Flow<Boolean> get() = notificationPrefs.keepAlive
+    override val keepAlive: Flow<Boolean> get() = notificationPrefs.keepAlive
 
     suspend fun setNotificationsEnabled(enabled: Boolean) = notificationPrefs.setNotificationsEnabled(enabled)
     suspend fun setNotifyOnChatList(enabled: Boolean) = notificationPrefs.setNotifyOnChatList(enabled)
@@ -100,8 +103,8 @@ class SettingsDataStore @Inject constructor(
 
     // ===== SMS Settings (delegated to SmsPreferences) =====
 
-    val smsEnabled: Flow<Boolean> get() = smsPrefs.smsEnabled
-    val smsOnlyMode: Flow<Boolean> get() = smsPrefs.smsOnlyMode
+    override val smsEnabled: Flow<Boolean> get() = smsPrefs.smsEnabled
+    override val smsOnlyMode: Flow<Boolean> get() = smsPrefs.smsOnlyMode
     val autoRetryAsSms: Flow<Boolean> get() = smsPrefs.autoRetryAsSms
     val preferSmsOverIMessage: Flow<Boolean> get() = smsPrefs.preferSmsOverIMessage
     val selectedSimSlot: Flow<Int> get() = smsPrefs.selectedSimSlot
@@ -127,9 +130,9 @@ class SettingsDataStore @Inject constructor(
     val showDeliveryTimestamps: Flow<Boolean> get() = uiPrefs.showDeliveryTimestamps
     val sendWithReturn: Flow<Boolean> get() = uiPrefs.sendWithReturn
     val autoOpenKeyboard: Flow<Boolean> get() = uiPrefs.autoOpenKeyboard
-    val enablePrivateApi: Flow<Boolean> get() = uiPrefs.enablePrivateApi
+    override val enablePrivateApi: Flow<Boolean> get() = uiPrefs.enablePrivateApi
     val sendTypingIndicators: Flow<Boolean> get() = uiPrefs.sendTypingIndicators
-    val hasShownPrivateApiPrompt: Flow<Boolean> get() = uiPrefs.hasShownPrivateApiPrompt
+    override val hasShownPrivateApiPrompt: Flow<Boolean> get() = uiPrefs.hasShownPrivateApiPrompt
     val hasCompletedSendModeTutorial: Flow<Boolean> get() = uiPrefs.hasCompletedSendModeTutorial
     val swipeGesturesEnabled: Flow<Boolean> get() = uiPrefs.swipeGesturesEnabled
     val swipeLeftAction: Flow<String> get() = uiPrefs.swipeLeftAction
@@ -154,9 +157,9 @@ class SettingsDataStore @Inject constructor(
     suspend fun setShowDeliveryTimestamps(enabled: Boolean) = uiPrefs.setShowDeliveryTimestamps(enabled)
     suspend fun setSendWithReturn(enabled: Boolean) = uiPrefs.setSendWithReturn(enabled)
     suspend fun setAutoOpenKeyboard(enabled: Boolean) = uiPrefs.setAutoOpenKeyboard(enabled)
-    suspend fun setEnablePrivateApi(enabled: Boolean) = uiPrefs.setEnablePrivateApi(enabled)
+    override suspend fun setEnablePrivateApi(enabled: Boolean) = uiPrefs.setEnablePrivateApi(enabled)
     suspend fun setSendTypingIndicators(enabled: Boolean) = uiPrefs.setSendTypingIndicators(enabled)
-    suspend fun setHasShownPrivateApiPrompt(shown: Boolean) = uiPrefs.setHasShownPrivateApiPrompt(shown)
+    override suspend fun setHasShownPrivateApiPrompt(shown: Boolean) = uiPrefs.setHasShownPrivateApiPrompt(shown)
     suspend fun setHasCompletedSendModeTutorial(completed: Boolean) = uiPrefs.setHasCompletedSendModeTutorial(completed)
     suspend fun setSwipeGesturesEnabled(enabled: Boolean) = uiPrefs.setSwipeGesturesEnabled(enabled)
     suspend fun setSwipeLeftAction(action: String) = uiPrefs.setSwipeLeftAction(action)
@@ -222,7 +225,7 @@ class SettingsDataStore @Inject constructor(
     val mlModelDownloaded: Flow<Boolean> get() = featurePrefs.mlModelDownloaded
     val mlAutoUpdateOnCellular: Flow<Boolean> get() = featurePrefs.mlAutoUpdateOnCellular
     val categorizationEnabled: Flow<Boolean> get() = featurePrefs.categorizationEnabled
-    val developerModeEnabled: Flow<Boolean> get() = featurePrefs.developerModeEnabled
+    override val developerModeEnabled: Flow<Boolean> get() = featurePrefs.developerModeEnabled
     val linkPreviewsEnabled: Flow<Boolean> get() = featurePrefs.linkPreviewsEnabled
     val autoResponderEnabled: Flow<Boolean> get() = featurePrefs.autoResponderEnabled
     val autoResponderFilter: Flow<String> get() = featurePrefs.autoResponderFilter
@@ -237,7 +240,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setMlModelDownloaded(downloaded: Boolean) = featurePrefs.setMlModelDownloaded(downloaded)
     suspend fun setMlAutoUpdateOnCellular(enabled: Boolean) = featurePrefs.setMlAutoUpdateOnCellular(enabled)
     suspend fun setCategorizationEnabled(enabled: Boolean) = featurePrefs.setCategorizationEnabled(enabled)
-    suspend fun setDeveloperModeEnabled(enabled: Boolean) = featurePrefs.setDeveloperModeEnabled(enabled)
+    override suspend fun setDeveloperModeEnabled(enabled: Boolean) = featurePrefs.setDeveloperModeEnabled(enabled)
     suspend fun setLinkPreviewsEnabled(enabled: Boolean) = featurePrefs.setLinkPreviewsEnabled(enabled)
     suspend fun setAutoResponderEnabled(enabled: Boolean) = featurePrefs.setAutoResponderEnabled(enabled)
     suspend fun setAutoResponderFilter(filter: String) = featurePrefs.setAutoResponderFilter(filter)

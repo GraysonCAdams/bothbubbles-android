@@ -1,5 +1,7 @@
 package com.bothbubbles.di
 
+import com.bothbubbles.core.data.SettingsProvider
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.services.contacts.ContactBlocker
@@ -133,4 +135,14 @@ abstract class ServiceModule {
     abstract fun bindSmsRestorer(
         smsRestoreService: SmsRestoreService
     ): SmsRestorer
+
+    /**
+     * Binds [SettingsDataStore] to the [SettingsProvider] interface.
+     * Feature modules depend on SettingsProvider for settings access.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSettingsProvider(
+        settingsDataStore: SettingsDataStore
+    ): SettingsProvider
 }

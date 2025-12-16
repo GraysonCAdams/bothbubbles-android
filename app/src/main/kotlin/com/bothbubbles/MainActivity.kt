@@ -12,7 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -94,9 +94,9 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val isSetupComplete by settingsDataStore.isSetupComplete.collectAsState(initial = true)
-            val developerModeEnabled by settingsDataStore.developerModeEnabled.collectAsState(initial = false)
-            val connectionMode by connectionModeManager.currentMode.collectAsState()
+            val isSetupComplete by settingsDataStore.isSetupComplete.collectAsStateWithLifecycle(initialValue = true)
+            val developerModeEnabled by settingsDataStore.developerModeEnabled.collectAsStateWithLifecycle(initialValue = false)
+            val connectionMode by connectionModeManager.currentMode.collectAsStateWithLifecycle()
             val navController = rememberNavController()
 
             // Clear crash protection after app has been stable for 30 seconds

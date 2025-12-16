@@ -29,3 +29,13 @@ include(":app")
 // Core modules (Phase 6 modularization)
 include(":core:model")
 include(":core:network")
+include(":core:data")
+
+// Navigation module (Phase 15 - route contracts)
+include(":navigation")
+
+// Feature modules (Phase 15)
+include(":feature:settings")
+include(":feature:setup")
+include(":feature:conversations")
+include(":feature:chat")
