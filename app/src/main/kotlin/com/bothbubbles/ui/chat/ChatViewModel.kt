@@ -109,6 +109,37 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 
+/**
+ * ViewModel for the Chat screen that orchestrates messaging functionality.
+ *
+ * ## Architecture
+ *
+ * This ViewModel follows the **Delegate Pattern** for decomposition. Complex functionality
+ * is delegated to focused handlers:
+ *
+ * - **ChatSendDelegate**: Message sending, retry, and forwarding (see [sendDelegate])
+ * - **ChatComposerDelegate**: Draft text, attachments, and composer UI state (see [composerDelegate])
+ * - **ChatMessageListDelegate**: Message loading, paging, and socket observation (see [messageListDelegate])
+ * - **ChatSearchDelegate**: In-chat message search (see [searchDelegate])
+ * - **ChatOperationsDelegate**: Archive, star, delete, spam, block (see [operationsDelegate])
+ * - **ChatEffectsDelegate**: Message effect playback (see [effectsDelegate])
+ * - **ChatSyncDelegate**: Adaptive polling and resume sync (see [syncDelegate])
+ * - **ChatThreadDelegate**: Thread overlay navigation (see [threadDelegate])
+ * - **ChatSendModeManager**: iMessage/SMS mode switching (see [sendModeManager])
+ * - **ChatScheduledMessageDelegate**: Scheduled message management (see [scheduledMessageDelegate])
+ * - **ChatAttachmentDelegate**: Attachment download and progress (see [attachmentDelegate])
+ * - **ChatEtaSharingDelegate**: ETA sharing during navigation (see [etaSharingDelegate])
+ *
+ * ## State Isolation
+ *
+ * Each delegate exposes its own StateFlow (e.g., [sendState], [searchState]) to reduce
+ * cascade recompositions. ChatScreen should collect from these flows directly rather than
+ * through a single monolithic UI state.
+ *
+ * @see ChatSendDelegate
+ * @see ChatComposerDelegate
+ * @see ChatMessageListDelegate
+ */
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ChatViewModel @Inject constructor(
@@ -119,39 +150,27 @@ class ChatViewModel @Inject constructor(
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
-    private val soundManager: SoundManager,
-    private val attachmentRepository: AttachmentRepository,
-    private val attachmentDownloadQueue: AttachmentDownloadQueue,
     private val androidContactsService: AndroidContactsService,
-    private val vCardService: VCardService,
-    private val smartReplyService: SmartReplyService,
-    private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val handleRepository: HandleRepository,
     private val activeConversationManager: ActiveConversationManager,
-    private val api: BothBubblesApi,
     private val smsPermissionHelper: SmsPermissionHelper,
-    private val attachmentPreloader: AttachmentPreloader,
     private val pendingMessageRepository: PendingMessageRepository,
-    private val iMessageAvailabilityService: IMessageAvailabilityService,
-    private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val chatStateCache: ChatStateCache,
-    // Delegates for decomposition
-    private val sendDelegate: ChatSendDelegate,
-    private val attachmentDelegate: ChatAttachmentDelegate,
-    private val etaSharingDelegate: ChatEtaSharingDelegate,
-    private val searchDelegate: ChatSearchDelegate,
-    private val operationsDelegate: ChatOperationsDelegate,
-    private val syncDelegate: ChatSyncDelegate,
-    private val effectsDelegate: ChatEffectsDelegate,
-    private val threadDelegate: ChatThreadDelegate,
-    private val composerDelegate: ChatComposerDelegate,
-    private val messageListDelegate: ChatMessageListDelegate,
-    private val sendModeManager: ChatSendModeManager,
-    private val scheduledMessageDelegate: ChatScheduledMessageDelegate,
+    // Delegates for decomposition - publicly exposed for thin controller pattern
+    val send: ChatSendDelegate,
+    val attachment: ChatAttachmentDelegate,
+    val etaSharing: ChatEtaSharingDelegate,
+    val search: ChatSearchDelegate,
+    val operations: ChatOperationsDelegate,
+    val sync: ChatSyncDelegate,
+    val effects: ChatEffectsDelegate,
+    val thread: ChatThreadDelegate,
+    val composer: ChatComposerDelegate,
+    val messageList: ChatMessageListDelegate,
+    val sendMode: ChatSendModeManager,
+    val scheduledMessages: ChatScheduledMessageDelegate,
     private val messageSendingService: MessageSendingService,
     // Sync integrity services
     private val counterpartSyncService: CounterpartSyncService,
-    private val gifRepository: GifRepository,
     // Media playback
     val exoPlayerPool: ExoPlayerPool
 ) : ViewModel() {
@@ -187,51 +206,32 @@ class ChatViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(ChatUiState(currentSendMode = initialSendMode))
     val uiState: StateFlow<ChatUiState> = _uiState.asStateFlow()
 
-    // Send state - owned by ChatSendDelegate, exposed directly to ChatScreen
-    // This reduces cascade recompositions by isolating send-related state updates
-    val sendState: StateFlow<SendState> get() = sendDelegate.state
+    // State flows exposed directly from delegates for thin controller pattern
+    // ChatScreen can access these directly: viewModel.send.state, viewModel.search.state, etc.
+    // Backward compatibility accessors:
+    val sendState: StateFlow<SendState> get() = send.state
+    val searchState: StateFlow<SearchState> get() = search.state
+    val operationsState: StateFlow<OperationsState> get() = operations.state
+    val syncState: StateFlow<SyncState> get() = sync.state
+    val effectsState: StateFlow<EffectsState> get() = effects.state
+    val threadState: StateFlow<ThreadState> get() = thread.state
+    val scheduledMessagesState: StateFlow<ScheduledMessagesState> get() = scheduledMessages.state
+    val composerState: StateFlow<ComposerState> get() = composer.state
+    val draftText: StateFlow<String> get() = composer.draftText
+    val pendingAttachments: StateFlow<List<PendingAttachmentInput>> get() = composer.pendingAttachments
+    val activePanel: StateFlow<ComposerPanel> get() = composer.activePanel
+    val smartReplySuggestions: StateFlow<List<SuggestionItem>> get() = composer.smartReplySuggestions
 
-    // Search state - owned by ChatSearchDelegate, exposed directly to ChatScreen
-    // This reduces cascade recompositions by isolating search-related state updates
-    val searchState: StateFlow<SearchState> get() = searchDelegate.state
-
-    // Operations state - owned by ChatOperationsDelegate, exposed directly to ChatScreen
-    val operationsState: StateFlow<OperationsState> get() = operationsDelegate.state
-
-    // Sync state - owned by ChatSyncDelegate, exposed directly to ChatScreen
-    val syncState: StateFlow<SyncState> get() = syncDelegate.state
-
-    // Effects state - owned by ChatEffectsDelegate, exposed directly to ChatScreen
-    val effectsState: StateFlow<EffectsState> get() = effectsDelegate.state
-
-    // Thread state - owned by ChatThreadDelegate, exposed directly to ChatScreen
-    val threadState: StateFlow<ThreadState> get() = threadDelegate.state
-
-    // Scheduled messages state - owned by ChatScheduledMessageDelegate, exposed directly to ChatScreen
-    val scheduledMessagesState: StateFlow<ScheduledMessagesState> get() = scheduledMessageDelegate.state
-
-    // Separate flow for messages - delegated to messageListDelegate
-    val messagesState: StateFlow<StableList<MessageUiModel>> get() = messageListDelegate.messagesState
+    // Separate flow for messages - delegated to messageList
+    val messagesState: StateFlow<StableList<MessageUiModel>> get() = messageList.messagesState
 
     // ============================================================================
-    // COMPOSER STATE - Delegated to ChatComposerDelegate
-    // The delegate owns draft text, pending attachments, quality, and panel state.
+    // COMPOSER STATE - Delegated to composer
+    // ChatScreen should access directly: viewModel.composer.draftText, etc.
     // ============================================================================
-
-    // Draft text - delegated to composerDelegate
-    val draftText: StateFlow<String> get() = composerDelegate.draftText
-
-    // Pending attachments - delegated to composerDelegate
-    val pendingAttachments: StateFlow<List<PendingAttachmentInput>> get() = composerDelegate.pendingAttachments
-
-    // Active panel - delegated to composerDelegate
-    val activePanel: StateFlow<ComposerPanel> get() = composerDelegate.activePanel
-
-    // Composer state - delegated to composerDelegate
-    val composerState: StateFlow<ComposerState> get() = composerDelegate.state
 
     fun onComposerEvent(event: ComposerEvent) {
-        composerDelegate.onComposerEvent(
+        composer.onComposerEvent(
             event = event,
             onSend = { sendMessage() },
             onToggleSendMode = { newMode -> _uiState.update { it.copy(currentSendMode = newMode) } },
@@ -249,31 +249,16 @@ class ChatViewModel @Inject constructor(
         _uiState.update { it.copy(appError = null) }
     }
 
-    // Sparse message list - delegated to messageListDelegate
-    val sparseMessages: StateFlow<SparseMessageList> get() = messageListDelegate.sparseMessages
-
-    // Total message count for scroll indicator - delegated to messageListDelegate
-    val totalMessageCount: StateFlow<Int> get() = messageListDelegate.totalMessageCount
-
-    // Track initial load completion for animation control - delegated to messageListDelegate
-    val initialLoadComplete: StateFlow<Boolean> get() = messageListDelegate.initialLoadComplete
-
-    // Track when we're fetching older messages from the BlueBubbles server - delegated to messageListDelegate
-    val isLoadingFromServer: StateFlow<Boolean> get() = messageListDelegate.isLoadingFromServer
-
-    // Emit socket-pushed message GUIDs for "new messages" indicator - delegated to messageListDelegate
-    val socketNewMessage: SharedFlow<String> get() = messageListDelegate.socketNewMessage
-
-    /**
-     * Check if a message has been loaded this session.
-     * Used to skip entrance animations for previously-viewed messages when scrolling back.
-     */
-    fun hasMessageBeenSeen(guid: String): Boolean = messageListDelegate.hasMessageBeenSeen(guid)
-
-    // Initial scroll position from LRU cache (for instant restore when re-opening chat)
-    // ChatScreen should read this once to initialize LazyListState
-    private val _cachedScrollPosition = MutableStateFlow<Pair<Int, Int>?>(null)
-    val cachedScrollPosition: StateFlow<Pair<Int, Int>?> = _cachedScrollPosition.asStateFlow()
+    // Message list state - delegated to messageList
+    // ChatScreen should access directly: viewModel.messageList.sparseMessages, etc.
+    // Backward compatibility accessors:
+    val sparseMessages: StateFlow<SparseMessageList> get() = messageList.sparseMessages
+    val totalMessageCount: StateFlow<Int> get() = messageList.totalMessageCount
+    val initialLoadComplete: StateFlow<Boolean> get() = messageList.initialLoadComplete
+    val isLoadingFromServer: StateFlow<Boolean> get() = messageList.isLoadingFromServer
+    val socketNewMessage: SharedFlow<String> get() = messageList.socketNewMessage
+    val cachedScrollPosition: StateFlow<Pair<Int, Int>?> get() = messageList.cachedScrollPosition
+    fun hasMessageBeenSeen(guid: String): Boolean = messageList.hasMessageBeenSeen(guid)
 
     // Attachment download progress tracking
     // Maps attachment GUID to download progress (0.0 to 1.0, or null if not downloading)
@@ -284,78 +269,39 @@ class ChatViewModel @Inject constructor(
     private val _autoDownloadEnabled = MutableStateFlow(true)
     val autoDownloadEnabled: StateFlow<Boolean> = _autoDownloadEnabled.asStateFlow()
 
-    // Smart reply suggestions (ML Kit + user templates, max 3)
-    private val _mlSuggestions = MutableStateFlow<List<String>>(emptyList())
-
-    val smartReplySuggestions: StateFlow<List<SuggestionItem>> = combine(
-        _mlSuggestions,
-        quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
-    ) { mlSuggestions, templates ->
-        getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
-
-    // Typing indicator state
-    private var typingDebounceJob: Job? = null
-    private var isCurrentlyTyping = false
-    private val typingDebounceMs = 3000L // 3 seconds after last keystroke to send stopped-typing
-    private var lastStartedTypingTime = 0L
-    private val typingCooldownMs = 500L // Min time between started-typing emissions
-
-    // Cached settings for typing indicators (avoids suspend calls on every keystroke)
-    @Volatile private var cachedPrivateApiEnabled = false
-    @Volatile private var cachedTypingIndicatorsEnabled = false
-
     // Draft persistence
     private var draftSaveJob: Job? = null
     private val draftSaveDebounceMs = 500L // Debounce draft saves to avoid excessive DB writes
 
-    // iMessage availability/send mode state is now managed by ChatSendModeManager
-
-    // PERF: Search debounce - cancels previous search when new query arrives
-    private var searchJob: Job? = null
-    private val searchDebounceMs = 150L // Debounce search to avoid running on every keystroke
-
-    // Scroll position tracking for state restoration
-    private var lastScrollPosition: Int = 0
-    private var lastScrollOffset: Int = 0
-    private var lastScrollSaveTime: Long = 0L
-    private val scrollSaveDebounceMs = 1000L // Debounce scroll saves
-
-    // Throttle preloader to avoid calling on every scroll frame
-    private var lastPreloadIndex: Int = -1
-    private var lastPreloadTime: Long = 0L
-    private val preloadThrottleMs = 150L // Only preload every 150ms at most
-
-    // Cached attachment list for preloading - avoids flatMap on every scroll frame
-    private var cachedAttachments: List<AttachmentUiModel> = emptyList()
-    private var cachedAttachmentsMessageCount: Int = 0
-
     // Thread scroll event - exposed from delegate for ChatScreen to collect
-    val scrollToGuid: SharedFlow<String> get() = threadDelegate.scrollToGuid
+    val scrollToGuid: SharedFlow<String> get() = thread.scrollToGuid
 
     init {
         // Initialize delegates
-        sendDelegate.initialize(chatGuid, viewModelScope)
-        attachmentDelegate.initialize(chatGuid, viewModelScope, mergedChatGuids)
-        etaSharingDelegate.initialize(viewModelScope)
-        searchDelegate.initialize(viewModelScope)
-        operationsDelegate.initialize(chatGuid, viewModelScope)
-        syncDelegate.initialize(chatGuid, viewModelScope)
-        effectsDelegate.initialize(viewModelScope)
-        threadDelegate.initialize(viewModelScope, mergedChatGuids)
-        scheduledMessageDelegate.initialize(chatGuid, viewModelScope)
-        composerDelegate.initialize(
-            scope = viewModelScope,
-            uiState = _uiState,
-            syncState = syncDelegate.state,
-            sendState = sendDelegate.state,
-            onUiStateUpdate = { transform -> _uiState.update { it.transform() } }
-        )
-        messageListDelegate.initialize(
+        send.initialize(chatGuid, viewModelScope)
+        attachment.initialize(chatGuid, viewModelScope, mergedChatGuids)
+        etaSharing.initialize(viewModelScope)
+        search.initialize(viewModelScope)
+        operations.initialize(chatGuid, viewModelScope)
+        sync.initialize(chatGuid, viewModelScope)
+        effects.initialize(viewModelScope)
+        thread.initialize(viewModelScope, mergedChatGuids)
+        scheduledMessages.initialize(chatGuid, viewModelScope)
+        // Initialize messageList first so we can pass its messagesState to composer
+        messageList.initialize(
             chatGuid = chatGuid,
             mergedChatGuids = mergedChatGuids,
             scope = viewModelScope,
             uiState = _uiState,
+            onUiStateUpdate = { transform -> _uiState.update { it.transform() } }
+        )
+        composer.initialize(
+            chatGuid = chatGuid,
+            scope = viewModelScope,
+            uiState = _uiState,
+            syncState = sync.state,
+            sendState = send.state,
+            messagesState = messageList.messagesState,
             onUiStateUpdate = { transform -> _uiState.update { it.transform() } }
         )
 
@@ -367,23 +313,20 @@ class ChatViewModel @Inject constructor(
                 settingsDataStore.reduceMotion
             ) { autoPlay, replayOnScroll, reduceMotion -> Triple(autoPlay, replayOnScroll, reduceMotion) }
                 .collect { (autoPlay, replayOnScroll, reduceMotion) ->
-                    effectsDelegate.setAutoPlayEffects(autoPlay)
-                    effectsDelegate.setReplayOnScroll(replayOnScroll)
-                    effectsDelegate.setReduceMotion(reduceMotion)
+                    effects.setAutoPlayEffects(autoPlay)
+                    effects.setReplayOnScroll(replayOnScroll)
+                    effects.setReduceMotion(reduceMotion)
                 }
         }
 
-        // Send delegate state is exposed directly via sendState - no forwarding needed
-        // ChatScreen should collect from sendState for send-related UI updates
-
-        // Derive replyToMessage from sendState.replyingToGuid (lookup in messages)
+        // Derive replyToMessage from send.state.replyingToGuid (lookup in messages)
         viewModelScope.launch {
-            sendDelegate.state
+            send.state
                 .map { it.replyingToGuid }
                 .distinctUntilChanged()
                 .collect { guid ->
                     if (guid != null) {
-                        val message = messageListDelegate.messagesState.value.find { it.guid == guid }
+                        val message = messageList.messagesState.value.find { it.guid == guid }
                         _uiState.update { it.copy(replyToMessage = message) }
                     } else {
                         _uiState.update { it.copy(replyToMessage = null) }
@@ -394,27 +337,27 @@ class ChatViewModel @Inject constructor(
         // Forward attachment delegate's state to ViewModel state
         viewModelScope.launch {
             combine(
-                attachmentDelegate.downloadProgress,
-                attachmentDelegate.refreshTrigger
+                attachment.downloadProgress,
+                attachment.refreshTrigger
             ) { progress, trigger -> Pair(progress, trigger) }
                 .collect { (progress, trigger) ->
                     _attachmentDownloadProgress.value = progress
                     // Forward refresh trigger to message list delegate
                     if (trigger > 0) {
-                        messageListDelegate.triggerAttachmentRefresh()
+                        messageList.triggerAttachmentRefresh()
                     }
                 }
         }
 
         // Mark as read when new messages arrive via socket (user is viewing the chat)
         viewModelScope.launch {
-            messageListDelegate.socketNewMessage.collect {
+            messageList.socketNewMessage.collect {
                 markAsRead()
             }
         }
         // Forward ETA sharing delegate's state to UI state
         viewModelScope.launch {
-            etaSharingDelegate.etaSharingState.collect { etaState ->
+            etaSharing.etaSharingState.collect { etaState ->
                 _uiState.update {
                     it.copy(
                         isEtaSharingEnabled = etaState.isEnabled,
@@ -427,38 +370,23 @@ class ChatViewModel @Inject constructor(
             }
         }
 
-        // Check LRU cache for previously viewed chat state (instant restore)
-        val cachedState = chatStateCache.get(chatGuid)
-        if (cachedState != null) {
-            Log.d(TAG, "Restoring chat from cache: scrollPos=${cachedState.scrollPosition}, messages=${cachedState.messages.size}")
-            lastScrollPosition = cachedState.scrollPosition
-            lastScrollOffset = cachedState.scrollOffset
-            // Expose to ChatScreen for LazyListState initialization
-            _cachedScrollPosition.value = Pair(cachedState.scrollPosition, cachedState.scrollOffset)
-        }
-
         // Track this conversation as active to suppress notifications while viewing
         activeConversationManager.setActiveConversation(chatGuid, mergedChatGuids.toSet())
 
         // Notify server which chat is open (helps server optimize notification delivery)
         socketService.sendOpenChat(chatGuid)
 
-        // Set this chat as the active chat for download queue prioritization
-        attachmentDownloadQueue.setActiveChat(chatGuid)
-
         loadChat()
-        // Note: Message loading, socket observation, and sync are now handled by messageListDelegate
+        // Note: Message loading, socket observation, and sync are now handled by messageList
         syncMessages() // Always sync to check for new messages (runs in background)
         observeTypingIndicators()
-        observeTypingIndicatorSettings()
         markAsRead()
         determineChatType()
         observeParticipantsForSaveContactBanner()
         observeFallbackMode()
         observeSendModeManagerState() // Observe delegate's state flows
-        observeSmartReplies()
         observeAutoDownloadSetting()
-        // Note: Quality settings are now observed by ChatComposerDelegate
+        // Note: Quality settings and smart replies are now observed by ChatComposerDelegate
         observeUploadProgress()
         saveCurrentChatState()
         observeQueuedMessages()
@@ -471,7 +399,7 @@ class ChatViewModel @Inject constructor(
             val currentState = _uiState.value
 
             // Initialize send mode manager with chat data
-            sendModeManager.initialize(
+            sendMode.initialize(
                 chatGuid = chatGuid,
                 scope = viewModelScope,
                 initialSendMode = currentState.currentSendMode,
@@ -480,20 +408,20 @@ class ChatViewModel @Inject constructor(
             )
 
             // Check if iMessage is available again (for chats in SMS fallback mode)
-            sendModeManager.checkAndMaybeExitFallback(currentState.participantPhone)
+            sendMode.checkAndMaybeExitFallback(currentState.participantPhone)
 
             // Check iMessage availability for the contact (for send mode switching)
-            sendModeManager.checkIMessageAvailability(
+            sendMode.checkIMessageAvailability(
                 isGroup = currentState.isGroup,
                 isIMessageChat = currentState.isIMessageChat,
                 isLocalSmsChat = currentState.isLocalSmsChat,
                 participantPhone = currentState.participantPhone
-            ) { available, isChecking, sendMode, canToggle, showReveal, smsBlocked ->
+            ) { available, isChecking, mode, canToggle, showReveal, smsBlocked ->
                 _uiState.update { state ->
                     state.copy(
                         contactIMessageAvailable = available,
                         isCheckingIMessageAvailability = isChecking,
-                        currentSendMode = sendMode,
+                        currentSendMode = mode,
                         canToggleSendMode = canToggle,
                         showSendModeRevealAnimation = showReveal,
                         smsInputBlocked = smsBlocked
@@ -504,23 +432,6 @@ class ChatViewModel @Inject constructor(
                     initTutorialIfNeeded()
                 }
             }
-        }
-    }
-
-    /**
-     * Observe typing indicator settings and cache them for fast access.
-     * This avoids suspend calls on every keystroke in handleTypingIndicator.
-     */
-    private fun observeTypingIndicatorSettings() {
-        viewModelScope.launch {
-            combine(
-                settingsDataStore.enablePrivateApi,
-                settingsDataStore.sendTypingIndicators
-            ) { privateApi, typingIndicators -> Pair(privateApi, typingIndicators) }
-                .collect { (privateApi, typingIndicators) ->
-                    cachedPrivateApiEnabled = privateApi
-                    cachedTypingIndicatorsEnabled = typingIndicators
-                }
         }
     }
 
@@ -552,11 +463,7 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Update the attachment quality for the current session.
-     * Delegated to ChatComposerDelegate.
-     */
-    fun setAttachmentQuality(quality: AttachmentQuality) = composerDelegate.setAttachmentQuality(quality)
+    // setAttachmentQuality - use viewModel.composer.setAttachmentQuality() directly
 
     /**
      * Observe upload progress from MessageSendingService for determinate progress bar.
@@ -572,18 +479,18 @@ class ChatViewModel @Inject constructor(
                     val currentProgress = progress.progress / progress.totalAttachments
                     val messageProgress = attachmentBase + currentProgress
 
-                    // Update pending message progress via sendDelegate
-                    val currentState = sendDelegate.state.value
+                    // Update pending message progress via send delegate
+                    val currentState = send.state.value
                     val pendingList = currentState.pendingMessages.toList()
                     val attachmentIndex = pendingList.indexOfFirst { it.hasAttachments }
                     if (attachmentIndex >= 0) {
-                        sendDelegate.updatePendingMessageProgress(
+                        send.updatePendingMessageProgress(
                             pendingList[attachmentIndex].tempGuid,
                             messageProgress
                         )
                     }
                     // Update aggregate progress
-                    sendDelegate.setSendProgress(sendDelegate.calculateAggregateProgress())
+                    send.setSendProgress(send.calculateAggregateProgress())
                 }
                 // Don't reset progress to 0 when progress is null - let completion handlers manage that
             }
@@ -596,47 +503,10 @@ class ChatViewModel @Inject constructor(
      * Uses the download queue for prioritized, concurrent downloads.
      */
     private fun downloadPendingAttachments() {
-        attachmentDelegate.downloadPendingAttachments()
+        attachment.downloadPendingAttachments()
     }
 
-    /**
-     * Manually download a specific attachment.
-     * Called when user taps on an attachment placeholder in manual download mode.
-     * Uses IMMEDIATE priority to jump ahead of background downloads.
-     */
-    fun downloadAttachment(attachmentGuid: String) {
-        attachmentDelegate.downloadAttachment(attachmentGuid)
-    }
-
-    /**
-     * Check if an attachment is currently downloading.
-     */
-    fun isDownloading(attachmentGuid: String): Boolean {
-        return attachmentDelegate.isDownloading(attachmentGuid)
-    }
-
-    /**
-     * Get download progress for an attachment (0.0 to 1.0).
-     */
-    fun getDownloadProgress(attachmentGuid: String): Float {
-        return attachmentDelegate.getDownloadProgress(attachmentGuid)
-    }
-
-    /**
-     * Observe messages and generate ML Kit smart reply suggestions.
-     * Debounced to avoid excessive processing while scrolling.
-     */
-    private fun observeSmartReplies() {
-        viewModelScope.launch {
-            messagesState
-                // StateFlow already guarantees distinct values, no need for distinctUntilChanged()
-                .debounce(500)  // Wait for conversation to settle
-                .collect { messages ->
-                    val suggestions = smartReplyService.getSuggestions(messages, maxSuggestions = 3)
-                    _mlSuggestions.value = suggestions
-                }
-        }
-    }
+    // downloadAttachment, isDownloading, getDownloadProgress - use viewModel.attachment.* directly
 
     /**
      * Observe queued messages from the database for offline-first UI.
@@ -647,7 +517,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             pendingMessageRepository.observePendingForChat(chatGuid)
                 .collect { pending ->
-                    sendDelegate.updateQueuedMessages(pending.map { it.toQueuedUiModel() })
+                    send.updateQueuedMessages(pending.map { it.toQueuedUiModel() })
                 }
         }
     }
@@ -696,49 +566,13 @@ class ChatViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Combine ML suggestions and user templates into max N suggestions.
-     * ML suggestions appear first (more contextual), user templates fill remaining slots.
-     */
-    private fun getCombinedSuggestions(
-        mlSuggestions: List<String>,
-        userTemplates: List<QuickReplyTemplateEntity>,
-        maxTotal: Int
-    ): List<SuggestionItem> {
-        val combined = mutableListOf<SuggestionItem>()
-
-        // Add ML suggestions first (most contextual)
-        mlSuggestions.take(maxTotal).forEach { text ->
-            combined.add(SuggestionItem(text = text, isSmartSuggestion = true))
-        }
-
-        // Fill remaining slots with user templates
-        val remaining = maxTotal - combined.size
-        userTemplates.take(remaining).forEach { template ->
-            combined.add(SuggestionItem(
-                text = template.title,
-                isSmartSuggestion = false,
-                templateId = template.id
-            ))
-        }
-
-        return combined
-    }
-
-    /**
-     * Record usage of a user template (for "most used" sorting).
-     */
-    fun recordTemplateUsage(templateId: Long) {
-        viewModelScope.launch {
-            quickReplyTemplateRepository.recordUsage(templateId)
-        }
-    }
+    // getCombinedSuggestions, recordTemplateUsage - use viewModel.composer.* directly
 
     private fun observeFallbackMode() {
         viewModelScope.launch {
             chatFallbackTracker.fallbackStates.collect { fallbackStates ->
                 val entry = fallbackStates[chatGuid]
-                syncDelegate.setSmsFallbackMode(
+                sync.setSmsFallbackMode(
                     isInFallback = entry != null,
                     reason = entry?.reason
                 )
@@ -753,56 +587,56 @@ class ChatViewModel @Inject constructor(
     private fun observeSendModeManagerState() {
         // Observe current send mode
         viewModelScope.launch {
-            sendModeManager.currentSendMode.collect { mode ->
+            sendMode.currentSendMode.collect { mode ->
                 _uiState.update { it.copy(currentSendMode = mode) }
             }
         }
 
         // Observe contact iMessage availability
         viewModelScope.launch {
-            sendModeManager.contactIMessageAvailable.collect { available ->
+            sendMode.contactIMessageAvailable.collect { available ->
                 _uiState.update { it.copy(contactIMessageAvailable = available) }
             }
         }
 
         // Observe checking state
         viewModelScope.launch {
-            sendModeManager.isCheckingIMessageAvailability.collect { isChecking ->
+            sendMode.isCheckingIMessageAvailability.collect { isChecking ->
                 _uiState.update { it.copy(isCheckingIMessageAvailability = isChecking) }
             }
         }
 
         // Observe toggle availability
         viewModelScope.launch {
-            sendModeManager.canToggleSendMode.collect { canToggle ->
+            sendMode.canToggleSendMode.collect { canToggle ->
                 _uiState.update { it.copy(canToggleSendMode = canToggle) }
             }
         }
 
         // Observe reveal animation state
         viewModelScope.launch {
-            sendModeManager.showSendModeRevealAnimation.collect { showReveal ->
+            sendMode.showSendModeRevealAnimation.collect { showReveal ->
                 _uiState.update { it.copy(showSendModeRevealAnimation = showReveal) }
             }
         }
 
         // Observe manually set state
         viewModelScope.launch {
-            sendModeManager.sendModeManuallySet.collect { manuallySet ->
+            sendMode.sendModeManuallySet.collect { manuallySet ->
                 _uiState.update { it.copy(sendModeManuallySet = manuallySet) }
             }
         }
 
         // Observe SMS input blocked state
         viewModelScope.launch {
-            sendModeManager.smsInputBlocked.collect { blocked ->
+            sendMode.smsInputBlocked.collect { blocked ->
                 _uiState.update { it.copy(smsInputBlocked = blocked) }
             }
         }
 
         // Observe tutorial state
         viewModelScope.launch {
-            sendModeManager.tutorialState.collect { tutorial ->
+            sendMode.tutorialState.collect { tutorial ->
                 _uiState.update { it.copy(tutorialState = tutorial) }
             }
         }
@@ -819,7 +653,7 @@ class ChatViewModel @Inject constructor(
      * @return true if the switch was successful, false otherwise
      */
     fun setSendMode(mode: ChatSendMode, persist: Boolean = true): Boolean {
-        return sendModeManager.setSendMode(mode, persist)
+        return sendMode.setSendMode(mode, persist)
     }
 
     /**
@@ -827,21 +661,21 @@ class ChatViewModel @Inject constructor(
      * Returns true if the toggle was successful.
      */
     fun tryToggleSendMode(): Boolean {
-        return sendModeManager.tryToggleSendMode()
+        return sendMode.tryToggleSendMode()
     }
 
     /**
      * Check if send mode toggle is currently available.
      */
     fun canToggleSendMode(): Boolean {
-        return sendModeManager.canToggleSendModeNow()
+        return sendMode.canToggleSendModeNow()
     }
 
     /**
      * Mark the send mode reveal animation as shown.
      */
     fun markRevealAnimationShown() {
-        sendModeManager.markRevealAnimationShown()
+        sendMode.markRevealAnimationShown()
     }
 
     /**
@@ -856,7 +690,7 @@ class ChatViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.hasCompletedSendModeTutorial.first().let { completed ->
                 if (!completed) {
-                    sendModeManager.updateTutorialState(TutorialState.STEP_1_SWIPE_UP)
+                    sendMode.updateTutorialState(TutorialState.STEP_1_SWIPE_UP)
                 }
             }
         }
@@ -867,7 +701,7 @@ class ChatViewModel @Inject constructor(
      * Delegates to ChatSendModeManager.
      */
     fun updateTutorialState(newState: TutorialState) {
-        sendModeManager.updateTutorialState(newState)
+        sendMode.updateTutorialState(newState)
     }
 
     /**
@@ -876,7 +710,7 @@ class ChatViewModel @Inject constructor(
      * Delegates to ChatSendModeManager.
      */
     fun onTutorialToggleSuccess() {
-        sendModeManager.onTutorialToggleSuccess()
+        sendMode.onTutorialToggleSuccess()
     }
 
     private fun syncMessages() {
@@ -884,7 +718,7 @@ class ChatViewModel @Inject constructor(
         if (messageRepository.isLocalSmsChat(chatGuid)) {
             syncSmsMessages()
         } else {
-            messageListDelegate.syncMessagesFromServer()
+            messageList.syncMessagesFromServer()
         }
     }
 
@@ -1119,9 +953,9 @@ class ChatViewModel @Inject constructor(
 
     // ===== Thread Overlay Functions (delegated to ChatThreadDelegate) =====
 
-    fun loadThread(originGuid: String) = threadDelegate.loadThread(originGuid)
-    fun dismissThreadOverlay() = threadDelegate.dismissThreadOverlay()
-    fun scrollToMessage(guid: String) = threadDelegate.scrollToMessage(guid)
+    fun loadThread(originGuid: String) = thread.loadThread(originGuid)
+    fun dismissThreadOverlay() = thread.dismissThreadOverlay()
+    fun scrollToMessage(guid: String) = thread.scrollToMessage(guid)
 
     /**
      * Jump to a specific message, loading its position from the database if needed.
@@ -1131,7 +965,7 @@ class ChatViewModel @Inject constructor(
      * @return The position of the message, or null if not found
      */
     suspend fun jumpToMessage(guid: String): Int? {
-        return messageListDelegate.jumpToMessage(guid)
+        return messageList.jumpToMessage(guid)
     }
 
     /**
@@ -1166,7 +1000,7 @@ class ChatViewModel @Inject constructor(
                     val chatTitle = resolveChatTitle(it, participants)
                     // Load draft only on first observation to avoid overwriting user edits
                     if (!draftLoaded) {
-                        composerDelegate.restoreDraftText(it.textFieldText)
+                        composer.restoreDraftText(it.textFieldText)
                     }
                     _uiState.update { state ->
                         state.copy(
@@ -1184,7 +1018,7 @@ class ChatViewModel @Inject constructor(
                         )
                     }
                     // Update operations delegate with archive/star/spam state
-                    operationsDelegate.updateState(
+                    operations.updateState(
                         isArchived = it.isArchived,
                         isStarred = it.isStarred,
                         isSpam = it.isSpam,
@@ -1222,7 +1056,7 @@ class ChatViewModel @Inject constructor(
      * Notifies the paging controller to load data around the visible range.
      */
     fun onScrollPositionChanged(firstVisibleIndex: Int, lastVisibleIndex: Int) {
-        messageListDelegate.onScrollPositionChanged(firstVisibleIndex, lastVisibleIndex)
+        messageList.onScrollPositionChanged(firstVisibleIndex, lastVisibleIndex)
     }
 
     private fun observeTypingIndicators() {
@@ -1242,7 +1076,7 @@ class ChatViewModel @Inject constructor(
                         } == true
                 }
                 .collect { event ->
-                    syncDelegate.setTyping(event.isTyping)
+                    sync.setTyping(event.isTyping)
                 }
         }
     }
@@ -1302,8 +1136,8 @@ class ChatViewModel @Inject constructor(
     }
 
     fun updateDraft(text: String) {
-        composerDelegate.setDraftText(text)
-        handleTypingIndicator(text)
+        composer.setDraftText(text)
+        composer.handleTypingIndicator(text)
         persistDraft(text)
     }
 
@@ -1319,52 +1153,6 @@ class ChatViewModel @Inject constructor(
     }
 
     /**
-     * Handle typing indicator logic with debouncing and rate limiting.
-     *
-     * Optimizations:
-     * 1. Uses cached settings (no suspend calls on every keystroke)
-     * 2. Only sends started-typing once until stopped-typing is sent
-     * 3. Rate limits started-typing to avoid rapid on/off transitions
-     * 4. Debounces stopped-typing (3 seconds after last keystroke)
-     */
-    private fun handleTypingIndicator(text: String) {
-        // Only send typing indicators for iMessage chats (not local SMS)
-        if (_uiState.value.isLocalSmsChat) return
-
-        // Use cached settings (no suspend required)
-        if (!cachedPrivateApiEnabled || !cachedTypingIndicatorsEnabled) return
-
-        // Cancel any pending stopped-typing
-        typingDebounceJob?.cancel()
-
-        if (text.isNotEmpty()) {
-            // User is typing - send started-typing if not already sent
-            // Also apply cooldown to avoid rapid started/stopped/started transitions
-            val now = System.currentTimeMillis()
-            if (!isCurrentlyTyping && (now - lastStartedTypingTime > typingCooldownMs)) {
-                isCurrentlyTyping = true
-                lastStartedTypingTime = now
-                socketService.sendStartedTyping(chatGuid)
-            }
-
-            // Set up debounce to send stopped-typing after inactivity
-            typingDebounceJob = viewModelScope.launch {
-                delay(typingDebounceMs)
-                if (isCurrentlyTyping) {
-                    isCurrentlyTyping = false
-                    socketService.sendStoppedTyping(chatGuid)
-                }
-            }
-        } else {
-            // Text cleared - immediately send stopped-typing
-            if (isCurrentlyTyping) {
-                isCurrentlyTyping = false
-                socketService.sendStoppedTyping(chatGuid)
-            }
-        }
-    }
-
-    /**
      * Called when leaving the chat to ensure we send stopped-typing and save draft
      */
     fun onChatLeave() {
@@ -1374,103 +1162,34 @@ class ChatViewModel @Inject constructor(
         // Notify server we're leaving this chat
         socketService.sendCloseChat(chatGuid)
 
-        // Clear active chat for attachment download queue
-        attachmentDelegate.onChatLeave()
+        // Clear active chat for attachment download queue and preloader
+        messageList.clearActiveChat()
 
-        typingDebounceJob?.cancel()
-        if (isCurrentlyTyping) {
-            isCurrentlyTyping = false
-            socketService.sendStoppedTyping(chatGuid)
-        }
+        // Send stopped-typing via composer delegate
+        composer.sendStoppedTyping()
+
         // Save draft immediately when leaving (cancel debounce and save now)
         draftSaveJob?.cancel()
         viewModelScope.launch {
-            chatRepository.updateDraftText(chatGuid, composerDelegate.draftText.value)
+            chatRepository.updateDraftText(chatGuid, composer.draftText.value)
             // Save scroll position for state restoration
             val mergedGuidsStr = if (isMergedChat) mergedChatGuids.joinToString(",") else null
-            android.util.Log.d("StateRestore", "onChatLeave: saving chatGuid=$chatGuid, scroll=($lastScrollPosition, $lastScrollOffset)")
+            val (scrollPos, scrollOffset) = messageList.getScrollPosition()
+            android.util.Log.d("StateRestore", "onChatLeave: saving chatGuid=$chatGuid, scroll=($scrollPos, $scrollOffset)")
             settingsDataStore.setLastOpenChat(chatGuid, mergedGuidsStr)
-            settingsDataStore.setLastScrollPosition(lastScrollPosition, lastScrollOffset)
+            settingsDataStore.setLastScrollPosition(scrollPos, scrollOffset)
 
             // Save state to LRU cache for instant restore when re-opening this chat
-            chatStateCache.put(
-                ChatStateCache.CachedChatState(
-                    chatGuid = chatGuid,
-                    mergedGuids = mergedChatGuids,
-                    messages = sparseMessages.value,
-                    totalCount = totalMessageCount.value,
-                    scrollPosition = lastScrollPosition,
-                    scrollOffset = lastScrollOffset
-                )
-            )
+            chatStateCache.put(messageList.saveStateToCacheSync())
         }
     }
 
     /**
      * Update scroll position for state restoration.
-     * Called from ChatScreen when scroll position changes.
-     * IMPORTANT: This runs on every scroll frame - must be extremely lightweight!
+     * Delegated to messageList delegate.
      */
     fun updateScrollPosition(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int, visibleItemCount: Int = 10) {
-        lastScrollPosition = firstVisibleItemIndex
-        lastScrollOffset = firstVisibleItemScrollOffset
-
-        // Throttle preloader - only call if BOTH index changed AND enough time has passed
-        // Using AND (not OR) to minimize work during scroll
-        val now = System.currentTimeMillis()
-        val indexChanged = firstVisibleItemIndex != lastPreloadIndex
-        val timeElapsed = now - lastPreloadTime >= preloadThrottleMs
-
-        if (indexChanged && timeElapsed) {
-            lastPreloadIndex = firstVisibleItemIndex
-            lastPreloadTime = now
-
-            // Defer preload work to avoid any main thread blocking
-            val messages = messagesState.value
-            if (messages.isNotEmpty()) {
-                // Update cached attachments only if message count changed
-                if (messages.size != cachedAttachmentsMessageCount) {
-                    cachedAttachments = messages.flatMap { it.attachments }
-                    cachedAttachmentsMessageCount = messages.size
-                }
-
-                if (cachedAttachments.isNotEmpty()) {
-                    val visibleEnd = (firstVisibleItemIndex + visibleItemCount).coerceAtMost(messages.size - 1)
-                    // Preload images for ~3 screens in each direction to prevent image pop-in
-                    attachmentPreloader.preloadNearby(
-                        attachments = cachedAttachments,
-                        visibleRange = firstVisibleItemIndex..visibleEnd,
-                        preloadCount = 15
-                    )
-
-                    // Boost download priority for attachments in extended visible range
-                    // This ensures attachments needing download from server get prioritized
-                    val extendedStart = (firstVisibleItemIndex - 15).coerceAtLeast(0)
-                    val extendedEnd = (visibleEnd + 15).coerceAtMost(messages.size - 1)
-                    for (i in extendedStart..extendedEnd) {
-                        messages.getOrNull(i)?.attachments?.forEach { attachment ->
-                            if (attachment.needsDownload) {
-                                attachmentDownloadQueue.enqueue(
-                                    attachmentGuid = attachment.guid,
-                                    chatGuid = chatGuid,
-                                    priority = AttachmentDownloadQueue.Priority.VISIBLE
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Throttled save to DataStore - uses timestamp instead of Job cancel/recreate
-        // This avoids object allocation and scheduling overhead on every scroll frame
-        val saveTimeElapsed = now - lastScrollSaveTime >= scrollSaveDebounceMs
-        if (saveTimeElapsed) {
-            lastScrollSaveTime = now
-            viewModelScope.launch {
-                settingsDataStore.setLastScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset)
-            }
-        }
+        messageList.updateScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset, visibleItemCount)
     }
 
     /**
@@ -1487,50 +1206,44 @@ class ChatViewModel @Inject constructor(
     override fun onCleared() {
         super.onCleared()
         onChatLeave()
-        attachmentPreloader.clearTracking()
-        // Clear active chat from download queue so priority is reset
-        attachmentDownloadQueue.setActiveChat(null)
         // Dispose message list delegate (cancels observers, clears cache)
-        messageListDelegate.dispose()
+        messageList.dispose()
     }
 
     // ============================================================================
-    // ATTACHMENT METHODS - Delegated to ChatComposerDelegate
+    // ATTACHMENT METHODS - Backward compatibility wrappers
+    // ChatScreen will be updated to use viewModel.composer.* directly in future
     // ============================================================================
 
-    fun addAttachment(uri: Uri) = composerDelegate.addAttachment(uri)
-
-    fun addAttachments(uris: List<Uri>) = composerDelegate.addAttachments(uris)
-
-    fun getContactData(contactUri: Uri): ContactData? = composerDelegate.getContactData(contactUri)
-
-    fun addContactFromPicker(contactUri: Uri) = composerDelegate.addContactFromPicker(contactUri)
-
+    fun addAttachment(uri: Uri) = composer.addAttachment(uri)
+    fun addAttachments(uris: List<Uri>) = composer.addAttachments(uris)
+    fun getContactData(contactUri: Uri): ContactData? = composer.getContactData(contactUri)
+    fun addContactFromPicker(contactUri: Uri) = composer.addContactFromPicker(contactUri)
     fun addContactAsVCard(contactData: ContactData, options: FieldOptions): Boolean =
-        composerDelegate.addContactAsVCard(contactData, options)
-
-    // GIF Picker state - delegated to composerDelegate
-    val gifPickerState get() = composerDelegate.gifPickerState
-    val gifSearchQuery get() = composerDelegate.gifSearchQuery
-
-    fun updateGifSearchQuery(query: String) = composerDelegate.updateGifSearchQuery(query)
-
-    fun searchGifs(query: String) = composerDelegate.searchGifs(query)
-
-    fun loadFeaturedGifs() = composerDelegate.loadFeaturedGifs()
-
-    fun selectGif(gif: com.bothbubbles.ui.chat.composer.panels.GifItem) = composerDelegate.selectGif(gif)
-
-    fun removeAttachment(uri: Uri) = composerDelegate.removeAttachment(uri)
-
-    fun reorderAttachments(reorderedList: List<PendingAttachmentInput>) = composerDelegate.reorderAttachments(reorderedList)
-
+        composer.addContactAsVCard(contactData, options)
+    fun removeAttachment(uri: Uri) = composer.removeAttachment(uri)
+    fun reorderAttachments(reorderedList: List<PendingAttachmentInput>) = composer.reorderAttachments(reorderedList)
     fun onAttachmentEdited(originalUri: Uri, editedUri: Uri, caption: String? = null) =
-        composerDelegate.onAttachmentEdited(originalUri, editedUri, caption)
+        composer.onAttachmentEdited(originalUri, editedUri, caption)
+    fun clearAttachments() = composer.clearAttachments()
+    fun dismissAttachmentWarning() = composer.dismissAttachmentWarning()
+    fun setAttachmentQuality(quality: AttachmentQuality) = composer.setAttachmentQuality(quality)
 
-    fun clearAttachments() = composerDelegate.clearAttachments()
+    // GIF Picker - delegated to composer
+    val gifPickerState get() = composer.gifPickerState
+    val gifSearchQuery get() = composer.gifSearchQuery
+    fun updateGifSearchQuery(query: String) = composer.updateGifSearchQuery(query)
+    fun searchGifs(query: String) = composer.searchGifs(query)
+    fun loadFeaturedGifs() = composer.loadFeaturedGifs()
+    fun selectGif(gif: com.bothbubbles.ui.chat.composer.panels.GifItem) = composer.selectGif(gif)
 
-    fun dismissAttachmentWarning() = composerDelegate.dismissAttachmentWarning()
+    // Smart Reply - delegated to composer
+    fun recordTemplateUsage(templateId: Long) = composer.recordTemplateUsage(templateId)
+
+    // Attachment Download - delegated to attachment delegate
+    fun downloadAttachment(attachmentGuid: String) = attachment.downloadAttachment(attachmentGuid)
+    fun isDownloading(attachmentGuid: String): Boolean = attachment.isDownloading(attachmentGuid)
+    fun getDownloadProgress(attachmentGuid: String): Float = attachment.getDownloadProgress(attachmentGuid)
 
     // ============================================================================
     // SEND MESSAGE
@@ -1540,8 +1253,8 @@ class ChatViewModel @Inject constructor(
         val sendStartTime = System.currentTimeMillis()
         Log.d(TAG, "⏱️ [SEND] sendMessage() CALLED on thread: ${Thread.currentThread().name}")
 
-        val text = composerDelegate.draftText.value.trim()
-        val attachments = composerDelegate.pendingAttachments.value
+        val text = composer.draftText.value.trim()
+        val attachments = composer.pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
 
@@ -1550,7 +1263,7 @@ class ChatViewModel @Inject constructor(
         val isLocalSmsChat = _uiState.value.isLocalSmsChat
 
         // Delegate to ChatSendDelegate for the actual send operation
-        sendDelegate.sendMessage(
+        send.sendMessage(
             text = text,
             attachments = attachments,
             effectId = effectId,
@@ -1559,8 +1272,8 @@ class ChatViewModel @Inject constructor(
             onClearInput = {
                 Log.d(TAG, "⏱️ [SEND] onClearInput: +${System.currentTimeMillis() - sendStartTime}ms")
                 // Clear UI state immediately for responsive feel via delegate
-                Log.d("CascadeDebug", "[EMIT] composerDelegate.clearInput()")
-                composerDelegate.clearInput()
+                Log.d("CascadeDebug", "[EMIT] composer.clearInput()")
+                composer.clearInput()
             },
             onDraftCleared = {
                 Log.d(TAG, "⏱️ [SEND] onDraftCleared: +${System.currentTimeMillis() - sendStartTime}ms")
@@ -1601,7 +1314,7 @@ class ChatViewModel @Inject constructor(
                 )
 
                 Log.d(TAG, "⏱️ [SEND] calling insertMessageOptimistically: +${System.currentTimeMillis() - sendStartTime}ms")
-                messageListDelegate.insertMessageOptimistically(optimisticModel)
+                messageList.insertMessageOptimistically(optimisticModel)
                 Log.d(TAG, "⏱️ [SEND] insertMessageOptimistically returned: +${System.currentTimeMillis() - sendStartTime}ms")
             }
         )
@@ -1624,19 +1337,19 @@ class ChatViewModel @Inject constructor(
      * Send message with explicit delivery mode override
      */
     fun sendMessageVia(deliveryMode: MessageDeliveryMode) {
-        val text = composerDelegate.draftText.value.trim()
-        val attachments = composerDelegate.pendingAttachments.value
+        val text = composer.draftText.value.trim()
+        val attachments = composer.pendingAttachments.value
 
         if (text.isBlank() && attachments.isEmpty()) return
 
         // Delegate to ChatSendDelegate
-        sendDelegate.sendMessageVia(
+        send.sendMessageVia(
             text = text,
             attachments = attachments,
             deliveryMode = deliveryMode,
             onClearInput = {
                 // Clear UI state immediately via delegate
-                composerDelegate.clearInput()
+                composer.clearInput()
             },
             onDraftCleared = {
                 // Clear draft from database
@@ -1652,14 +1365,14 @@ class ChatViewModel @Inject constructor(
      * Set the message to reply to (for swipe-to-reply)
      */
     fun setReplyTo(messageGuid: String) {
-        sendDelegate.setReplyTo(messageGuid)
+        send.setReplyTo(messageGuid)
     }
 
     /**
      * Clear the reply state
      */
     fun clearReply() {
-        sendDelegate.clearReply()
+        send.clearReply()
     }
 
     /**
@@ -1681,7 +1394,7 @@ class ChatViewModel @Inject constructor(
 
         viewModelScope.launch {
             // OPTIMISTIC UPDATE: Immediately show the reaction in UI
-            val optimisticUpdateApplied = messageListDelegate.updateMessageLocally(messageGuid) { currentMessage ->
+            val optimisticUpdateApplied = messageList.updateMessageLocally(messageGuid) { currentMessage ->
                 val newMyReactions = if (isRemoving) {
                     currentMessage.myReactions - tapback
                 } else {
@@ -1733,31 +1446,31 @@ class ChatViewModel @Inject constructor(
                 Log.d(TAG, "toggleReaction: API success for $messageGuid")
                 // Refresh from database to get the canonical server state
                 // This ensures our optimistic update is replaced with the real data
-                messageListDelegate.updateMessage(messageGuid)
+                messageList.updateMessage(messageGuid)
             }.onFailure { error ->
                 Log.e(TAG, "toggleReaction: API failed for $messageGuid, rolling back optimistic update", error)
                 // ROLLBACK: Revert to database state (which doesn't have the reaction)
-                messageListDelegate.updateMessage(messageGuid)
+                messageList.updateMessage(messageGuid)
             }
         }
     }
 
     fun retryMessage(messageGuid: String) {
-        sendDelegate.retryMessage(messageGuid)
+        send.retryMessage(messageGuid)
     }
 
     /**
      * Retry a failed iMessage as SMS/MMS
      */
     fun retryMessageAsSms(messageGuid: String) {
-        sendDelegate.retryMessageAsSms(messageGuid)
+        send.retryMessageAsSms(messageGuid)
     }
 
     /**
      * Forward a message to another conversation.
      */
     fun forwardMessage(messageGuid: String, targetChatGuid: String) {
-        sendDelegate.forwardMessage(messageGuid, targetChatGuid)
+        send.forwardMessage(messageGuid, targetChatGuid)
     }
 
     /**
@@ -1773,18 +1486,18 @@ class ChatViewModel @Inject constructor(
      * Forward success is now managed by ChatSendDelegate's SendState.
      */
     fun clearForwardSuccess() {
-        sendDelegate.clearForwardSuccess()
+        send.clearForwardSuccess()
     }
 
     /**
      * Check if a failed message can be retried as SMS
      */
     suspend fun canRetryAsSms(messageGuid: String): Boolean {
-        return sendDelegate.canRetryAsSms(messageGuid)
+        return send.canRetryAsSms(messageGuid)
     }
 
     fun loadMoreMessages() {
-        messageListDelegate.loadMoreMessages()
+        messageList.loadMoreMessages()
     }
 
     fun clearError() {
@@ -1794,21 +1507,21 @@ class ChatViewModel @Inject constructor(
     // ===== Menu Actions =====
     // Delegated to ChatOperationsDelegate for state isolation
 
-    fun archiveChat() = operationsDelegate.archiveChat()
-    fun unarchiveChat() = operationsDelegate.unarchiveChat()
-    fun toggleStarred() = operationsDelegate.toggleStarred()
-    fun deleteChat() = operationsDelegate.deleteChat()
-    fun toggleSubjectField() = operationsDelegate.toggleSubjectField()
+    fun archiveChat() = operations.archiveChat()
+    fun unarchiveChat() = operations.unarchiveChat()
+    fun toggleStarred() = operations.toggleStarred()
+    fun deleteChat() = operations.deleteChat()
+    fun toggleSubjectField() = operations.toggleSubjectField()
 
     // ===== Inline Search (delegated to ChatSearchDelegate) =====
 
-    fun activateSearch() = searchDelegate.activateSearch()
-    fun closeSearch() = searchDelegate.closeSearch()
-    fun updateSearchQuery(query: String) = searchDelegate.updateSearchQuery(query, messagesState.value, mergedChatGuids)
-    fun navigateSearchUp() = searchDelegate.navigateSearchUp()
-    fun navigateSearchDown() = searchDelegate.navigateSearchDown()
-    fun showSearchResultsSheet() = searchDelegate.showResultsSheet()
-    fun hideSearchResultsSheet() = searchDelegate.hideResultsSheet()
+    fun activateSearch() = search.activateSearch()
+    fun closeSearch() = search.closeSearch()
+    fun updateSearchQuery(query: String) = search.updateSearchQuery(query, messagesState.value, mergedChatGuids)
+    fun navigateSearchUp() = search.navigateSearchUp()
+    fun navigateSearchDown() = search.navigateSearchDown()
+    fun showSearchResultsSheet() = search.showResultsSheet()
+    fun hideSearchResultsSheet() = search.hideResultsSheet()
 
     /**
      * Scroll to a specific message by GUID and highlight it.
@@ -1817,10 +1530,10 @@ class ChatViewModel @Inject constructor(
      */
     fun scrollToAndHighlightMessage(messageGuid: String) {
         viewModelScope.launch {
-            val position = messageListDelegate.jumpToMessage(messageGuid)
+            val position = messageList.jumpToMessage(messageGuid)
             if (position != null) {
                 // Emit scroll event for the UI to handle
-                threadDelegate.emitScrollEvent(messageGuid)
+                thread.emitScrollEvent(messageGuid)
                 // Highlight after scroll
                 delay(100)
                 highlightMessage(messageGuid)
@@ -1830,34 +1543,34 @@ class ChatViewModel @Inject constructor(
 
     // ===== Intent Creation & Contact Actions (delegated to ChatOperationsDelegate) =====
 
-    fun getAddToContactsIntent(): Intent = operationsDelegate.getAddToContactsIntent(
+    fun getAddToContactsIntent(): Intent = operations.getAddToContactsIntent(
         _uiState.value.participantPhone,
         _uiState.value.inferredSenderName
     )
-    fun getGoogleMeetIntent(): Intent = operationsDelegate.getGoogleMeetIntent()
-    fun getWhatsAppCallIntent(): Intent? = operationsDelegate.getWhatsAppCallIntent(_uiState.value.participantPhone)
-    fun getHelpIntent(): Intent = operationsDelegate.getHelpIntent()
+    fun getGoogleMeetIntent(): Intent = operations.getGoogleMeetIntent()
+    fun getWhatsAppCallIntent(): Intent? = operations.getWhatsAppCallIntent(_uiState.value.participantPhone)
+    fun getHelpIntent(): Intent = operations.getHelpIntent()
     fun blockContact(context: Context): Boolean {
         if (!_uiState.value.isLocalSmsChat) return false
-        return operationsDelegate.blockContact(context, _uiState.value.participantPhone)
+        return operations.blockContact(context, _uiState.value.participantPhone)
     }
-    fun isWhatsAppAvailable(context: Context): Boolean = operationsDelegate.isWhatsAppAvailable(context)
+    fun isWhatsAppAvailable(context: Context): Boolean = operations.isWhatsAppAvailable(context)
 
     // ===== Spam Operations (delegated to ChatOperationsDelegate) =====
 
-    fun markAsSafe() = operationsDelegate.markAsSafe()
-    fun reportAsSpam() = operationsDelegate.reportAsSpam()
+    fun markAsSafe() = operations.markAsSafe()
+    fun reportAsSpam() = operations.reportAsSpam()
     fun reportToCarrier(): Boolean {
         if (!uiState.value.isLocalSmsChat) return false
-        return operationsDelegate.reportToCarrier()
+        return operations.reportToCarrier()
     }
-    fun checkReportedToCarrier() = operationsDelegate.checkReportedToCarrier()
+    fun checkReportedToCarrier() = operations.checkReportedToCarrier()
 
     // ===== Effect Playback (delegated to ChatEffectsDelegate) =====
 
-    fun onBubbleEffectCompleted(messageGuid: String) = effectsDelegate.onBubbleEffectCompleted(messageGuid)
-    fun triggerScreenEffect(message: MessageUiModel) = effectsDelegate.triggerScreenEffect(message)
-    fun onScreenEffectCompleted() = effectsDelegate.onScreenEffectCompleted()
+    fun onBubbleEffectCompleted(messageGuid: String) = effects.onBubbleEffectCompleted(messageGuid)
+    fun triggerScreenEffect(message: MessageUiModel) = effects.triggerScreenEffect(message)
+    fun onScreenEffectCompleted() = effects.onScreenEffectCompleted()
 
     // ===== Scheduled Messages (delegated to ChatScheduledMessageDelegate) =====
 
@@ -1866,32 +1579,32 @@ class ChatViewModel @Inject constructor(
      * Delegated to ChatScheduledMessageDelegate.
      */
     fun scheduleMessage(text: String, attachments: List<PendingAttachmentInput>, sendAt: Long) =
-        scheduledMessageDelegate.scheduleMessage(text, attachments, sendAt)
+        scheduledMessages.scheduleMessage(text, attachments, sendAt)
 
     /**
      * Cancel a scheduled message.
      * Delegated to ChatScheduledMessageDelegate.
      */
-    fun cancelScheduledMessage(id: Long) = scheduledMessageDelegate.cancelScheduledMessage(id)
+    fun cancelScheduledMessage(id: Long) = scheduledMessages.cancelScheduledMessage(id)
 
     /**
      * Update the scheduled time for a message.
      * Delegated to ChatScheduledMessageDelegate.
      */
-    fun updateScheduledTime(id: Long, newSendAt: Long) = scheduledMessageDelegate.updateScheduledTime(id, newSendAt)
+    fun updateScheduledTime(id: Long, newSendAt: Long) = scheduledMessages.updateScheduledTime(id, newSendAt)
 
     /**
      * Delete a scheduled message from the database.
      * Delegated to ChatScheduledMessageDelegate.
      */
-    fun deleteScheduledMessage(id: Long) = scheduledMessageDelegate.deleteScheduledMessage(id)
+    fun deleteScheduledMessage(id: Long) = scheduledMessages.deleteScheduledMessage(id)
 
     /**
      * Retry a failed scheduled message.
      * Delegated to ChatScheduledMessageDelegate.
      */
     fun retryScheduledMessage(id: Long, newSendAt: Long = System.currentTimeMillis()) =
-        scheduledMessageDelegate.retryScheduledMessage(id, newSendAt)
+        scheduledMessages.retryScheduledMessage(id, newSendAt)
 
     // ===== ETA Sharing =====
 
@@ -1901,14 +1614,14 @@ class ChatViewModel @Inject constructor(
      */
     fun startEtaSharing() {
         val chatTitle = _uiState.value.chatTitle
-        etaSharingDelegate.startSharingEta(chatGuid, chatTitle)
+        etaSharing.startSharingEta(chatGuid, chatTitle)
     }
 
     /**
      * Stop sharing ETA with the current chat recipient.
      */
     fun stopEtaSharing() {
-        etaSharingDelegate.stopSharingEta()
+        etaSharing.stopSharingEta()
     }
 
     /**
@@ -1916,7 +1629,7 @@ class ChatViewModel @Inject constructor(
      * Banner will reappear when navigation stops and starts again.
      */
     fun dismissEtaBanner() {
-        etaSharingDelegate.dismissBanner()
+        etaSharing.dismissBanner()
     }
 }
 

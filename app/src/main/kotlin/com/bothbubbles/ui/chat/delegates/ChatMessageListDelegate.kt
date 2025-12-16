@@ -1,13 +1,17 @@
 package com.bothbubbles.ui.chat.delegates
 
 import android.util.Log
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
+import com.bothbubbles.services.media.AttachmentDownloadQueue
+import com.bothbubbles.services.media.AttachmentPreloader
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.SocketService
+import com.bothbubbles.ui.chat.ChatStateCache
 import com.bothbubbles.ui.chat.ChatUiState
 import com.bothbubbles.ui.chat.MessageCache
 import com.bothbubbles.ui.chat.paging.MessagePagingController
@@ -15,6 +19,7 @@ import com.bothbubbles.ui.chat.paging.PagingConfig
 import com.bothbubbles.ui.chat.paging.RoomMessageDataSource
 import com.bothbubbles.ui.chat.paging.SparseMessageList
 import com.bothbubbles.ui.chat.paging.SyncTrigger
+import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
@@ -76,7 +81,11 @@ class ChatMessageListDelegate @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val handleRepository: HandleRepository,
     private val socketService: SocketService,
-    private val appLifecycleTracker: AppLifecycleTracker
+    private val appLifecycleTracker: AppLifecycleTracker,
+    private val attachmentPreloader: AttachmentPreloader,
+    private val attachmentDownloadQueue: AttachmentDownloadQueue,
+    private val settingsDataStore: SettingsDataStore,
+    private val chatStateCache: ChatStateCache
 ) {
     companion object {
         private const val TAG = "ChatMessageListDelegate"
@@ -114,6 +123,36 @@ class ChatMessageListDelegate @Inject constructor(
     // Adaptive polling: tracks when we last received a socket message for this chat
     @Volatile
     private var lastSocketMessageTime: Long = System.currentTimeMillis()
+
+    // ============================================================================
+    // SCROLL POSITION CACHING
+    // ============================================================================
+
+    // Initial scroll position from LRU cache (for instant restore when re-opening chat)
+    private val _cachedScrollPosition = MutableStateFlow<Pair<Int, Int>?>(null)
+    val cachedScrollPosition: StateFlow<Pair<Int, Int>?> = _cachedScrollPosition.asStateFlow()
+
+    // Scroll position tracking for state restoration
+    private var lastScrollPosition: Int = 0
+    private var lastScrollOffset: Int = 0
+    private var lastScrollSaveTime: Long = 0L
+    private val scrollSaveDebounceMs = 1000L // Debounce scroll saves
+
+    // ============================================================================
+    // ATTACHMENT PRELOADING
+    // ============================================================================
+
+    // Throttle preloader to avoid calling on every scroll frame
+    private var lastPreloadIndex: Int = -1
+    private var lastPreloadTime: Long = 0L
+    private val preloadThrottleMs = 150L // Only preload every 150ms at most
+
+    // Cached attachment list for preloading - avoids flatMap on every scroll frame
+    private var cachedAttachments: List<AttachmentUiModel> = emptyList()
+    private var cachedAttachmentsMessageCount: Int = 0
+
+    // Whether this is a merged conversation
+    private var isMergedChat: Boolean = false
 
     // SyncTrigger implementation for fetching from server when gaps are detected
     private val syncTriggerImpl: SyncTrigger by lazy {
@@ -208,6 +247,19 @@ class ChatMessageListDelegate @Inject constructor(
         this.scope = scope
         this.uiStateFlow = uiState
         this.onUiStateUpdate = onUiStateUpdate
+        this.isMergedChat = mergedChatGuids.size > 1
+
+        // Restore cached scroll position from LRU cache
+        val cachedState = chatStateCache.get(chatGuid)
+        if (cachedState != null) {
+            Log.d(TAG, "Restoring chat from cache: scrollPos=${cachedState.scrollPosition}, messages=${cachedState.messages.size}")
+            lastScrollPosition = cachedState.scrollPosition
+            lastScrollOffset = cachedState.scrollOffset
+            _cachedScrollPosition.value = Pair(cachedState.scrollPosition, cachedState.scrollOffset)
+        }
+
+        // Set this chat as active for download queue prioritization
+        attachmentDownloadQueue.setActiveChat(chatGuid)
 
         // Start message loading and socket observers
         loadMessages()
@@ -587,5 +639,105 @@ class ChatMessageListDelegate @Inject constructor(
                     }
                 }
         }
+    }
+
+    // ============================================================================
+    // SCROLL POSITION & PRELOADING
+    // ============================================================================
+
+    /**
+     * Update scroll position for state restoration.
+     * Called from ChatScreen when scroll position changes.
+     * IMPORTANT: This runs on every scroll frame - must be extremely lightweight!
+     */
+    fun updateScrollPosition(firstVisibleItemIndex: Int, firstVisibleItemScrollOffset: Int, visibleItemCount: Int = 10) {
+        lastScrollPosition = firstVisibleItemIndex
+        lastScrollOffset = firstVisibleItemScrollOffset
+
+        // Throttle preloader - only call if BOTH index changed AND enough time has passed
+        // Using AND (not OR) to minimize work during scroll
+        val now = System.currentTimeMillis()
+        val indexChanged = firstVisibleItemIndex != lastPreloadIndex
+        val timeElapsed = now - lastPreloadTime >= preloadThrottleMs
+
+        if (indexChanged && timeElapsed) {
+            lastPreloadIndex = firstVisibleItemIndex
+            lastPreloadTime = now
+
+            // Defer preload work to avoid any main thread blocking
+            val messages = _messagesState.value
+            if (messages.isNotEmpty()) {
+                // Update cached attachments only if message count changed
+                if (messages.size != cachedAttachmentsMessageCount) {
+                    cachedAttachments = messages.flatMap { it.attachments }
+                    cachedAttachmentsMessageCount = messages.size
+                }
+
+                if (cachedAttachments.isNotEmpty()) {
+                    val visibleEnd = (firstVisibleItemIndex + visibleItemCount).coerceAtMost(messages.size - 1)
+                    // Preload images for ~3 screens in each direction to prevent image pop-in
+                    attachmentPreloader.preloadNearby(
+                        attachments = cachedAttachments,
+                        visibleRange = firstVisibleItemIndex..visibleEnd,
+                        preloadCount = 15
+                    )
+
+                    // Boost download priority for attachments in extended visible range
+                    // This ensures attachments needing download from server get prioritized
+                    val extendedStart = (firstVisibleItemIndex - 15).coerceAtLeast(0)
+                    val extendedEnd = (visibleEnd + 15).coerceAtMost(messages.size - 1)
+                    for (i in extendedStart..extendedEnd) {
+                        messages.getOrNull(i)?.attachments?.forEach { attachment ->
+                            if (attachment.needsDownload) {
+                                attachmentDownloadQueue.enqueue(
+                                    attachmentGuid = attachment.guid,
+                                    chatGuid = chatGuid,
+                                    priority = AttachmentDownloadQueue.Priority.VISIBLE
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Throttled save to DataStore - uses timestamp instead of Job cancel/recreate
+        // This avoids object allocation and scheduling overhead on every scroll frame
+        val saveTimeElapsed = now - lastScrollSaveTime >= scrollSaveDebounceMs
+        if (saveTimeElapsed) {
+            lastScrollSaveTime = now
+            scope.launch {
+                settingsDataStore.setLastScrollPosition(firstVisibleItemIndex, firstVisibleItemScrollOffset)
+            }
+        }
+    }
+
+    /**
+     * Get the current scroll position for state saving.
+     */
+    fun getScrollPosition(): Pair<Int, Int> = Pair(lastScrollPosition, lastScrollOffset)
+
+    /**
+     * Save current state to the LRU cache.
+     * Called when leaving the chat.
+     */
+    fun saveStateToCacheSync(): ChatStateCache.CachedChatState {
+        return ChatStateCache.CachedChatState(
+            chatGuid = chatGuid,
+            mergedGuids = mergedChatGuids,
+            messages = sparseMessages.value,
+            totalCount = totalMessageCount.value,
+            scrollPosition = lastScrollPosition,
+            scrollOffset = lastScrollOffset
+        )
+    }
+
+    /**
+     * Clear the active chat from download queue.
+     * Called when leaving the chat.
+     */
+    fun clearActiveChat() {
+        attachmentDownloadQueue.setActiveChat(null)
+        attachmentPreloader.clearTracking()
     }
 }

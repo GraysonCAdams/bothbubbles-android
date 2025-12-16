@@ -2,16 +2,20 @@ package com.bothbubbles.ui.chat.delegates
 
 import android.net.Uri
 import android.util.Log
+import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.GifRepository
+import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.messaging.MessageDeliveryMode
+import com.bothbubbles.services.smartreply.SmartReplyService
+import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.chat.AttachmentWarning
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.ChatUiState
@@ -23,14 +27,20 @@ import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.composer.MessagePreview
 import com.bothbubbles.ui.chat.state.SendState
 import com.bothbubbles.ui.chat.state.SyncState
+import com.bothbubbles.ui.components.input.SuggestionItem
 import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.util.StableList
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -54,12 +64,16 @@ import javax.inject.Inject
  * This delegate follows the composition pattern where ChatViewModel
  * delegates specific concerns to focused helper classes.
  */
+@OptIn(FlowPreview::class)
 class ChatComposerDelegate @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val gifRepository: GifRepository,
     private val vCardService: VCardService,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val smartReplyService: SmartReplyService,
+    private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
+    private val socketService: SocketService
 ) {
     companion object {
         private const val TAG = "ChatComposerDelegate"
@@ -71,6 +85,32 @@ class ChatComposerDelegate @Inject constructor(
     private lateinit var syncStateFlow: StateFlow<SyncState>
     private lateinit var sendStateFlow: StateFlow<SendState>
     private lateinit var onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
+    private lateinit var messagesStateFlow: StateFlow<StableList<MessageUiModel>>
+    private lateinit var chatGuid: String
+
+    // ============================================================================
+    // TYPING INDICATOR STATE
+    // ============================================================================
+
+    private var typingDebounceJob: Job? = null
+    private var isCurrentlyTyping = false
+    private val typingDebounceMs = 3000L // 3 seconds after last keystroke to send stopped-typing
+    private var lastStartedTypingTime = 0L
+    private val typingCooldownMs = 500L // Min time between started-typing emissions
+
+    // Cached settings for typing indicators (avoids suspend calls on every keystroke)
+    @Volatile private var cachedPrivateApiEnabled = false
+    @Volatile private var cachedTypingIndicatorsEnabled = false
+
+    // ============================================================================
+    // SMART REPLY STATE
+    // ============================================================================
+
+    private val _mlSuggestions = MutableStateFlow<List<String>>(emptyList())
+
+    // Late-initialized smart reply flow
+    private lateinit var _smartReplySuggestions: StateFlow<List<SuggestionItem>>
+    val smartReplySuggestions: StateFlow<List<SuggestionItem>> get() = _smartReplySuggestions
 
     // ============================================================================
     // INTERNAL MUTABLE STATE
@@ -130,30 +170,48 @@ class ChatComposerDelegate @Inject constructor(
      * Initialize the delegate with external dependencies.
      * Must be called before any composer operations.
      *
+     * @param chatGuid The chat GUID for typing indicators
      * @param scope CoroutineScope for launching operations
      * @param uiState StateFlow of the main ChatUiState
      * @param syncState StateFlow from ChatSyncDelegate
      * @param sendState StateFlow from ChatSendDelegate
+     * @param messagesState StateFlow of messages for smart reply context
      * @param onUiStateUpdate Callback to update ChatUiState (for attachment warnings, counts, etc.)
      */
     fun initialize(
+        chatGuid: String,
         scope: CoroutineScope,
         uiState: StateFlow<ChatUiState>,
         syncState: StateFlow<SyncState>,
         sendState: StateFlow<SendState>,
+        messagesState: StateFlow<StableList<MessageUiModel>>,
         onUiStateUpdate: (ChatUiState.() -> ChatUiState) -> Unit
     ) {
+        this.chatGuid = chatGuid
         this.scope = scope
         this.uiStateFlow = uiState
         this.syncStateFlow = syncState
         this.sendStateFlow = sendState
+        this.messagesStateFlow = messagesState
         this.onUiStateUpdate = onUiStateUpdate
 
         // Initialize the combined state flow
         _state = createComposerStateFlow()
 
+        // Initialize smart reply suggestions flow
+        _smartReplySuggestions = combine(
+            _mlSuggestions,
+            quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
+        ) { mlSuggestions, templates ->
+            getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
+        }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+
         // Observe quality settings
         observeQualitySettings()
+        // Observe typing indicator settings
+        observeTypingIndicatorSettings()
+        // Observe messages for smart reply generation
+        observeSmartReplies()
     }
 
     /**
@@ -649,5 +707,141 @@ class ChatComposerDelegate @Inject constructor(
      */
     fun dismissPanel() {
         _activePanel.value = ComposerPanel.None
+    }
+
+    // ============================================================================
+    // TYPING INDICATORS
+    // ============================================================================
+
+    /**
+     * Observe typing indicator settings and cache them for fast access.
+     * This avoids suspend calls on every keystroke in handleTypingIndicator.
+     */
+    private fun observeTypingIndicatorSettings() {
+        scope.launch {
+            combine(
+                settingsDataStore.enablePrivateApi,
+                settingsDataStore.sendTypingIndicators
+            ) { privateApi, typingIndicators -> Pair(privateApi, typingIndicators) }
+                .collect { (privateApi, typingIndicators) ->
+                    cachedPrivateApiEnabled = privateApi
+                    cachedTypingIndicatorsEnabled = typingIndicators
+                }
+        }
+    }
+
+    /**
+     * Handle typing indicator logic with debouncing and rate limiting.
+     *
+     * Optimizations:
+     * 1. Uses cached settings (no suspend calls on every keystroke)
+     * 2. Only sends started-typing once until stopped-typing is sent
+     * 3. Rate limits started-typing to avoid rapid on/off transitions
+     * 4. Debounces stopped-typing (3 seconds after last keystroke)
+     */
+    fun handleTypingIndicator(text: String) {
+        // Only send typing indicators for iMessage chats (not local SMS)
+        if (uiStateFlow.value.isLocalSmsChat) return
+
+        // Use cached settings (no suspend required)
+        if (!cachedPrivateApiEnabled || !cachedTypingIndicatorsEnabled) return
+
+        // Cancel any pending stopped-typing
+        typingDebounceJob?.cancel()
+
+        if (text.isNotEmpty()) {
+            // User is typing - send started-typing if not already sent
+            // Also apply cooldown to avoid rapid started/stopped/started transitions
+            val now = System.currentTimeMillis()
+            if (!isCurrentlyTyping && (now - lastStartedTypingTime > typingCooldownMs)) {
+                isCurrentlyTyping = true
+                lastStartedTypingTime = now
+                socketService.sendStartedTyping(chatGuid)
+            }
+
+            // Set up debounce to send stopped-typing after inactivity
+            typingDebounceJob = scope.launch {
+                delay(typingDebounceMs)
+                if (isCurrentlyTyping) {
+                    isCurrentlyTyping = false
+                    socketService.sendStoppedTyping(chatGuid)
+                }
+            }
+        } else {
+            // Text cleared - immediately send stopped-typing
+            if (isCurrentlyTyping) {
+                isCurrentlyTyping = false
+                socketService.sendStoppedTyping(chatGuid)
+            }
+        }
+    }
+
+    /**
+     * Send stopped typing indicator immediately.
+     * Called when leaving the chat or clearing text.
+     */
+    fun sendStoppedTyping() {
+        typingDebounceJob?.cancel()
+        if (isCurrentlyTyping) {
+            isCurrentlyTyping = false
+            socketService.sendStoppedTyping(chatGuid)
+        }
+    }
+
+    // ============================================================================
+    // SMART REPLIES
+    // ============================================================================
+
+    /**
+     * Observe messages and generate ML Kit smart reply suggestions.
+     * Debounced to avoid excessive processing while scrolling.
+     */
+    private fun observeSmartReplies() {
+        scope.launch {
+            messagesStateFlow
+                .debounce(500)  // Wait for conversation to settle
+                .collect { messages ->
+                    val suggestions = smartReplyService.getSuggestions(messages, maxSuggestions = 3)
+                    _mlSuggestions.value = suggestions
+                }
+        }
+    }
+
+    /**
+     * Combine ML suggestions and user templates into max N suggestions.
+     * ML suggestions appear first (more contextual), user templates fill remaining slots.
+     */
+    private fun getCombinedSuggestions(
+        mlSuggestions: List<String>,
+        userTemplates: List<QuickReplyTemplateEntity>,
+        maxTotal: Int
+    ): List<SuggestionItem> {
+        val combined = mutableListOf<SuggestionItem>()
+
+        // Add ML suggestions first (most contextual)
+        mlSuggestions.take(maxTotal).forEach { text ->
+            combined.add(SuggestionItem(text = text, isSmartSuggestion = true))
+        }
+
+        // Fill remaining slots with user templates
+        val remaining = maxTotal - combined.size
+        userTemplates.take(remaining).forEach { template ->
+            combined.add(SuggestionItem(
+                text = template.title,
+                isSmartSuggestion = false,
+                templateId = template.id
+            ))
+        }
+
+        return combined
+    }
+
+    /**
+     * Record usage of a user template (for "most used" sorting).
+     */
+    fun recordTemplateUsage(templateId: Long) {
+        scope.launch {
+            quickReplyTemplateRepository.recordUsage(templateId)
+        }
     }
 }
