@@ -22,8 +22,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
-
-private const val SCROLL_DEBUG_TAG = "ChatScroll"
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.EtaSharingBanner
 import com.bothbubbles.ui.chat.components.EtaStopSharingLink
@@ -57,6 +55,8 @@ import com.bothbubbles.ui.modifiers.materialAttentionHighlight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
+
+private const val SCROLL_DEBUG_TAG = "ChatScroll"
 
 /**
  * Content types for LazyColumn item recycling optimization.
@@ -177,14 +177,6 @@ fun ChatMessageList(
     val hapticFeedback = LocalHapticFeedback.current
     val scrollScope = rememberCoroutineScope()
     val retryMenuScope = rememberCoroutineScope()
-
-    // Debug: Log whenever ChatMessageList recomposes with new messages
-    val firstMessage = messages.firstOrNull()
-    Log.d(SCROLL_DEBUG_TAG, "📜 ChatMessageList composed: " +
-        "messagesCount=${messages.size}, " +
-        "firstGuid=${firstMessage?.guid?.takeLast(8)}, " +
-        "firstIsFromMe=${firstMessage?.isFromMe}, " +
-        "listStateIndex=${listState.firstVisibleItemIndex}")
 
     // Auto-scroll to search result when navigating
     LaunchedEffect(searchState.currentMatchIndex) {

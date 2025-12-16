@@ -8,6 +8,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHost
@@ -16,6 +17,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -62,6 +64,9 @@ fun ChatScreen(
     targetMessageGuid: String? = null,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
+    val chatScreenStart = System.currentTimeMillis()
+    android.util.Log.d("PerfTrace", "ChatScreen START")
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     // Stage 3: Access delegate states directly (Container Pattern)
     val sendState by viewModel.send.state.collectAsStateWithLifecycle()
@@ -71,7 +76,7 @@ fun ChatScreen(
     val effectsState by viewModel.effects.state.collectAsStateWithLifecycle()
     val threadState by viewModel.thread.state.collectAsStateWithLifecycle()
     val messages by viewModel.messageList.messagesState.collectAsStateWithLifecycle()
-    val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
+    // PERF FIX: draftText collection moved to ChatDialogsHost to avoid ChatScreen recomposition on every keystroke
     val smartReplySuggestions by viewModel.composer.smartReplySuggestions.collectAsStateWithLifecycle()
     val chatInfoState by viewModel.chatInfo.state.collectAsStateWithLifecycle()
     val connectionState by viewModel.connection.state.collectAsStateWithLifecycle()
@@ -79,8 +84,8 @@ fun ChatScreen(
 
     // Recomposition debugging (see ChatScreenDebug.kt - can be disabled via ENABLE_RECOMPOSITION_DEBUG)
     ChatScreenRecompositionDebug(
+        viewModel = viewModel,
         messages = messages,
-        draftText = draftText,
         isSending = sendState.isSending,
         smartReplyCount = smartReplySuggestions.size,
         attachmentCount = uiState.attachmentCount,
@@ -246,6 +251,8 @@ fun ChatScreen(
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
     val activePanelState by viewModel.composer.activePanel.collectAsStateWithLifecycle()
+    val gifPickerState by viewModel.composer.gifPickerState.collectAsStateWithLifecycle()
+    val gifSearchQuery by viewModel.composer.gifSearchQuery.collectAsStateWithLifecycle()
     LaunchedEffect(activePanelState) {
         if (activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
             viewModel.composer.loadFeaturedGifs()
@@ -262,10 +269,12 @@ fun ChatScreen(
     // PERF FIX: Track topBar/bottomBar heights for content padding
     // This avoids SubcomposeLayout which has O(N) overhead with message list
     var topBarHeightPx by remember { mutableStateOf(0) }
-    var bottomBarHeightPx by remember { mutableStateOf(0) }
+    // PERF FIX: Track BASE height of bottom bar (without IME) to avoid recomposition during keyboard animation
+    // Use minimum height seen, which is when keyboard is closed
+    var bottomBarBaseHeightPx by remember { mutableStateOf(0) }
     val density = androidx.compose.ui.platform.LocalDensity.current
     val topBarHeightDp = with(density) { topBarHeightPx.toDp() }
-    val bottomBarHeightDp = with(density) { bottomBarHeightPx.toDp() }
+    val bottomBarBaseHeightDp = with(density) { bottomBarBaseHeightPx.toDp() }
 
     ChatBackground {
         // PERF FIX: Use Box with overlapping layout instead of Scaffold
@@ -316,11 +325,28 @@ fun ChatScreen(
 
         // BottomBar overlay at bottom
         val composerState by viewModel.composer.state.collectAsStateWithLifecycle()
+
+        // PERF FIX: Compute replyingToMessage with derivedStateOf to avoid passing
+        // full messages list to ChatInputUI (which caused recomposition on every keystroke)
+        val replyingToMessage by remember {
+            derivedStateOf {
+                sendState.replyingToGuid?.let { guid -> messages.find { it.guid == guid } }
+            }
+        }
+
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .onSizeChanged { bottomBarHeightPx = it.height }
+                .onSizeChanged { size ->
+                    // PERF FIX: Track base height (without IME) to avoid recomposition during keyboard animation
+                    // Use minimum height seen - when keyboard is closed, the height is smallest
+                    // When keyboard opens, imePadding adds to the height, making it larger
+                    val newHeight = size.height
+                    if (bottomBarBaseHeightPx == 0 || newHeight < bottomBarBaseHeightPx) {
+                        bottomBarBaseHeightPx = newHeight
+                    }
+                }
                 .zIndex(1f)
         ) {
             ChatInputUI(
@@ -328,15 +354,14 @@ fun ChatScreen(
                 audioState = audioState,
                 sendState = sendState,
                 smartReplySuggestions = smartReplySuggestions,
-                messages = messages,
-                draftText = draftText,
+                replyingToMessage = replyingToMessage,
                 isLocalSmsChat = chatInfoState.isLocalSmsChat,
-                showAttachmentPicker = state.showAttachmentPicker,
-                showEmojiPicker = state.showEmojiPicker,
-                gifPickerState = viewModel.composer.gifPickerState.collectAsState().value,
-                gifSearchQuery = viewModel.composer.gifSearchQuery.collectAsState().value,
-                onDismissAttachmentPicker = { state.showAttachmentPicker = false },
-                onDismissEmojiPicker = { state.showEmojiPicker = false },
+                showAttachmentPicker = activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.MediaPicker,
+                showEmojiPicker = activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.EmojiKeyboard,
+                gifPickerState = gifPickerState,
+                gifSearchQuery = gifSearchQuery,
+                onDismissAttachmentPicker = { viewModel.composer.dismissPanel() },
+                onDismissEmojiPicker = { viewModel.composer.dismissPanel() },
                 onAttachmentSelected = { uri -> viewModel.composer.addAttachment(uri) },
                 onLocationSelected = { lat, lng ->
                     val locationText = "📍 https://maps.google.com/?q=$lat,$lng"
@@ -354,8 +379,9 @@ fun ChatScreen(
                 onScheduleClick = { state.showScheduleDialog = true },
                 onCameraClick = onCameraClick,
                 onEmojiSelected = { emoji ->
-                    viewModel.updateDraft(draftText + emoji)
-                    state.showEmojiPicker = false
+                    // PERF FIX: Use appendToDraft to avoid reading draftText state in ChatScreen
+                    viewModel.composer.appendToDraft(emoji)
+                    viewModel.composer.dismissPanel()
                 },
                 onSmartReplyClick = { suggestion ->
                     viewModel.updateDraft(suggestion.text)
@@ -384,10 +410,12 @@ fun ChatScreen(
 
         // Main content area - uses calculated padding for top/bottom bars
         // This avoids SubcomposeLayout by using pre-measured heights
+        // PERF FIX: Use base height (without IME) + imePadding() to avoid recomposition during keyboard animation
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = topBarHeightDp, bottom = bottomBarHeightDp)
+                .padding(top = topBarHeightDp, bottom = bottomBarBaseHeightDp)
+                .imePadding()
         ) {
         // Detect new messages with screen effects and trigger playback
         LaunchedEffect(messages.firstOrNull()?.guid) {
@@ -407,6 +435,7 @@ fun ChatScreen(
         }
 
         // Stage 2: Extracted ChatMessageList component
+        android.util.Log.d("PerfTrace", "Before ChatMessageList: +${System.currentTimeMillis() - chatScreenStart}ms")
         ChatMessageList(
             modifier = Modifier.fillMaxSize(),
             listState = state.listState,
@@ -512,6 +541,7 @@ fun ChatScreen(
             // Server connection
             isServerConnected = syncState.isServerConnected
         )
+        android.util.Log.d("PerfTrace", "After ChatMessageList: +${System.currentTimeMillis() - chatScreenStart}ms")
 
     } // End of content Box
 
@@ -565,7 +595,6 @@ fun ChatScreen(
         messageToForward = state.messageToForward,
         pendingContactData = state.pendingContactData,
         forwardableChats = forwardableChats,
-        draftText = draftText,
         pendingAttachments = pendingAttachments,
         attachmentQuality = uiState.attachmentQuality,
         isWhatsAppAvailable = isWhatsAppAvailable,
@@ -586,7 +615,7 @@ fun ChatScreen(
             state.showEffectPicker = false
             if (effect != null) {
                 viewModel.sendMessage(effect.appleId)
-                state.showAttachmentPicker = false
+                viewModel.composer.dismissPanel()
             }
         },
         onShowDiscordSetup = { state.showDiscordSetupDialog = true },

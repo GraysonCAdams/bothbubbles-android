@@ -5,6 +5,8 @@ import android.content.Intent
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.geometry.Rect
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.model.PendingAttachmentInput
@@ -81,7 +83,6 @@ fun ChatDialogsHost(
     messageToForward: MessageUiModel?,
     pendingContactData: ContactData?,
     forwardableChats: List<ChatEntity>,
-    draftText: String,
     pendingAttachments: List<PendingAttachmentInput>,
     attachmentQuality: AttachmentQuality,
     isWhatsAppAvailable: Boolean,
@@ -110,6 +111,9 @@ fun ChatDialogsHost(
     onClearPendingContactData: () -> Unit,
     onClearMessageToForward: () -> Unit,
 ) {
+    // PERF FIX: Collect draftText here to avoid ChatScreen recomposition on every keystroke
+    val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
+
     // Effect picker bottom sheet
     if (showEffectPicker) {
         EffectPickerSheet(

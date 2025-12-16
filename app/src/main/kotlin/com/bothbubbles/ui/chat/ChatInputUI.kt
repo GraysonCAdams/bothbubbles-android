@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat
 
 import android.Manifest
+import android.util.Log
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -58,10 +59,8 @@ fun ChatInputUI(
     sendState: SendState,
     // Smart reply suggestions
     smartReplySuggestions: List<SuggestionItem>,
-    // Messages list for finding reply target
-    messages: List<MessageUiModel>,
-    // Draft text for emoji insertion
-    draftText: String,
+    // Pre-computed reply target message (avoids passing full messages list)
+    replyingToMessage: MessageUiModel?,
     // Whether this is a local SMS chat (affects long-press behavior)
     isLocalSmsChat: Boolean,
     // Picker visibility state
@@ -111,6 +110,10 @@ fun ChatInputUI(
 ) {
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
+
+    // Debug: Track recomposition with granular timing
+    val t0 = System.currentTimeMillis()
+    Log.d("PerfTrace", "ChatInputUI START, replyingTo=${replyingToMessage?.guid}, smartReplies=${smartReplySuggestions.size}")
 
     // Audio permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -168,12 +171,7 @@ fun ChatInputUI(
             )
         }
 
-        // Reply preview - shows when replying to a message
-        val replyingToGuid = sendState.replyingToGuid
-        val replyingToMessage = remember(replyingToGuid, messages) {
-            replyingToGuid?.let { guid -> messages.find { it.guid == guid } }
-        }
-
+        // Reply preview - shows when replying to a message (passed in pre-computed)
         AnimatedVisibility(
             visible = replyingToMessage != null,
             enter = expandVertically() + fadeIn(),
@@ -187,35 +185,34 @@ fun ChatInputUI(
             }
         }
 
-        // PHASE 3 OPTIMIZATION: Use derivedStateOf for recording state
-        // The old approach with remember(vararg keys) created a NEW ComposerState
-        // every time ANY key changed (recording duration updates 10x/sec).
-        // derivedStateOf only triggers recomposition when the RESULT changes structurally.
-        //
-        // The base composerState from ViewModel already has distinctUntilChanged(),
-        // so we only need to optimize the recording state merge here.
-        val adjustedComposerState by remember {
-            derivedStateOf {
-                // Only merge recording state when actively recording/previewing
-                if (audioState.isRecording || audioState.isPreviewingVoiceMemo) {
-                    composerState.copy(
-                        inputMode = if (audioState.isRecording) ComposerInputMode.VOICE_RECORDING else ComposerInputMode.VOICE_PREVIEW,
-                        recordingState = RecordingState(
-                            durationMs = audioState.recordingDuration,
-                            amplitudeHistory = audioState.amplitudeHistory,
-                            isNoiseCancellationEnabled = audioState.isNoiseCancellationEnabled,
-                            playbackPositionMs = audioState.playbackPosition,
-                            isPlaying = audioState.isPlayingVoiceMemo,
-                            recordedUri = audioState.getRecordingUri()
-                        )
+        // Merge recording state when actively recording/previewing
+        // Note: composerState must be a key so changes propagate
+        val adjustedComposerState = remember(
+            composerState,
+            audioState.isRecording,
+            audioState.isPreviewingVoiceMemo,
+            audioState.recordingDuration,
+            audioState.playbackPosition,
+            audioState.isPlayingVoiceMemo
+        ) {
+            if (audioState.isRecording || audioState.isPreviewingVoiceMemo) {
+                composerState.copy(
+                    inputMode = if (audioState.isRecording) ComposerInputMode.VOICE_RECORDING else ComposerInputMode.VOICE_PREVIEW,
+                    recordingState = RecordingState(
+                        durationMs = audioState.recordingDuration,
+                        amplitudeHistory = audioState.amplitudeHistory,
+                        isNoiseCancellationEnabled = audioState.isNoiseCancellationEnabled,
+                        playbackPositionMs = audioState.playbackPosition,
+                        isPlaying = audioState.isPlayingVoiceMemo,
+                        recordedUri = audioState.getRecordingUri()
                     )
-                } else {
-                    // Fast path: no recording, just use base state
-                    composerState.copy(inputMode = ComposerInputMode.TEXT)
-                }
+                )
+            } else {
+                composerState.copy(inputMode = ComposerInputMode.TEXT)
             }
         }
 
+        Log.d("PerfTrace", "Before ChatComposer: +${System.currentTimeMillis() - t0}ms")
         ChatComposer(
             state = adjustedComposerState,
             onEvent = { event ->
@@ -274,5 +271,6 @@ fun ChatInputUI(
             onGifSelected = onGifSelected,
             onSendButtonBoundsChanged = onSendButtonBoundsChanged
         )
+        Log.d("PerfTrace", "After ChatComposer: +${System.currentTimeMillis() - t0}ms")
     }
 }

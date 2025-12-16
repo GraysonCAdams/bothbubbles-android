@@ -2,16 +2,18 @@ package com.bothbubbles.ui.chat
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.components.message.MessageUiModel
 
 /**
  * Debug flag to enable/disable recomposition tracking.
  * Set to false for production builds to eliminate overhead.
  */
-private const val ENABLE_RECOMPOSITION_DEBUG = true
+private const val ENABLE_RECOMPOSITION_DEBUG = false
 
 /**
  * Tracks and logs what state changes caused a recomposition.
@@ -22,8 +24,11 @@ private const val ENABLE_RECOMPOSITION_DEBUG = true
  *
  * Usage: Call this from inside ChatScreen after collecting all state.
  *
+ * PERF: draftText is collected internally only when debugging is enabled,
+ * to avoid causing ChatScreen recomposition on every keystroke.
+ *
+ * @param viewModel ChatViewModel to collect draftText from (only when debugging enabled)
  * @param messages Current message list
- * @param draftText Current draft text
  * @param isSending Whether a message is currently sending
  * @param smartReplyCount Number of smart reply suggestions
  * @param attachmentCount Number of pending attachments
@@ -33,8 +38,8 @@ private const val ENABLE_RECOMPOSITION_DEBUG = true
  */
 @Composable
 fun ChatScreenRecompositionDebug(
+    viewModel: ChatViewModel,
     messages: List<MessageUiModel>,
-    draftText: String,
     isSending: Boolean,
     smartReplyCount: Int,
     attachmentCount: Int,
@@ -43,6 +48,9 @@ fun ChatScreenRecompositionDebug(
     uiStateHash: Int
 ) {
     if (!ENABLE_RECOMPOSITION_DEBUG) return
+
+    // Only collect draftText when debugging is enabled to avoid performance impact
+    val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
 
     val recomposeCount = remember { mutableIntStateOf(0) }
     val prevMessagesSize = remember { mutableIntStateOf(-1) }

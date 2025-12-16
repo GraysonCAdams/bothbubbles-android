@@ -378,6 +378,7 @@ class ChatComposerDelegate @Inject constructor(
     ) {
         when (event) {
             is ComposerEvent.TextChanged -> {
+                Log.d("PerfTrace", "TextChanged event received, text length=${event.text.length}")
                 _draftText.value = event.text
             }
             is ComposerEvent.AddAttachments -> {
@@ -443,6 +444,14 @@ class ChatComposerDelegate @Inject constructor(
      */
     fun clearDraftText() {
         _draftText.value = ""
+    }
+
+    /**
+     * Append text to the current draft (e.g., for emoji insertion).
+     * PERF: This reads the current value internally, avoiding state reads in parent composables.
+     */
+    fun appendToDraft(text: String) {
+        _draftText.value = _draftText.value + text
     }
 
     /**
