@@ -37,6 +37,7 @@ import java.io.File
  * audioState.reset()
  * ```
  */
+@Stable
 class ChatAudioState {
     // Recording state
     var isRecording by mutableStateOf(false)
@@ -65,19 +66,29 @@ class ChatAudioState {
     private var mediaPlayer: MediaPlayer? = null
     private var recordingFile: File? = null
     private var mediaActionSound: MediaActionSound? = null
+    private var soundsLoaded = false
 
     /**
      * Initialize the audio state with a MediaActionSound.
      * Call this in a DisposableEffect to handle cleanup.
+     * Note: Sounds are loaded lazily on first use to avoid blocking the main thread.
      */
     fun initialize(): () -> Unit {
-        mediaActionSound = MediaActionSound().apply {
-            load(MediaActionSound.START_VIDEO_RECORDING)
-            load(MediaActionSound.STOP_VIDEO_RECORDING)
-        }
+        mediaActionSound = MediaActionSound()
 
         return {
             cleanup()
+        }
+    }
+
+    /**
+     * Lazily load sounds on first use to avoid blocking the main thread during composition.
+     */
+    private fun ensureSoundsLoaded() {
+        if (!soundsLoaded && mediaActionSound != null) {
+            mediaActionSound?.load(MediaActionSound.START_VIDEO_RECORDING)
+            mediaActionSound?.load(MediaActionSound.STOP_VIDEO_RECORDING)
+            soundsLoaded = true
         }
     }
 
@@ -100,6 +111,7 @@ class ChatAudioState {
                 mediaRecorder = recorder
                 recordingFile = file
                 isRecording = true
+                ensureSoundsLoaded()
                 mediaActionSound?.play(MediaActionSound.START_VIDEO_RECORDING)
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
             },
@@ -118,6 +130,7 @@ class ChatAudioState {
         try {
             mediaRecorder?.stop()
             mediaRecorder?.release()
+            ensureSoundsLoaded()
             mediaActionSound?.play(MediaActionSound.STOP_VIDEO_RECORDING)
             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
         } catch (_: Exception) {
@@ -311,6 +324,7 @@ class ChatAudioState {
         mediaPlayer = null
         mediaActionSound?.release()
         mediaActionSound = null
+        soundsLoaded = false
     }
 }
 

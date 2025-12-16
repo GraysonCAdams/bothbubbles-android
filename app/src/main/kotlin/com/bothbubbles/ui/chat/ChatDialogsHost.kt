@@ -6,21 +6,24 @@ import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.ui.chat.composer.tutorial.ComposerTutorial
 import com.bothbubbles.ui.chat.composer.tutorial.toComposerTutorialState
-import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.ui.chat.components.QualitySelectionSheet
 import com.bothbubbles.ui.chat.components.SearchResultsSheet
-import com.bothbubbles.ui.chat.state.ChatConnectionState
-import com.bothbubbles.ui.chat.state.SearchState
+import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
+import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.state.ChatInfoState
-import com.bothbubbles.ui.chat.state.OperationsState
-import com.bothbubbles.ui.chat.state.SendState
 import com.bothbubbles.ui.components.dialogs.DiscordChannelHelpOverlay
 import com.bothbubbles.ui.components.dialogs.DiscordChannelSetupDialog
 import com.bothbubbles.ui.components.dialogs.ForwardableChatInfo
@@ -30,10 +33,16 @@ import com.bothbubbles.ui.components.input.ScheduleMessageDialog
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.effects.EffectPickerSheet
 import com.bothbubbles.util.PhoneNumberFormatter
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Hosts all dialogs and bottom sheets for the ChatScreen.
  * Extracted to reduce ChatScreen complexity and improve maintainability.
+ *
+ * PERF FIX: This component now collects connection state internally from the delegate
+ * to avoid ChatScreen recomposition when connection state changes. Additionally,
+ * forwardableChats is only collected when the forward dialog is shown, and
+ * isWhatsAppAvailable is checked via LaunchedEffect to avoid blocking composition.
  *
  * This component manages visibility and callbacks for:
  * - EffectPickerSheet
@@ -57,12 +66,14 @@ fun ChatDialogsHost(
     viewModel: ChatViewModel,
     context: Context,
 
-    // State objects
+    // Wave 2: Delegates for internal collection
+    connectionDelegate: ChatConnectionDelegate,
+    sendDelegate: ChatSendDelegate,
+    operationsDelegate: ChatOperationsDelegate,
+    searchDelegate: ChatSearchDelegate,
+
+    // State objects (still needed at this level)
     chatInfoState: ChatInfoState,
-    connectionState: ChatConnectionState,
-    operationsState: OperationsState,
-    sendState: SendState,
-    searchState: SearchState,
 
     // Dialog visibility states
     showEffectPicker: Boolean,
@@ -82,10 +93,8 @@ fun ChatDialogsHost(
     canRetrySmsForMessage: Boolean,
     messageToForward: MessageUiModel?,
     pendingContactData: ContactData?,
-    forwardableChats: List<ChatEntity>,
     pendingAttachments: List<PendingAttachmentInput>,
     attachmentQuality: AttachmentQuality,
-    isWhatsAppAvailable: Boolean,
 
     // Tutorial data
     sendButtonBounds: Rect,
@@ -111,6 +120,27 @@ fun ChatDialogsHost(
     onClearPendingContactData: () -> Unit,
     onClearMessageToForward: () -> Unit,
 ) {
+    // Collect state internally from delegates to avoid ChatScreen recomposition
+    val connectionState by connectionDelegate.state.collectAsStateWithLifecycle()
+    val sendState by sendDelegate.state.collectAsStateWithLifecycle()
+    val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
+    val searchState by searchDelegate.state.collectAsStateWithLifecycle()
+
+    // PERF FIX: Only collect forwardable chats when dialog is shown
+    val forwardableChats by remember(showForwardDialog) {
+        if (showForwardDialog) {
+            viewModel.getForwardableChats()
+        } else {
+            flowOf(emptyList())
+        }
+    }.collectAsStateWithLifecycle(initialValue = emptyList())
+
+    // PERF FIX: Move WhatsApp check to LaunchedEffect (not during composition)
+    var isWhatsAppAvailable by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        isWhatsAppAvailable = viewModel.operations.isWhatsAppAvailable(context)
+    }
+
     // PERF FIX: Collect draftText here to avoid ChatScreen recomposition on every keystroke
     val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
 
@@ -355,14 +385,14 @@ fun ChatDialogsHost(
     }
 
     // Tutorial overlay
-    val effectiveTutorialState = if (sendButtonBounds != Rect.Zero) {
+    val tutorialState = if (sendButtonBounds != Rect.Zero) {
         connectionState.tutorialState.toComposerTutorialState()
     } else {
         com.bothbubbles.ui.chat.composer.ComposerTutorialState.Hidden
     }
 
     ComposerTutorial(
-        tutorialState = effectiveTutorialState,
+        tutorialState = tutorialState,
         sendButtonBounds = sendButtonBounds,
         onStepComplete = { _ ->
             // The tutorial progresses based on actual swipe gestures

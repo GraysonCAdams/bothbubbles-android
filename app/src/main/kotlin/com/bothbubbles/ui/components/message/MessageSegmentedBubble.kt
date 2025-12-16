@@ -38,6 +38,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -93,7 +97,7 @@ internal fun SegmentedMessageBubble(
     searchQuery: String? = null,
     isCurrentSearchMatch: Boolean = false,
     onDownloadClick: ((String) -> Unit)? = null,
-    downloadingAttachments: Map<String, Float> = emptyMap(),
+    attachmentDelegate: ChatAttachmentDelegate? = null,
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
@@ -364,14 +368,16 @@ internal fun SegmentedMessageBubble(
                         segments.forEachIndexed { index, segment ->
                             when (segment) {
                                 is MessageSegment.MediaSegment -> {
+                                    val progressState = rememberDownloadProgress(attachmentDelegate, segment.attachment.guid)
+                                    val progress = progressState.value
                                     BorderlessMediaContent(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
                                         maxWidth = 300.dp,
                                         onDownloadClick = onDownloadClick,
-                                        isDownloading = segment.attachment.guid in downloadingAttachments,
-                                        downloadProgress = downloadingAttachments[segment.attachment.guid] ?: 0f,
+                                        isDownloading = progress != null,
+                                        downloadProgress = progress ?: 0f,
                                         isPlacedSticker = message.isPlacedSticker,
                                         messageGuid = message.guid,
                                         modifier = Modifier
@@ -419,13 +425,15 @@ internal fun SegmentedMessageBubble(
                                 }
 
                                 is MessageSegment.FileSegment -> {
+                                    val progressState = rememberDownloadProgress(attachmentDelegate, segment.attachment.guid)
+                                    val progress = progressState.value
                                     AttachmentContent(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
                                         onDownloadClick = onDownloadClick,
-                                        isDownloading = segment.attachment.guid in downloadingAttachments,
-                                        downloadProgress = downloadingAttachments[segment.attachment.guid] ?: 0f
+                                        isDownloading = progress != null,
+                                        downloadProgress = progress ?: 0f
                                     )
                                 }
                             }
@@ -739,4 +747,17 @@ internal fun TextBubbleSegment(
             }
         }
     }
+}
+
+@Composable
+private fun rememberDownloadProgress(
+    delegate: ChatAttachmentDelegate?,
+    guid: String
+): androidx.compose.runtime.State<Float?> {
+    return androidx.compose.runtime.remember(delegate, guid) {
+        delegate?.downloadProgress
+            ?.map { it[guid] }
+            ?.distinctUntilChanged()
+    }?.collectAsStateWithLifecycle(initialValue = null)
+        ?: androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(null) }
 }

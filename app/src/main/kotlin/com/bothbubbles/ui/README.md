@@ -124,9 +124,49 @@ val uiState = _uiState.asStateFlow()
 
 ## Best Practices
 
-1. Use `hiltViewModel()` for ViewModel injection
-2. Use `collectAsStateWithLifecycle()` for StateFlow
-3. Split Screen and Content composables (stateless content)
-4. Use delegate pattern for complex ViewModels
-5. Follow Material 3 design guidelines
-6. Use theme colors and typography
+**MANDATORY**: Read and follow `docs/COMPOSE_BEST_PRACTICES.md` before writing any Compose code.
+
+### Core Rules
+
+1. **Leaf-Node State Collection**: Never collect state in a parent just to pass it down. Push state collection to the lowest possible child composable.
+
+2. **Immutable Collections**: Always use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state classes.
+
+3. **Stable Callbacks**: Use method references (`viewModel::method`) instead of lambdas that capture state.
+
+4. **No Logic in Composition**: Keep the composition path pure. No logging, I/O, or complex calculations during composition.
+
+5. Use `collectAsStateWithLifecycle()` for StateFlow (not `collectAsState()`)
+
+6. Use `hiltViewModel()` for ViewModel injection
+
+7. Use delegate pattern for complex ViewModels
+
+8. Follow Material 3 design guidelines
+
+### Push-Down State Pattern
+
+For complex screens, pass delegates to child composables instead of collected state:
+
+```kotlin
+// GOOD: Child collects its own state
+@Composable
+fun ChatScreen(viewModel: ChatViewModel) {
+    ChatMessageList(
+        searchDelegate = viewModel.searchDelegate,
+        syncDelegate = viewModel.syncDelegate
+    )
+}
+
+@Composable
+fun ChatMessageList(
+    searchDelegate: ChatSearchDelegate,
+    syncDelegate: ChatSyncDelegate
+) {
+    // PERF FIX: Collect state internally to avoid parent recomposition
+    val searchState by searchDelegate.state.collectAsStateWithLifecycle()
+    val syncState by syncDelegate.state.collectAsStateWithLifecycle()
+}
+```
+
+See `docs/COMPOSE_BEST_PRACTICES.md` for detailed rules and examples.

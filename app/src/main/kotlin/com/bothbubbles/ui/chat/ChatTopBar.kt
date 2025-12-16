@@ -1,6 +1,5 @@
 package com.bothbubbles.ui.chat
 
-import android.content.Context
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
@@ -10,38 +9,44 @@ import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.ui.chat.state.ChatInfoState
-import com.bothbubbles.ui.chat.state.OperationsState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
+import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.common.GroupAvatar
 import com.bothbubbles.util.PhoneNumberFormatter
 
 /**
- * Top app bar for the chat screen using decomposed state objects.
+ * Top app bar for the chat screen with internal state collection.
  * Displays chat title, avatar, and action buttons (video call, overflow menu).
  *
- * This is the preferred signature for Stage 2B refactoring - UI components
- * should request specific state objects instead of the monolithic ChatUiState.
+ * PERF FIX: This signature collects state internally from delegates to avoid
+ * ChatScreen recomposition when top bar state changes.
  *
- * @param infoState Chat metadata from ChatInfoDelegate
- * @param operationsState Operations state from ChatOperationsDelegate
+ * @param operationsDelegate Delegate for operations state (internal collection)
+ * @param chatInfoDelegate Delegate for chat info state (internal collection)
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatTopBar(
-    infoState: ChatInfoState,
-    operationsState: OperationsState,
+    // NEW: Delegates for internal collection
+    operationsDelegate: ChatOperationsDelegate,
+    chatInfoDelegate: ChatInfoDelegate,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Collect state internally from delegates to avoid ChatScreen recomposition
+    val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
+    val infoState by chatInfoDelegate.state.collectAsStateWithLifecycle()
+
     ChatTopBarContent(
         chatTitle = infoState.chatTitle,
         avatarPath = infoState.avatarPath,
@@ -53,51 +58,6 @@ fun ChatTopBar(
         isStarred = operationsState.isStarred,
         showSubjectField = operationsState.showSubjectField,
         isLocalSmsChat = infoState.isLocalSmsChat,
-        onBackClick = onBackClick,
-        onDetailsClick = onDetailsClick,
-        onVideoCallClick = onVideoCallClick,
-        onMenuAction = onMenuAction,
-        modifier = modifier
-    )
-}
-
-/**
- * Top app bar for the chat screen.
- * Displays chat title, avatar, and action buttons (video call, overflow menu).
- *
- * @deprecated Use the overload accepting ChatInfoState and OperationsState for better
- * state isolation and reduced recomposition scope.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun ChatTopBar(
-    chatTitle: String,
-    avatarPath: String?,
-    isGroup: Boolean,
-    participantNames: List<String>,
-    participantAvatarPaths: List<String?>,
-    isSnoozed: Boolean,
-    isArchived: Boolean,
-    isStarred: Boolean,
-    showSubjectField: Boolean,
-    isLocalSmsChat: Boolean,
-    onBackClick: () -> Unit,
-    onDetailsClick: () -> Unit,
-    onVideoCallClick: () -> Unit,
-    onMenuAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    ChatTopBarContent(
-        chatTitle = chatTitle,
-        avatarPath = avatarPath,
-        isGroup = isGroup,
-        participantNames = participantNames,
-        participantAvatarPaths = participantAvatarPaths,
-        isSnoozed = isSnoozed,
-        isArchived = isArchived,
-        isStarred = isStarred,
-        showSubjectField = showSubjectField,
-        isLocalSmsChat = isLocalSmsChat,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
@@ -128,7 +88,6 @@ private fun ChatTopBarContent(
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
     var showOverflowMenu = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
     TopAppBar(

@@ -50,6 +50,11 @@ android {
     }
 }
 
+composeCompiler {
+    reportsDestination = layout.buildDirectory.dir("compose_compiler")
+    metricsDestination = layout.buildDirectory.dir("compose_compiler")
+}
+
 // Room schema export for migration testing
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
@@ -74,6 +79,12 @@ dependencies {
     implementation(libs.androidx.compose.material.icons.extended)
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
+
+    // Linting
+    lintChecks(libs.slack.compose.lint)
+
+    // Immutable Collections
+    implementation(libs.kotlinx.collections.immutable)
 
     // Navigation
     implementation(libs.androidx.navigation.compose)

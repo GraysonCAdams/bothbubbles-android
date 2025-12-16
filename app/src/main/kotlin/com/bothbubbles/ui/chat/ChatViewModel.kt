@@ -160,7 +160,7 @@ class ChatViewModel @Inject constructor(
         send.initialize(chatGuid, viewModelScope)
         attachment.initialize(chatGuid, viewModelScope, mergedChatGuids)
         etaSharing.initialize(viewModelScope)
-        search.initialize(viewModelScope)
+        search.initialize(viewModelScope, mergedChatGuids)
         operations.initialize(chatGuid, viewModelScope)
         sync.initialize(chatGuid, viewModelScope, mergedChatGuids)
         effects.initialize(viewModelScope)
@@ -198,6 +198,9 @@ class ChatViewModel @Inject constructor(
 
         // Set delegate references for operations (enables reaction toggling in delegate)
         operations.setMessageListDelegate(messageList)
+
+        // Set delegate references for search (enables internal message lookup for stable callbacks)
+        search.setMessageListDelegate(messageList)
 
         // Observe effect settings and update delegate
         viewModelScope.launch {

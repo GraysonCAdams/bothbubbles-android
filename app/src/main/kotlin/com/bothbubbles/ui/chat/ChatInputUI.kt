@@ -17,6 +17,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -31,55 +32,37 @@ import com.bothbubbles.ui.chat.composer.ComposerInputMode
 import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.panels.GifItem
-import com.bothbubbles.ui.chat.composer.panels.GifPickerState
-import com.bothbubbles.ui.chat.state.SendState
-import com.bothbubbles.ui.components.input.AttachmentPickerPanel
-import com.bothbubbles.ui.components.input.EmojiPickerPanel
+import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.input.SuggestionItem
-import com.bothbubbles.ui.components.message.MessageUiModel
 
 /**
  * Extracted input area component containing:
- * - AttachmentPickerPanel (slides up above input)
- * - EmojiPickerPanel (slides up above input)
  * - SmartReplyChips
  * - ReplyPreview
- * - ChatComposer
+ * - ChatComposer (which includes panels via ComposerPanelHost)
+ *
+ * Note: Attachment/Emoji/GIF pickers are rendered inside ChatComposer's ComposerPanelHost
+ * to avoid component duplication.
  *
  * This extraction follows Stage 2 of the refactor plan to declutter ChatScreen.kt
  */
 @Composable
 fun ChatInputUI(
-    // Composer state from delegate
-    composerState: ComposerState,
+    // NEW: Delegates for internal state collection (PERF FIX: avoids ChatScreen recomposition)
+    sendDelegate: ChatSendDelegate,
+    messageListDelegate: ChatMessageListDelegate,
+    // Composer delegate to collect state from (PERF: collected internally to avoid parent recomposition)
+    composerDelegate: com.bothbubbles.ui.chat.delegates.ChatComposerDelegate,
     // Audio state for voice recording
     audioState: ChatAudioState,
-    // Send state for reply tracking
-    sendState: SendState,
-    // Smart reply suggestions
-    smartReplySuggestions: List<SuggestionItem>,
-    // Pre-computed reply target message (avoids passing full messages list)
-    replyingToMessage: MessageUiModel?,
     // Whether this is a local SMS chat (affects long-press behavior)
     isLocalSmsChat: Boolean,
-    // Picker visibility state
-    showAttachmentPicker: Boolean,
-    showEmojiPicker: Boolean,
-    // GIF picker state
-    gifPickerState: GifPickerState,
-    gifSearchQuery: String,
-    // Callbacks - Picker dismissal
-    onDismissAttachmentPicker: () -> Unit,
-    onDismissEmojiPicker: () -> Unit,
-    // Callbacks - Attachment handling
-    onAttachmentSelected: (android.net.Uri) -> Unit,
-    onLocationSelected: (Double, Double) -> Unit,
-    onContactSelected: (android.net.Uri) -> Unit,
-    onScheduleClick: () -> Unit,
+
+    // Callbacks - Camera (passed through to ChatComposer)
     onCameraClick: () -> Unit,
-    // Callbacks - Emoji handling
-    onEmojiSelected: (String) -> Unit,
+    // Note: onEmojiSelected removed - emoji selection handled inside ComposerPanelHost
     // Callbacks - Smart reply
     onSmartReplyClick: (SuggestionItem) -> Unit,
     // Callbacks - Reply preview
@@ -111,9 +94,24 @@ fun ChatInputUI(
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
 
-    // Debug: Track recomposition with granular timing
-    val t0 = System.currentTimeMillis()
-    Log.d("PerfTrace", "ChatInputUI START, replyingTo=${replyingToMessage?.guid}, smartReplies=${smartReplySuggestions.size}")
+    // PERF FIX: Collect composerState internally to avoid parent (ChatScreen) recomposition on every keystroke
+    val composerState by composerDelegate.state.collectAsStateWithLifecycle()
+
+    // PERF FIX: Collect state internally from delegates to avoid ChatScreen recomposition
+    val sendState by sendDelegate.state.collectAsStateWithLifecycle()
+    val smartReplySuggestions by composerDelegate.smartReplySuggestions.collectAsStateWithLifecycle()
+    val gifPickerState by composerDelegate.gifPickerState.collectAsStateWithLifecycle()
+    val gifSearchQuery by composerDelegate.gifSearchQuery.collectAsStateWithLifecycle()
+    val messages by messageListDelegate.messagesState.collectAsStateWithLifecycle()
+
+    // PERF FIX: Compute replyingToMessage locally using derivedStateOf to avoid passing full messages list
+    val replyingToMessage by remember {
+        derivedStateOf {
+            sendState.replyingToGuid?.let { guid ->
+                messages.firstOrNull { it.guid == guid }
+            }
+        }
+    }
 
     // Audio permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
@@ -132,25 +130,9 @@ fun ChatInputUI(
             .imePadding()
             .onSizeChanged { size -> onSizeChanged(size.height) }
     ) {
-        // Attachment picker panel (slides up above input)
-        AttachmentPickerPanel(
-            visible = showAttachmentPicker,
-            onDismiss = onDismissAttachmentPicker,
-            onAttachmentSelected = onAttachmentSelected,
-            onLocationSelected = onLocationSelected,
-            onContactSelected = onContactSelected,
-            onScheduleClick = onScheduleClick,
-            onCameraClick = onCameraClick
-        )
-
-        // Emoji picker panel (slides up above input)
-        EmojiPickerPanel(
-            visible = showEmojiPicker,
-            onDismiss = onDismissEmojiPicker,
-            onEmojiSelected = { emoji ->
-                onEmojiSelected(emoji)
-            }
-        )
+        // Note: Both attachment and emoji pickers are rendered inside ChatComposer's ComposerPanelHost
+        // to avoid duplication. The showEmojiPicker state triggers activePanel = EmojiKeyboard
+        // which is handled by ComposerPanelHost.EmojiKeyboardPanel
 
         // Determine input mode for unified handling
         val inputMode = when {
@@ -171,7 +153,7 @@ fun ChatInputUI(
             )
         }
 
-        // Reply preview - shows when replying to a message (passed in pre-computed)
+        // Reply preview - shows when replying to a message (computed internally via derivedStateOf)
         AnimatedVisibility(
             visible = replyingToMessage != null,
             enter = expandVertically() + fadeIn(),
@@ -212,7 +194,6 @@ fun ChatInputUI(
             }
         }
 
-        Log.d("PerfTrace", "Before ChatComposer: +${System.currentTimeMillis() - t0}ms")
         ChatComposer(
             state = adjustedComposerState,
             onEvent = { event ->
@@ -263,7 +244,7 @@ fun ChatInputUI(
             onFileClick = onFileClick,
             onLocationClick = onLocationClick,
             onContactClick = onContactClick,
-            // GIF Picker
+            // GIF Picker - collected internally from delegate
             gifPickerState = gifPickerState,
             gifSearchQuery = gifSearchQuery,
             onGifSearchQueryChange = onGifSearchQueryChange,
@@ -271,6 +252,5 @@ fun ChatInputUI(
             onGifSelected = onGifSelected,
             onSendButtonBoundsChanged = onSendButtonBoundsChanged
         )
-        Log.d("PerfTrace", "After ChatComposer: +${System.currentTimeMillis() - t0}ms")
     }
 }

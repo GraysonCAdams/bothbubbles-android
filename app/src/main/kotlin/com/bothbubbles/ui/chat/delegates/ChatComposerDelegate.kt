@@ -378,7 +378,7 @@ class ChatComposerDelegate @Inject constructor(
     ) {
         when (event) {
             is ComposerEvent.TextChanged -> {
-                Log.d("PerfTrace", "TextChanged event received, text length=${event.text.length}")
+                // Log.d("PerfTrace", "TextChanged event received, text length=${event.text.length}")
                 _draftText.value = event.text
             }
             is ComposerEvent.AddAttachments -> {

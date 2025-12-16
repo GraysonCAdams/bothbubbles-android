@@ -2,6 +2,7 @@ package com.bothbubbles.ui.chat
 
 import android.widget.Toast
 import android.util.Log
+import com.bothbubbles.BuildConfig
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
@@ -22,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
 import com.bothbubbles.ui.chat.components.EtaSharingBanner
 import com.bothbubbles.ui.chat.components.EtaStopSharingLink
@@ -30,13 +32,15 @@ import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
 import com.bothbubbles.ui.chat.components.SaveContactBanner
 import com.bothbubbles.ui.chat.components.SendingIndicatorBar
 import com.bothbubbles.ui.chat.components.SmsFallbackBanner
-import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate.EtaSharingUiState
+import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
+import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
+import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
 import com.bothbubbles.ui.chat.state.ChatInfoState
-import com.bothbubbles.ui.chat.state.SearchState
-import com.bothbubbles.ui.chat.state.EffectsState
-import com.bothbubbles.ui.chat.state.OperationsState
-import com.bothbubbles.ui.chat.state.SendState
-import com.bothbubbles.ui.chat.state.SyncState
 import com.bothbubbles.ui.components.common.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.MessageListSkeleton
 import com.bothbubbles.ui.components.common.SpamSafetyBanner
@@ -57,6 +61,13 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 private const val SCROLL_DEBUG_TAG = "ChatScroll"
+
+/** Debug-only scroll logging - compiles out in release builds */
+private inline fun scrollDebugLog(message: () -> String) {
+    if (BuildConfig.DEBUG) {
+        Log.d(SCROLL_DEBUG_TAG, message())
+    }
+}
 
 /**
  * Content types for LazyColumn item recycling optimization.
@@ -124,26 +135,26 @@ data class MessageListCallbacks(
 @Composable
 fun ChatMessageList(
     modifier: Modifier = Modifier,
-    listState: LazyListState,
+    chatScreenState: ChatScreenState,
     messages: List<MessageUiModel>,
 
-    // State objects
+    // Wave 2: All delegates for internal state collection
+    messageListDelegate: ChatMessageListDelegate,
+    sendDelegate: ChatSendDelegate,
+    searchDelegate: ChatSearchDelegate,
+    syncDelegate: ChatSyncDelegate,
+    operationsDelegate: ChatOperationsDelegate,
+    attachmentDelegate: ChatAttachmentDelegate,
+    etaSharingDelegate: ChatEtaSharingDelegate,
+    effectsDelegate: ChatEffectsDelegate,
+
+    // State objects (passed by reference - still needed at this level)
     chatInfoState: ChatInfoState,
-    sendState: SendState,
-    syncState: SyncState,
-    searchState: SearchState,
-    operationsState: OperationsState,
-    effectsState: EffectsState,
-    etaSharingState: EtaSharingUiState,
 
     // UI state
     highlightedMessageGuid: String?,
     isLoadingMore: Boolean,
-    isLoadingFromServer: Boolean,
     isSyncingMessages: Boolean,
-    initialLoadComplete: Boolean,
-    autoDownloadEnabled: Boolean,
-    downloadingAttachments: Map<String, Float>,
 
     // Socket new message flow for "x new messages" indicator
     socketNewMessageFlow: Flow<String>,
@@ -167,14 +178,26 @@ fun ChatMessageList(
     swipingMessageGuid: String?,
     onSwipingMessageChange: (String?) -> Unit,
 
-    // Composer height for tapback LiveZone calculation
-    composerHeightPx: Float,
+    // Composer height for tapback LiveZone calculation (lambda to avoid parent recomposition on keyboard animation)
+    composerHeightPxProvider: () -> Float,
 
     // Server connection for tapback availability
     isServerConnected: Boolean
 ) {
+    // Collect state internally from delegates to avoid ChatScreen recomposition
+    val sendState by sendDelegate.state.collectAsStateWithLifecycle()
+    val searchState by searchDelegate.state.collectAsStateWithLifecycle()
+    val syncState by syncDelegate.state.collectAsStateWithLifecycle()
+    val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
+    val effectsState by effectsDelegate.state.collectAsStateWithLifecycle()
+    val etaSharingState by etaSharingDelegate.etaSharingState.collectAsStateWithLifecycle()
+    val isLoadingFromServer by messageListDelegate.isLoadingFromServer.collectAsStateWithLifecycle()
+    val initialLoadComplete by messageListDelegate.initialLoadComplete.collectAsStateWithLifecycle()
+    val autoDownloadEnabled by attachmentDelegate.autoDownloadEnabled.collectAsStateWithLifecycle()
+
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
+    val listState = chatScreenState.listState
     val scrollScope = rememberCoroutineScope()
     val retryMenuScope = rememberCoroutineScope()
 
@@ -224,58 +247,61 @@ fun ChatMessageList(
         val firstVisibleIndex = listState.firstVisibleItemIndex
         val isNearBottom = firstVisibleIndex <= 2
 
-        Log.d(SCROLL_DEBUG_TAG, "📜 AutoScroll LaunchedEffect triggered: " +
-            "newestGuid=${newestGuid?.takeLast(8)}, " +
-            "previousGuid=${previousNewestGuid?.takeLast(8)}, " +
-            "firstVisibleIndex=$firstVisibleIndex, " +
-            "isNearBottom=$isNearBottom, " +
-            "hasInitiallyLoaded=$hasInitiallyLoaded, " +
-            "isFromMe=${newestMessage?.isFromMe}")
+        scrollDebugLog {
+            "📜 AutoScroll LaunchedEffect triggered: " +
+                "newestGuid=${newestGuid?.takeLast(8)}, " +
+                "previousGuid=${previousNewestGuid?.takeLast(8)}, " +
+                "firstVisibleIndex=$firstVisibleIndex, " +
+                "isNearBottom=$isNearBottom, " +
+                "hasInitiallyLoaded=$hasInitiallyLoaded, " +
+                "isFromMe=${newestMessage?.isFromMe}"
+        }
 
         if (newestGuid == null) {
-            Log.d(SCROLL_DEBUG_TAG, "📜 SKIP: newestGuid is null")
+            scrollDebugLog { "📜 SKIP: newestGuid is null" }
             return@LaunchedEffect
         }
 
         if (!hasInitiallyLoaded) {
             hasInitiallyLoaded = true
             previousNewestGuid = newestGuid
-            Log.d(SCROLL_DEBUG_TAG, "📜 SKIP: Initial load, setting previousNewestGuid=${newestGuid.takeLast(8)}")
+            scrollDebugLog { "📜 SKIP: Initial load, setting previousNewestGuid=${newestGuid.takeLast(8)}" }
             return@LaunchedEffect
         }
 
         val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestGuid
-        Log.d(SCROLL_DEBUG_TAG, "📜 isNewMessage=$isNewMessage (prev=${previousNewestGuid?.takeLast(8)} vs new=${newestGuid.takeLast(8)})")
+        scrollDebugLog { "📜 isNewMessage=$isNewMessage (prev=${previousNewestGuid?.takeLast(8)} vs new=${newestGuid.takeLast(8)})" }
         previousNewestGuid = newestGuid
 
         // For sent messages: scroll if NOT already at bottom (user scrolled up before sending)
         if (newestMessage.isFromMe) {
             if (isNewMessage && firstVisibleIndex > 0) {
-                Log.d(SCROLL_DEBUG_TAG, "📜 SCROLLING for SENT message: firstVisibleIndex=$firstVisibleIndex > 0")
+                scrollDebugLog { "📜 SCROLLING for SENT message: firstVisibleIndex=$firstVisibleIndex > 0" }
                 delay(50)
                 listState.scrollToItem(0)
-                Log.d(SCROLL_DEBUG_TAG, "📜 Scroll complete for sent, now at index=${listState.firstVisibleItemIndex}")
+                scrollDebugLog { "📜 Scroll complete for sent, now at index=${listState.firstVisibleItemIndex}" }
             } else {
-                Log.d(SCROLL_DEBUG_TAG, "📜 SKIP sent message scroll: isNewMessage=$isNewMessage, firstVisibleIndex=$firstVisibleIndex")
+                scrollDebugLog { "📜 SKIP sent message scroll: isNewMessage=$isNewMessage, firstVisibleIndex=$firstVisibleIndex" }
             }
             return@LaunchedEffect
         }
 
         if (isNewMessage && isNearBottom) {
-            Log.d(SCROLL_DEBUG_TAG, "📜 SCROLLING to item 0 for incoming message")
+            scrollDebugLog { "📜 SCROLLING to item 0 for incoming message" }
             delay(50)
             listState.scrollToItem(0)
-            Log.d(SCROLL_DEBUG_TAG, "📜 Scroll complete, now at index=${listState.firstVisibleItemIndex}")
+            scrollDebugLog { "📜 Scroll complete, now at index=${listState.firstVisibleItemIndex}" }
         } else {
-            Log.d(SCROLL_DEBUG_TAG, "📜 NOT scrolling: isNewMessage=$isNewMessage, isNearBottom=$isNearBottom")
+            scrollDebugLog { "📜 NOT scrolling: isNewMessage=$isNewMessage, isNearBottom=$isNearBottom" }
         }
     }
 
     // Track new messages from socket for indicator
+    val currentMessages by rememberUpdatedState(messages)
     LaunchedEffect(Unit) {
         socketNewMessageFlow.collect { messageGuid ->
             val isNearBottom = listState.firstVisibleItemIndex <= 2
-            val newestMessage = messages.firstOrNull { it.guid == messageGuid }
+            val newestMessage = currentMessages.firstOrNull { it.guid == messageGuid }
 
             if (newestMessage?.isFromMe == false) {
                 hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -302,30 +328,21 @@ fun ChatMessageList(
         }
     }
 
-    // Track revealed invisible ink messages (resets when leaving chat)
-    var revealedInvisibleInkMessages by remember { mutableStateOf(setOf<String>()) }
-
-    // Track messages that have been animated
-    val animatedMessageGuids = remember { mutableSetOf<String>() }
-
     // Effect settings
     val autoPlayEffects = effectsState.autoPlayEffects
     val replayEffectsOnScroll = effectsState.replayOnScroll
     val reduceMotion = effectsState.reduceMotion
 
-    // Track processed screen effects this session
-    val processedEffectMessages = remember { mutableSetOf<String>() }
-
     // Detect new messages with screen effects
     LaunchedEffect(messages.firstOrNull()?.guid) {
         val newest = messages.firstOrNull() ?: return@LaunchedEffect
-        if (newest.guid in processedEffectMessages) return@LaunchedEffect
+        if (chatScreenState.isEffectProcessed(newest.guid)) return@LaunchedEffect
         if (!autoPlayEffects || reduceMotion) return@LaunchedEffect
         if (newest.effectPlayed && !replayEffectsOnScroll) return@LaunchedEffect
 
         val effect = MessageEffect.fromStyleId(newest.expressiveSendStyleId)
         if (effect is MessageEffect.Screen) {
-            processedEffectMessages.add(newest.guid)
+            chatScreenState.markEffectProcessed(newest.guid)
             // Screen effects are handled at ChatScreen level via ScreenEffectOverlay
         }
     }
@@ -400,7 +417,7 @@ fun ChatMessageList(
         // Mark initial messages as animated
         LaunchedEffect(initialLoadComplete) {
             if (initialLoadComplete) {
-                messages.forEach { animatedMessageGuids.add(it.guid) }
+                messages.forEach { chatScreenState.markMessageAnimated(it.guid) }
             }
         }
 
@@ -569,14 +586,14 @@ fun ChatMessageList(
                             val isHighlighted = highlightedMessageGuid == message.guid
 
                             val isAlreadyAnimated = remember(message.guid) {
-                                message.guid in animatedMessageGuids
+                                chatScreenState.isMessageAnimated(message.guid)
                             }
                             val shouldAnimateEntrance = initialLoadComplete && !isAlreadyAnimated
 
                             if (shouldAnimateEntrance) {
                                 LaunchedEffect(message.guid) {
                                     delay(16)
-                                    animatedMessageGuids.add(message.guid)
+                                    chatScreenState.markMessageAnimated(message.guid)
                                 }
                             }
 
@@ -628,7 +645,7 @@ fun ChatMessageList(
                                         message.attachments.any { it.isImage || it.isVideo }
                                     }
 
-                                    val isInvisibleInkRevealed = message.guid in revealedInvisibleInkMessages
+                                    val isInvisibleInkRevealed = chatScreenState.isInvisibleInkRevealed(message.guid)
                                     val isInvisibleInk = bubbleEffect == MessageEffect.Bubble.InvisibleInk
 
                                     BubbleEffectWrapper(
@@ -638,11 +655,7 @@ fun ChatMessageList(
                                         onEffectComplete = { callbacks.onBubbleEffectCompleted(message.guid) },
                                         isInvisibleInkRevealed = isInvisibleInkRevealed,
                                         onInvisibleInkRevealChanged = { revealed ->
-                                            revealedInvisibleInkMessages = if (revealed) {
-                                                revealedInvisibleInkMessages + message.guid
-                                            } else {
-                                                revealedInvisibleInkMessages - message.guid
-                                            }
+                                            chatScreenState.toggleInvisibleInk(message.guid, revealed)
                                         },
                                         hasMedia = hasMedia,
                                         onMediaClickBlocked = {}
@@ -670,8 +683,9 @@ fun ChatMessageList(
                                             groupPosition = groupPosition,
                                             searchQuery = if (searchState.isActive) searchState.query else null,
                                             isCurrentSearchMatch = isCurrentSearchMatch,
-                                            onDownloadClick = callbacks.onDownloadAttachment,
-                                            downloadingAttachments = downloadingAttachments,
+                                            // Wave 2: Conditionally pass download callback based on internally collected autoDownloadEnabled
+                                            onDownloadClick = if (!autoDownloadEnabled) callbacks.onDownloadAttachment else null,
+                                            attachmentDelegate = attachmentDelegate,
                                             showDeliveryIndicator = showDeliveryIndicator,
                                             onReply = if (message.isPlacedSticker) null else { guid ->
                                                 callbacks.onSetReplyTo(guid)
@@ -769,7 +783,7 @@ fun ChatMessageList(
                         visible = selectedMessageForTapback != null && selectedMessageBounds != null,
                         anchorBounds = selectedMessageBounds,
                         isFromMe = selectedMessageForTapback?.isFromMe == true,
-                        composerHeight = composerHeightPx,
+                        composerHeight = composerHeightPxProvider(),
                         myReactions = selectedMessageForTapback?.myReactions ?: emptySet(),
                         canReply = selectedMessageForTapback?.isServerOrigin == true,
                         canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),

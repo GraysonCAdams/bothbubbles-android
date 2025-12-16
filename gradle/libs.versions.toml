@@ -48,6 +48,10 @@ cameraX = "1.4.0"
 # Media3 (ExoPlayer)
 media3 = "1.5.0"
 
+# Linting & Static Analysis
+slackComposeLint = "1.4.2"
+kotlinxImmutable = "0.3.8"
+
 # ML Kit
 mlkitBarcodeScanning = "17.3.0"
 mlkitSmartReply = "17.0.4"
@@ -99,6 +103,8 @@ androidx-compose-ui-test-manifest = { group = "androidx.compose.ui", name = "ui-
 androidx-compose-ui-test-junit4 = { group = "androidx.compose.ui", name = "ui-test-junit4" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material-icons-extended = { group = "androidx.compose.material", name = "material-icons-extended" }
+slack-compose-lint = { group = "com.slack.lint.compose", name = "compose-lint-checks", version.ref = "slackComposeLint" }
+kotlinx-collections-immutable = { group = "org.jetbrains.kotlinx", name = "kotlinx-collections-immutable", version.ref = "kotlinxImmutable" }
 
 # Navigation
 androidx-navigation-compose = { group = "androidx.navigation", name = "navigation-compose", version.ref = "navigationCompose" }

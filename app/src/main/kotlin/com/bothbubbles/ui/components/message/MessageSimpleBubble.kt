@@ -38,6 +38,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -90,7 +94,7 @@ internal fun SimpleBubbleContent(
     searchQuery: String? = null,
     isCurrentSearchMatch: Boolean = false,
     onDownloadClick: ((String) -> Unit)? = null,
-    downloadingAttachments: Map<String, Float> = emptyMap(),
+    attachmentDelegate: ChatAttachmentDelegate? = null,
     showDeliveryIndicator: Boolean = true,
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
@@ -426,15 +430,15 @@ internal fun SimpleBubbleContent(
                         //         modifier = Modifier.padding(bottom = if (message.text.isNullOrBlank()) 0.dp else 8.dp)
                         //     ) {
                         //         message.attachments.forEach { attachment ->
-                        //             val isDownloading = attachment.guid in downloadingAttachments
-                        //             val downloadProgress = downloadingAttachments[attachment.guid] ?: 0f
+                        //             val progressState = rememberDownloadProgress(attachmentDelegate, attachment.guid)
+                        //             val progress = progressState.value
                         //             AttachmentContent(
                         //                 attachment = attachment,
                         //                 isFromMe = message.isFromMe,
                         //                 onMediaClick = onMediaClick,
                         //                 onDownloadClick = onDownloadClick,
-                        //                 isDownloading = isDownloading,
-                        //                 downloadProgress = downloadProgress
+                        //                 isDownloading = progress != null,
+                        //                 downloadProgress = progress ?: 0f
                         //             )
                         //         }
                         //     }
@@ -753,4 +757,17 @@ internal fun SimpleBubbleContent(
 
     }
     } // Close Box
+}
+
+@Composable
+private fun rememberDownloadProgress(
+    delegate: ChatAttachmentDelegate?,
+    guid: String
+): androidx.compose.runtime.State<Float?> {
+    return androidx.compose.runtime.remember(delegate, guid) {
+        delegate?.downloadProgress
+            ?.map { it[guid] }
+            ?.distinctUntilChanged()
+    }?.collectAsStateWithLifecycle(initialValue = null)
+        ?: androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(null) }
 }

@@ -6,7 +6,19 @@ import androidx.compose.ui.platform.SoftwareKeyboardController
 import kotlinx.coroutines.flow.distinctUntilChanged
 
 /**
- * Encapsulates scroll-related side effects for ChatScreen.
+ * Scroll helpers for ChatMessageList.
+ *
+ * Scroll behavior ownership:
+ * - Load more on scroll: LoadMoreOnScroll (this file)
+ * - Scroll position tracking: ScrollPositionTracker (this file)
+ * - Keyboard hide on scroll: KeyboardHideOnScroll (this file)
+ * - Search result scrolling: ChatMessageList.kt (LaunchedEffect on currentMatchIndex)
+ * - Highlighted message scrolling: ChatMessageList.kt (LaunchedEffect on highlightedMessageGuid)
+ * - New message auto-scroll: ChatMessageList.kt (LaunchedEffect on messages.firstOrNull()?.guid)
+ * - Typing indicator auto-scroll: ChatMessageList.kt (LaunchedEffect on isTyping)
+ * - Scroll restoration: ChatScreenEffects.kt (LaunchedEffect on messages.isNotEmpty)
+ * - Deep-link/thread scrolling: ChatScreenEffects.kt (LaunchedEffect on targetMessageGuid)
+ * - Scroll-to-safety for tapback: ChatScreenEffects.kt (LaunchedEffect on selectedMessageForTapback)
  *
  * This helper extracts scroll logic from ChatScreen to improve readability and maintainability.
  * It handles:
@@ -117,6 +129,10 @@ private fun LoadMoreOnScroll(
     isLoadingMore: Boolean,
     onLoadMore: () -> Unit
 ) {
+    val currentCanLoadMore by rememberUpdatedState(canLoadMore)
+    val currentIsLoadingMore by rememberUpdatedState(isLoadingMore)
+    val currentOnLoadMore by rememberUpdatedState(onLoadMore)
+
     LaunchedEffect(listState) {
         snapshotFlow {
             val layoutInfo = listState.layoutInfo
@@ -126,8 +142,8 @@ private fun LoadMoreOnScroll(
         }
             .distinctUntilChanged()
             .collect { shouldLoadMore ->
-                if (shouldLoadMore && canLoadMore && !isLoadingMore) {
-                    onLoadMore()
+                if (shouldLoadMore && currentCanLoadMore && !currentIsLoadingMore) {
+                    currentOnLoadMore()
                 }
             }
     }
@@ -158,150 +174,6 @@ private fun ScrollPositionTracker(
     }
 }
 
-/**
- * State holder for scroll-to-safety behavior.
- * Used when showing tapback menu to ensure selected message is visible.
- */
-class ScrollToSafetyState {
-    var isInProgress by mutableStateOf(false)
-        private set
-
-    fun startScrollToSafety() {
-        isInProgress = true
-    }
-
-    fun finishScrollToSafety() {
-        isInProgress = false
-    }
-}
-
-/**
- * Remember a ScrollToSafetyState instance.
- */
-@Composable
-fun rememberScrollToSafetyState(): ScrollToSafetyState {
-    return remember { ScrollToSafetyState() }
-}
-
-/**
- * Scrolls to ensure the selected message is visible and centered for tapback menu.
- * Dismisses selection when user scrolls (but not during programmatic scroll-to-safety).
- *
- * @param selectedMessageGuid The GUID of the selected message, or null if none selected
- * @param messages The list of messages to search for the selected message
- * @param listState The LazyListState to scroll
- * @param scrollToSafetyState State holder to track programmatic scroll
- * @param onDismiss Callback to dismiss the selection when user scrolls
- */
-@Composable
-fun ScrollToSafetyEffect(
-    selectedMessageGuid: String?,
-    messages: List<com.bothbubbles.ui.components.message.MessageUiModel>,
-    listState: LazyListState,
-    scrollToSafetyState: ScrollToSafetyState,
-    onDismiss: () -> Unit
-) {
-    // Scroll-to-safety: When showing tapback menu, ensure message is visible and centered
-    LaunchedEffect(selectedMessageGuid) {
-        val messageGuid = selectedMessageGuid ?: return@LaunchedEffect
-        val messageIndex = messages.indexOfFirst { it.guid == messageGuid }
-        if (messageIndex < 0) return@LaunchedEffect
-
-        // Get current viewport info
-        val layoutInfo = listState.layoutInfo
-        val visibleItems = layoutInfo.visibleItemsInfo
-        val viewportHeight = layoutInfo.viewportSize.height
-
-        // Check if message is currently visible
-        val isVisible = visibleItems.any { it.index == messageIndex }
-
-        // Calculate safe zone: center third of viewport
-        // With reverseLayout=true, we want to position message in center
-        if (!isVisible) {
-            // Message not visible - scroll to center it
-            scrollToSafetyState.startScrollToSafety()
-            val centerOffset = -(viewportHeight / 3)
-            listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
-            scrollToSafetyState.finishScrollToSafety()
-        } else {
-            // Message is visible - check if it's in safe zone
-            val visibleItem = visibleItems.find { it.index == messageIndex }
-            if (visibleItem != null) {
-                val itemTop = visibleItem.offset
-                val itemBottom = visibleItem.offset + visibleItem.size
-                val safeTop = viewportHeight / 4
-                val safeBottom = viewportHeight * 3 / 4
-
-                // If message extends outside safe zone, scroll to center
-                if (itemTop < safeTop || itemBottom > safeBottom) {
-                    scrollToSafetyState.startScrollToSafety()
-                    val centerOffset = -(viewportHeight / 3)
-                    listState.animateScrollToItem(messageIndex, scrollOffset = centerOffset)
-                    scrollToSafetyState.finishScrollToSafety()
-                }
-            }
-        }
-    }
-
-    // Dismiss tapback menu when user scrolls (but not during programmatic scroll-to-safety)
-    LaunchedEffect(selectedMessageGuid) {
-        if (selectedMessageGuid != null) {
-            // Wait for scroll-to-safety to complete before enabling dismiss-on-scroll
-            snapshotFlow { listState.isScrollInProgress to scrollToSafetyState.isInProgress }
-                .collect { (isScrolling, isScrollToSafety) ->
-                    if (isScrolling && !isScrollToSafety) {
-                        onDismiss()
-                    }
-                }
-        }
-    }
-}
-
-/**
- * Auto-scrolls to the newest message when it arrives (if user is near bottom).
- * Tracks new messages from socket for the "new messages" indicator.
- *
- * @param messages The list of messages
- * @param listState The LazyListState to scroll
- * @param socketNewMessageFlow Flow of new message GUIDs from socket
- * @param onNewMessageCountIncrement Callback when a new message arrives while scrolled away
- * @param hapticFeedback Optional haptic feedback for incoming messages
- */
-@Composable
-fun AutoScrollOnNewMessage(
-    newestMessageGuid: String?,
-    listState: LazyListState,
-    onAutoScroll: suspend () -> Unit
-) {
-    // Track the previous newest message GUID to detect truly NEW messages (not initial load)
-    var previousNewestGuid by remember { mutableStateOf<String?>(null) }
-    var hasInitiallyLoaded by remember { mutableStateOf(false) }
-
-    // Auto-scroll to show newest message when it arrives (if user is viewing recent messages)
-    LaunchedEffect(newestMessageGuid) {
-        val isNearBottom = listState.firstVisibleItemIndex <= 2
-
-        // Skip if no messages yet
-        if (newestMessageGuid == null) return@LaunchedEffect
-
-        // Track initial load - don't auto-scroll on first message load
-        if (!hasInitiallyLoaded) {
-            hasInitiallyLoaded = true
-            previousNewestGuid = newestMessageGuid
-            return@LaunchedEffect
-        }
-
-        // Only auto-scroll if a NEW message arrived (guid changed from previous)
-        val isNewMessage = previousNewestGuid != null && previousNewestGuid != newestMessageGuid
-        previousNewestGuid = newestMessageGuid
-
-        if (isNewMessage && isNearBottom) {
-            // Small delay to let the message render and calculate its height
-            kotlinx.coroutines.delay(100)
-            onAutoScroll()
-        }
-    }
-}
 
 /**
  * Derives whether user is scrolled away from bottom.

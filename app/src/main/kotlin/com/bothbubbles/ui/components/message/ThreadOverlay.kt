@@ -16,11 +16,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
 import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ThreadChain
@@ -211,21 +214,30 @@ private fun ThreadMessageItem(
 
 /**
  * Animated wrapper for ThreadOverlay that handles enter/exit animations.
+ * Collects thread state internally from the delegate to avoid ChatScreen recomposition.
+ *
+ * @param threadDelegate Delegate for internal state collection
+ * @param onMessageClick Callback when a message is clicked (scrolls to it in main chat)
+ * @param onDismiss Callback when the overlay is dismissed
  */
 @Composable
 fun AnimatedThreadOverlay(
-    threadChain: ThreadChain?,
+    threadDelegate: ChatThreadDelegate,
     onMessageClick: (String) -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Collect thread state internally from delegate to avoid ChatScreen recomposition
+    val threadState by threadDelegate.state.collectAsStateWithLifecycle()
+    val threadChain = threadState.threadOverlay
+
     AnimatedVisibility(
         visible = threadChain != null,
         enter = fadeIn() + slideInVertically { it / 3 },
         exit = fadeOut() + slideOutVertically { it / 3 },
         modifier = modifier
     ) {
-        // Use non-null assertion since AnimatedVisibility only shows content when visible=true
+        // Use non-null check since AnimatedVisibility only shows content when visible=true
         // and we only set visible=true when threadChain != null
         if (threadChain != null) {
             ThreadOverlay(

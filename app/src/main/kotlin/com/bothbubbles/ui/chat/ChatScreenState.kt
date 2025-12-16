@@ -58,6 +58,12 @@ class ChatScreenState(
     var swipingMessageGuid by mutableStateOf<String?>(null)
 
     // ===== Layout =====
+    /** Height of the top bar in pixels */
+    var topBarHeightPx by mutableFloatStateOf(0f)
+
+    /** Base height of the bottom bar (minimum, excluding keyboard/panels) */
+    var bottomBarBaseHeightPx by mutableFloatStateOf(0f)
+
     var composerHeightPx by mutableFloatStateOf(0f)
     var sendButtonBounds by mutableStateOf(Rect.Zero)
 
@@ -66,7 +72,41 @@ class ChatScreenState(
     var targetMessageHandled by mutableStateOf(false)
     var isScrollToSafetyInProgress by mutableStateOf(false)
 
-    // ===== Logic Helpers =====
+    // ===== Message Effects & Animation =====
+    // Track processed screen effects this session to avoid re-triggering
+    val processedEffectMessages = mutableSetOf<String>()
+
+    // Track revealed invisible ink messages (resets when leaving chat)
+    var revealedInvisibleInkMessages by mutableStateOf(setOf<String>())
+        private set
+
+    // Track messages that have been animated (prevents re-animation on recompose)
+    val animatedMessageGuids = mutableSetOf<String>()
+
+    // ===== Effect tracking =====
+    fun markEffectProcessed(guid: String): Boolean = processedEffectMessages.add(guid)
+    fun isEffectProcessed(guid: String): Boolean = guid in processedEffectMessages
+
+    // ===== Animation tracking =====
+    fun markMessageAnimated(guid: String): Boolean = animatedMessageGuids.add(guid)
+    fun isMessageAnimated(guid: String): Boolean = guid in animatedMessageGuids
+    fun markInitialMessagesAnimated(guids: Collection<String>) {
+        animatedMessageGuids.addAll(guids)
+    }
+
+    // ===== Invisible ink tracking =====
+    fun revealInvisibleInk(guid: String) {
+        revealedInvisibleInkMessages = revealedInvisibleInkMessages + guid
+    }
+    fun concealInvisibleInk(guid: String) {
+        revealedInvisibleInkMessages = revealedInvisibleInkMessages - guid
+    }
+    fun isInvisibleInkRevealed(guid: String): Boolean = guid in revealedInvisibleInkMessages
+
+    // Legacy method for backward compatibility (will be removed in sequential phase)
+    fun toggleInvisibleInk(guid: String, revealed: Boolean) {
+        if (revealed) revealInvisibleInk(guid) else concealInvisibleInk(guid)
+    }
 
     /** Clears the tapback selection state */
     fun clearTapbackSelection() {

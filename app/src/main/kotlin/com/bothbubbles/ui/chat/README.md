@@ -47,6 +47,14 @@ ChatViewModel (orchestrator)
 
 ## Required Patterns
 
+**MANDATORY**: Follow `docs/COMPOSE_BEST_PRACTICES.md` and the push-down state architecture.
+
+### Core Principle
+
+> "Push Down State, Pull Data Locally."
+
+`ChatScreen` acts as a **Coordinator** that passes stable delegate references to children. Child composables collect their own state internally to prevent parent recomposition.
+
 ### ViewModel Initialization
 
 ```kotlin
@@ -69,7 +77,7 @@ class ChatViewModel @Inject constructor(
 }
 ```
 
-### Screen Composition
+### Screen Composition (Push-Down Pattern)
 
 ```kotlin
 @Composable
@@ -79,22 +87,50 @@ fun ChatScreen(
     onNavigateBack: () -> Unit,
     onNavigateToDetails: () -> Unit
 ) {
-    // Collect state from delegates
-    val messages by viewModel.messages.collectAsStateWithLifecycle()
-    val sendState by viewModel.sendState.collectAsStateWithLifecycle()
-    val searchState by viewModel.searchState.collectAsStateWithLifecycle()
+    // ChatScreen passes DELEGATES, not collected state
+    ChatMessageList(
+        searchDelegate = viewModel.searchDelegate,
+        syncDelegate = viewModel.syncDelegate,
+        attachmentDelegate = viewModel.attachmentDelegate,
+        // ...
+    )
 
-    // Effects overlay
-    ScreenEffectOverlay(effectsState = viewModel.effectsState)
-
-    ChatScreenContent(
-        messages = messages,
-        sendState = sendState,
-        onSendMessage = viewModel::sendMessage,
+    ChatInputUI(
+        sendDelegate = viewModel.sendDelegate,
+        composerDelegate = viewModel.composer,
         // ...
     )
 }
+
+@Composable
+fun ChatMessageList(
+    searchDelegate: ChatSearchDelegate,
+    syncDelegate: ChatSyncDelegate,
+    attachmentDelegate: ChatAttachmentDelegate
+) {
+    // PERF FIX: Collect state internally to avoid ChatScreen recomposition
+    val searchState by searchDelegate.state.collectAsStateWithLifecycle()
+    val syncState by syncDelegate.state.collectAsStateWithLifecycle()
+    // Each message bubble collects its own download progress
+}
 ```
+
+### State Consolidation in ChatScreenState
+
+Effect and animation tracking sets are consolidated in `ChatScreenState` (not created in composition):
+
+```kotlin
+// IN ChatScreenState.kt - single source of truth
+val processedEffectMessages = mutableSetOf<String>()
+val animatedMessageGuids = mutableSetOf<String>()
+var revealedInvisibleInkMessages by mutableStateOf(setOf<String>())
+
+// Helper methods
+fun markEffectProcessed(guid: String) = processedEffectMessages.add(guid)
+fun isEffectProcessed(guid: String) = guid in processedEffectMessages
+```
+
+**NEVER create these sets in composition body** - use `ChatScreenState` instead.
 
 ## Sub-packages
 
@@ -109,12 +145,32 @@ fun ChatScreen(
 
 ## Best Practices
 
-1. Use delegates to decompose large ViewModel
-2. Keep screen composable thin, delegate to content
-3. Use LazyColumn for message list (performance)
-4. Cache message transformations
-5. Handle keyboard/IME properly
-6. Use helper classes to extract complex state logic (see ChatAudioHelper, ChatScrollHelper)
+1. **Push-down state**: Pass delegates to children, let them collect their own state
+2. Use delegates to decompose large ViewModel
+3. Use `collectAsStateWithLifecycle()` (not `collectAsState()`)
+4. Add `// PERF FIX:` comments when adding internal state collection
+5. Use `rememberUpdatedState` for values read inside `LaunchedEffect(Unit)`
+6. Use `derivedStateOf` for computed values dependent on collected state
+7. Guard all logging with `if (BuildConfig.DEBUG)`
+8. Use LazyColumn for message list (performance)
+9. Cache message transformations
+10. Handle keyboard/IME properly
+11. Use helper classes to extract complex state logic (see ChatAudioHelper, ChatScrollHelper)
+
+### Stale Capture Prevention
+
+```kotlin
+// CORRECT - Use rememberUpdatedState for LaunchedEffect(Unit)
+val currentMessages by rememberUpdatedState(messages)
+LaunchedEffect(Unit) {
+    flow.collect { currentMessages.firstOrNull { ... } }
+}
+
+// WRONG - captures stale value at launch time
+LaunchedEffect(Unit) {
+    flow.collect { messages.firstOrNull { ... } }  // STALE!
+}
+```
 
 ## Helper Classes
 

@@ -24,6 +24,8 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.geometry.Rect
+import com.bothbubbles.BuildConfig
+import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.util.parsing.UrlParsingUtils
@@ -70,7 +72,7 @@ fun MessageBubble(
     isCurrentSearchMatch: Boolean = false,
     // Attachment download support (for manual download mode)
     onDownloadClick: ((String) -> Unit)? = null,
-    downloadingAttachments: Map<String, Float> = emptyMap(),
+    attachmentDelegate: ChatAttachmentDelegate? = null,
     // Whether to show delivery indicator (iMessage-style: only on last message in sequence)
     showDeliveryIndicator: Boolean = true,
     // Callback for swipe-to-reply (iMessage only). Pass message GUID when triggered.
@@ -93,8 +95,8 @@ fun MessageBubble(
         UrlParsingUtils.getFirstUrl(message.text)
     }
 
-    // PERFORMANCE TRACKING: Log when a temporary message is actually composed
-    if (message.guid.startsWith("temp-")) {
+    // PERFORMANCE TRACKING: Log when a temporary message is actually composed (debug builds only)
+    if (BuildConfig.DEBUG && message.guid.startsWith("temp-")) {
         androidx.compose.runtime.SideEffect {
             android.util.Log.d("MessageBubble", "⏱️ [RENDER] MessageBubble composed for ${message.guid}")
         }
@@ -158,7 +160,7 @@ fun MessageBubble(
                     searchQuery = searchQuery,
                     isCurrentSearchMatch = isCurrentSearchMatch,
                     onDownloadClick = onDownloadClick,
-                    downloadingAttachments = downloadingAttachments,
+                    attachmentDelegate = attachmentDelegate,
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
@@ -177,7 +179,7 @@ fun MessageBubble(
                     searchQuery = searchQuery,
                     isCurrentSearchMatch = isCurrentSearchMatch,
                     onDownloadClick = onDownloadClick,
-                    downloadingAttachments = downloadingAttachments,
+                    attachmentDelegate = attachmentDelegate,
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,

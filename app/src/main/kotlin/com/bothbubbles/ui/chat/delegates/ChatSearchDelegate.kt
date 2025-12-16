@@ -46,6 +46,10 @@ class ChatSearchDelegate @Inject constructor(
     private var searchJob: Job? = null
     private var databaseSearchJob: Job? = null
 
+    // Cross-delegate references (set after initialization)
+    private var messageListDelegate: ChatMessageListDelegate? = null
+    private var chatGuids: List<String> = emptyList()
+
     // ============================================================================
     // CONSOLIDATED SEARCH STATE
     // Single StateFlow containing all search-related state for reduced recompositions.
@@ -57,8 +61,17 @@ class ChatSearchDelegate @Inject constructor(
     /**
      * Initialize the delegate.
      */
-    fun initialize(scope: CoroutineScope) {
+    fun initialize(scope: CoroutineScope, chatGuids: List<String> = emptyList()) {
         this.scope = scope
+        this.chatGuids = chatGuids
+    }
+
+    /**
+     * Set cross-delegate references for internal message lookup.
+     * Called by ChatViewModel after all delegates are initialized.
+     */
+    fun setMessageListDelegate(messageListDelegate: ChatMessageListDelegate) {
+        this.messageListDelegate = messageListDelegate
     }
 
     /**
@@ -89,15 +102,41 @@ class ChatSearchDelegate @Inject constructor(
 
     /**
      * Update search query and perform hybrid search.
+     * Uses internal message list delegate lookup for stable callback references.
+     *
+     * @param query The search query
+     */
+    fun updateSearchQuery(query: String) {
+        val messages = messageListDelegate?.messagesState?.value ?: emptyList()
+        updateSearchQueryInternal(query, messages, chatGuids)
+    }
+
+    /**
+     * Update search query and perform hybrid search.
      *
      * @param query The search query
      * @param messages Currently loaded messages in memory
      * @param chatGuids List of chat GUIDs to search within (for merged conversations)
      */
+    @Deprecated(
+        message = "Use updateSearchQuery(query) instead for stable callbacks",
+        replaceWith = ReplaceWith("updateSearchQuery(query)")
+    )
     fun updateSearchQuery(
         query: String,
         messages: List<MessageUiModel>,
         chatGuids: List<String> = emptyList()
+    ) {
+        updateSearchQueryInternal(query, messages, chatGuids)
+    }
+
+    /**
+     * Internal implementation of search query update.
+     */
+    private fun updateSearchQueryInternal(
+        query: String,
+        messages: List<MessageUiModel>,
+        searchChatGuids: List<String>
     ) {
         // Cancel previous search jobs
         searchJob?.cancel()
@@ -131,8 +170,8 @@ class ChatSearchDelegate @Inject constructor(
             )}
 
             // 2. Async database search (with additional delay to prioritize local results)
-            if (chatGuids.isNotEmpty()) {
-                launchDatabaseSearch(query, chatGuids, messages)
+            if (searchChatGuids.isNotEmpty()) {
+                launchDatabaseSearch(query, searchChatGuids, messages)
             }
         }
     }

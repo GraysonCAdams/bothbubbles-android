@@ -4,7 +4,10 @@ import android.net.Uri
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import kotlinx.coroutines.delay
 
 /**
@@ -17,12 +20,18 @@ import kotlinx.coroutines.delay
  * - Error display via snackbar
  *
  * Created as part of Stage 3 refactoring to reduce ChatScreen.kt size.
+ *
+ * PERF FIX (Wave 2): Now collects operations state internally from delegate
+ * to avoid ChatScreen recomposition when operations state changes.
  */
 @Composable
 fun ChatScreenEffects(
     viewModel: ChatViewModel,
     state: ChatScreenState,
     chatGuid: String,
+
+    // NEW: Delegate for internal collection
+    operationsDelegate: ChatOperationsDelegate,
 
     // Message list for scroll operations
     messages: List<com.bothbubbles.ui.components.message.MessageUiModel>,
@@ -50,11 +59,11 @@ fun ChatScreenEffects(
 
     // Error state
     error: String?,
-    onClearError: () -> Unit,
-
-    // Operations state for chat deletion
-    chatDeleted: Boolean
+    onClearError: () -> Unit
 ) {
+    // PERF FIX: Collect chatDeleted internally to avoid ChatScreen recomposition
+    val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
+    val chatDeleted = operationsState.chatDeleted
     // Restore scroll position after messages load (if we have state to restore)
     LaunchedEffect(messages.isNotEmpty(), effectiveScrollPosition) {
         if (!state.scrollRestored && messages.isNotEmpty() &&

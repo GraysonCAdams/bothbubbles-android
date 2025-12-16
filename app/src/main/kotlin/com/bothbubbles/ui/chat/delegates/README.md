@@ -106,3 +106,48 @@ class ChatViewModel @Inject constructor(
 4. Expose state via StateFlow
 5. Handle cleanup if needed
 6. Unit test delegates independently
+
+## Composable State Collection Pattern
+
+Following the push-down state architecture from `docs/COMPOSE_BEST_PRACTICES.md`, delegates are passed directly to composables which collect their own state internally:
+
+```kotlin
+// ChatScreen passes delegates, not collected values
+@Composable
+fun ChatScreen(viewModel: ChatViewModel) {
+    ChatMessageList(
+        searchDelegate = viewModel.searchDelegate,
+        syncDelegate = viewModel.syncDelegate
+    )
+}
+
+// Child composable collects state internally
+@Composable
+fun ChatMessageList(
+    searchDelegate: ChatSearchDelegate,
+    syncDelegate: ChatSyncDelegate
+) {
+    // PERF FIX: Collect searchState internally to avoid ChatScreen recomposition
+    val searchState by searchDelegate.state.collectAsStateWithLifecycle()
+    val syncState by syncDelegate.state.collectAsStateWithLifecycle()
+
+    // Use the state...
+}
+```
+
+### Delegate-to-Composable Mapping
+
+| Delegate | Primary Composable Consumer |
+|----------|---------------------------|
+| `ChatSearchDelegate` | `ChatMessageList`, `ChatTopBar` |
+| `ChatSyncDelegate` | `ChatMessageList` |
+| `ChatOperationsDelegate` | `ChatMessageList`, `ChatTopBar` |
+| `ChatAttachmentDelegate` | `ChatMessageList`, `MessageBubble` |
+| `ChatSendDelegate` | `ChatInputUI` |
+| `ChatComposerDelegate` | `ChatInputUI` |
+| `ChatEffectsDelegate` | `ChatMessageList` |
+| `ChatConnectionDelegate` | `ChatDialogsHost` |
+| `ChatThreadDelegate` | `AnimatedThreadOverlay` |
+| `ChatEtaSharingDelegate` | `ChatMessageList` |
+
+This pattern prevents "God Composables" where a parent collects many StateFlows just to pass values down, causing full-tree recomposition on minor state changes.

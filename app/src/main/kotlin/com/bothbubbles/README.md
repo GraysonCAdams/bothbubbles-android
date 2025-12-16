@@ -68,6 +68,21 @@ class BothBubblesApp : Application() {
 | `ui/` | UI layer - screens, ViewModels, components |
 | `util/` | Shared utilities |
 
+## Documentation
+
+The `docs/` directory (at repo root) contains important guidelines:
+
+| Document | Purpose |
+|----------|---------|
+| `docs/COMPOSE_BEST_PRACTICES.md` | **MANDATORY** - Jetpack Compose performance rules and patterns |
+| `docs/refactor_plans/` | Architecture refactor plans and conventions |
+
+**Before writing Compose code**, read `docs/COMPOSE_BEST_PRACTICES.md` for required patterns including:
+- Leaf-node state collection (push-down state)
+- Immutable collections for UI state
+- Stable callbacks
+- Side-effect isolation
+
 ## Key Dependencies
 
 - **Hilt**: Dependency injection

@@ -19,10 +19,20 @@ Key READMEs:
 - `app/src/main/kotlin/com/bothbubbles/ui/README.md` - UI layer
 - `app/src/main/kotlin/com/bothbubbles/di/README.md` - Dependency injection
 - `app/schemas/README.md` - Database migrations
+- `docs/COMPOSE_BEST_PRACTICES.md` - **MANDATORY** Jetpack Compose performance rules
 
 ## Project Overview
 
 BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that connects to a BlueBubbles server for iMessage functionality, with optional SMS/MMS support as a fallback.
+
+## Compose Guidelines (CRITICAL)
+
+**You must follow the rules in `docs/COMPOSE_BEST_PRACTICES.md`.**
+
+1.  **Leaf-Node State**: Never collect state in a parent just to pass it down. Push state collection to the lowest possible child.
+2.  **Immutable Collections**: Always use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.
+3.  **Stable Callbacks**: Use method references (`viewModel::method`) instead of lambdas capturing state.
+4.  **No Logic in Composition**: Keep the composition path pure. No logging, no I/O, no complex calculations.
 
 ## Build Commands
 

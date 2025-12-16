@@ -1,14 +1,12 @@
 package com.bothbubbles.ui.chat
 
 import android.net.Uri
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHost
@@ -17,10 +15,10 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,30 +62,21 @@ fun ChatScreen(
     targetMessageGuid: String? = null,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
-    val chatScreenStart = System.currentTimeMillis()
-    android.util.Log.d("PerfTrace", "ChatScreen START")
-
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    // Stage 3: Access delegate states directly (Container Pattern)
-    val sendState by viewModel.send.state.collectAsStateWithLifecycle()
-    val searchState by viewModel.search.state.collectAsStateWithLifecycle()
-    val operationsState by viewModel.operations.state.collectAsStateWithLifecycle()
-    val syncState by viewModel.sync.state.collectAsStateWithLifecycle()
-    val effectsState by viewModel.effects.state.collectAsStateWithLifecycle()
-    val threadState by viewModel.thread.state.collectAsStateWithLifecycle()
+    // Wave 2: State collections moved to child components for internal collection
+    // Keeping only what's needed at ChatScreen level
     val messages by viewModel.messageList.messagesState.collectAsStateWithLifecycle()
-    // PERF FIX: draftText collection moved to ChatDialogsHost to avoid ChatScreen recomposition on every keystroke
-    val smartReplySuggestions by viewModel.composer.smartReplySuggestions.collectAsStateWithLifecycle()
     val chatInfoState by viewModel.chatInfo.state.collectAsStateWithLifecycle()
-    val connectionState by viewModel.connection.state.collectAsStateWithLifecycle()
-    val etaSharingState by viewModel.etaSharing.etaSharingState.collectAsStateWithLifecycle()
+    // Note: sendState, searchState, operationsState, syncState, effectsState, threadState,
+    // smartReplySuggestions, connectionState, etaSharingState now collected internally by children
 
     // Recomposition debugging (see ChatScreenDebug.kt - can be disabled via ENABLE_RECOMPOSITION_DEBUG)
+    // Note: isSending and smartReplyCount now collected internally by children
     ChatScreenRecompositionDebug(
         viewModel = viewModel,
         messages = messages,
-        isSending = sendState.isSending,
-        smartReplyCount = smartReplySuggestions.size,
+        isSending = false, // Collected internally by ChatInputUI
+        smartReplyCount = 0, // Collected internally by ChatInputUI
         attachmentCount = uiState.attachmentCount,
         isLoading = uiState.isLoading,
         canLoadMore = uiState.canLoadMore,
@@ -128,11 +117,13 @@ fun ChatScreen(
         }
     )
 
-    // Stage 3: ChatScreenEffects handles navigation, deep-links, and external inputs
+    // Wave 2: ChatScreenEffects handles navigation, deep-links, and external inputs
+    // Now collects operationsState internally from delegate
     ChatScreenEffects(
         viewModel = viewModel,
         state = state,
         chatGuid = chatGuid,
+        operationsDelegate = viewModel.operations,
         messages = messages,
         effectiveScrollPosition = effectiveScrollPosition,
         onScrollPositionRestored = onScrollPositionRestored,
@@ -150,55 +141,23 @@ fun ChatScreen(
         onSharedContentHandled = onSharedContentHandled,
         onSearchActivated = onSearchActivated,
         error = uiState.error,
-        onClearError = viewModel::clearError,
-        chatDeleted = operationsState.chatDeleted
+        onClearError = viewModel::clearError
     )
 
-    // Effect settings from delegate state
-    val autoPlayEffects = effectsState.autoPlayEffects
-    val replayEffectsOnScroll = effectsState.replayOnScroll
-    val reduceMotion = effectsState.reduceMotion
-    val activeScreenEffectState = effectsState.activeScreenEffect
-
-    // Animation control: only animate new messages after initial load completes
-    val initialLoadComplete by viewModel.messageList.initialLoadComplete.collectAsStateWithLifecycle()
-
-    // Track when fetching older messages from server (for loading indicator at top)
-    val isLoadingFromServer by viewModel.messageList.isLoadingFromServer.collectAsStateWithLifecycle()
-
-    // Attachment download settings and progress
-    val autoDownloadEnabled by viewModel.attachment.autoDownloadEnabled.collectAsStateWithLifecycle()
-    val downloadingAttachments by viewModel.attachment.downloadProgress.collectAsStateWithLifecycle()
-
-    // Track processed screen effects this session to avoid re-triggering
-    val processedEffectMessages = remember { mutableSetOf<String>() }
-
-    // Track revealed invisible ink messages (resets when leaving chat)
-    var revealedInvisibleInkMessages by remember { mutableStateOf(setOf<String>()) }
-
-    // Track messages that have been animated (prevents re-animation on recompose)
-    // Messages present during initial load are added immediately
-    val animatedMessageGuids = remember { mutableSetOf<String>() }
+    // Wave 2: Effect settings, initialLoadComplete, isLoadingFromServer, autoDownloadEnabled,
+    // threadOverlayState, forwardableChats, isWhatsAppAvailable are now collected internally
+    // by their respective child components
 
     // Handle back press to dismiss tapback menu (uses state from ChatScreenState)
     BackHandler(enabled = state.selectedMessageForTapback != null) {
         state.clearTapbackSelection()
     }
 
-    // Thread overlay state from delegate
-    val threadOverlayState = threadState.threadOverlay
-
-    // Forward message state is now in ChatScreenState; just need forwardableChats flow
-    val forwardableChats by viewModel.getForwardableChats().collectAsStateWithLifecycle(initialValue = emptyList())
-
-    // Track pending attachments locally for UI
+    // Track pending attachments locally for UI (still needed at ChatScreen level for dialogs)
     val pendingAttachments by viewModel.composer.pendingAttachments.collectAsStateWithLifecycle()
 
     // Voice memo recording and playback state (encapsulated in ChatAudioHelper)
     val audioState = rememberChatAudioState()
-
-    // Check WhatsApp availability
-    val isWhatsAppAvailable = remember { viewModel.operations.isWhatsAppAvailable(context) }
 
     // Recording duration timer with amplitude tracking + playback position tracker
     ChatAudioEffects(audioState)
@@ -250,9 +209,8 @@ fun ChatScreen(
 
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
+    // Wave 2: gifPickerState and gifSearchQuery now collected internally by ChatInputUI
     val activePanelState by viewModel.composer.activePanel.collectAsStateWithLifecycle()
-    val gifPickerState by viewModel.composer.gifPickerState.collectAsStateWithLifecycle()
-    val gifSearchQuery by viewModel.composer.gifSearchQuery.collectAsStateWithLifecycle()
     LaunchedEffect(activePanelState) {
         if (activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.GifPicker) {
             viewModel.composer.loadFeaturedGifs()
@@ -268,13 +226,14 @@ fun ChatScreen(
 
     // PERF FIX: Track topBar/bottomBar heights for content padding
     // This avoids SubcomposeLayout which has O(N) overhead with message list
-    var topBarHeightPx by remember { mutableStateOf(0) }
-    // PERF FIX: Track BASE height of bottom bar (without IME) to avoid recomposition during keyboard animation
-    // Use minimum height seen, which is when keyboard is closed
-    var bottomBarBaseHeightPx by remember { mutableStateOf(0) }
+    // Height state now consolidated in ChatScreenState (topBarHeightPx, bottomBarBaseHeightPx)
     val density = androidx.compose.ui.platform.LocalDensity.current
-    val topBarHeightDp = with(density) { topBarHeightPx.toDp() }
-    val bottomBarBaseHeightDp = with(density) { bottomBarBaseHeightPx.toDp() }
+    val topBarHeightDp = with(density) { state.topBarHeightPx.toDp() }
+    val bottomBarHeightDp = with(density) { state.bottomBarBaseHeightPx.toDp() }
+
+    // Wave 2: Collect effect settings (needed for screen effect detection and overlay)
+    val effectsStateForOverlay by viewModel.effects.state.collectAsStateWithLifecycle()
+    val activeScreenEffectState = effectsStateForOverlay.activeScreenEffect
 
     ChatBackground {
         // PERF FIX: Use Box with overlapping layout instead of Scaffold
@@ -286,13 +245,13 @@ fun ChatScreen(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .onSizeChanged { topBarHeightPx = it.height }
+                .onSizeChanged { state.topBarHeightPx = it.height.toFloat() }
                 .zIndex(1f)
         ) {
-            // Stage 2B: Use decomposed state objects for ChatTopBar
+            // Wave 2: ChatTopBar uses delegates for internal state collection
             ChatTopBar(
-                infoState = chatInfoState,
-                operationsState = operationsState,
+                operationsDelegate = viewModel.operations,
+                chatInfoDelegate = viewModel.chatInfo,
                 onBackClick = {
                     // Clear saved state when user explicitly navigates back
                     viewModel.onNavigateBack()
@@ -324,65 +283,33 @@ fun ChatScreen(
         }
 
         // BottomBar overlay at bottom
-        val composerState by viewModel.composer.state.collectAsStateWithLifecycle()
-
-        // PERF FIX: Compute replyingToMessage with derivedStateOf to avoid passing
-        // full messages list to ChatInputUI (which caused recomposition on every keystroke)
-        val replyingToMessage by remember {
-            derivedStateOf {
-                sendState.replyingToGuid?.let { guid -> messages.find { it.guid == guid } }
-            }
-        }
+        // Wave 2: replyingToMessage calculation moved to ChatInputUI (collected internally)
 
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .onSizeChanged { size ->
-                    // PERF FIX: Track base height (without IME) to avoid recomposition during keyboard animation
-                    // Use minimum height seen - when keyboard is closed, the height is smallest
-                    // When keyboard opens, imePadding adds to the height, making it larger
-                    val newHeight = size.height
-                    if (bottomBarBaseHeightPx == 0 || newHeight < bottomBarBaseHeightPx) {
-                        bottomBarBaseHeightPx = newHeight
+                .onSizeChanged { newSize ->
+                    // PERF FIX: Only track the BASE height (minimum) to avoid
+                    // recomposition during keyboard/panel open animation.
+                    // When keyboard/panels close, height decreases back to base.
+                    val newHeight = newSize.height.toFloat()
+                    if (state.bottomBarBaseHeightPx == 0f || newHeight < state.bottomBarBaseHeightPx) {
+                        state.bottomBarBaseHeightPx = newHeight
                     }
                 }
                 .zIndex(1f)
         ) {
             ChatInputUI(
-                composerState = composerState,
+                // Wave 2: Delegates for internal state collection
+                sendDelegate = viewModel.send,
+                messageListDelegate = viewModel.messageList,
+                composerDelegate = viewModel.composer,
                 audioState = audioState,
-                sendState = sendState,
-                smartReplySuggestions = smartReplySuggestions,
-                replyingToMessage = replyingToMessage,
                 isLocalSmsChat = chatInfoState.isLocalSmsChat,
-                showAttachmentPicker = activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.MediaPicker,
-                showEmojiPicker = activePanelState == com.bothbubbles.ui.chat.composer.ComposerPanel.EmojiKeyboard,
-                gifPickerState = gifPickerState,
-                gifSearchQuery = gifSearchQuery,
-                onDismissAttachmentPicker = { viewModel.composer.dismissPanel() },
-                onDismissEmojiPicker = { viewModel.composer.dismissPanel() },
-                onAttachmentSelected = { uri -> viewModel.composer.addAttachment(uri) },
-                onLocationSelected = { lat, lng ->
-                    val locationText = "📍 https://maps.google.com/?q=$lat,$lng"
-                    viewModel.updateDraft(locationText)
-                },
-                onContactSelected = { contactUri ->
-                    val contactData = viewModel.composer.getContactData(contactUri)
-                    if (contactData != null) {
-                        state.pendingContactData = contactData
-                        state.showVCardOptionsDialog = true
-                    } else {
-                        Toast.makeText(context, "Failed to read contact", Toast.LENGTH_SHORT).show()
-                    }
-                },
-                onScheduleClick = { state.showScheduleDialog = true },
+                // Wave 2: Deprecated params removed (sendState, smartReplySuggestions,
+                // replyingToMessage, gifPickerState, gifSearchQuery) - now collected internally
                 onCameraClick = onCameraClick,
-                onEmojiSelected = { emoji ->
-                    // PERF FIX: Use appendToDraft to avoid reading draftText state in ChatScreen
-                    viewModel.composer.appendToDraft(emoji)
-                    viewModel.composer.dismissPanel()
-                },
                 onSmartReplyClick = { suggestion ->
                     viewModel.updateDraft(suggestion.text)
                     suggestion.templateId?.let { viewModel.composer.recordTemplateUsage(it) }
@@ -410,18 +337,21 @@ fun ChatScreen(
 
         // Main content area - uses calculated padding for top/bottom bars
         // This avoids SubcomposeLayout by using pre-measured heights
-        // PERF FIX: Use base height (without IME) + imePadding() to avoid recomposition during keyboard animation
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = topBarHeightDp, bottom = bottomBarBaseHeightDp)
-                .imePadding()
+                .padding(top = topBarHeightDp, bottom = bottomBarHeightDp)
         ) {
+        // Wave 2: Use effect settings from outer scope (collected at higher level)
+        val autoPlayEffects = effectsStateForOverlay.autoPlayEffects
+        val replayEffectsOnScroll = effectsStateForOverlay.replayOnScroll
+        val reduceMotion = effectsStateForOverlay.reduceMotion
+
         // Detect new messages with screen effects and trigger playback
         LaunchedEffect(messages.firstOrNull()?.guid) {
             val newest = messages.firstOrNull() ?: return@LaunchedEffect
             // Skip if already processed this session
-            if (newest.guid in processedEffectMessages) return@LaunchedEffect
+            if (state.isEffectProcessed(newest.guid)) return@LaunchedEffect
             // Skip if effects disabled or reduce motion enabled
             if (!autoPlayEffects || reduceMotion) return@LaunchedEffect
             // Skip if already played (and not replaying on scroll)
@@ -429,85 +359,101 @@ fun ChatScreen(
 
             val effect = MessageEffect.fromStyleId(newest.expressiveSendStyleId)
             if (effect is MessageEffect.Screen) {
-                processedEffectMessages.add(newest.guid)
+                state.markEffectProcessed(newest.guid)
                 viewModel.effects.triggerScreenEffect(newest)
             }
         }
 
-        // Stage 2: Extracted ChatMessageList component
-        android.util.Log.d("PerfTrace", "Before ChatMessageList: +${System.currentTimeMillis() - chatScreenStart}ms")
-        ChatMessageList(
-            modifier = Modifier.fillMaxSize(),
-            listState = state.listState,
-            messages = messages,
+        // Wave 3G: rememberUpdatedState for callbacks that need access to state values
+        // These provide stable callback references while allowing access to current state
+        val currentState by rememberUpdatedState(state)
+        val currentChatInfoState by rememberUpdatedState(chatInfoState)
+        val currentContext by rememberUpdatedState(context)
+        val currentAddContactLauncher by rememberUpdatedState(addContactLauncher)
+        val currentChatGuid by rememberUpdatedState(chatGuid)
 
-            // State objects
-            chatInfoState = chatInfoState,
-            sendState = sendState,
-            syncState = syncState,
-            searchState = searchState,
-            operationsState = operationsState,
-            effectsState = effectsState,
-            etaSharingState = etaSharingState,
-
-            // UI state
-            highlightedMessageGuid = uiState.highlightedMessageGuid,
-            isLoadingMore = uiState.isLoadingMore,
-            isLoadingFromServer = isLoadingFromServer,
-            isSyncingMessages = uiState.isSyncingMessages,
-            initialLoadComplete = initialLoadComplete,
-            autoDownloadEnabled = autoDownloadEnabled,
-            downloadingAttachments = downloadingAttachments,
-
-            // Socket new message flow
-            socketNewMessageFlow = viewModel.messageList.socketNewMessage,
-
-            // Callbacks
-            callbacks = MessageListCallbacks(
+        // Wave 3G: Stable MessageListCallbacks wrapped in remember(viewModel)
+        // Callbacks are stable because:
+        // - Method references (viewModel::method) are inherently stable
+        // - State-accessing callbacks use rememberUpdatedState to get current values
+        val messageListCallbacks = remember(viewModel) {
+            MessageListCallbacks(
                 onMediaClick = onMediaClick,
-                onToggleReaction = { messageGuid, tapback ->
-                    viewModel.toggleReaction(messageGuid, tapback)
-                },
-                onSetReplyTo = { guid -> viewModel.send.setReplyTo(guid) },
-                onClearReply = { viewModel.send.clearReply() },
-                onLoadThread = { originGuid -> viewModel.thread.loadThread(originGuid) },
-                onRetryMessage = { guid -> viewModel.send.retryMessage(guid) },
-                onCanRetryAsSms = { guid -> viewModel.send.canRetryAsSms(guid) },
+                onToggleReaction = viewModel::toggleReaction,
+                onSetReplyTo = viewModel.send::setReplyTo,
+                onClearReply = viewModel.send::clearReply,
+                onLoadThread = viewModel.thread::loadThread,
+                onRetryMessage = viewModel.send::retryMessage,
+                onCanRetryAsSms = viewModel.send::canRetryAsSms,
                 onForwardRequest = { message ->
-                    state.messageToForward = message
-                    state.showForwardDialog = true
+                    currentState.messageToForward = message
+                    currentState.showForwardDialog = true
                 },
-                onBubbleEffectCompleted = { guid -> viewModel.effects.onBubbleEffectCompleted(guid) },
-                onHighlightMessage = { guid -> viewModel.highlightMessage(guid) },
-                onClearHighlight = { viewModel.clearHighlight() },
-                onDownloadAttachment = if (!autoDownloadEnabled) {
-                    { attachmentGuid -> viewModel.attachment.downloadAttachment(attachmentGuid) }
-                } else null,
+                onBubbleEffectCompleted = viewModel.effects::onBubbleEffectCompleted,
+                onHighlightMessage = viewModel::highlightMessage,
+                onClearHighlight = viewModel::clearHighlight,
+                onDownloadAttachment = viewModel.attachment::downloadAttachment,
                 onAddContact = {
-                    addContactLauncher.launch(viewModel.operations.getAddToContactsIntent(
-                        chatInfoState.participantPhone,
-                        chatInfoState.inferredSenderName
+                    currentAddContactLauncher.launch(viewModel.operations.getAddToContactsIntent(
+                        currentChatInfoState.participantPhone,
+                        currentChatInfoState.inferredSenderName
                     ))
                 },
                 onReportSpam = {
                     viewModel.operations.reportAsSpam()
-                    if (chatInfoState.isLocalSmsChat) {
-                        viewModel.operations.blockContact(context, chatInfoState.participantPhone)
+                    if (currentChatInfoState.isLocalSmsChat) {
+                        viewModel.operations.blockContact(currentContext, currentChatInfoState.participantPhone)
                     }
                     viewModel.chatInfo.dismissSaveContactBanner()
                 },
                 onDismissSaveContactBanner = viewModel.chatInfo::dismissSaveContactBanner,
-                onMarkAsSafe = { viewModel.operations.markAsSafe() },
-                onStartSharingEta = { viewModel.etaSharing.startSharingEta(chatGuid, chatInfoState.chatTitle) },
-                onStopSharingEta = { viewModel.etaSharing.stopSharingEta() },
-                onDismissEtaBanner = { viewModel.etaSharing.dismissBanner() },
+                onMarkAsSafe = viewModel.operations::markAsSafe,
+                onStartSharingEta = {
+                    viewModel.etaSharing.startSharingEta(currentChatGuid, currentChatInfoState.chatTitle)
+                },
+                onStopSharingEta = viewModel.etaSharing::stopSharingEta,
+                onDismissEtaBanner = viewModel.etaSharing::dismissBanner,
                 onExitSmsFallback = viewModel::exitSmsFallback,
-                onSearchQueryChange = { query -> viewModel.search.updateSearchQuery(query, messages) },
+                // Wave 3G: Uses new single-param overload that gets messages internally
+                onSearchQueryChange = viewModel.search::updateSearchQuery,
                 onCloseSearch = viewModel.search::closeSearch,
                 onNavigateSearchUp = viewModel.search::navigateSearchUp,
                 onNavigateSearchDown = viewModel.search::navigateSearchDown,
                 onViewAllSearchResults = viewModel.search::showResultsSheet
-            ),
+            )
+        }
+
+        // Stage 2: Extracted ChatMessageList component
+        ChatMessageList(
+            modifier = Modifier.fillMaxSize(),
+            chatScreenState = state,
+            messages = messages,
+
+            // Wave 2: All delegates for internal state collection
+            messageListDelegate = viewModel.messageList,
+            sendDelegate = viewModel.send,
+            searchDelegate = viewModel.search,
+            syncDelegate = viewModel.sync,
+            operationsDelegate = viewModel.operations,
+            attachmentDelegate = viewModel.attachment,
+            etaSharingDelegate = viewModel.etaSharing,
+            effectsDelegate = viewModel.effects,
+
+            // State objects (still needed at this level)
+            chatInfoState = chatInfoState,
+
+            // UI state
+            highlightedMessageGuid = uiState.highlightedMessageGuid,
+            isLoadingMore = uiState.isLoadingMore,
+            isSyncingMessages = uiState.isSyncingMessages,
+            // Wave 2: isLoadingFromServer, initialLoadComplete, autoDownloadEnabled
+            // now collected internally from delegates
+
+            // Socket new message flow
+            socketNewMessageFlow = viewModel.messageList.socketNewMessage,
+
+            // Wave 3G: Stable callbacks reference
+            callbacks = messageListCallbacks,
 
             // Tapback overlay state
             selectedMessageForTapback = state.selectedMessageForTapback,
@@ -536,12 +482,13 @@ fun ChatScreen(
             },
 
             // Composer height
-            composerHeightPx = state.composerHeightPx,
+            // PERF FIX: Pass lambda to avoid reading composerHeightPx during ChatScreen composition
+            // (keyboard/panel animations would otherwise cause ChatMessageList recomposition every frame)
+            composerHeightPxProvider = { state.composerHeightPx },
 
-            // Server connection
-            isServerConnected = syncState.isServerConnected
+            // Wave 2: Server connection collected locally for tapback availability
+            isServerConnected = viewModel.sync.state.collectAsState().value.isServerConnected
         )
-        android.util.Log.d("PerfTrace", "After ChatMessageList: +${System.currentTimeMillis() - chatScreenStart}ms")
 
     } // End of content Box
 
@@ -561,24 +508,28 @@ fun ChatScreen(
         }
     )
 
-    // Thread overlay - shows when user taps a reply indicator
+    // Wave 2: Thread overlay uses delegate for internal state collection
     AnimatedThreadOverlay(
-        threadChain = threadOverlayState,
+        threadDelegate = viewModel.thread,
         onMessageClick = { guid -> viewModel.thread.scrollToMessage(guid) },
         onDismiss = { viewModel.thread.dismissThreadOverlay() }
     )
     } // End of outer Box
     } // End of CompositionLocalProvider
 
-    // All dialogs and bottom sheets are now hosted in ChatDialogsHost
+    // Wave 2: ChatDialogsHost uses delegates for internal state collection
     ChatDialogsHost(
         viewModel = viewModel,
         context = context,
+        // Wave 2: Delegates for internal state collection
+        connectionDelegate = viewModel.connection,
+        sendDelegate = viewModel.send,
+        operationsDelegate = viewModel.operations,
+        searchDelegate = viewModel.search,
+        // State objects (still needed at this level)
         chatInfoState = chatInfoState,
-        connectionState = connectionState,
-        operationsState = operationsState,
-        sendState = sendState,
-        searchState = searchState,
+        // Wave 2: Deprecated params removed (connectionState, operationsState, sendState,
+        // searchState, forwardableChats, isWhatsAppAvailable) - now collected internally
         showEffectPicker = state.showEffectPicker,
         showDeleteDialog = state.showDeleteDialog,
         showBlockDialog = state.showBlockDialog,
@@ -594,10 +545,8 @@ fun ChatScreen(
         canRetrySmsForMessage = state.canRetrySmsForMessage,
         messageToForward = state.messageToForward,
         pendingContactData = state.pendingContactData,
-        forwardableChats = forwardableChats,
         pendingAttachments = pendingAttachments,
         attachmentQuality = uiState.attachmentQuality,
-        isWhatsAppAvailable = isWhatsAppAvailable,
         sendButtonBounds = state.sendButtonBounds,
         onDismissEffectPicker = { state.showEffectPicker = false },
         onDismissDeleteDialog = { state.showDeleteDialog = false },
