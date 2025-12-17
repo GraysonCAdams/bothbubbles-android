@@ -46,7 +46,7 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 
 /**
  * Connection status banner types for iMessage

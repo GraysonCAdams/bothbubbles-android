@@ -43,7 +43,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 

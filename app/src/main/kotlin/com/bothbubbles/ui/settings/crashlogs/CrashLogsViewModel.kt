@@ -56,9 +56,10 @@ class CrashLogsViewModel @Inject constructor(
             val reports = withContext(Dispatchers.IO) {
                 try {
                     val reportLocator = ReportLocator(context)
-                    val reportFiles = reportLocator.unapprovedReportFiles + reportLocator.approvedReportFiles
+                    val reportFiles: List<File> = reportLocator.unapprovedReports.toList() +
+                                                   reportLocator.approvedReports.toList()
 
-                    reportFiles.mapNotNull { file ->
+                    reportFiles.mapNotNull { file: File ->
                         try {
                             val content = file.readText()
                             val preview = content.take(200).replace("\n", " ").trim()
@@ -122,7 +123,9 @@ class CrashLogsViewModel @Inject constructor(
             withContext(Dispatchers.IO) {
                 try {
                     val reportLocator = ReportLocator(context)
-                    (reportLocator.unapprovedReportFiles + reportLocator.approvedReportFiles).forEach { file ->
+                    val allFiles: List<File> = reportLocator.unapprovedReports.toList() +
+                                                reportLocator.approvedReports.toList()
+                    allFiles.forEach { file: File ->
                         try {
                             file.delete()
                         } catch (e: Exception) {

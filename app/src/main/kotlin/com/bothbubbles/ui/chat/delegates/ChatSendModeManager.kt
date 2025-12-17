@@ -8,7 +8,7 @@ import com.bothbubbles.services.imessage.IMessageAvailabilityService
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.messaging.FallbackReason
 import com.bothbubbles.services.sms.SmsPermissionHelper
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.TutorialState

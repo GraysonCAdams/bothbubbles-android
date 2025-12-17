@@ -1,38 +1,36 @@
 # Claude Code Instructions for BothBubbles
 
-This file provides guidance to Claude Code for working with this repository.
+This file provides **mandatory rules** for Claude Code when working with this repository. These are RULES, not guidelines. Agents MUST follow them.
 
-## Documentation System
+## Architecture Rules
 
-**Every directory has a README.md** with detailed documentation including:
-- Purpose and file descriptions
-- Architecture diagrams
-- Required patterns and code examples
-- Best practices
+The following READMEs define **mandatory patterns** for each layer. You MUST read and follow the rules in these files before writing code in that layer:
 
-**When exploring the codebase**, read the README.md in the relevant directory first. The READMEs provide context-specific guidance that supplements this file.
+| README | Layer | Required Reading Before |
+|--------|-------|------------------------|
+| `app/src/main/kotlin/com/bothbubbles/README.md` | Root | Any code changes |
+| `app/src/main/kotlin/com/bothbubbles/data/README.md` | Data | Repository, DAO, or data model changes |
+| `app/src/main/kotlin/com/bothbubbles/services/README.md` | Services | Service or handler changes |
+| `app/src/main/kotlin/com/bothbubbles/ui/README.md` | UI | Screen, ViewModel, or component changes |
+| `app/src/main/kotlin/com/bothbubbles/di/README.md` | DI | Module or injection changes |
+| `app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/README.md` | Delegates | ViewModel delegate pattern |
+| `app/schemas/README.md` | Database | Schema migrations |
+| `docs/COMPOSE_BEST_PRACTICES.md` | Compose | **ANY** Compose UI code |
 
-Key READMEs:
-- `app/src/main/kotlin/com/bothbubbles/README.md` - Root package overview
-- `app/src/main/kotlin/com/bothbubbles/data/README.md` - Data layer
-- `app/src/main/kotlin/com/bothbubbles/services/README.md` - Services layer
-- `app/src/main/kotlin/com/bothbubbles/ui/README.md` - UI layer
-- `app/src/main/kotlin/com/bothbubbles/di/README.md` - Dependency injection
-- `app/schemas/README.md` - Database migrations
-- `docs/COMPOSE_BEST_PRACTICES.md` - **MANDATORY** Jetpack Compose performance rules
+**RULE**: When modifying code in a layer, you MUST first read that layer's README and follow its patterns exactly.
 
 ## Project Overview
 
 BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that connects to a BlueBubbles server for iMessage functionality, with optional SMS/MMS support as a fallback.
 
-## Compose Guidelines (CRITICAL)
+## Compose Rules (MANDATORY)
 
-**You must follow the rules in `docs/COMPOSE_BEST_PRACTICES.md`.**
+**RULE**: You MUST follow the rules in `docs/COMPOSE_BEST_PRACTICES.md`. Violations will break performance.
 
-1.  **Leaf-Node State**: Never collect state in a parent just to pass it down. Push state collection to the lowest possible child.
-2.  **Immutable Collections**: Always use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.
-3.  **Stable Callbacks**: Use method references (`viewModel::method`) instead of lambdas capturing state.
-4.  **No Logic in Composition**: Keep the composition path pure. No logging, no I/O, no complex calculations.
+1.  **Leaf-Node State**: NEVER collect state in a parent just to pass it down. Push state collection to the lowest possible child.
+2.  **Immutable Collections**: ALWAYS use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.
+3.  **Stable Callbacks**: ALWAYS use method references (`viewModel::method`) instead of lambdas capturing state.
+4.  **No Logic in Composition**: NEVER put logging, I/O, or complex calculations in the composition path.
 
 ## Build Commands
 
@@ -323,9 +321,9 @@ app/src/main/kotlin/com/bothbubbles/
 - **Real-time**: Socket.IO for server communication
 - **Background**: WorkManager for offline-first message delivery
 
-## Coding Conventions
+## Coding Rules
 
-### General
+### General Rules
 
 - Use Kotlin idioms and best practices
 - Follow Material Design 3 guidelines for UI
@@ -333,14 +331,14 @@ app/src/main/kotlin/com/bothbubbles/
 - Prefer Flow over LiveData
 - Use Result types for operations that can fail
 
-### Architecture
+### Architecture Rules (MANDATORY)
 
-- **Data layer should NOT depend on Services layer** (except through abstraction interfaces)
-- Services layer can depend on Data layer
-- UI layer can depend on both Data and Services layers
-- Keep ViewModels focused; use delegates for complex ViewModels
+- **RULE**: Data layer MUST NOT depend on Services layer (except through abstraction interfaces)
+- **RULE**: Services layer CAN depend on Data layer
+- **RULE**: UI layer CAN depend on both Data and Services layers
+- **RULE**: ViewModels with >300 lines MUST use delegates
 
-### File Organization
+### File Organization Rules
 
 - One primary class per file
 - Keep files under 500 lines when possible

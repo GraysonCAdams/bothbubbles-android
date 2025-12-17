@@ -4,7 +4,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope

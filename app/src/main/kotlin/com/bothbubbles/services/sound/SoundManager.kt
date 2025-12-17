@@ -22,15 +22,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
-
-/**
- * Available sound themes for message sounds.
- */
-enum class SoundTheme(val displayName: String) {
-    DEFAULT("Default"),
-    HIGH("High"),
-    POP("Pop")
-}
+import com.bothbubbles.core.model.SoundTheme
 
 /**
  * Manages playback of send/receive message sounds.

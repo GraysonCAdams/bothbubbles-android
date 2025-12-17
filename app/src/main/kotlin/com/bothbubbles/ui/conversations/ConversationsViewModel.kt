@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.conversations
 
+import com.bothbubbles.core.data.ConnectionState
 import timber.log.Timber
 import android.app.Application
 import android.net.Uri
@@ -369,7 +370,7 @@ class ConversationsViewModel @Inject constructor(
     private fun checkPrivateApiPrompt() {
         viewModelScope.launch {
             observerDelegate.connectionState
-                .filter { it == com.bothbubbles.services.socket.ConnectionState.CONNECTED }
+                .filter { it == ConnectionState.CONNECTED }
                 .take(1)
                 .collect {
                     val hasChecked = settingsDataStore.hasShownPrivateApiPrompt.first()
@@ -525,7 +526,7 @@ class ConversationsViewModel @Inject constructor(
                 settingsDataStore.dismissedSetupBanner
             ) { connectionState, gracePeriodPassed, isSetupBannerDismissed ->
                 // Note: retryAttempt is internal to socketService, we use connectionState instead
-                if (!gracePeriodPassed && connectionState != com.bothbubbles.services.socket.ConnectionState.CONNECTED) {
+                if (!gracePeriodPassed && connectionState != ConnectionState.CONNECTED) {
                     ConnectionBannerState.Connected // Effectively hide the banner
                 } else {
                     determineConnectionBannerState(

@@ -18,7 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus

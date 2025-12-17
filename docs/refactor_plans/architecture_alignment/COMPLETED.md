@@ -1,6 +1,6 @@
 # Architecture Alignment — Completed Phases
 
-This document summarizes all completed architecture refactoring phases (0-12).
+This document summarizes all completed architecture refactoring phases (0-15).
 
 ## Phase Summary
 
@@ -19,6 +19,8 @@ This document summarizes all completed architecture refactoring phases (0-12).
 | Phase 10 | Service Modernization | ✅ Complete |
 | Phase 11 | Architectural Completion | ✅ Complete |
 | Phase 12 | Observability (Privacy-First) | ✅ Complete |
+| Phase 14 | Core Module Extraction | ✅ Complete |
+| Phase 15 | Feature Module Extraction | ✅ Complete |
 
 ---
 
@@ -252,6 +254,61 @@ Implemented privacy-first observability:
 
 ---
 
+## Phase 14: Core Module Extraction
+
+Completed the core module extraction to enable feature module migration:
+
+**Modules Created/Completed:**
+- `:core:model` — Domain entities (already existed from Phase 6)
+- `:core:network` — API layer (BothBubblesApi, DTOs, AuthInterceptor, CoreNetworkModule)
+- `:core:data` — Interfaces (SettingsProvider, ConnectionState, ServerConnectionProvider, DeveloperModeTracker)
+- `:core:design` — Shared UI components (fonts, typography, SettingsComponents)
+
+**Key Files:**
+- `core/design/src/main/kotlin/.../theme/Type.kt` — Font families and AppTypography
+- `core/design/src/main/kotlin/.../component/SettingsComponents.kt` — SettingsCard, SettingsMenuItem, ProfileHeader
+- `core/data/src/main/kotlin/.../ConnectionState.kt` — Connection state enum
+- `core/network/src/main/kotlin/.../di/CoreNetworkModule.kt` — Hilt DI for networking
+
+**Benefits Achieved:**
+- Feature modules can now depend on core modules without circular dependencies
+- Shared UI components available to all feature modules
+- Clean separation between core infrastructure and feature code
+- Incremental build improvements for UI-only changes
+
+---
+
+## Phase 15: Feature Module Extraction
+
+Completed feature module structure and demonstrated migration pattern:
+
+**Module Structure:**
+- `:navigation` — Type-safe routes for all destinations (Route.kt)
+- `:feature:settings` — AboutScreen + AboutViewModel migrated as first example
+- `:feature:setup` — Structure ready for migration
+- `:feature:conversations` — Structure ready for migration
+- `:feature:chat` — Structure ready for migration
+
+**Key Files:**
+- `feature/settings/src/.../about/AboutScreen.kt` — Settings about screen (migrated)
+- `feature/settings/src/.../about/AboutViewModel.kt` — Uses core:data interfaces
+- `feature/settings/src/.../SettingsNavigation.kt` — NavGraphBuilder extension
+- `navigation/src/.../Routes.kt` — All route definitions
+
+**Migration Pattern Established:**
+1. Create screen + ViewModel in feature module
+2. Use interfaces from `:core:data` (SettingsProvider, ServerConnectionProvider, etc.)
+3. Use components from `:core:design` (SettingsCard, fonts, etc.)
+4. Update app's navigation to use feature module screen
+5. Feature module has no dependencies on other feature modules
+
+**App Module Dependencies:**
+- All feature modules now wired to app module
+- App module serves as composition root for all features
+- Navigation delegated to feature modules via extensions
+
+---
+
 ## Key Files Modified
 
 Total files changed across all phases: ~200+
@@ -262,8 +319,9 @@ Total files changed across all phases: ~200+
 - Created 4 SetupViewModel delegates
 - Created 6 service interfaces
 - Created 4 AndroidX Startup initializers
-- Created 3 core modules (`:core:model`, `:core:network`, `:core:data`)
+- Created 4 core modules (`:core:model`, `:core:network`, `:core:data`, `:core:design`)
 - Created `:navigation` module
+- Created 4 feature module stubs (`:feature:chat`, `:feature:conversations`, `:feature:settings`, `:feature:setup`)
 
 ---
 

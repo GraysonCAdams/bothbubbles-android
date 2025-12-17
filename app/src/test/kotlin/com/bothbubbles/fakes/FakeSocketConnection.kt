@@ -1,6 +1,6 @@
 package com.bothbubbles.fakes
 
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -38,6 +38,9 @@ class FakeSocketConnection : SocketConnection {
 
     private val _retryAttempt = MutableStateFlow(0)
     override val retryAttempt: StateFlow<Int> = _retryAttempt
+
+    private val _serverVersion = MutableStateFlow<String?>(null)
+    override val serverVersion: StateFlow<String?> = _serverVersion
 
     private val _events = MutableSharedFlow<SocketEvent>(replay = 1)
     override val events: SharedFlow<SocketEvent> = _events
@@ -140,5 +143,12 @@ class FakeSocketConnection : SocketConnection {
      */
     fun setRetryAttempt(attempt: Int) {
         _retryAttempt.value = attempt
+    }
+
+    /**
+     * Set the server version.
+     */
+    fun setServerVersion(version: String?) {
+        _serverVersion.value = version
     }
 }

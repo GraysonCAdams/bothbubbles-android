@@ -36,7 +36,6 @@ import com.bothbubbles.services.categorization.MessageCategory
 import com.bothbubbles.ui.components.common.ConversationListSkeleton
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.dialogs.ContactInfo
-import com.bothbubbles.ui.conversations.ConversationEmptyStates
 import com.bothbubbles.ui.conversations.ConversationFilter
 import com.bothbubbles.ui.conversations.ConversationScreenState
 import com.bothbubbles.ui.conversations.ConversationUiModel
@@ -47,7 +46,7 @@ import com.bothbubbles.ui.conversations.EmptyFilterState
 import com.bothbubbles.ui.conversations.PinnedDragOverlay
 import com.bothbubbles.ui.conversations.PullToSearchIndicator
 import com.bothbubbles.ui.conversations.PullToSearchState
-import com.bothbubbles.ui.conversations.SwipeConfig
+import com.bothbubbles.ui.components.conversation.SwipeConfig
 
 /**
  * Main content area for conversations list.

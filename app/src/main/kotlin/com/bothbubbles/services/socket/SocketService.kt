@@ -1,5 +1,6 @@
 package com.bothbubbles.services.socket
 
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.services.developer.DeveloperEventLog
@@ -9,6 +10,7 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -19,22 +21,6 @@ import okhttp3.OkHttpClient
 import dagger.Lazy
 import javax.inject.Inject
 import javax.inject.Singleton
-
-/**
- * Socket.IO connection states
- */
-enum class ConnectionState {
-    /** Not connected and not attempting to connect */
-    DISCONNECTED,
-    /** Actively attempting to connect */
-    CONNECTING,
-    /** Successfully connected to server */
-    CONNECTED,
-    /** Connection failed with error, will attempt retry */
-    ERROR,
-    /** Server not configured (no address/password) */
-    NOT_CONFIGURED
-}
 
 /**
  * Events that can be received from the server
@@ -112,6 +98,20 @@ class SocketService @Inject constructor(
 
     private val _events = MutableSharedFlow<SocketEvent>(extraBufferCapacity = 100)
     override val events: SharedFlow<SocketEvent> = _events.asSharedFlow()
+
+    private val _serverVersion = MutableStateFlow<String?>(null)
+    override val serverVersion: StateFlow<String?> = _serverVersion.asStateFlow()
+
+    init {
+        // Listen for server version updates from socket events
+        applicationScope.launch {
+            events.collect { event ->
+                if (event is SocketEvent.ServerUpdate) {
+                    _serverVersion.value = event.version
+                }
+            }
+        }
+    }
 
     // Delegated components
     private val eventParser = SocketEventParser(

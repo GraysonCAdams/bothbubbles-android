@@ -1,5 +1,6 @@
 package com.bothbubbles.services.developer
 
+import com.bothbubbles.core.data.DeveloperModeTracker
 import timber.log.Timber
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -39,7 +40,7 @@ data class DeveloperEvent(
  * Events are kept in memory and displayed in the developer mode overlay.
  */
 @Singleton
-class DeveloperEventLog @Inject constructor() {
+class DeveloperEventLog @Inject constructor() : DeveloperModeTracker {
 
     companion object {
         private const val MAX_EVENTS = 500
@@ -58,7 +59,7 @@ class DeveloperEventLog @Inject constructor() {
      * Enable or disable event logging.
      * When disabled, no new events are logged (but existing events are retained).
      */
-    fun setEnabled(enabled: Boolean) {
+    override fun setEnabled(enabled: Boolean) {
         _isEnabled.value = enabled
     }
 

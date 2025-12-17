@@ -40,7 +40,7 @@ Each Delegate:
 └── Methods for operations
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Delegate Structure
 
@@ -98,14 +98,14 @@ class ChatViewModel @Inject constructor(
 }
 ```
 
-## Best Practices
+## Delegate Rules
 
-1. Keep delegates focused on single responsibility
-2. Use constructor injection for dependencies
-3. Initialize with context from ViewModel
-4. Expose state via StateFlow
-5. Handle cleanup if needed
-6. Unit test delegates independently
+1. **RULE**: Keep delegates focused on single responsibility
+2. **RULE**: Use constructor injection for dependencies
+3. **RULE**: Initialize with context from ViewModel via `initialize()`
+4. **RULE**: Expose state via StateFlow (never mutable externally)
+5. **RULE**: Handle cleanup if needed
+6. **RULE**: Unit test delegates independently
 
 ## Composable State Collection Pattern
 

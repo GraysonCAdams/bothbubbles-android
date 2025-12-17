@@ -4,7 +4,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.UnifiedChatGroupRepository
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.sync.StageProgress

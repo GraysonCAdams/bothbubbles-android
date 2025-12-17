@@ -26,7 +26,7 @@ The data layer provides data access abstractions following the Repository patter
 └─────────────────┘ └─────────────────┘ └─────────────────┘
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Repository Pattern
 

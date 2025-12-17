@@ -13,7 +13,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.foundation.layout.padding
-import com.bothbubbles.ui.conversations.UnifiedSyncProgress
+import com.bothbubbles.services.sync.UnifiedSyncProgress
 
 /**
  * Floating Action Button for starting a new chat.

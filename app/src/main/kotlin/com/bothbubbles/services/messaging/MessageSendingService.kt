@@ -18,7 +18,7 @@ import com.bothbubbles.core.network.api.dto.UnsendMessageRequest
 import com.bothbubbles.services.messaging.sender.MessageSenderStrategy
 import com.bothbubbles.services.messaging.sender.SendOptions
 import com.bothbubbles.services.sms.SmsPermissionHelper
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.util.error.MessageError
 import com.bothbubbles.util.error.NetworkError

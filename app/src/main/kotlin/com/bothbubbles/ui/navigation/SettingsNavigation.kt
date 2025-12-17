@@ -122,10 +122,10 @@ fun NavGraphBuilder.settingsNavigation(
         )
     }
 
-    // About
+    // About - from :feature:settings module
     composable<Screen.About> { backStackEntry ->
         val route: Screen.About = backStackEntry.toRoute()
-        com.bothbubbles.ui.settings.about.AboutScreen(
+        com.bothbubbles.feature.settings.about.AboutScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
             },
@@ -135,9 +135,9 @@ fun NavGraphBuilder.settingsNavigation(
         )
     }
 
-    // Open Source Licenses
+    // Open Source Licenses - from :feature:settings module
     composable<Screen.OpenSourceLicenses> {
-        com.bothbubbles.ui.settings.about.OpenSourceLicensesScreen(
+        com.bothbubbles.feature.settings.about.OpenSourceLicensesScreen(
             onNavigateBack = { navController.popBackStack() }
         )
     }

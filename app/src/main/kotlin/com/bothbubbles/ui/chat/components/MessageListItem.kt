@@ -1,6 +1,5 @@
 package com.bothbubbles.ui.chat.components
 
-import androidx.compose.animation.core.snap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -164,11 +163,6 @@ fun MessageListItem(
             .newMessageEntrance(
                 shouldAnimate = shouldAnimateEntrance,
                 isFromMe = message.isFromMe
-            )
-            .animateItem(
-                fadeInSpec = null,
-                fadeOutSpec = null,
-                placementSpec = snap()
             )
             .materialAttentionHighlight(
                 shouldHighlight = isHighlighted,

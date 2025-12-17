@@ -33,7 +33,7 @@ Hilt Module Hierarchy:
 └── SmsModule           - SMS dependencies
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Module Definition
 
@@ -120,11 +120,11 @@ fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
 | `FcmModule` | Firebase services |
 | `SmsModule` | SMS/MMS services |
 
-## Best Practices
+## DI Rules
 
-1. Use `@Singleton` sparingly - only for truly shared instances
-2. Prefer constructor injection over field injection
-3. Use `@Binds` for interface bindings (more efficient than `@Provides`)
-4. Group related providers in logical modules
-5. Use qualifiers for disambiguation
-6. Keep modules focused on single responsibility
+1. **RULE**: Use `@Singleton` sparingly - only for truly shared instances
+2. **RULE**: Prefer constructor injection over field injection
+3. **RULE**: Use `@Binds` for interface bindings (more efficient than `@Provides`)
+4. **RULE**: Group related providers in logical modules
+5. **RULE**: Use qualifiers for disambiguation
+6. **RULE**: Keep modules focused on single responsibility

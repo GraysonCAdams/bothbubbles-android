@@ -34,7 +34,7 @@ BothBubbles follows Clean Architecture with three main layers:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Application Initialization
 

@@ -2,7 +2,7 @@ package com.bothbubbles.ui.conversations
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.sync.UnifiedSyncProgress
 import com.bothbubbles.ui.components.common.ConnectionBannerState
 import com.bothbubbles.ui.components.common.SmsBannerState

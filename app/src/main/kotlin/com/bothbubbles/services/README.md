@@ -40,7 +40,7 @@ Services Layer Organization:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Service Interfaces
 

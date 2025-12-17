@@ -18,6 +18,12 @@ interface ServerConnectionProvider {
     val connectionState: StateFlow<ConnectionState>
 
     /**
+     * Current server version (e.g., "1.9.6").
+     * Null if not connected or version not yet received.
+     */
+    val serverVersion: StateFlow<String?>
+
+    /**
      * Current retry attempt number.
      */
     val retryAttempt: StateFlow<Int>

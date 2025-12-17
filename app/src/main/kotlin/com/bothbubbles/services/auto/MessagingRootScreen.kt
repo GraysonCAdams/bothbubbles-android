@@ -19,7 +19,7 @@ import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import kotlinx.coroutines.CoroutineScope

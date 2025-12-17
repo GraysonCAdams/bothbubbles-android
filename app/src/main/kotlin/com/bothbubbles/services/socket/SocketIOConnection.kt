@@ -1,4 +1,5 @@
 package com.bothbubbles.services.socket
+import com.bothbubbles.core.data.ConnectionState
 
 import timber.log.Timber
 import com.bothbubbles.BuildConfig

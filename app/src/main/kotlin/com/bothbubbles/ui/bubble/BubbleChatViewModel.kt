@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.bubble
 
+import com.bothbubbles.core.data.ConnectionState
 import androidx.compose.runtime.Stable
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -104,7 +105,7 @@ class BubbleChatViewModel @Inject constructor(
 
     private fun observeSocketConnection() {
         viewModelScope.launch {
-            socketConnection.connectionState.map { it == com.bothbubbles.services.socket.ConnectionState.CONNECTED }.collect { connected ->
+            socketConnection.connectionState.map { it == ConnectionState.CONNECTED }.collect { connected ->
                 _uiState.update { it.copy(isServerConnected = connected) }
             }
         }

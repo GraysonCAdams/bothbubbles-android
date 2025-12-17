@@ -6,7 +6,7 @@ import com.bothbubbles.data.local.db.entity.CheckResult
 import com.bothbubbles.data.local.db.entity.IMessageAvailabilityCacheEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher

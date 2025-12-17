@@ -67,7 +67,14 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:network"))
     implementation(project(":core:data"))
+    implementation(project(":core:design"))
     implementation(project(":navigation"))
+
+    // Feature modules
+    implementation(project(":feature:settings"))
+    implementation(project(":feature:setup"))
+    implementation(project(":feature:conversations"))
+    implementation(project(":feature:chat"))
 
     // Core Android
     implementation(libs.androidx.core.ktx)

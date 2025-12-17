@@ -13,7 +13,7 @@ import com.bothbubbles.services.fcm.FcmTokenManager
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.MainDispatcher
 import com.bothbubbles.services.fcm.FirebaseConfigManager
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher

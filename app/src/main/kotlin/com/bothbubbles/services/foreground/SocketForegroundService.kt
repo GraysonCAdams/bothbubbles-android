@@ -12,7 +12,7 @@ import com.bothbubbles.MainActivity
 import com.bothbubbles.R
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.services.notifications.NotificationChannelManager
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher

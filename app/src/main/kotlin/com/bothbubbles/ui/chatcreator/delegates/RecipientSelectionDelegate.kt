@@ -3,7 +3,7 @@ package com.bothbubbles.ui.chatcreator.delegates
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.services.socket.ConnectionState
+import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.SelectedRecipient

@@ -5,10 +5,9 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.local.prefs.SettingsDataStore
-import com.bothbubbles.services.developer.DeveloperEventLog
-import com.bothbubbles.services.socket.SocketConnection
-import com.bothbubbles.services.socket.SocketEvent
+import com.bothbubbles.core.data.DeveloperModeTracker
+import com.bothbubbles.core.data.ServerConnectionProvider
+import com.bothbubbles.core.data.SettingsProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.*
@@ -18,9 +17,9 @@ import javax.inject.Inject
 @HiltViewModel
 class AboutViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val socketConnection: SocketConnection,
-    private val settingsDataStore: SettingsDataStore,
-    private val developerEventLog: DeveloperEventLog
+    private val serverConnection: ServerConnectionProvider,
+    private val settingsProvider: SettingsProvider,
+    private val developerModeTracker: DeveloperModeTracker
 ) : ViewModel() {
 
     companion object {
@@ -59,19 +58,17 @@ class AboutViewModel @Inject constructor(
 
     private fun observeServerVersion() {
         viewModelScope.launch {
-            socketConnection.events.collect { event ->
-                if (event is SocketEvent.ServerUpdate) {
-                    _uiState.update { it.copy(serverVersion = event.version) }
-                }
+            serverConnection.serverVersion.collect { version ->
+                _uiState.update { it.copy(serverVersion = version) }
             }
         }
     }
 
     private fun observeDeveloperMode() {
         viewModelScope.launch {
-            settingsDataStore.developerModeEnabled.collect { enabled ->
+            settingsProvider.developerModeEnabled.collect { enabled ->
                 _uiState.update { it.copy(developerModeEnabled = enabled) }
-                developerEventLog.setEnabled(enabled)
+                developerModeTracker.setEnabled(enabled)
             }
         }
     }
@@ -103,7 +100,7 @@ class AboutViewModel @Inject constructor(
                 // Enable developer mode
                 tapCount = 0
                 viewModelScope.launch {
-                    settingsDataStore.setDeveloperModeEnabled(true)
+                    settingsProvider.setDeveloperModeEnabled(true)
                 }
                 DeveloperModeTapResult.JustEnabled
             }

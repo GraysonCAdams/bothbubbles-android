@@ -1,7 +1,10 @@
 package com.bothbubbles.di
 
+import com.bothbubbles.core.data.DeveloperModeTracker
+import com.bothbubbles.core.data.ServerConnectionProvider
 import com.bothbubbles.core.data.SettingsProvider
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.services.contacts.ContactBlocker
@@ -65,6 +68,16 @@ abstract class ServiceModule {
     abstract fun bindSocketConnection(
         socketService: SocketService
     ): SocketConnection
+
+    /**
+     * Binds [SocketService] to the [ServerConnectionProvider] interface.
+     * Feature modules depend on ServerConnectionProvider for connection state access.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindServerConnectionProvider(
+        socketService: SocketService
+    ): ServerConnectionProvider
 
     /**
      * Binds [IncomingMessageHandler] to the [IncomingMessageProcessor] interface.
@@ -145,4 +158,14 @@ abstract class ServiceModule {
     abstract fun bindSettingsProvider(
         settingsDataStore: SettingsDataStore
     ): SettingsProvider
+
+    /**
+     * Binds [DeveloperEventLog] to the [DeveloperModeTracker] interface.
+     * Feature modules depend on DeveloperModeTracker for developer mode control.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindDeveloperModeTracker(
+        developerEventLog: DeveloperEventLog
+    ): DeveloperModeTracker
 }

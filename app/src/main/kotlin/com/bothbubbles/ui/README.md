@@ -28,7 +28,7 @@ UI Layer Organization:
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Required Patterns
+## Mandatory Rules
 
 ### Screen Structure
 
@@ -122,11 +122,11 @@ val uiState = _uiState.asStateFlow()
 | `theme/` | Material 3 theme |
 | `util/` | UI utilities |
 
-## Best Practices
+## Compose Rules (MANDATORY)
 
-**MANDATORY**: Read and follow `docs/COMPOSE_BEST_PRACTICES.md` before writing any Compose code.
+**RULE**: You MUST read and follow `docs/COMPOSE_BEST_PRACTICES.md` before writing any Compose code. Violations break performance.
 
-### Core Rules
+### Core Rules (NEVER BREAK THESE)
 
 1. **Leaf-Node State Collection**: Never collect state in a parent just to pass it down. Push state collection to the lowest possible child composable.
 

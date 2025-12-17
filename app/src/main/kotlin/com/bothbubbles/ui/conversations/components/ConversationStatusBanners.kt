@@ -14,8 +14,8 @@ import com.bothbubbles.ui.components.common.ConnectionBannerState
 import com.bothbubbles.ui.components.common.ConnectionStatusBanner
 import com.bothbubbles.ui.components.common.SmsBannerState
 import com.bothbubbles.ui.components.common.SmsStatusBanner
-import com.bothbubbles.ui.conversations.ConversationProgressBars
-import com.bothbubbles.ui.conversations.UnifiedSyncProgress
+import com.bothbubbles.ui.conversations.UnifiedSyncProgressBar
+import com.bothbubbles.services.sync.UnifiedSyncProgress
 
 /**
  * Stacked status banners at bottom of screen.
