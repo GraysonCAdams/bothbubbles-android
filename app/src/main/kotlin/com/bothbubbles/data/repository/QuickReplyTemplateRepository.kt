@@ -2,11 +2,7 @@ package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -17,13 +13,11 @@ import javax.inject.Singleton
  * - CRUD operations for templates
  * - Usage tracking for "most used" sorting
  * - Providing templates for notification quick replies
- * - Default template creation on first launch
  */
 @Singleton
 class QuickReplyTemplateRepository @Inject constructor(
     private val quickReplyTemplateDao: QuickReplyTemplateDao
 ) {
-    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     // ===== Observation =====
 
@@ -140,33 +134,4 @@ class QuickReplyTemplateRepository @Inject constructor(
      */
     suspend fun setFavorite(id: Long, isFavorite: Boolean) =
         quickReplyTemplateDao.updateFavoriteStatus(id, isFavorite)
-
-    // ===== Default Templates =====
-
-    /**
-     * Create default templates if none exist.
-     * Call this on app startup to ensure user has some templates to start with.
-     */
-    suspend fun createDefaultTemplatesIfNeeded() {
-        if (quickReplyTemplateDao.getTemplateCount() > 0) return
-
-        val defaults = listOf(
-            QuickReplyTemplateEntity(title = "On my way!", text = "On my way!", displayOrder = 0),
-            QuickReplyTemplateEntity(title = "Be there in 5", text = "Be there in 5 minutes!", displayOrder = 1),
-            QuickReplyTemplateEntity(title = "Running late", text = "Running a few minutes late, be there soon!", displayOrder = 2),
-            QuickReplyTemplateEntity(title = "Can't talk now", text = "Can't talk right now, I'll call you back later.", displayOrder = 3),
-            QuickReplyTemplateEntity(title = "Sounds good!", text = "Sounds good!", displayOrder = 4)
-        )
-
-        quickReplyTemplateDao.insertAll(defaults)
-    }
-
-    /**
-     * Initialize repository - create default templates in background.
-     */
-    fun initialize() {
-        repositoryScope.launch {
-            createDefaultTemplatesIfNeeded()
-        }
-    }
 }

@@ -250,7 +250,9 @@ class FcmMessageHandler @Inject constructor(
      * Returns Pair of (name, avatarUri)
      */
     private suspend fun resolveSenderNameAndAvatar(address: String?, serverProvidedName: String?): Pair<String?, String?> {
-        if (address.isNullOrBlank()) return serverProvidedName to null
+        if (address.isNullOrBlank()) {
+            return serverProvidedName to null
+        }
 
         // Try live contact lookup first
         val contactName = androidContactsService.getContactDisplayName(address)
@@ -276,7 +278,8 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // Fall back to server-provided name or formatted address
-        return (serverProvidedName ?: PhoneNumberFormatter.format(address)) to null
+        val fallback = serverProvidedName ?: PhoneNumberFormatter.format(address)
+        return fallback to null
     }
 
     private fun handleUpdatedMessage(data: Map<String, String>) {

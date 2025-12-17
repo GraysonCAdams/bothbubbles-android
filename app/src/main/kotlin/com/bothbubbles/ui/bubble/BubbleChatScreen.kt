@@ -87,6 +87,7 @@ fun BubbleChatScreen(
         topBar = {
             BubbleTopBar(
                 title = displayTitle,
+                avatarPath = uiState.avatarPath,
                 onExpandClick = onExpandClick,
                 onCloseClick = onCloseClick
             )
@@ -168,6 +169,7 @@ fun BubbleChatScreen(
 @Composable
 private fun BubbleTopBar(
     title: String,
+    avatarPath: String?,
     onExpandClick: () -> Unit,
     onCloseClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -180,6 +182,7 @@ private fun BubbleTopBar(
             ) {
                 Avatar(
                     name = title,
+                    avatarPath = avatarPath,
                     size = 32.dp
                 )
                 Spacer(modifier = Modifier.width(8.dp))

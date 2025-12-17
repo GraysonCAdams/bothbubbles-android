@@ -76,17 +76,6 @@ class QuickReplyTemplatesViewModel @Inject constructor(
         }
     }
 
-    fun resetToDefaults() {
-        viewModelScope.launch {
-            try {
-                repository.deleteAllTemplates()
-                repository.createDefaultTemplatesIfNeeded()
-            } catch (e: Exception) {
-                _uiState.update { it.copy(error = e.message) }
-            }
-        }
-    }
-
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }

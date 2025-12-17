@@ -119,22 +119,32 @@ class BubbleChatViewModel @Inject constructor(
     private fun loadChat() {
         viewModelScope.launch {
             var draftLoaded = false
-            chatRepository.observeChat(chatGuid).collect { chat ->
-                chat?.let {
-                    _uiState.update { state ->
-                        state.copy(
-                            chatTitle = chat.displayName ?: chat.chatIdentifier ?: "",
-                            isLocalSmsChat = chat.isLocalSms,
-                            isLoading = false
-                        )
-                    }
-                    // Load draft only on first observation
-                    if (!draftLoaded) {
-                        _draftText.value = chat.textFieldText ?: ""
-                        draftLoaded = true
+            // Combine chat with participants to resolve display name properly
+            combine(
+                chatRepository.observeChat(chatGuid),
+                chatRepository.observeParticipantsForChat(chatGuid)
+            ) { chat, participants -> chat to participants }
+                .collect { (chat, participants) ->
+                    chat?.let {
+                        val resolvedTitle = chatRepository.resolveChatTitle(it, participants)
+                        // Get avatar from first participant (for 1:1 chats)
+                        val avatarPath = participants.firstOrNull()?.cachedAvatarPath
+
+                        _uiState.update { state ->
+                            state.copy(
+                                chatTitle = resolvedTitle,
+                                avatarPath = avatarPath,
+                                isLocalSmsChat = chat.isLocalSms,
+                                isLoading = false
+                            )
+                        }
+                        // Load draft only on first observation
+                        if (!draftLoaded) {
+                            _draftText.value = chat.textFieldText ?: ""
+                            draftLoaded = true
+                        }
                     }
                 }
-            }
         }
     }
 
@@ -294,6 +304,7 @@ class BubbleChatViewModel @Inject constructor(
 @Stable
 data class BubbleChatUiState(
     val chatTitle: String = "",
+    val avatarPath: String? = null,
     val messages: List<MessageUiModel> = emptyList(),
     val isLoading: Boolean = true,
     val isLocalSmsChat: Boolean = false,

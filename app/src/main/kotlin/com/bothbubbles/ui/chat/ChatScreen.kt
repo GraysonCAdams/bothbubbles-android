@@ -289,13 +289,10 @@ fun ChatScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .onSizeChanged { newSize ->
-                    // PERF FIX: Only track the BASE height (minimum) to avoid
-                    // recomposition during keyboard/panel open animation.
-                    // When keyboard/panels close, height decreases back to base.
-                    val newHeight = newSize.height.toFloat()
-                    if (state.bottomBarBaseHeightPx == 0f || newHeight < state.bottomBarBaseHeightPx) {
-                        state.bottomBarBaseHeightPx = newHeight
-                    }
+                    // Track actual height of bottom bar (composer + smart reply chips)
+                    // Keyboard handling is done via imePadding() on the content Box,
+                    // so we can safely track the full height here.
+                    state.bottomBarBaseHeightPx = newSize.height.toFloat()
                 }
                 .zIndex(1f)
         ) {
@@ -308,7 +305,6 @@ fun ChatScreen(
                 onCameraClick = onCameraClick,
                 onSmartReplyClick = { suggestion ->
                     viewModel.updateDraft(suggestion.text)
-                    suggestion.templateId?.let { viewModel.composer.recordTemplateUsage(it) }
                 },
                 onComposerEvent = { event -> viewModel.onComposerEvent(event) },
                 onMediaSelected = { uris -> viewModel.composer.addAttachments(uris) },

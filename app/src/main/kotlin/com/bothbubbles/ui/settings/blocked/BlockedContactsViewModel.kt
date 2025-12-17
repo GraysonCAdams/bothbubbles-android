@@ -12,14 +12,25 @@ import javax.inject.Inject
 
 @HiltViewModel
 class BlockedContactsViewModel @Inject constructor(
-    private val contactBlocker: ContactBlocker
+    private val contactBlocker: ContactBlocker,
+    private val smsPermissionHelper: com.bothbubbles.services.sms.SmsPermissionHelper
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(BlockedContactsUiState())
     val uiState: StateFlow<BlockedContactsUiState> = _uiState.asStateFlow()
 
     init {
+        checkSmsCapability()
         loadBlockedNumbers()
+    }
+
+    private fun checkSmsCapability() {
+        _uiState.update {
+            it.copy(
+                isDefaultSmsApp = smsPermissionHelper.isDefaultSmsApp(),
+                canBlock = smsPermissionHelper.canBlockNumbers()
+            )
+        }
     }
 
     fun loadBlockedNumbers() {
@@ -89,5 +100,7 @@ class BlockedContactsViewModel @Inject constructor(
 data class BlockedContactsUiState(
     val blockedNumbers: List<String> = emptyList(),
     val isLoading: Boolean = true,
-    val error: String? = null
+    val error: String? = null,
+    val isDefaultSmsApp: Boolean = false,
+    val canBlock: Boolean = false
 )

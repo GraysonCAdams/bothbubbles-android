@@ -1,8 +1,5 @@
 package com.bothbubbles.ui.settings.blocked
 
-import android.content.ContentValues
-import android.provider.BlockedNumberContract
-import android.provider.Telephony
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -13,7 +10,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -26,25 +22,10 @@ fun BlockedContactsScreen(
     onNavigateBack: () -> Unit,
     viewModel: BlockedContactsViewModel = hiltViewModel()
 ) {
-    val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     var showAddDialog by remember { mutableStateOf(false) }
     var numberToAdd by remember { mutableStateOf("") }
-
-    // Check if we're the default SMS app
-    val isDefaultSmsApp = remember {
-        Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
-    }
-
-    // Check if blocking is supported
-    val canBlock = remember {
-        try {
-            BlockedNumberContract.canCurrentUserBlockNumbers(context)
-        } catch (e: Exception) {
-            false
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -59,7 +40,7 @@ fun BlockedContactsScreen(
                     }
                 },
                 actions = {
-                    if (isDefaultSmsApp && canBlock) {
+                    if (uiState.isDefaultSmsApp && uiState.canBlock) {
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Block number")
                         }
@@ -124,23 +105,11 @@ fun BlockedContactsContent(
     viewModel: BlockedContactsViewModel = hiltViewModel(),
     uiState: BlockedContactsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
 ) {
-    val context = LocalContext.current
     var showAddDialog by remember { mutableStateOf(false) }
     var numberToAdd by remember { mutableStateOf("") }
 
-    val isDefaultSmsApp = remember {
-        Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
-    }
-    val canBlock = remember {
-        try {
-            BlockedNumberContract.canCurrentUserBlockNumbers(context)
-        } catch (e: Exception) {
-            false
-        }
-    }
-
     when {
-        !isDefaultSmsApp -> {
+        !uiState.isDefaultSmsApp -> {
             Box(
                 modifier = modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
@@ -171,7 +140,7 @@ fun BlockedContactsContent(
                 }
             }
         }
-        !canBlock -> {
+        !uiState.canBlock -> {
             Box(
                 modifier = modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center

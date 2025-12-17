@@ -27,7 +27,6 @@ fun QuickReplyTemplatesScreen(
 
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf<QuickReplyTemplateEntity?>(null) }
-    var showResetDialog by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -44,9 +43,6 @@ fun QuickReplyTemplatesScreen(
                 actions = {
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(Icons.Default.Add, contentDescription = "Add template")
-                    }
-                    IconButton(onClick = { showResetDialog = true }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Reset to defaults")
                     }
                 }
             )
@@ -87,30 +83,6 @@ fun QuickReplyTemplatesScreen(
                     template.copy(title = title, text = text)
                 )
                 showEditDialog = null
-            }
-        )
-    }
-
-    // Reset confirmation dialog
-    if (showResetDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetDialog = false },
-            title = { Text("Reset templates?") },
-            text = { Text("This will delete all your templates and restore the defaults.") },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        viewModel.resetToDefaults()
-                        showResetDialog = false
-                    }
-                ) {
-                    Text("Reset")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetDialog = false }) {
-                    Text("Cancel")
-                }
             }
         )
     }

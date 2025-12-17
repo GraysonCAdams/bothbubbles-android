@@ -560,7 +560,16 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Default.Block,
                     title = "Blocked contacts",
-                    onClick = onBlockedClick
+                    subtitle = if (!uiState.isDefaultSmsApp) "Requires default SMS app" else null,
+                    onClick = onBlockedClick,
+                    enabled = uiState.isDefaultSmsApp,
+                    onDisabledClick = {
+                        showDisabledSnackbar(
+                            message = "Set as default SMS app to manage blocked contacts",
+                            actionLabel = "SMS Settings",
+                            onAction = onSmsSettingsClick
+                        )
+                    }
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

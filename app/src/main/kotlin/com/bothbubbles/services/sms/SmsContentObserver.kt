@@ -16,6 +16,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -41,6 +42,8 @@ class SmsContentObserver @Inject constructor(
     private val notificationService: NotificationService,
     private val activeConversationManager: ActiveConversationManager,
     private val androidContactsService: AndroidContactsService,
+    private val soundManager: SoundManager,
+    private val smsPermissionHelper: SmsPermissionHelper,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -197,7 +200,13 @@ class SmsContentObserver @Inject constructor(
                             Timber.i("Chat $chatGuid is snoozed, skipping SMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
                             // Check if user is currently viewing this conversation
-                            Timber.i("Chat $chatGuid is currently active, skipping SMS notification")
+                            // Only play sound if we're NOT the default SMS app (when default, SmsBroadcastReceiver handles it)
+                            if (!smsPermissionHelper.isDefaultSmsApp()) {
+                                Timber.i("Chat $chatGuid is currently active, playing in-app sound and skipping SMS notification")
+                                soundManager.playReceiveSound(chatGuid)
+                            } else {
+                                Timber.i("Chat $chatGuid is currently active, skipping SMS notification (broadcast receiver handled sound)")
+                            }
                         } else {
                             // Resolve sender name and avatar from contacts
                             val senderName = androidContactsService.getContactDisplayName(address)
@@ -332,7 +341,13 @@ class SmsContentObserver @Inject constructor(
                             Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
                             // Check if user is currently viewing this conversation
-                            Timber.i("Chat $chatGuid is currently active, skipping MMS notification")
+                            // Only play sound if we're NOT the default SMS app (when default, MmsBroadcastReceiver handles it)
+                            if (!smsPermissionHelper.isDefaultSmsApp()) {
+                                Timber.i("Chat $chatGuid is currently active, playing in-app sound and skipping MMS notification")
+                                soundManager.playReceiveSound(chatGuid)
+                            } else {
+                                Timber.i("Chat $chatGuid is currently active, skipping MMS notification (broadcast receiver handled sound)")
+                            }
                         } else {
                             // Resolve sender name and avatar from contacts
                             val senderName = androidContactsService.getContactDisplayName(primaryAddress)

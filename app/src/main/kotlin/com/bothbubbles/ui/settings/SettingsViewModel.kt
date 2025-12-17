@@ -45,7 +45,7 @@ class SettingsViewModel @Inject constructor(
         observeDeveloperMode()
         observeSmsEnabled()
         observeLinkPreviews()
-        checkSmsCapability()
+        refreshSmsCapability()
     }
 
     private fun observeSmsEnabled() {
@@ -56,9 +56,18 @@ class SettingsViewModel @Inject constructor(
         }
     }
 
-    private fun checkSmsCapability() {
+    /**
+     * Refresh SMS capability status. Called on screen resume to ensure
+     * up-to-date status after returning from SMS settings.
+     */
+    fun refreshSmsCapability() {
         val status = smsPermissionHelper.getSmsCapabilityStatus()
-        _uiState.update { it.copy(isSmsFullyFunctional = status.isFullyFunctional) }
+        _uiState.update {
+            it.copy(
+                isSmsFullyFunctional = status.isFullyFunctional,
+                isDefaultSmsApp = status.isDefaultSmsApp
+            )
+        }
     }
 
     private fun observeAppTitleSetting() {
@@ -314,6 +323,7 @@ data class SettingsUiState(
     // SMS state
     val smsEnabled: Boolean = false,
     val isSmsFullyFunctional: Boolean = false,
+    val isDefaultSmsApp: Boolean = false,
     // Developer mode
     val developerModeEnabled: Boolean = false,
     // Link previews

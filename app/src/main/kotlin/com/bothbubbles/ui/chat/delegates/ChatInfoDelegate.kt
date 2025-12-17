@@ -11,7 +11,6 @@ import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.util.toStable
-import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
@@ -85,7 +84,7 @@ class ChatInfoDelegate @AssistedInject constructor(
             ) { chat, participants -> chat to participants }
                 .collect { (chat, participants) ->
                     chat?.let {
-                        val chatTitle = resolveChatTitle(it, participants)
+                        val chatTitle = chatRepository.resolveChatTitle(it, participants)
 
                         // Load Discord channel ID for non-group chats
                         val discordChannelId = if (!it.isGroup) {
@@ -199,26 +198,6 @@ class ChatInfoDelegate @AssistedInject constructor(
         }
     }
 
-    /**
-     * Resolve the display name for a chat, using consistent logic with the conversation list.
-     * For 1:1 chats: prefer participant's displayName (from contacts or inferred)
-     * For group chats: use chat displayName or generate from participant names
-     */
-    private fun resolveChatTitle(chat: ChatEntity, participants: List<HandleEntity>): String {
-        // For group chats: use explicit group name or generate from participants
-        if (chat.isGroup) {
-            return chat.displayName?.takeIf { it.isNotBlank() }
-                ?: participants.take(3).joinToString(", ") { it.displayName }
-                    .let { names -> if (participants.size > 3) "$names +${participants.size - 3}" else names }
-                    .ifEmpty { PhoneNumberFormatter.format(chat.chatIdentifier ?: "") }
-        }
-
-        // For 1:1 chats: prefer participant's displayName (handles contact lookup, inferred names)
-        val primaryParticipant = participants.firstOrNull()
-        return primaryParticipant?.displayName
-            ?: chat.displayName?.takeIf { it.isNotBlank() }
-            ?: PhoneNumberFormatter.format(chat.chatIdentifier ?: primaryParticipant?.address ?: "")
-    }
 
     /**
      * Check if a string looks like a phone number or email address (not a contact name)

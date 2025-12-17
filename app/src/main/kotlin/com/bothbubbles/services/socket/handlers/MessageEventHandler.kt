@@ -304,6 +304,7 @@ class MessageEventHandler @Inject constructor(
 
             // Look up local handle entity for cached contact info
             val localHandle = handleDao.getHandlesByAddress(address).firstOrNull()
+
             if (localHandle?.cachedDisplayName != null) {
                 return localHandle.cachedDisplayName to localHandle.cachedAvatarPath
             }

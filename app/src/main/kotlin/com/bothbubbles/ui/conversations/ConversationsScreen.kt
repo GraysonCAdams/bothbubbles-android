@@ -185,13 +185,6 @@ fun ConversationsScreen(
         viewModel.saveSearchActive(isSearchActive)
     }
 
-    // Pull-to-search state
-    val pullToSearchState = rememberPullToSearchState(
-        listState = listState,
-        isSearchActive = isSearchActive,
-        onSearchActivated = { isSearchActive = true }
-    )
-
     // Scroll-to-top button visibility - show when scrolled past first item
     val showScrollToTop by remember {
         derivedStateOf {
@@ -426,7 +419,6 @@ fun ConversationsScreen(
                 selectedConversations = selectedConversations,
                 isSelectionMode = isSelectionMode,
                 listState = listState,
-                pullToSearchState = pullToSearchState,
                 bannerPadding = bannerPadding,
                 onConversationClick = onConversationClick,
                 onConversationLongClick = { guid ->

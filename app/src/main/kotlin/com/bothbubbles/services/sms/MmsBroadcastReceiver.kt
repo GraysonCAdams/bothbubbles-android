@@ -18,6 +18,7 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.EntryPoint
@@ -103,6 +104,9 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var activeConversationManager: ActiveConversationManager
+
+    @Inject
+    lateinit var soundManager: SoundManager
 
     override fun onReceive(context: Context, intent: Intent) {
         // Only handle MMS when we are the default SMS app
@@ -229,7 +233,8 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
             } else if (activeConversationManager.isConversationActive(chatGuid)) {
                 // Check if user is currently viewing this conversation
-                Timber.i("Chat $chatGuid is currently active, skipping MMS notification")
+                Timber.i("Chat $chatGuid is currently active, playing in-app sound and skipping MMS notification")
+                soundManager.playReceiveSound(chatGuid)
             } else {
                 val notificationText = notification.subject?.takeIf { it.isNotBlank() }
                     ?: "Incoming MMS"

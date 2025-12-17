@@ -2,7 +2,6 @@ package com.bothbubbles.ui.conversations.components
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -12,7 +11,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
@@ -44,8 +41,6 @@ import com.bothbubbles.ui.conversations.EmptyCategoryState
 import com.bothbubbles.ui.conversations.EmptyConversationsState
 import com.bothbubbles.ui.conversations.EmptyFilterState
 import com.bothbubbles.ui.conversations.PinnedDragOverlay
-import com.bothbubbles.ui.conversations.PullToSearchIndicator
-import com.bothbubbles.ui.conversations.PullToSearchState
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 
 /**
@@ -70,7 +65,6 @@ fun ConversationMainContent(
     selectedConversations: Set<String>,
     isSelectionMode: Boolean,
     listState: LazyListState,
-    pullToSearchState: PullToSearchState,
     bannerPadding: Dp,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
     onConversationLongClick: (guid: String) -> Unit,
@@ -163,13 +157,6 @@ fun ConversationMainContent(
                             .sortedWith(compareBy<ConversationUiModel> { it.pinIndex }.thenByDescending { it.lastMessageTimestamp })
                         val regularConversations = filteredConversations.filter { !it.isPinned }
 
-                        // Animated pull indicator offset
-                        val animatedPullOffset by animateFloatAsState(
-                            targetValue = pullToSearchState.pullOffset,
-                            label = "pullOffset"
-                        )
-                        val pullThreshold = with(density) { 80.dp.toPx() }
-
                         // State for dragged pin overlay
                         var draggedPinConversation by remember { mutableStateOf<ConversationUiModel?>(null) }
                         var draggedPinStartPosition by remember { mutableStateOf(Offset.Zero) }
@@ -186,20 +173,8 @@ fun ConversationMainContent(
                                 }
                         ) {
                             Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .nestedScroll(pullToSearchState.nestedScrollConnection)
+                                modifier = Modifier.fillMaxSize()
                             ) {
-                                // Pull-to-search indicator
-                                if (animatedPullOffset > 0) {
-                                    PullToSearchIndicator(
-                                        progress = (animatedPullOffset / pullThreshold).coerceIn(0f, 1f),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .height(with(density) { animatedPullOffset.toDp() })
-                                    )
-                                }
-
                                 // Main conversation list
                                 ConversationsList(
                                     pinnedConversations = pinnedConversations,

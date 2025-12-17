@@ -8,6 +8,8 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.core.network.api.BothBubblesApi
 import kotlinx.coroutines.flow.Flow
 import javax.inject.Inject
@@ -120,6 +122,33 @@ class ChatRepository @Inject constructor(
      */
     fun getBestParticipant(participants: List<HandleEntity>): HandleEntity? =
         participantOps.getBestParticipant(participants)
+
+    /**
+     * Resolve the display title for a chat using consistent logic.
+     *
+     * For group chats: use explicit group name or generate from participant names
+     * For 1:1 chats: prefer participant's displayName (from contacts or inferred),
+     *                fallback to chat displayName, then formatted identifier
+     *
+     * @param chat The chat entity
+     * @param participants The list of participants in the chat
+     * @return The resolved display title
+     */
+    fun resolveChatTitle(chat: ChatEntity, participants: List<HandleEntity>): String {
+        // For group chats: use explicit group name or generate from participants
+        if (chat.isGroup) {
+            return chat.displayName?.takeIf { it.isNotBlank() }
+                ?: participants.take(3).joinToString(", ") { it.displayName }
+                    .let { names -> if (participants.size > 3) "$names +${participants.size - 3}" else names }
+                    .ifEmpty { PhoneNumberFormatter.format(chat.chatIdentifier ?: "") }
+        }
+
+        // For 1:1 chats: prefer participant's displayName (handles contact lookup, inferred names)
+        val primaryParticipant = participants.firstOrNull()
+        return primaryParticipant?.displayName
+            ?: chat.displayName?.takeIf { it.isNotBlank() }
+            ?: PhoneNumberFormatter.format(chat.chatIdentifier ?: primaryParticipant?.address ?: "")
+    }
 
     /**
      * Get the first participant's phone number/address for a chat.

@@ -9,6 +9,7 @@ import android.content.pm.PackageManager
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.os.Build
+import android.provider.BlockedNumberContract
 import android.provider.Telephony
 import androidx.activity.result.ActivityResultLauncher
 import androidx.core.content.ContextCompat
@@ -208,6 +209,18 @@ class SmsPermissionHelper @Inject constructor(
             missingPermissions = getMissingSmsPermissions(),
             hasCellularConnectivity = hasCellularConnectivity()
         )
+    }
+
+    /**
+     * Check if the current user can block numbers using BlockedNumberContract.
+     * Requires being the default SMS app.
+     */
+    fun canBlockNumbers(): Boolean {
+        return try {
+            BlockedNumberContract.canCurrentUserBlockNumbers(context)
+        } catch (e: Exception) {
+            false
+        }
     }
 }
 

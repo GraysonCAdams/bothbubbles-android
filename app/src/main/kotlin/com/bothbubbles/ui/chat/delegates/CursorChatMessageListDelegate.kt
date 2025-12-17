@@ -554,7 +554,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
     /**
      * Load more (older) messages.
-     * Increases queryLimit and fetches from server if needed.
+     * Increases queryLimit and fetches from server (or imports SMS) if needed.
      */
     fun loadMore() {
         if (!isLoadingMore.compareAndSet(false, true)) {
@@ -577,7 +577,28 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                     return@launch
                 }
 
-                // Need to fetch from server
+                // For local SMS chats, import more from device SMS database
+                if (messageRepository.isLocalSmsChat(chatGuid)) {
+                    val result = smsRepository.importMessagesForChat(chatGuid, limit = PAGE_SIZE)
+                    result.fold(
+                        onSuccess = { count ->
+                            _hasMoreMessages.value = count >= PAGE_SIZE
+                            _loadError.value = null
+                            Timber.tag(TAG).d("Imported $count SMS messages")
+                        },
+                        onFailure = { e ->
+                            // Don't show error for permission denial - just mark no more messages
+                            val isPermissionError = e.message?.contains("Permission Denial", ignoreCase = true) == true
+                            if (!isPermissionError) {
+                                Timber.tag(TAG).w("SMS import failed: ${e.message}")
+                            }
+                            _hasMoreMessages.value = false
+                        }
+                    )
+                    return@launch
+                }
+
+                // Need to fetch from server for iMessage chats
                 val oldestMessage = _messagesState.value.lastOrNull()
                 if (oldestMessage == null) {
                     _hasMoreMessages.value = false

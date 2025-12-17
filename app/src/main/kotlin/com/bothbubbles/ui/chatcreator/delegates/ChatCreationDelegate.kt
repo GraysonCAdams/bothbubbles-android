@@ -72,19 +72,16 @@ class ChatCreationDelegate @Inject constructor(
             // Determine if this is iMessage or local messaging (SMS/RCS/MMS)
             val isIMessage = service.equals("iMessage", ignoreCase = true)
 
-            // Check all possible GUID variants for this address
+            // Check ALL possible GUID variants for this address, regardless of requested service
+            // A contact might have chats under different services (e.g., RCS chat but iMessage handle)
             // Server uses different prefixes: iMessage, SMS, RCS, MMS (case-sensitive)
-            val possibleGuids = if (isIMessage) {
-                listOf("iMessage;-;$normalizedAddress")
-            } else {
-                // For local messaging, check all variants (server uses uppercase)
-                listOf(
-                    "SMS;-;$normalizedAddress",
-                    "RCS;-;$normalizedAddress",
-                    "MMS;-;$normalizedAddress",
-                    "sms;-;$normalizedAddress"  // Lowercase fallback
-                )
-            }
+            val possibleGuids = listOf(
+                "iMessage;-;$normalizedAddress",
+                "SMS;-;$normalizedAddress",
+                "RCS;-;$normalizedAddress",
+                "MMS;-;$normalizedAddress",
+                "sms;-;$normalizedAddress"  // Lowercase fallback
+            )
 
             Timber.d("Looking for existing chats: $possibleGuids")
 

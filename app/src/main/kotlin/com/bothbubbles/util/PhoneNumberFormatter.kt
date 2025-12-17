@@ -60,12 +60,23 @@ object PhoneNumberFormatter {
             return phoneNumber
         }
 
+        // Skip formatting for Apple Business Chat URNs (urn:biz:...)
+        if (phoneNumber.startsWith("urn:biz:", ignoreCase = true)) {
+            return phoneNumber
+        }
+
         // Strip any service suffixes like (smsfp), (smsft), (smsft_fi), etc.
         val cleanedNumber = stripServiceSuffix(phoneNumber)
 
         // Skip if it's clearly not a phone number
         val digitsOnly = cleanedNumber.replace(Regex("[^0-9]"), "")
         if (digitsOnly.length < 7) {
+            return cleanedNumber
+        }
+
+        // Skip if too long - real phone numbers are at most 15 digits (ITU-T E.164 limit)
+        // Long numeric strings are likely RCS/MMS system identifiers, not phone numbers
+        if (digitsOnly.length > 15) {
             return cleanedNumber
         }
 

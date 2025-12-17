@@ -2,14 +2,12 @@ package com.bothbubbles.ui.chat.delegates
 
 import android.net.Uri
 import timber.log.Timber
-import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.GifRepository
-import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardExporter
@@ -80,7 +78,6 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val vCardExporter: VCardExporter,
     private val settingsDataStore: SettingsDataStore,
     private val smartReplyService: SmartReplyService,
-    private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
     private val socketConnection: SocketConnection,
     private val chatRepository: ChatRepository,
     @Assisted private val chatGuid: String,
@@ -186,13 +183,12 @@ class ChatComposerDelegate @AssistedInject constructor(
     // Combined state flow
     val state: StateFlow<ComposerState> = createComposerStateFlow()
 
-    // Smart reply suggestions
-    val smartReplySuggestions: StateFlow<List<SuggestionItem>> = combine(
-        _mlSuggestions,
-        quickReplyTemplateRepository.observeMostUsedTemplates(limit = 3)
-    ) { mlSuggestions, templates ->
-        getCombinedSuggestions(mlSuggestions, templates, maxTotal = 3)
-    }.stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
+    // Smart reply suggestions (ML Kit only - templates are for notifications)
+    val smartReplySuggestions: StateFlow<List<SuggestionItem>> = _mlSuggestions
+        .map { suggestions ->
+            suggestions.map { text -> SuggestionItem(text = text, isSmartSuggestion = true) }
+        }
+        .stateIn(scope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         // Observe quality settings
@@ -860,41 +856,4 @@ class ChatComposerDelegate @AssistedInject constructor(
         }
     }
 
-    /**
-     * Combine ML suggestions and user templates into max N suggestions.
-     * ML suggestions appear first (more contextual), user templates fill remaining slots.
-     */
-    private fun getCombinedSuggestions(
-        mlSuggestions: List<String>,
-        userTemplates: List<QuickReplyTemplateEntity>,
-        maxTotal: Int
-    ): List<SuggestionItem> {
-        val combined = mutableListOf<SuggestionItem>()
-
-        // Add ML suggestions first (most contextual)
-        mlSuggestions.take(maxTotal).forEach { text ->
-            combined.add(SuggestionItem(text = text, isSmartSuggestion = true))
-        }
-
-        // Fill remaining slots with user templates
-        val remaining = maxTotal - combined.size
-        userTemplates.take(remaining).forEach { template ->
-            combined.add(SuggestionItem(
-                text = template.title,
-                isSmartSuggestion = false,
-                templateId = template.id
-            ))
-        }
-
-        return combined
-    }
-
-    /**
-     * Record usage of a user template (for "most used" sorting).
-     */
-    fun recordTemplateUsage(templateId: Long) {
-        scope.launch {
-            quickReplyTemplateRepository.recordUsage(templateId)
-        }
-    }
 }
