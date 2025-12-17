@@ -7,6 +7,6 @@ plugins {
     alias(libs.plugins.kotlin.serialization) apply false
     alias(libs.plugins.hilt) apply false
     alias(libs.plugins.ksp) apply false
-    alias(libs.plugins.firebase.crashlytics) apply false
-    alias(libs.plugins.firebase.perf) apply false
+    // Note: Firebase Crashlytics/Performance plugins removed for privacy
+    // App uses local-only crash reporting with manual opt-in sharing
 }

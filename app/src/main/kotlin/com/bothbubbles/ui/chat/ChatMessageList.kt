@@ -1,6 +1,5 @@
 package com.bothbubbles.ui.chat
 
-import android.widget.Toast
 import timber.log.Timber
 import com.bothbubbles.BuildConfig
 import androidx.compose.animation.animateContentSize
@@ -8,30 +7,37 @@ import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.components.EmptyStateMessages
-import com.bothbubbles.ui.chat.components.EtaSharingBanner
-import com.bothbubbles.ui.chat.components.EtaStopSharingLink
-import com.bothbubbles.ui.chat.components.InlineSearchBar
 import com.bothbubbles.ui.chat.components.LoadingMoreIndicator
-import com.bothbubbles.ui.chat.components.SaveContactBanner
-import com.bothbubbles.ui.chat.components.SendModeHelperText
-import com.bothbubbles.ui.chat.components.SendingIndicatorBar
+import com.bothbubbles.ui.chat.components.MessageItemCallbacks
+import com.bothbubbles.ui.chat.components.MessageListBannerCallbacks
+import com.bothbubbles.ui.chat.components.MessageListBanners
+import com.bothbubbles.ui.chat.components.MessageListItem
+import com.bothbubbles.ui.chat.components.MessageListOverlayCallbacks
+import com.bothbubbles.ui.chat.components.MessageListOverlays
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
@@ -44,18 +50,10 @@ import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.components.common.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.MessageListSkeleton
 import com.bothbubbles.ui.components.common.SpamSafetyBanner
-import com.bothbubbles.ui.components.common.newMessageEntrance
-import com.bothbubbles.ui.components.message.DateSeparator
-import com.bothbubbles.ui.components.message.JumpToBottomIndicator
-import com.bothbubbles.ui.components.message.MessageBubble
-import com.bothbubbles.ui.components.message.MessageGroupPosition
-import com.bothbubbles.ui.components.message.MessageSpotlightOverlay
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.TypingIndicator
 import com.bothbubbles.ui.effects.MessageEffect
-import com.bothbubbles.ui.effects.bubble.BubbleEffectWrapper
-import com.bothbubbles.ui.modifiers.materialAttentionHighlight
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
@@ -352,54 +350,26 @@ fun ChatMessageList(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Inline search bar
-        InlineSearchBar(
-            visible = searchState.isActive,
-            query = searchState.query,
-            onQueryChange = { callbacks.onSearchQueryChange(it) },
-            onClose = callbacks.onCloseSearch,
-            onNavigateUp = callbacks.onNavigateSearchUp,
-            onNavigateDown = callbacks.onNavigateSearchDown,
-            currentMatch = if (searchState.matchIndices.isNotEmpty()) searchState.currentMatchIndex + 1 else 0,
-            totalMatches = searchState.matchIndices.size,
-            isSearchingDatabase = searchState.isSearchingDatabase,
-            databaseResultCount = searchState.databaseResults.size,
-            onViewAllClick = callbacks.onViewAllSearchResults
-        )
-
-        // Sending indicator bar
-        SendingIndicatorBar(
-            isVisible = sendState.isSending,
-            isLocalSmsChat = chatInfoState.isLocalSmsChat || syncState.isInSmsFallbackMode,
-            hasAttachments = sendState.pendingMessages.any { it.hasAttachments },
-            progress = sendState.sendProgress,
-            pendingMessages = sendState.pendingMessages
-        )
-
-        // SMS fallback mode banner
-        SendModeHelperText(
-            visible = syncState.isInSmsFallbackMode && !chatInfoState.isLocalSmsChat,
-            fallbackReason = syncState.fallbackReason,
-            isServerConnected = syncState.isServerConnected,
-            showExitAction = chatInfoState.isIMessageChat,
-            onExitFallback = callbacks.onExitSmsFallback
-        )
-
-        // Save contact banner
-        SaveContactBanner(
-            visible = chatInfoState.showSaveContactBanner,
-            senderAddress = chatInfoState.unsavedSenderAddress ?: "",
-            inferredName = chatInfoState.inferredSenderName,
-            onAddContact = callbacks.onAddContact,
-            onReportSpam = callbacks.onReportSpam,
-            onDismiss = callbacks.onDismissSaveContactBanner
-        )
-
-        // ETA sharing banner
-        EtaSharingBanner(
-            etaState = etaSharingState,
-            onStartSharing = callbacks.onStartSharingEta,
-            onDismiss = callbacks.onDismissEtaBanner
+        // Banners section
+        MessageListBanners(
+            searchDelegate = searchDelegate,
+            sendDelegate = sendDelegate,
+            syncDelegate = syncDelegate,
+            etaSharingDelegate = etaSharingDelegate,
+            chatInfoState = chatInfoState,
+            callbacks = MessageListBannerCallbacks(
+                onSearchQueryChange = callbacks.onSearchQueryChange,
+                onCloseSearch = callbacks.onCloseSearch,
+                onNavigateSearchUp = callbacks.onNavigateSearchUp,
+                onNavigateSearchDown = callbacks.onNavigateSearchDown,
+                onViewAllSearchResults = callbacks.onViewAllSearchResults,
+                onExitSmsFallback = callbacks.onExitSmsFallback,
+                onAddContact = callbacks.onAddContact,
+                onReportSpam = callbacks.onReportSpam,
+                onDismissSaveContactBanner = callbacks.onDismissSaveContactBanner,
+                onStartSharingEta = callbacks.onStartSharingEta,
+                onDismissEtaBanner = callbacks.onDismissEtaBanner
+            )
         )
 
         // Delayed loading indicator
@@ -539,193 +509,43 @@ fun ChatMessageList(
                                 }
                             }
                         ) { index, message ->
-                            val canTapback = !message.text.isNullOrBlank() &&
-                                message.isServerOrigin &&
-                                isServerConnected &&
-                                !message.guid.startsWith("temp") &&
-                                !message.guid.startsWith("error") &&
-                                !message.hasError
-
-                            val isSearchMatch = searchState.isActive && index in searchState.matchIndices
-                            val isCurrentSearchMatch = searchState.isActive &&
-                                searchState.currentMatchIndex >= 0 &&
-                                searchState.matchIndices.getOrNull(searchState.currentMatchIndex) == index
-
-                            val nextVisibleMessage = nextVisibleMessageMap[index]
-                            val showTimeSeparator = !message.isReaction && (nextVisibleMessage?.let {
-                                shouldShowTimeSeparator(message.dateCreated, it.dateCreated)
-                            } ?: true)
-
-                            val groupPosition = calculateGroupPosition(
-                                messages = messages,
+                            MessageListItem(
+                                message = message,
                                 index = index,
-                                message = message
+                                messages = messages,
+                                chatScreenState = chatScreenState,
+                                chatInfoState = chatInfoState,
+                                searchDelegate = searchDelegate,
+                                attachmentDelegate = attachmentDelegate,
+                                etaSharingDelegate = etaSharingDelegate,
+                                effectsDelegate = effectsDelegate,
+                                highlightedMessageGuid = highlightedMessageGuid,
+                                isServerConnected = isServerConnected,
+                                initialLoadComplete = initialLoadComplete,
+                                nextVisibleMessage = nextVisibleMessageMap[index],
+                                lastOutgoingIndex = lastOutgoingIndex,
+                                latestEtaMessageIndex = latestEtaMessageIndex,
+                                showSenderName = showSenderNameMap[index] ?: false,
+                                showAvatar = showAvatarMap[index] ?: false,
+                                selectedMessageForTapback = selectedMessageForTapback,
+                                selectedMessageForRetry = selectedMessageForRetry,
+                                swipingMessageGuid = swipingMessageGuid,
+                                onSelectMessageForTapback = onSelectMessageForTapback,
+                                onSelectMessageForRetry = onSelectMessageForRetry,
+                                onCanRetrySmsUpdate = onCanRetrySmsUpdate,
+                                onSwipingMessageChange = onSwipingMessageChange,
+                                onSelectedBoundsChange = onSelectedBoundsChange,
+                                callbacks = MessageItemCallbacks(
+                                    onMediaClick = callbacks.onMediaClick,
+                                    onSetReplyTo = callbacks.onSetReplyTo,
+                                    onLoadThread = callbacks.onLoadThread,
+                                    onCanRetryAsSms = callbacks.onCanRetryAsSms,
+                                    onBubbleEffectCompleted = callbacks.onBubbleEffectCompleted,
+                                    onClearHighlight = callbacks.onClearHighlight,
+                                    onDownloadAttachment = callbacks.onDownloadAttachment,
+                                    onStopSharingEta = callbacks.onStopSharingEta
+                                )
                             )
-
-                            val showDeliveryIndicator = message.isFromMe && index == lastOutgoingIndex
-
-                            val topPadding = when {
-                                message.isPlacedSticker -> 0.dp
-                                groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
-                                else -> 2.dp
-                            }
-                            val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
-
-                            val showSenderName = showSenderNameMap[index] ?: false
-                            val showAvatar = showAvatarMap[index] ?: false
-
-                            val targetGuid = message.associatedMessageGuid?.let { guid ->
-                                if (guid.contains("/")) guid.substringAfter("/") else guid
-                            }
-                            val isStickerTargetInteracting = message.isPlacedSticker && (
-                                selectedMessageForTapback?.guid == targetGuid ||
-                                swipingMessageGuid == targetGuid
-                            )
-                            val stickerFadeAlpha = if (isStickerTargetInteracting) 0f else 1f
-
-                            val isHighlighted = highlightedMessageGuid == message.guid
-
-                            val isAlreadyAnimated = remember(message.guid) {
-                                chatScreenState.isMessageAnimated(message.guid)
-                            }
-                            val shouldAnimateEntrance = initialLoadComplete && !isAlreadyAnimated
-
-                            if (shouldAnimateEntrance) {
-                                LaunchedEffect(message.guid) {
-                                    delay(16)
-                                    chatScreenState.markMessageAnimated(message.guid)
-                                }
-                            }
-
-                            Column(
-                                modifier = Modifier
-                                    .zIndex(if (message.isPlacedSticker) 1f else 0f)
-                                    .alpha(stickerFadeAlpha)
-                                    .offset(y = stickerOverlapOffset)
-                                    .padding(top = topPadding)
-                                    .newMessageEntrance(
-                                        shouldAnimate = shouldAnimateEntrance,
-                                        isFromMe = message.isFromMe
-                                    )
-                                    .animateItem(
-                                        fadeInSpec = null,
-                                        fadeOutSpec = null,
-                                        placementSpec = snap()
-                                    )
-                                    .materialAttentionHighlight(
-                                        shouldHighlight = isHighlighted,
-                                        onHighlightFinished = { callbacks.onClearHighlight() }
-                                    )
-                            ) {
-                                if (showTimeSeparator) {
-                                    DateSeparator(
-                                        date = formatTimeSeparator(message.dateCreated)
-                                    )
-                                }
-
-                                if (showSenderName) {
-                                    Text(
-                                        text = message.senderName!!,
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        modifier = Modifier.padding(start = 52.dp, bottom = 2.dp)
-                                    )
-                                }
-
-                                Box {
-                                    val bubbleEffect = remember(message.expressiveSendStyleId) {
-                                        MessageEffect.fromStyleId(message.expressiveSendStyleId) as? MessageEffect.Bubble
-                                    }
-
-                                    val shouldAnimateBubble = bubbleEffect != null &&
-                                        autoPlayEffects && !reduceMotion &&
-                                        (!message.effectPlayed || replayEffectsOnScroll)
-
-                                    val hasMedia = remember(message.attachments) {
-                                        message.attachments.any { it.isImage || it.isVideo }
-                                    }
-
-                                    val isInvisibleInkRevealed = chatScreenState.isInvisibleInkRevealed(message.guid)
-                                    val isInvisibleInk = bubbleEffect == MessageEffect.Bubble.InvisibleInk
-
-                                    BubbleEffectWrapper(
-                                        effect = bubbleEffect,
-                                        isNewMessage = shouldAnimateBubble,
-                                        isFromMe = message.isFromMe,
-                                        onEffectComplete = { callbacks.onBubbleEffectCompleted(message.guid) },
-                                        isInvisibleInkRevealed = isInvisibleInkRevealed,
-                                        onInvisibleInkRevealChanged = { revealed ->
-                                            chatScreenState.toggleInvisibleInk(message.guid, revealed)
-                                        },
-                                        hasMedia = hasMedia,
-                                        onMediaClickBlocked = {}
-                                    ) {
-                                        MessageBubble(
-                                            message = message,
-                                            onLongPress = {
-                                                if (message.isPlacedSticker) return@MessageBubble
-
-                                                if (message.hasError && message.isFromMe) {
-                                                    onSelectMessageForRetry(message)
-                                                    retryMenuScope.launch {
-                                                        val canRetry = callbacks.onCanRetryAsSms(message.guid)
-                                                        onCanRetrySmsUpdate(canRetry)
-                                                    }
-                                                } else if (canTapback) {
-                                                    onSelectMessageForTapback(message)
-                                                }
-                                            },
-                                            onMediaClick = if (isInvisibleInk && hasMedia && !isInvisibleInkRevealed) {
-                                                { _ -> }
-                                            } else {
-                                                callbacks.onMediaClick
-                                            },
-                                            groupPosition = groupPosition,
-                                            searchQuery = if (searchState.isActive) searchState.query else null,
-                                            isCurrentSearchMatch = isCurrentSearchMatch,
-                                            // Wave 2: Conditionally pass download callback based on internally collected autoDownloadEnabled
-                                            onDownloadClick = if (!autoDownloadEnabled) callbacks.onDownloadAttachment else null,
-                                            attachmentDelegate = attachmentDelegate,
-                                            showDeliveryIndicator = showDeliveryIndicator,
-                                            onReply = if (message.isPlacedSticker) null else { guid ->
-                                                callbacks.onSetReplyTo(guid)
-                                            },
-                                            onReplyIndicatorClick = { originGuid ->
-                                                callbacks.onLoadThread(originGuid)
-                                            },
-                                            onSwipeStateChanged = { isSwiping ->
-                                                onSwipingMessageChange(if (isSwiping) message.guid else null)
-                                            },
-                                            onRetry = { guid ->
-                                                onSelectMessageForRetry(message)
-                                                retryMenuScope.launch {
-                                                    val canRetry = callbacks.onCanRetryAsSms(guid)
-                                                    onCanRetrySmsUpdate(canRetry)
-                                                }
-                                            },
-                                            isGroupChat = chatInfoState.isGroup,
-                                            showAvatar = showAvatar,
-                                            onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->
-                                                onSelectedBoundsChange(bounds)
-                                            } else null
-                                        )
-                                    }
-                                }
-
-                                // ETA stop sharing link
-                                if (etaSharingState.isCurrentlySharing && index == latestEtaMessageIndex) {
-                                    Box(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        contentAlignment = Alignment.CenterEnd
-                                    ) {
-                                        EtaStopSharingLink(
-                                            isVisible = true,
-                                            onStopSharing = callbacks.onStopSharingEta,
-                                            modifier = Modifier.padding(end = 16.dp)
-                                        )
-                                    }
-                                }
-                            }
                         }
 
                         // Loading more indicator
@@ -763,70 +583,24 @@ fun ChatMessageList(
                         }
                     }
 
-                    // Jump to bottom indicator
-                    JumpToBottomIndicator(
-                        visible = isScrolledAwayFromBottom,
-                        newMessageCount = newMessageCountWhileAway,
-                        onClick = {
-                            scrollScope.launch {
-                                listState.animateScrollToItem(0)
-                                newMessageCountWhileAway = 0
-                            }
-                        },
-                        modifier = Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(bottom = 16.dp)
-                    )
-
-                    // Message Spotlight Overlay
-                    MessageSpotlightOverlay(
-                        visible = selectedMessageForTapback != null && selectedMessageBounds != null,
-                        anchorBounds = selectedMessageBounds,
-                        isFromMe = selectedMessageForTapback?.isFromMe == true,
+                    // Overlays (jump to bottom + message spotlight)
+                    MessageListOverlays(
+                        listState = listState,
+                        isScrolledAwayFromBottom = isScrolledAwayFromBottom,
+                        newMessageCountWhileAway = newMessageCountWhileAway,
+                        onResetNewMessageCount = { newMessageCountWhileAway = 0 },
+                        selectedMessageForTapback = selectedMessageForTapback,
+                        selectedMessageBounds = selectedMessageBounds,
+                        isServerConnected = isServerConnected,
                         composerHeight = composerHeightPxProvider(),
-                        myReactions = selectedMessageForTapback?.myReactions ?: emptySet(),
-                        canReply = selectedMessageForTapback?.isServerOrigin == true,
-                        canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),
-                        canForward = true,
-                        showReactions = selectedMessageForTapback?.isServerOrigin == true && isServerConnected,
-                        onDismiss = {
-                            onSelectMessageForTapback(null)
-                            onSelectedBoundsChange(null)
-                        },
-                        onReactionSelected = { tapback ->
-                            selectedMessageForTapback?.let { message ->
-                                callbacks.onToggleReaction(message.guid, tapback)
-                            }
-                        },
-                        onReply = {
-                            selectedMessageForTapback?.let { message ->
-                                callbacks.onSetReplyTo(message.guid)
-                            }
-                        },
-                        onCopy = {
-                            selectedMessageForTapback?.text?.let { text ->
-                                val clipboardManager = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                                clipboardManager.setPrimaryClip(android.content.ClipData.newPlainText("Message", text))
-                                Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onForward = {
-                            selectedMessageForTapback?.let { message ->
-                                callbacks.onForwardRequest(message)
-                            }
-                        }
-                    ) {
-                        selectedMessageForTapback?.let { message ->
-                            MessageBubble(
-                                message = message,
-                                onLongPress = {},
-                                onMediaClick = {},
-                                groupPosition = MessageGroupPosition.SINGLE,
-                                showDeliveryIndicator = false,
-                                onBoundsChanged = null
-                            )
-                        }
-                    }
+                        onSelectMessageForTapback = onSelectMessageForTapback,
+                        onSelectedBoundsChange = onSelectedBoundsChange,
+                        callbacks = MessageListOverlayCallbacks(
+                            onToggleReaction = callbacks.onToggleReaction,
+                            onSetReplyTo = callbacks.onSetReplyTo,
+                            onForwardRequest = callbacks.onForwardRequest
+                        )
+                    )
                 }
             }
         }

@@ -156,4 +156,11 @@
     <string name="tutorial_send_mode_step2_description">Swipe up or down to toggle modes anytime</string>
     <string name="tutorial_send_mode_hint_swipe_up">Swipe up or down to switch</string>
     <string name="tutorial_send_mode_hint_swipe_back">Now swipe back</string>
+
+    <!-- Crash Reporting (ACRA - Privacy-First) -->
+    <string name="crash_dialog_title">BothBubbles Crashed</string>
+    <string name="crash_dialog_text">We\'re sorry, but the app has crashed. Would you like to send a crash report to help us fix this issue?\n\nNo data is sent automatically. If you choose to send, your email app will open with the report attached.</string>
+    <string name="crash_dialog_comment">Add any details about what you were doing (optional):</string>
+    <string name="crash_email_subject">BothBubbles Crash Report</string>
+    <string name="crash_email_body">Please describe what you were doing when the crash occurred:\n\n</string>
 </resources>

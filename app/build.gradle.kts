@@ -5,8 +5,8 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.hilt)
     alias(libs.plugins.ksp)
-    alias(libs.plugins.firebase.crashlytics)
-    alias(libs.plugins.firebase.perf)
+    // Note: Firebase Crashlytics/Analytics/Performance removed for privacy
+    // Using local-only crash reporting with manual opt-in sharing
 }
 
 android {
@@ -164,12 +164,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
-    // Firebase
+    // Firebase (only messaging for push notifications - no tracking/analytics)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
-    implementation(libs.firebase.crashlytics)
-    implementation(libs.firebase.analytics)
-    implementation(libs.firebase.perf)
 
     // Google Play Services
     implementation(libs.play.services.location)
@@ -186,6 +183,11 @@ dependencies {
 
     // LeakCanary (debug only)
     debugImplementation(libs.leakcanary)
+
+    // ACRA - Local crash reporting with manual opt-in sharing (no automatic data collection)
+    implementation(libs.acra.core)
+    implementation(libs.acra.dialog)
+    implementation(libs.acra.mail)
 
     // Testing
     testImplementation(libs.junit)

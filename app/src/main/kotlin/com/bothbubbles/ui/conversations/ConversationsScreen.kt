@@ -2,47 +2,22 @@ package com.bothbubbles.ui.conversations
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Message
-import androidx.compose.material.icons.filled.Archive
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Error
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExtendedFloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -60,27 +35,25 @@ import kotlinx.coroutines.launch
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.services.categorization.MessageCategory
-import com.bothbubbles.ui.components.common.ConnectionBannerState
-import com.bothbubbles.ui.components.common.ConnectionStatusBanner
-import com.bothbubbles.ui.components.common.ConversationListSkeleton
-import com.bothbubbles.ui.components.common.SmsBannerState
-import com.bothbubbles.ui.components.common.SmsStatusBanner
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.dialogs.SnoozeDurationDialog
 import com.bothbubbles.ui.components.conversation.SwipeActionType
+import com.bothbubbles.ui.conversations.components.BatchActionConfirmationDialog
+import com.bothbubbles.ui.conversations.components.ConversationFab
+import com.bothbubbles.ui.conversations.components.ConversationMainContent
+import com.bothbubbles.ui.conversations.components.ConversationStatusBanners
+import com.bothbubbles.ui.conversations.components.ConversationTopBarWrapper
+import com.bothbubbles.ui.conversations.components.CorruptionDetectedDialog
+import com.bothbubbles.ui.conversations.components.ScrollToTopButton
+import com.bothbubbles.ui.conversations.components.SwipeActionConfirmationDialog
 import com.bothbubbles.ui.settings.SettingsPanel
 
 
@@ -413,233 +386,56 @@ fun ConversationsScreen(
                 }
             },
             floatingActionButton = {
-                // Calculate bottom padding based on unified progress bar visibility
-                // Single bar is ~80dp (or ~168dp when expanded), animate the offset so FAB stays above
-                val showProgressBar = uiState.unifiedSyncProgress != null && !isSearchActive
-                val isExpanded = uiState.unifiedSyncProgress?.isExpanded == true
-                val stageCount = uiState.unifiedSyncProgress?.stages?.size ?: 0
-                val progressBarHeight = if (isExpanded && stageCount > 1) {
-                    80.dp + (32.dp * stageCount) // Base + per-stage rows
-                } else {
-                    80.dp
-                }
-                val fabBottomPadding by animateDpAsState(
-                    targetValue = if (showProgressBar) progressBarHeight else 0.dp,
-                    animationSpec = tween(durationMillis = 300),
-                    label = "fabPadding"
-                )
-
-                // MD3 Extended FAB with animated expansion
-                // Uses standard MD3 shape (16dp corner radius) and elevation
-                // The `expanded` parameter animates the text label with a slide transition
-                ExtendedFloatingActionButton(
+                ConversationFab(
                     onClick = onNewMessageClick,
-                    expanded = isFabExpanded,
-                    modifier = Modifier.padding(bottom = fabBottomPadding),
-                    icon = {
-                        Icon(
-                            Icons.AutoMirrored.Filled.Message,
-                            contentDescription = "Start chat"
-                        )
-                    },
-                    text = {
-                        Text(
-                            text = "Start chat",
-                            style = MaterialTheme.typography.labelLarge
-                        )
-                    },
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                    isExpanded = isFabExpanded,
+                    unifiedSyncProgress = uiState.unifiedSyncProgress,
+                    isSearchActive = isSearchActive
                 )
             }
         ) { padding ->
-            // Rounded card shape for the conversation list - rounded at top, meets edges
-            val cardShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(top = padding.calculateTopPadding()),
-                shape = cardShape,
-                color = MaterialTheme.colorScheme.surface
-            ) {
-        // Determine screen state for animated transitions
-        val screenState = when {
-            uiState.isLoading -> ConversationScreenState.LOADING
-            uiState.conversations.isEmpty() -> ConversationScreenState.EMPTY
-            else -> ConversationScreenState.CONTENT
-        }
-
-        AnimatedContent(
-            targetState = screenState,
-            transitionSpec = {
-                fadeIn(tween(250)) togetherWith fadeOut(tween(200))
-            },
-            label = "conversationStateTransition"
-        ) { state ->
-            when (state) {
-                ConversationScreenState.LOADING -> {
-                    ConversationListSkeleton(
-                        count = 8,
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-                ConversationScreenState.EMPTY -> {
-                    EmptyConversationsState(
-                        modifier = Modifier.fillMaxSize(),
-                        isSearching = uiState.searchQuery.isNotBlank()
-                    )
-                }
-                ConversationScreenState.CONTENT -> {
-                // Apply conversation filter
-                // By default, hide spam conversations unless the SPAM filter is active
-                val filteredConversations = uiState.conversations.filter { conv ->
-                    // Apply status filter first
-                    val matchesStatus = when (conversationFilter) {
-                        ConversationFilter.ALL -> !conv.isSpam
-                        ConversationFilter.UNREAD -> !conv.isSpam && conv.unreadCount > 0
-                        ConversationFilter.SPAM -> conv.isSpam
-                        ConversationFilter.UNKNOWN_SENDERS -> !conv.isSpam && !conv.hasContact
-                        ConversationFilter.KNOWN_SENDERS -> !conv.isSpam && conv.hasContact
-                    }
-
-                    // Apply category filter if set
-                    val matchesCategory = categoryFilter?.let { category ->
-                        conv.category?.equals(category.name, ignoreCase = true) == true
-                    } ?: true
-
-                    matchesStatus && matchesCategory
-                }
-
-                // Show empty state if filter returns no results
-                val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
-                val showFilterEmptyState = filteredConversations.isEmpty() && hasActiveFilter
-
-                if (showFilterEmptyState) {
-                    if (categoryFilter != null) {
-                        EmptyCategoryState(
-                            category = categoryFilter!!,
-                            onClearFilter = {
-                                viewModel.setCategoryFilter(null)
-                            },
-                            modifier = Modifier.fillMaxSize()
-                        )
+            ConversationMainContent(
+                conversations = uiState.conversations,
+                isLoading = uiState.isLoading,
+                isLoadingMore = uiState.isLoadingMore,
+                searchQuery = uiState.searchQuery,
+                conversationFilter = conversationFilter,
+                categoryFilter = categoryFilter,
+                swipeConfig = uiState.swipeConfig,
+                selectedConversations = selectedConversations,
+                isSelectionMode = isSelectionMode,
+                listState = listState,
+                pullToSearchState = pullToSearchState,
+                bannerPadding = bannerPadding,
+                onConversationClick = onConversationClick,
+                onConversationLongClick = { guid ->
+                    selectedConversations = if (guid in selectedConversations) {
+                        selectedConversations - guid
                     } else {
-                        EmptyFilterState(
-                            filter = conversationFilter,
-                            onClearFilter = { viewModel.setConversationFilter("all") },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                        selectedConversations + guid
                     }
-                } else {
-                    val pinnedConversations = filteredConversations.filter { it.isPinned }
-                    val regularConversations = filteredConversations.filter { !it.isPinned }
-
-                    // Animated pull indicator offset
-                    val animatedPullOffset by animateFloatAsState(
-                        targetValue = pullToSearchState.pullOffset,
-                        label = "pullOffset"
-                    )
-                    val pullThreshold = with(density) { 80.dp.toPx() }
-
-                    // State for dragged pin overlay (renders on top of everything)
-                    var draggedPinConversation by remember { mutableStateOf<ConversationUiModel?>(null) }
-                    var draggedPinStartPosition by remember { mutableStateOf(Offset.Zero) }
-                    var draggedPinOffset by remember { mutableStateOf(Offset.Zero) }
-                    var isPinDragging by remember { mutableStateOf(false) }
-                    val unpinThresholdPx = with(density) { 60.dp.toPx() }
-                    // Track container position for correct overlay positioning
-                    var containerRootPosition by remember { mutableStateOf(Offset.Zero) }
-
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .onGloballyPositioned { coordinates ->
-                                containerRootPosition = coordinates.positionInRoot()
-                            }
-                    ) {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .nestedScroll(pullToSearchState.nestedScrollConnection)
-                        ) {
-                            // Pull-to-search indicator
-                            if (animatedPullOffset > 0) {
-                                PullToSearchIndicator(
-                                    progress = (animatedPullOffset / pullThreshold).coerceIn(0f, 1f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(with(density) { animatedPullOffset.toDp() })
-                                )
-                            }
-
-                            // Main conversation list
-                            ConversationsList(
-                                pinnedConversations = pinnedConversations,
-                                regularConversations = regularConversations,
-                                listState = listState,
-                                swipeConfig = uiState.swipeConfig,
-                                selectedConversations = selectedConversations,
-                                isSelectionMode = isSelectionMode,
-                                isLoadingMore = uiState.isLoadingMore,
-                                bottomPadding = bannerPadding,
-                                onConversationClick = onConversationClick,
-                                onConversationLongClick = { guid ->
-                                    selectedConversations = if (guid in selectedConversations) {
-                                        selectedConversations - guid
-                                    } else {
-                                        selectedConversations + guid
-                                    }
-                                },
-                                onAvatarClick = { contactInfo ->
-                                    quickActionsContact = contactInfo
-                                },
-                                onSwipeAction = { chatGuid, action ->
-                                    when (action) {
-                                        SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
-                                            pendingSwipeAction = chatGuid to action
-                                        }
-                                        else -> viewModel.handleSwipeAction(chatGuid, action)
-                                    }
-                                },
-                                onPinReorder = { reorderedGuids ->
-                                    viewModel.reorderPins(reorderedGuids)
-                                },
-                                onUnpin = { guid ->
-                                    viewModel.togglePin(guid)
-                                },
-                                onDragOverlayStart = { conversation, position ->
-                                    draggedPinConversation = conversation
-                                    draggedPinStartPosition = position
-                                    draggedPinOffset = Offset.Zero
-                                    isPinDragging = true
-                                },
-                                onDragOverlayMove = { offset ->
-                                    draggedPinOffset = offset
-                                },
-                                onDragOverlayEnd = {
-                                    isPinDragging = false
-                                    draggedPinConversation = null
-                                    draggedPinOffset = Offset.Zero
-                                }
-                            )
+                },
+                onAvatarClick = { contactInfo ->
+                    quickActionsContact = contactInfo
+                },
+                onSwipeAction = { chatGuid, action ->
+                    when (action) {
+                        SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
+                            pendingSwipeAction = chatGuid to action
                         }
-
-                        // Drag overlay - renders dragged pin on top of everything
-                        PinnedDragOverlay(
-                            conversation = draggedPinConversation,
-                            isDragging = isPinDragging,
-                            startPosition = draggedPinStartPosition,
-                            dragOffset = draggedPinOffset,
-                            containerRootPosition = containerRootPosition,
-                            unpinThresholdPx = unpinThresholdPx
-                        )
+                        else -> viewModel.handleSwipeAction(chatGuid, action)
                     }
-                } // End of else (showFilterEmptyState)
-                } // End of CONTENT state
-            } // End of when
-        } // End of AnimatedContent
-        } // End of Surface
+                },
+                onPinReorder = { reorderedGuids ->
+                    viewModel.reorderPins(reorderedGuids)
+                },
+                onUnpin = { guid ->
+                    viewModel.togglePin(guid)
+                },
+                onClearConversationFilter = { viewModel.setConversationFilter("all") },
+                onClearCategoryFilter = { viewModel.setCategoryFilter(null) },
+                padding = padding
+            )
         } // End of Scaffold content
 
         // Full-screen search overlay
@@ -721,37 +517,11 @@ fun ConversationsScreen(
 
         // Corruption detected dialog - non-dismissable
         if (uiState.unifiedSyncProgress?.isCorrupted == true) {
-            AlertDialog(
-                onDismissRequest = { /* Not dismissable */ },
-                icon = {
-                    Icon(
-                        Icons.Default.Error,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error
-                    )
-                },
-                title = {
-                    Text("Data Issue Detected")
-                },
-                text = {
-                    Text(
-                        "The app encountered a data issue that cannot be automatically fixed. " +
-                        "To continue, the app data needs to be reset. Your messages on the server are safe."
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.resetAppData {
-                                // Navigate to setup
-                                onSettingsNavigate("setup", false)
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error
-                        )
-                    ) {
-                        Text("Reset App")
+            CorruptionDetectedDialog(
+                onResetAppData = {
+                    viewModel.resetAppData {
+                        // Navigate to setup
+                        onSettingsNavigate("setup", false)
                     }
                 }
             )
@@ -759,107 +529,31 @@ fun ConversationsScreen(
 
         // Swipe action confirmation dialog
         pendingSwipeAction?.let { (chatGuid, action) ->
-            val isDelete = action == SwipeActionType.DELETE
-            AlertDialog(
-                onDismissRequest = { pendingSwipeAction = null },
-                icon = {
-                    Icon(
-                        if (isDelete) Icons.Default.Delete else Icons.Default.Archive,
-                        contentDescription = null,
-                        tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
+            SwipeActionConfirmationDialog(
+                action = action,
+                onConfirm = {
+                    viewModel.handleSwipeAction(chatGuid, action)
+                    pendingSwipeAction = null
                 },
-                title = {
-                    Text(if (isDelete) "Delete Conversation?" else "Archive Conversation?")
-                },
-                text = {
-                    Text(
-                        if (isDelete) {
-                            "This conversation will be permanently deleted. This cannot be undone."
-                        } else {
-                            "This conversation will be moved to the archive."
-                        }
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            viewModel.handleSwipeAction(chatGuid, action)
-                            pendingSwipeAction = null
-                        },
-                        colors = if (isDelete) {
-                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        } else {
-                            ButtonDefaults.buttonColors()
-                        }
-                    ) {
-                        Text(if (isDelete) "Delete" else "Archive")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { pendingSwipeAction = null }) {
-                        Text("Cancel")
-                    }
-                }
+                onDismiss = { pendingSwipeAction = null }
             )
         }
 
         // Batch action confirmation dialog (for selection mode)
         pendingBatchAction?.let { action ->
-            val isDelete = action == SwipeActionType.DELETE
-            val count = selectedConversations.size
-            AlertDialog(
-                onDismissRequest = { pendingBatchAction = null },
-                icon = {
-                    Icon(
-                        if (isDelete) Icons.Default.Delete else Icons.Default.Archive,
-                        contentDescription = null,
-                        tint = if (isDelete) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-                    )
-                },
-                title = {
-                    Text(
-                        if (isDelete) {
-                            "Delete $count Conversation${if (count > 1) "s" else ""}?"
-                        } else {
-                            "Archive $count Conversation${if (count > 1) "s" else ""}?"
-                        }
-                    )
-                },
-                text = {
-                    Text(
-                        if (isDelete) {
-                            "These conversations will be permanently deleted. This cannot be undone."
-                        } else {
-                            "These conversations will be moved to the archive."
-                        }
-                    )
-                },
-                confirmButton = {
-                    Button(
-                        onClick = {
-                            if (isDelete) {
-                                selectedConversations.forEach { viewModel.deleteChat(it) }
-                            } else {
-                                selectedConversations.forEach { viewModel.archiveChat(it) }
-                            }
-                            selectedConversations = emptySet()
-                            pendingBatchAction = null
-                        },
-                        colors = if (isDelete) {
-                            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                        } else {
-                            ButtonDefaults.buttonColors()
-                        }
-                    ) {
-                        Text(if (isDelete) "Delete" else "Archive")
+            BatchActionConfirmationDialog(
+                action = action,
+                count = selectedConversations.size,
+                onConfirm = {
+                    if (action == SwipeActionType.DELETE) {
+                        selectedConversations.forEach { viewModel.deleteChat(it) }
+                    } else {
+                        selectedConversations.forEach { viewModel.archiveChat(it) }
                     }
+                    selectedConversations = emptySet()
+                    pendingBatchAction = null
                 },
-                dismissButton = {
-                    TextButton(onClick = { pendingBatchAction = null }) {
-                        Text("Cancel")
-                    }
-                }
+                onDismiss = { pendingBatchAction = null }
             )
         }
 
@@ -867,17 +561,17 @@ fun ConversationsScreen(
         AnimatedVisibility(
             visible = showScrollToTop && !isSearchActive && !isSelectionMode,
             enter = slideInVertically(
-                initialOffsetY = { it }, // Start from below the screen
+                initialOffsetY = { it },
                 animationSpec = tween(durationMillis = 300)
             ) + fadeIn(animationSpec = tween(durationMillis = 300)),
             exit = slideOutVertically(
-                targetOffsetY = { it }, // Exit to below the screen
+                targetOffsetY = { it },
                 animationSpec = tween(durationMillis = 300)
             ) + fadeOut(animationSpec = tween(durationMillis = 300)),
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
-                .padding(bottom = 20.dp) // Aligned vertically with FAB
+                .padding(bottom = 20.dp)
         ) {
             ScrollToTopButton(
                 onClick = {
@@ -907,55 +601,20 @@ fun ConversationsScreen(
         }
 
         // Stacked status banners at the bottom
-        // Sync progress, SMS import progress, and banners stack on top of each other
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomCenter),
-            verticalArrangement = Arrangement.Bottom
-        ) {
-            // Unified sync progress bar (combines iMessage sync, SMS import, and categorization)
-            AnimatedVisibility(
-                visible = uiState.unifiedSyncProgress != null && !isSearchActive,
-                enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
-                exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
-            ) {
-                uiState.unifiedSyncProgress?.let { progress ->
-                    UnifiedSyncProgressBar(
-                        progress = progress,
-                        onExpandToggle = { viewModel.toggleSyncProgressExpanded() },
-                        onRetry = { viewModel.retrySyncOperation() },
-                        onDismiss = { viewModel.dismissSyncError() },
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            }
-
-            // SMS status banner (on top when both visible)
-            SmsStatusBanner(
-                state = uiState.smsBannerState,
-                onSetAsDefaultClick = {
-                    // Navigate to SMS settings
-                    onSettingsNavigate("sms", false)
-                },
-                onDismiss = {
-                    viewModel.dismissSmsBanner()
-                }
-            )
-
-            // Connection status banner (at the bottom)
-            ConnectionStatusBanner(
-                state = uiState.connectionBannerState,
-                onSetupClick = {
-                    // Navigate to setup flow (skip welcome and SMS setup)
-                    onSettingsNavigate("setup", false)
-                },
-                onDismiss = {
-                    viewModel.dismissSetupBanner()
-                },
-                onRetryClick = {
-                    viewModel.retryConnection()
-                }
-            )
-        }
+        ConversationStatusBanners(
+            unifiedSyncProgress = uiState.unifiedSyncProgress,
+            smsBannerState = uiState.smsBannerState,
+            connectionBannerState = uiState.connectionBannerState,
+            isSearchActive = isSearchActive,
+            onExpandToggle = viewModel::toggleSyncProgressExpanded,
+            onRetrySync = viewModel::retrySyncOperation,
+            onDismissSyncError = viewModel::dismissSyncError,
+            onSetAsDefaultClick = { onSettingsNavigate("sms", false) },
+            onDismissSmsBanner = viewModel::dismissSmsBanner,
+            onSetupClick = { onSettingsNavigate("setup", false) },
+            onDismissSetupBanner = viewModel::dismissSetupBanner,
+            onRetryConnection = viewModel::retryConnection,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }

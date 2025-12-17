@@ -15,7 +15,6 @@ import coil.memory.MemoryCache
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.PendingMessageSource
 import com.bothbubbles.data.repository.SmsRepository
-import com.bothbubbles.util.logging.CrashlyticsTree
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.ContactsContentObserver
@@ -32,6 +31,11 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import org.acra.ACRA
+import org.acra.config.dialog
+import org.acra.config.mailSender
+import org.acra.data.StringFormat
+import org.acra.ktx.initAcra
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -39,6 +43,34 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var connectionModeManager: ConnectionModeManager
+
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(base)
+
+        // Initialize ACRA for local crash reporting (privacy-first: no automatic data collection)
+        // Crashes are stored locally and only shared if user explicitly chooses to email them
+        initAcra {
+            buildConfigClass = BuildConfig::class.java
+            reportFormat = StringFormat.JSON
+
+            // Show dialog asking user if they want to send crash report
+            dialog {
+                title = getString(R.string.crash_dialog_title)
+                text = getString(R.string.crash_dialog_text)
+                commentPrompt = getString(R.string.crash_dialog_comment)
+                resIcon = R.drawable.ic_launcher_foreground
+            }
+
+            // Use email sender - user manually sends via their email app (no automatic upload)
+            mailSender {
+                mailTo = "crashes@bothbubbles.com"
+                reportAsFile = true
+                reportFileName = "crash_report.json"
+                subject = getString(R.string.crash_email_subject)
+                body = getString(R.string.crash_email_body)
+            }
+        }
+    }
 
     @Inject
     lateinit var developerEventLog: DeveloperEventLog
@@ -107,11 +139,7 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         // Note: Timber is initialized via TimberInitializer (AndroidX Startup)
         // Note: AppLifecycleTracker is initialized via AppLifecycleTrackerInitializer
         // Note: WorkManager is initialized via WorkManagerInitializer
-
-        // Initialize Crashlytics logging for release builds
-        if (!BuildConfig.DEBUG) {
-            Timber.plant(CrashlyticsTree())
-        }
+        // Note: ACRA crash reporting is initialized in attachBaseContext()
 
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
