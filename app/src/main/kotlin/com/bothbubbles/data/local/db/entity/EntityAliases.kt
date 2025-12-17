@@ -45,6 +45,7 @@ typealias IMessageAvailabilityCacheEntity = com.bothbubbles.core.model.entity.IM
 typealias AutoRespondedSenderEntity = com.bothbubbles.core.model.entity.AutoRespondedSenderEntity
 typealias VerifiedCounterpartCheckEntity = com.bothbubbles.core.model.entity.VerifiedCounterpartCheckEntity
 typealias AutoShareContactEntity = com.bothbubbles.core.model.entity.AutoShareContactEntity
+typealias TombstoneEntity = com.bothbubbles.core.model.entity.TombstoneEntity
 
 // Enums and utility types
 typealias MessageSource = com.bothbubbles.core.model.entity.MessageSource

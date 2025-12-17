@@ -34,9 +34,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -203,7 +203,7 @@ fun ComposerSendButton(
     val gestureCallbacks = remember(onClick, onLongPress, onModeToggle, hapticFeedback) {
         object : SendModeGestureCallbacks {
             override fun onTap() {
-                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                HapticUtils.onTap(hapticFeedback)
                 onClick()
             }
             override fun onLongPress() = onLongPress()

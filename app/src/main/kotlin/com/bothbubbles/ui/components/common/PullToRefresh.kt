@@ -10,10 +10,9 @@ import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.delay
+import com.bothbubbles.util.HapticUtils
 
 /**
  * Pull-to-refresh container with Material 3 styling and haptic feedback
@@ -29,19 +28,11 @@ fun PullToRefreshContainer(
     val haptic = LocalHapticFeedback.current
     val state = rememberPullToRefreshState()
 
-    // Track refresh trigger for haptic
-    var lastRefreshingState by remember { mutableStateOf(false) }
-    LaunchedEffect(isRefreshing) {
-        if (isRefreshing && !lastRefreshingState) {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-        }
-        lastRefreshingState = isRefreshing
-    }
-
     PullToRefreshBox(
         isRefreshing = isRefreshing,
         onRefresh = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            // Single haptic at threshold release - no double haptic
+            HapticUtils.onThresholdCrossed(haptic)
             onRefresh()
         },
         modifier = modifier,

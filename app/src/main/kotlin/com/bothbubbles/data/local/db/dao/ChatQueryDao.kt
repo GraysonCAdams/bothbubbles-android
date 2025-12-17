@@ -127,4 +127,42 @@ interface ChatQueryDao {
 
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_starred = 1")
     fun getStarredChatCount(): Flow<Int>
+
+    /**
+     * Find chats that need repair sync.
+     *
+     * These are chats where:
+     * - latest_message_date is set (server indicated messages exist)
+     * - No sync_ranges exist (messages were never synced)
+     * - No messages exist in the local database
+     * - Chat is not deleted
+     *
+     * This detects chats created from server metadata where the actual
+     * message sync never occurred (e.g., socket event created the chat
+     * but messages weren't pulled).
+     */
+    @Query("""
+        SELECT c.* FROM chats c
+        WHERE c.date_deleted IS NULL
+        AND c.latest_message_date IS NOT NULL
+        AND c.latest_message_date > 0
+        AND NOT EXISTS (SELECT 1 FROM sync_ranges sr WHERE sr.chat_guid = c.guid)
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_guid = c.guid AND m.date_deleted IS NULL)
+        ORDER BY c.latest_message_date DESC
+    """)
+    suspend fun findChatsNeedingRepair(): List<ChatEntity>
+
+    /**
+     * Count of chats needing repair sync.
+     * Used for quick detection without fetching full entities.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM chats c
+        WHERE c.date_deleted IS NULL
+        AND c.latest_message_date IS NOT NULL
+        AND c.latest_message_date > 0
+        AND NOT EXISTS (SELECT 1 FROM sync_ranges sr WHERE sr.chat_guid = c.guid)
+        AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_guid = c.guid AND m.date_deleted IS NULL)
+    """)
+    suspend fun countChatsNeedingRepair(): Int
 }

@@ -281,6 +281,26 @@ class ConversationsViewModel @Inject constructor(
                 _uiState.update { it.copy(categorizationEnabled = enabled) }
             }
         }
+        viewModelScope.launch {
+            settingsDataStore.transactionsCategoryEnabled.collect { enabled ->
+                _uiState.update { it.copy(transactionsEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.deliveriesCategoryEnabled.collect { enabled ->
+                _uiState.update { it.copy(deliveriesEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.promotionsCategoryEnabled.collect { enabled ->
+                _uiState.update { it.copy(promotionsEnabled = enabled) }
+            }
+        }
+        viewModelScope.launch {
+            settingsDataStore.remindersCategoryEnabled.collect { enabled ->
+                _uiState.update { it.copy(remindersEnabled = enabled) }
+            }
+        }
     }
 
     /**
@@ -560,13 +580,23 @@ class ConversationsViewModel @Inject constructor(
                 _smsStateRefreshTrigger
             ) { smsEnabled, isSmsBannerDismissed, _ ->
                 val smsStatus = smsPermissionHelper.getSmsCapabilityStatus()
-                determineSmsBannerState(
-                    smsEnabled = smsEnabled,
-                    isFullyFunctional = smsStatus.isFullyFunctional,
-                    isSmsBannerDismissed = isSmsBannerDismissed
+                Triple(
+                    smsEnabled,
+                    smsStatus.isFullyFunctional,
+                    determineSmsBannerState(
+                        smsEnabled = smsEnabled,
+                        isFullyFunctional = smsStatus.isFullyFunctional,
+                        isSmsBannerDismissed = isSmsBannerDismissed
+                    )
                 )
-            }.collect { bannerState ->
-                _uiState.update { it.copy(smsBannerState = bannerState) }
+            }.collect { (smsEnabled, isFullyFunctional, bannerState) ->
+                _uiState.update {
+                    it.copy(
+                        smsBannerState = bannerState,
+                        smsEnabled = smsEnabled,
+                        isSmsFullyFunctional = isFullyFunctional
+                    )
+                }
             }
         }
     }
@@ -816,9 +846,7 @@ class ConversationsViewModel @Inject constructor(
                     observerDelegate.updateSmsImportState(SmsImportState.Complete)
                     settingsDataStore.setHasCompletedInitialSmsImport(true)
                     notificationService.showSmsImportCompleteNotification()
-                    // Clear completion state after a delay
-                    delay(2000)
-                    observerDelegate.updateSmsImportState(SmsImportState.Idle)
+                    // Keep Complete state - progress bar hides when all stages are done
                 },
                 onFailure = { e ->
                     Timber.tag("ConversationsViewModel").e(e, "SMS import failed")

@@ -1,5 +1,10 @@
 package com.bothbubbles.ui.components.message
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -50,7 +55,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
@@ -72,6 +76,7 @@ import com.bothbubbles.ui.components.common.openSmsIntent
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import com.bothbubbles.ui.theme.MessageShapes
 import com.bothbubbles.util.EmojiUtils.analyzeEmojis
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.parsing.DateParsingUtils
 import com.bothbubbles.util.parsing.DetectedPhoneNumber
 import com.bothbubbles.util.parsing.DetectedUrl
@@ -329,7 +334,7 @@ internal fun SimpleBubbleContent(
 
                                                 // Haptic at threshold
                                                 if (replyDragOffset.value.absoluteValue >= replyThresholdPx && !hasTriggeredHaptic) {
-                                                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                    HapticUtils.onThresholdCrossed(hapticFeedback)
                                                     hasTriggeredHaptic = true
                                                 } else if (replyDragOffset.value.absoluteValue < replyThresholdPx) {
                                                     hasTriggeredHaptic = false
@@ -410,7 +415,7 @@ internal fun SimpleBubbleContent(
                                 detectTapGestures(
                                     onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                     onLongPress = {
-                                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        HapticUtils.onLongPress(hapticFeedback)
                                         onLongPress()
                                     }
                                 )
@@ -549,7 +554,7 @@ internal fun SimpleBubbleContent(
                                             if (phoneIndex != null && phoneIndex < detectedPhoneNumbers.size) {
                                                 selectedPhoneNumber = detectedPhoneNumbers[phoneIndex]
                                                 showPhoneMenu = true
-                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                                HapticUtils.onTap(hapticFeedback)
                                             }
                                             return@ClickableText
                                         }
@@ -567,7 +572,7 @@ internal fun SimpleBubbleContent(
                                                     detectedCodes[codeIndex].code,
                                                     "Code copied"
                                                 )
-                                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                HapticUtils.onTap(hapticFeedback)
                                             }
                                             return@ClickableText
                                         }
@@ -671,7 +676,11 @@ internal fun SimpleBubbleContent(
             }
 
             // Tap-to-reveal timestamp and message type below the bubble
-            if (showTimestamp) {
+            AnimatedVisibility(
+                visible = showTimestamp,
+                enter = expandVertically() + fadeIn(),
+                exit = shrinkVertically() + fadeOut()
+            ) {
                 Text(
                     text = "${message.formattedTime} · $messageTypeLabel",
                     style = MaterialTheme.typography.labelSmall,

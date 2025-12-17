@@ -490,7 +490,11 @@ class ChatMessageListDelegate @AssistedInject constructor(
                     Timber.d("Imported $count SMS messages for $chatGuid")
                 },
                 onFailure = { e ->
-                    if (_messagesState.value.isEmpty()) {
+                    // Don't show error for permission denial - the composer already shows
+                    // "Not default SMS app" message when smsInputBlocked is true
+                    val isPermissionError = e.message?.contains("Permission Denial", ignoreCase = true) == true ||
+                        e.message?.contains("grantUriPermission", ignoreCase = true) == true
+                    if (_messagesState.value.isEmpty() && !isPermissionError) {
                         onUiStateUpdate { copy(error = "Failed to load SMS messages: ${e.message}") }
                     }
                 }

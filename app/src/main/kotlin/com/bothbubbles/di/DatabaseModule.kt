@@ -19,6 +19,7 @@ import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import dagger.Module
@@ -164,5 +165,11 @@ object DatabaseModule {
     @Singleton
     fun provideAutoShareContactDao(database: BothBubblesDatabase): AutoShareContactDao {
         return database.autoShareContactDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideTombstoneDao(database: BothBubblesDatabase): TombstoneDao {
+        return database.tombstoneDao()
     }
 }

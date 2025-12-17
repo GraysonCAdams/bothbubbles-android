@@ -189,6 +189,13 @@ class MessageSendingService @Inject constructor(
         val canFallback = address?.isPhoneNumber() == true
 
         if (autoRetry && canFallback) {
+            // Check if cellular is available - no point retrying as SMS without it
+            val smsCapability = smsPermissionHelper.getSmsCapabilityStatus()
+            if (!smsCapability.hasCellularConnectivity) {
+                Timber.i("iMessage failed but no cellular connectivity - not falling back to SMS for chat: $chatGuid")
+                return result // Return original iMessage failure
+            }
+
             ensureCarrierReadyOrThrow()
             Timber.i("iMessage failed, auto-retrying as SMS for chat: $chatGuid")
 
@@ -508,13 +515,15 @@ class MessageSendingService @Inject constructor(
 
             if (canFallbackToSms) {
                 val capability = smsPermissionHelper.getSmsCapabilityStatus()
-                if (capability.isDefaultSmsApp && capability.canSendSms) {
+                if (capability.isDefaultSmsApp && capability.canSendSms && capability.hasCellularConnectivity) {
                     chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.SERVER_DISCONNECTED)
                     return if (chat?.isGroup == true || hasAttachments) {
                         MessageDeliveryMode.LOCAL_MMS
                     } else {
                         MessageDeliveryMode.LOCAL_SMS
                     }
+                } else if (!capability.hasCellularConnectivity) {
+                    Timber.w("Cannot enter SMS fallback for $chatGuid: no cellular connectivity")
                 } else {
                     Timber.w("Cannot enter SMS fallback for $chatGuid: default SMS role missing")
                 }

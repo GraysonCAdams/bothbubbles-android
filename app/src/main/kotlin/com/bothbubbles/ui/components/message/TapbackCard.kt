@@ -39,10 +39,11 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.bothbubbles.util.HapticUtils
+import com.bothbubbles.util.rememberThrottledHaptic
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -77,6 +78,7 @@ fun TapbackCard(
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
+    val throttledHaptics = rememberThrottledHaptic(haptics)
     val density = LocalDensity.current
 
     // Track which emoji is being hovered during scrub
@@ -101,11 +103,12 @@ fun TapbackCard(
                         detectDragGestures(
                             onDragStart = { offset ->
                                 isDragging = true
+                                throttledHaptics.reset()
                                 val index = (offset.x / emojiSize.toPx()).toInt()
                                     .coerceIn(0, Tapback.entries.size - 1)
                                 if (index != hoveredIndex) {
                                     hoveredIndex = index
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    throttledHaptics.onDragTransition()
                                 }
                             },
                             onDrag = { change, _ ->
@@ -114,14 +117,14 @@ fun TapbackCard(
                                     .coerceIn(0, Tapback.entries.size - 1)
                                 if (index != hoveredIndex) {
                                     hoveredIndex = index
-                                    haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    throttledHaptics.onDragTransition()
                                 }
                             },
                             onDragEnd = {
                                 isDragging = false
                                 hoveredIndex?.let { index ->
                                     if (index < Tapback.entries.size) {
-                                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        HapticUtils.onConfirm(haptics)
                                         onReactionSelected(Tapback.entries[index])
                                     }
                                 }
@@ -142,7 +145,7 @@ fun TapbackCard(
                         isSelected = tapback in myReactions,
                         isHovered = hoveredIndex == index && isDragging,
                         onClick = {
-                            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                            HapticUtils.onConfirm(haptics)
                             onReactionSelected(tapback)
                         },
                         modifier = Modifier.size(emojiSize)

@@ -70,6 +70,7 @@ class ChatSendModeManager @AssistedInject constructor(
         private const val SERVER_STABILITY_PERIOD_MS = 30_000L // 30 seconds stable before allowing iMessage
         private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
         private const val FLIP_FLOP_THRESHOLD = 3 // 3+ state changes = unstable server
+        private const val PERIODIC_FALLBACK_CHECK_INTERVAL_MS = 30_000L // 30 seconds between fallback exit checks
     }
 
     // Server stability tracking
@@ -81,6 +82,7 @@ class ChatSendModeManager @AssistedInject constructor(
     // Availability check state
     private var lastAvailabilityCheck: Long = 0
     private var iMessageAvailabilityCheckJob: Job? = null
+    private var periodicFallbackCheckJob: Job? = null
 
     // Send mode state
     private val _currentSendMode = MutableStateFlow(initialSendMode)
@@ -118,6 +120,9 @@ class ChatSendModeManager @AssistedInject constructor(
 
         // Load persisted send mode preference
         loadPersistedSendMode()
+
+        // Start periodic fallback exit check
+        startPeriodicFallbackCheck()
     }
 
     /**
@@ -435,6 +440,9 @@ class ChatSendModeManager @AssistedInject constructor(
                         serverConnectedSince = System.currentTimeMillis()
                     }
 
+                    // Clear input blocked state now that server is connected
+                    _smsInputBlocked.value = false
+
                     // Restore iMessage mode if appropriate
                     val shouldBeIMessage = _contactIMessageAvailable.value == true
                     val wasAutoSwitchedToSms = _currentSendMode.value == ChatSendMode.SMS && !_sendModeManuallySet.value
@@ -450,7 +458,7 @@ class ChatSendModeManager @AssistedInject constructor(
                     serverConnectedSince = null
                     iMessageAvailabilityCheckJob?.cancel()
 
-                    // Auto-switch to SMS for non-iMessage-only chats
+                    // Auto-switch to SMS for non-iMessage-only chats (if SMS is available)
                     val isIMessageGroup = chatGuid.startsWith("iMessage;+;", ignoreCase = true)
                     val isEmailChat = participantPhone?.contains("@") == true
                     val isIMessageOnly = isIMessageGroup || isEmailChat
@@ -458,7 +466,19 @@ class ChatSendModeManager @AssistedInject constructor(
                     if (!isIMessageOnly) {
                         scope.launch {
                             delay(3000) // Debounce
-                            _currentSendMode.value = ChatSendMode.SMS
+
+                            // Check if SMS is actually available before switching
+                            val smsCapability = smsPermissionHelper.getSmsCapabilityStatus()
+                            if (smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity) {
+                                // SMS is available - switch to SMS mode
+                                _currentSendMode.value = ChatSendMode.SMS
+                                _smsInputBlocked.value = false
+                            } else {
+                                // SMS not available - block input and stay in iMessage mode
+                                // User needs to either wait for server or set up SMS
+                                _smsInputBlocked.value = true
+                                Timber.i("Server disconnected but SMS not available (functional=${smsCapability.isFullyFunctional}, cellular=${smsCapability.hasCellularConnectivity}) - blocking input")
+                            }
                         }
                     }
                 }
@@ -482,6 +502,45 @@ class ChatSendModeManager @AssistedInject constructor(
 
             if (_contactIMessageAvailable.value == true) {
                 _currentSendMode.value = ChatSendMode.IMESSAGE
+            }
+        }
+    }
+
+    /**
+     * Start periodic check to exit fallback mode when iMessage becomes available.
+     *
+     * Runs every 30 seconds while the chat is open. The actual API call is throttled
+     * by the 5-minute cooldown in checkAndMaybeExitFallback().
+     */
+    private fun startPeriodicFallbackCheck() {
+        periodicFallbackCheckJob?.cancel()
+        periodicFallbackCheckJob = scope.launch {
+            while (true) {
+                delay(PERIODIC_FALLBACK_CHECK_INTERVAL_MS)
+
+                // Only check if we're actually in fallback mode
+                val fallbackReason = chatFallbackTracker.getFallbackReason(chatGuid)
+                if (fallbackReason == null) {
+                    continue // Not in fallback mode, skip this check
+                }
+
+                // Only check if server is connected (needed for API call)
+                if (socketConnection.connectionState.value != ConnectionState.CONNECTED) {
+                    continue
+                }
+
+                // Check if iMessage is available and exit fallback if so
+                // The cooldown in checkAndMaybeExitFallback will prevent excessive API calls
+                checkAndMaybeExitFallback(participantPhone)
+
+                // If we exited fallback mode, also restore iMessage send mode
+                if (!chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                    if (_contactIMessageAvailable.value == true && !_sendModeManuallySet.value) {
+                        _currentSendMode.value = ChatSendMode.IMESSAGE
+                        _smsInputBlocked.value = false
+                        Timber.i("Periodic check: exited fallback mode, restored iMessage send mode")
+                    }
+                }
             }
         }
     }

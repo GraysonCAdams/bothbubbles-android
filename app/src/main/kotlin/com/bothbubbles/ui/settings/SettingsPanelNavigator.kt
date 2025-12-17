@@ -9,7 +9,8 @@ import androidx.compose.runtime.setValue
 
 /**
  * Manages navigation state within the settings panel.
- * Maintains a back stack for proper back navigation.
+ * Maintains a back stack for proper back navigation and tracks
+ * navigation direction for animations.
  */
 @Stable
 class SettingsPanelNavigator {
@@ -18,8 +19,13 @@ class SettingsPanelNavigator {
     var currentPage by mutableStateOf<SettingsPanelPage>(SettingsPanelPage.Main)
         private set
 
+    /** Whether the last navigation was forward (true) or backward (false) */
+    var isNavigatingForward by mutableStateOf(true)
+        private set
+
     /** Navigate to a new page, adding current to back stack */
     fun navigateTo(page: SettingsPanelPage) {
+        isNavigatingForward = true
         backStack.add(currentPage)
         currentPage = page
     }
@@ -27,6 +33,7 @@ class SettingsPanelNavigator {
     /** Navigate back. Returns true if navigated back, false if at root */
     fun navigateBack(): Boolean {
         return if (backStack.isNotEmpty()) {
+            isNavigatingForward = false
             currentPage = backStack.removeLast()
             true
         } else {

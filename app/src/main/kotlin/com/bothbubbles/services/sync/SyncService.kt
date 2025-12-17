@@ -3,6 +3,7 @@ package com.bothbubbles.services.sync
 import android.database.sqlite.SQLiteException
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.entity.SyncSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.MessageRepository
@@ -28,6 +29,7 @@ import javax.inject.Singleton
 @Singleton
 class SyncService @Inject constructor(
     private val chatDao: ChatDao,
+    private val chatQueryDao: ChatQueryDao,
     private val chatRepository: com.bothbubbles.data.repository.ChatRepository,
     private val messageRepository: MessageRepository,
     private val settingsDataStore: SettingsDataStore,
@@ -96,24 +98,14 @@ class SyncService @Inject constructor(
             )
         }
 
-        // Fetch total message count upfront for accurate progress tracking
-        val totalMessageCount = chatRepository.getServerMessageCount()
-        if (totalMessageCount != null) {
-            Timber.i("Total messages to sync: $totalMessageCount")
-        } else {
-            Timber.w("Could not fetch message count - using chat-based progress estimation")
-        }
-
         // Get already synced chats (for resume scenario)
         val alreadySynced = settingsDataStore.syncedChatGuids.first()
 
-        // Initialize progress tracker
-        val progressTracker = SyncProgressTracker().apply {
-            totalMessagesExpected.set(totalMessageCount ?: 0)
-        }
+        // Initialize progress tracker (chat-based progress)
+        val progressTracker = SyncProgressTracker()
 
         // Helper to update progress - tracks iMessage and SMS separately
-        // Uses message-based progress when available for accuracy
+        // Progress is based on chats processed
         fun updateProgress(stage: String, chatName: String? = null) {
             val imProgress = progressTracker.calculateInitialSyncProgressFloat()
             val imComplete = imProgress >= 0.99f
@@ -133,7 +125,6 @@ class SyncService @Inject constructor(
                 totalChats = progressTracker.totalChatsFound.get(),
                 processedChats = progressTracker.processedChats.get(),
                 syncedMessages = progressTracker.syncedMessages.get(),
-                totalMessagesExpected = progressTracker.totalMessagesExpected.get(),
                 currentChatName = chatName,
                 isInitialSync = true,
                 iMessageProgress = imProgress,
@@ -456,6 +447,88 @@ class SyncService @Inject constructor(
         }
         applicationScope.launch(ioDispatcher) {
             performIncrementalSync()
+        }
+    }
+
+    /**
+     * Perform repair sync to fix chats with missing messages.
+     *
+     * This detects and repairs chats where:
+     * - Chat exists with latest_message_date set (server indicated messages exist)
+     * - No sync_ranges exist (messages were never synced)
+     * - No messages exist in the local database
+     *
+     * This can happen when a chat is created from server metadata (e.g., socket event)
+     * but the actual message sync was never triggered.
+     *
+     * This is a self-healing operation that runs on app startup. It's idempotent:
+     * - If no broken chats found, returns immediately (fast local query)
+     * - If broken chats found, syncs messages and creates sync_ranges
+     * - Subsequent calls will find nothing to repair
+     *
+     * @return Number of chats repaired, or 0 if none needed
+     */
+    suspend fun performRepairSync(): Result<Int> = runCatching {
+        // Fast local query to detect broken chats
+        val brokenChats = chatQueryDao.findChatsNeedingRepair()
+
+        if (brokenChats.isEmpty()) {
+            Timber.d("Repair sync: no broken chats found")
+            return@runCatching 0
+        }
+
+        Timber.i("Repair sync: found ${brokenChats.size} chats needing repair")
+
+        // Update sync state to show progress bar
+        _syncState.value = SyncState.Syncing(
+            progress = 0f,
+            stage = "Checking messages...",
+            totalChats = brokenChats.size,
+            processedChats = 0,
+            syncedMessages = 0,
+            isInitialSync = false
+        )
+
+        val progressTracker = SyncProgressTracker().apply {
+            totalChatsFound.set(brokenChats.size)
+        }
+
+        // Convert to ChatInfo list for message sync helper
+        val chatInfoList = brokenChats.map { chat ->
+            MessageSyncHelper.ChatInfo(chat.guid, chat.displayName)
+        }
+
+        // Reuse existing message sync infrastructure
+        messageSyncHelper.syncMessagesForChats(
+            chats = chatInfoList,
+            messagesPerChat = MESSAGE_PAGE_SIZE,
+            syncSource = SyncSource.REPAIR,
+            progressTracker = progressTracker,
+            totalChats = brokenChats.size,
+            onProgressUpdate = { state -> _syncState.value = state }
+        )
+
+        Timber.i("Repair sync completed: ${brokenChats.size} chats repaired, ${progressTracker.syncedMessages.get()} messages synced")
+
+        _syncState.value = SyncState.Completed
+        brokenChats.size
+    }.onFailure { e ->
+        Timber.e(e, "Repair sync failed")
+        _syncState.value = createErrorState(e)
+    }
+
+    /**
+     * Start repair sync in the service's own scope.
+     * This is called from BothBubblesApp on startup for self-healing.
+     */
+    fun startRepairSync() {
+        // Skip if sync already in progress (coalescing)
+        if (_syncState.value !is SyncState.Idle) {
+            Timber.d("Skipping repair sync - sync already in progress")
+            return
+        }
+        applicationScope.launch(ioDispatcher) {
+            performRepairSync()
         }
     }
 

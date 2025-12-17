@@ -13,6 +13,8 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
+import com.bothbubbles.util.AudioHapticPattern
+import com.bothbubbles.util.AudioHapticSync
 import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -46,6 +48,11 @@ class SoundManager @Inject constructor(
 ) : SoundPlayer {
     companion object {
         private const val MAX_STREAMS = 2
+    }
+
+    // Audio-synchronized haptic feedback
+    private val audioHapticSync: AudioHapticSync by lazy {
+        AudioHapticSync(context)
     }
 
     private val audioManager: AudioManager by lazy {
@@ -137,6 +144,8 @@ class SoundManager @Inject constructor(
             if (settingsDataStore.messageSoundsEnabled.first()) {
                 val theme = settingsDataStore.soundTheme.first()
                 playSound(getSendSoundId(theme))
+                // Play synchronized haptic if enabled
+                playHapticIfEnabled(AudioHapticPattern.MESSAGE_SENT)
             }
         }
     }
@@ -163,6 +172,8 @@ class SoundManager @Inject constructor(
             if (settingsDataStore.messageSoundsEnabled.first()) {
                 val theme = settingsDataStore.soundTheme.first()
                 playSound(getReceiveSoundId(theme))
+                // Play synchronized haptic if enabled
+                playHapticIfEnabled(AudioHapticPattern.MESSAGE_RECEIVED)
             }
         }
     }
@@ -170,14 +181,17 @@ class SoundManager @Inject constructor(
     /**
      * Preview both sounds for a theme (receive then send).
      * Used when user selects a new sound theme in settings.
+     * Also plays synchronized haptic patterns if enabled.
      */
     override fun previewSounds(theme: SoundTheme) {
         applicationScope.launch(ioDispatcher) {
-            // Play receive sound first
+            // Play receive sound + haptic first
             playSoundDirect(getReceiveSoundId(theme))
-            // Wait a moment, then play send sound
+            playHapticIfEnabled(AudioHapticPattern.MESSAGE_RECEIVED)
+            // Wait a moment, then play send sound + haptic
             delay(600)
             playSoundDirect(getSendSoundId(theme))
+            playHapticIfEnabled(AudioHapticPattern.MESSAGE_SENT)
         }
     }
 
@@ -244,11 +258,25 @@ class SoundManager @Inject constructor(
     }
 
     /**
+     * Play haptic pattern if haptics and audio-haptic sync are enabled.
+     * Should be called from a coroutine as it reads settings.
+     */
+    private suspend fun playHapticIfEnabled(pattern: AudioHapticPattern) {
+        val hapticsEnabled = settingsDataStore.hapticsEnabled.first()
+        val audioHapticSyncEnabled = settingsDataStore.audioHapticSyncEnabled.first()
+
+        if (hapticsEnabled && audioHapticSyncEnabled) {
+            audioHapticSync.play(pattern)
+        }
+    }
+
+    /**
      * Release resources when no longer needed.
      */
     fun release() {
         soundPool?.release()
         soundPool = null
         isLoaded = false
+        audioHapticSync.release()
     }
 }

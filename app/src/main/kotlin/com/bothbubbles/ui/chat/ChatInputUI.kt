@@ -1,7 +1,6 @@
 package com.bothbubbles.ui.chat
 
 import android.Manifest
-import timber.log.Timber
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -14,7 +13,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -25,23 +23,19 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import com.bothbubbles.ui.chat.components.InputMode
-import com.bothbubbles.ui.chat.components.ReplyPreview
 import com.bothbubbles.ui.chat.composer.ChatComposer
 import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.ComposerInputMode
 import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.composer.RecordingState
 import com.bothbubbles.ui.chat.composer.panels.GifItem
-import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
-import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.components.input.SmartReplyChips
 import com.bothbubbles.ui.components.input.SuggestionItem
 
 /**
  * Extracted input area component containing:
  * - SmartReplyChips
- * - ReplyPreview
- * - ChatComposer (which includes panels via ComposerPanelHost)
+ * - ChatComposer (which includes panels via ComposerPanelHost, and ReplyPreviewBar)
  *
  * Note: Attachment/Emoji/GIF pickers are rendered inside ChatComposer's ComposerPanelHost
  * to avoid component duplication.
@@ -50,9 +44,6 @@ import com.bothbubbles.ui.components.input.SuggestionItem
  */
 @Composable
 fun ChatInputUI(
-    // NEW: Delegates for internal state collection (PERF FIX: avoids ChatScreen recomposition)
-    sendDelegate: ChatSendDelegate,
-    messageListDelegate: ChatMessageListDelegate,
     // Composer delegate to collect state from (PERF: collected internally to avoid parent recomposition)
     composerDelegate: com.bothbubbles.ui.chat.delegates.ChatComposerDelegate,
     // Audio state for voice recording
@@ -65,8 +56,6 @@ fun ChatInputUI(
     // Note: onEmojiSelected removed - emoji selection handled inside ComposerPanelHost
     // Callbacks - Smart reply
     onSmartReplyClick: (SuggestionItem) -> Unit,
-    // Callbacks - Reply preview
-    onCancelReply: () -> Unit,
     // Callbacks - Composer events
     onComposerEvent: (ComposerEvent) -> Unit,
     onMediaSelected: (List<android.net.Uri>) -> Unit,
@@ -98,21 +87,9 @@ fun ChatInputUI(
     val composerState by composerDelegate.state.collectAsStateWithLifecycle()
 
     // PERF FIX: Collect state internally from delegates to avoid ChatScreen recomposition
-    val sendState by sendDelegate.state.collectAsStateWithLifecycle()
     val smartReplySuggestions by composerDelegate.smartReplySuggestions.collectAsStateWithLifecycle()
     val gifPickerState by composerDelegate.gifPickerState.collectAsStateWithLifecycle()
     val gifSearchQuery by composerDelegate.gifSearchQuery.collectAsStateWithLifecycle()
-    val messages by messageListDelegate.messagesState.collectAsStateWithLifecycle()
-
-    // PERF FIX: Compute replyingToMessage locally using derivedStateOf to avoid passing full messages list
-    val replyingToMessage by remember {
-        derivedStateOf {
-            sendState.replyingToGuid?.let { guid ->
-                messages.firstOrNull { it.guid == guid }
-            }
-        }
-    }
-
     // Audio permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -151,20 +128,6 @@ fun ChatInputUI(
                 suggestions = smartReplySuggestions,
                 onSuggestionClick = onSmartReplyClick
             )
-        }
-
-        // Reply preview - shows when replying to a message (computed internally via derivedStateOf)
-        AnimatedVisibility(
-            visible = replyingToMessage != null,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut()
-        ) {
-            replyingToMessage?.let { message ->
-                ReplyPreview(
-                    message = message,
-                    onDismiss = onCancelReply
-                )
-            }
         }
 
         // Merge recording state when actively recording/previewing

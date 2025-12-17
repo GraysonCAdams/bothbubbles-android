@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
@@ -32,6 +33,7 @@ class SmsRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
+    private val tombstoneDao: TombstoneDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val smsContentProvider: SmsContentProvider,
     private val smsSendService: SmsSendService,
@@ -54,6 +56,7 @@ class SmsRepository @Inject constructor(
         context = context,
         chatDao = chatDao,
         messageDao = messageDao,
+        tombstoneDao = tombstoneDao,
         smsContentProvider = smsContentProvider
     )
 

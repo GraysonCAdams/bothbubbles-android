@@ -123,6 +123,19 @@ fun ConversationsScreen(
             MessageCategory.entries.find { it.name.equals(savedCategory, ignoreCase = true) }
         }
     }
+    val enabledCategories = remember(
+        uiState.transactionsEnabled,
+        uiState.deliveriesEnabled,
+        uiState.promotionsEnabled,
+        uiState.remindersEnabled
+    ) {
+        buildSet {
+            if (uiState.transactionsEnabled) add(MessageCategory.TRANSACTIONS)
+            if (uiState.deliveriesEnabled) add(MessageCategory.DELIVERIES)
+            if (uiState.promotionsEnabled) add(MessageCategory.PROMOTIONS)
+            if (uiState.remindersEnabled) add(MessageCategory.REMINDERS)
+        }
+    }
     var showFilterDropdown by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -373,6 +386,8 @@ fun ConversationsScreen(
                                 conversationFilter = conversationFilter,
                                 categoryFilter = categoryFilter,
                                 categorizationEnabled = uiState.categorizationEnabled,
+                                enabledCategories = enabledCategories,
+                                hasSettingsWarning = uiState.hasSettingsWarning,
                                 onFilterSelected = { filter ->
                                     viewModel.setConversationFilter(filter.name.lowercase())
                                 },

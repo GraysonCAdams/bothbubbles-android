@@ -2,7 +2,6 @@ package com.bothbubbles.ui.conversations
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
@@ -10,7 +9,9 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -77,7 +78,7 @@ internal fun GoogleStyleConversationTile(
     // Animate corner radius for smooth transition (MD3 uses 12.dp "Large" shape token)
     val cornerRadius by animateDpAsState(
         targetValue = if (isSelectionMode || hasRoundedCorners) 12.dp else 0.dp,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = MotionTokens.Duration.NORMAL),
         label = "cornerRadius"
     )
     val shape = RoundedCornerShape(cornerRadius)
@@ -85,7 +86,7 @@ internal fun GoogleStyleConversationTile(
     // Animate vertical padding for smooth height transition
     val verticalPadding by animateDpAsState(
         targetValue = if (isSelectionMode || hasRoundedCorners) 4.dp else 0.dp,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = MotionTokens.Duration.NORMAL),
         label = "verticalPadding"
     )
 
@@ -96,7 +97,7 @@ internal fun GoogleStyleConversationTile(
         } else {
             MaterialTheme.colorScheme.surface
         },
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = MotionTokens.Duration.NORMAL),
         label = "backgroundColor"
     )
 
@@ -135,8 +136,8 @@ internal fun GoogleStyleConversationTile(
                 AnimatedContent(
                     targetState = isSelected,
                     transitionSpec = {
-                        fadeIn(animationSpec = tween(200)) togetherWith
-                            fadeOut(animationSpec = tween(200))
+                        fadeIn(animationSpec = tween(MotionTokens.Duration.NORMAL)) togetherWith
+                            fadeOut(animationSpec = tween(MotionTokens.Duration.NORMAL))
                     },
                     label = "avatarSelection"
                 ) { selected ->

@@ -58,7 +58,8 @@ class ServerSettingsViewModel @Inject constructor(
                         it.copy(
                             serverVersion = serverInfo?.serverVersion,
                             serverPrivateApiEnabled = serverInfo?.privateApi ?: false,
-                            serverOsVersion = serverInfo?.osVersion
+                            serverOsVersion = serverInfo?.osVersion,
+                            helperConnected = serverInfo?.helperConnected ?: false
                         )
                     }
 
@@ -191,6 +192,14 @@ class ServerSettingsViewModel @Inject constructor(
     fun clearTestResult() {
         _uiState.update { it.copy(testResult = null) }
     }
+
+    fun showCapabilitiesDialog() {
+        _uiState.update { it.copy(showCapabilitiesDialog = true) }
+    }
+
+    fun hideCapabilitiesDialog() {
+        _uiState.update { it.copy(showCapabilitiesDialog = false) }
+    }
 }
 
 data class ServerSettingsUiState(
@@ -199,11 +208,13 @@ data class ServerSettingsUiState(
     val serverVersion: String? = null,
     val serverOsVersion: String? = null,
     val serverPrivateApiEnabled: Boolean = false,
+    val helperConnected: Boolean = false,
     val privateApiEnabled: Boolean = false,
     val isReconnecting: Boolean = false,
     val isTesting: Boolean = false,
     val testResult: ConnectionTestResult? = null,
-    val error: String? = null
+    val error: String? = null,
+    val showCapabilitiesDialog: Boolean = false
 )
 
 data class ConnectionTestResult(

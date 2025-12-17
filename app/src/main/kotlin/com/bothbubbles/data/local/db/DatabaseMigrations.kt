@@ -858,6 +858,33 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 37 to 38: Add tombstones table for tracking deleted items.
+     *
+     * When messages or chats are hard-deleted, their GUIDs are recorded here to prevent
+     * them from being resurrected during sync operations. This enables:
+     * - Safe repair syncs without bringing back deleted content
+     * - Consistent deletion behavior across sync operations
+     *
+     * Tombstones older than 90 days can be safely pruned as old deleted items
+     * are unlikely to appear in server sync queries.
+     */
+    val MIGRATION_37_38 = object : Migration(37, 38) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS tombstones (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    guid TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    deleted_at INTEGER NOT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_tombstones_guid ON tombstones(guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_type ON tombstones(type)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_tombstones_deleted_at ON tombstones(deleted_at)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -899,6 +926,7 @@ object DatabaseMigrations {
         MIGRATION_33_34,
         MIGRATION_34_35,
         MIGRATION_35_36,
-        MIGRATION_36_37
+        MIGRATION_36_37,
+        MIGRATION_37_38
     )
 }

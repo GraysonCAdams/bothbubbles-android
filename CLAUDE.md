@@ -338,6 +338,28 @@ app/src/main/kotlin/com/bothbubbles/
 - **RULE**: UI layer CAN depend on both Data and Services layers
 - **RULE**: ViewModels with >300 lines MUST use delegates
 
+### Anti-Pattern Validation (MANDATORY)
+
+**RULE**: Before writing or modifying ANY code, you MUST validate that your approach is NOT an anti-pattern.
+
+Before implementing:
+1. **Verify against known anti-patterns** - Check that your solution doesn't match common anti-patterns for the technology (Compose, Kotlin, Android, Room, Hilt, etc.)
+2. **Consult layer READMEs** - Each layer's README documents anti-patterns specific to that layer. Read them.
+3. **Question your approach** - If the solution feels complex, repetitive, or requires workarounds, it's likely an anti-pattern. Stop and reconsider.
+
+Common anti-patterns to ALWAYS check for:
+- **God objects** - Classes doing too much (use delegates/handlers)
+- **Prop drilling** - Passing state through many layers (use CompositionLocal or push state collection down)
+- **Collecting state too high** - Parent collecting state just to pass it down (violates leaf-node state rule)
+- **Mutable collections in state** - Using `List` instead of `ImmutableList` in UI state
+- **Lambda capturing** - Using `{ viewModel.method() }` instead of `viewModel::method`
+- **Logic in composition** - Putting I/O, logging, or calculations in composable functions
+- **Unsafe casts** - Using `as` instead of `as?` with safe defaults
+- **Circular dependencies** - Layers depending on each other incorrectly
+- **Leaking internals** - Exposing implementation details in public APIs
+
+If you are unsure whether something is an anti-pattern, **ask before implementing**.
+
 ### File Organization Rules
 
 - One primary class per file

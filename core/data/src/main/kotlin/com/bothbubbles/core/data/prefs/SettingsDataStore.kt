@@ -148,6 +148,8 @@ class SettingsDataStore @Inject constructor(
     val reduceMotion: Flow<Boolean> get() = uiPrefs.reduceMotion
     val messageSoundsEnabled: Flow<Boolean> get() = uiPrefs.messageSoundsEnabled
     val soundTheme: Flow<SoundTheme> get() = uiPrefs.soundTheme
+    val hapticsEnabled: Flow<Boolean> get() = uiPrefs.hapticsEnabled
+    val audioHapticSyncEnabled: Flow<Boolean> get() = uiPrefs.audioHapticSyncEnabled
     val conversationFilter: Flow<String> get() = uiPrefs.conversationFilter
     val categoryFilter: Flow<String?> get() = uiPrefs.categoryFilter
 
@@ -177,6 +179,8 @@ class SettingsDataStore @Inject constructor(
     suspend fun setReduceMotion(enabled: Boolean) = uiPrefs.setReduceMotion(enabled)
     suspend fun setMessageSoundsEnabled(enabled: Boolean) = uiPrefs.setMessageSoundsEnabled(enabled)
     suspend fun setSoundTheme(theme: SoundTheme) = uiPrefs.setSoundTheme(theme)
+    suspend fun setHapticsEnabled(enabled: Boolean) = uiPrefs.setHapticsEnabled(enabled)
+    suspend fun setAudioHapticSyncEnabled(enabled: Boolean) = uiPrefs.setAudioHapticSyncEnabled(enabled)
     suspend fun setConversationFilter(filter: String) = uiPrefs.setConversationFilter(filter)
     suspend fun setCategoryFilter(category: String?) = uiPrefs.setCategoryFilter(category)
 
@@ -226,6 +230,10 @@ class SettingsDataStore @Inject constructor(
     val mlModelDownloaded: Flow<Boolean> get() = featurePrefs.mlModelDownloaded
     val mlAutoUpdateOnCellular: Flow<Boolean> get() = featurePrefs.mlAutoUpdateOnCellular
     val categorizationEnabled: Flow<Boolean> get() = featurePrefs.categorizationEnabled
+    val transactionsCategoryEnabled: Flow<Boolean> get() = featurePrefs.transactionsCategoryEnabled
+    val deliveriesCategoryEnabled: Flow<Boolean> get() = featurePrefs.deliveriesCategoryEnabled
+    val promotionsCategoryEnabled: Flow<Boolean> get() = featurePrefs.promotionsCategoryEnabled
+    val remindersCategoryEnabled: Flow<Boolean> get() = featurePrefs.remindersCategoryEnabled
     override val developerModeEnabled: Flow<Boolean> get() = featurePrefs.developerModeEnabled
     val linkPreviewsEnabled: Flow<Boolean> get() = featurePrefs.linkPreviewsEnabled
     val autoResponderEnabled: Flow<Boolean> get() = featurePrefs.autoResponderEnabled
@@ -243,6 +251,10 @@ class SettingsDataStore @Inject constructor(
     suspend fun setMlModelDownloaded(downloaded: Boolean) = featurePrefs.setMlModelDownloaded(downloaded)
     suspend fun setMlAutoUpdateOnCellular(enabled: Boolean) = featurePrefs.setMlAutoUpdateOnCellular(enabled)
     suspend fun setCategorizationEnabled(enabled: Boolean) = featurePrefs.setCategorizationEnabled(enabled)
+    suspend fun setTransactionsCategoryEnabled(enabled: Boolean) = featurePrefs.setTransactionsCategoryEnabled(enabled)
+    suspend fun setDeliveriesCategoryEnabled(enabled: Boolean) = featurePrefs.setDeliveriesCategoryEnabled(enabled)
+    suspend fun setPromotionsCategoryEnabled(enabled: Boolean) = featurePrefs.setPromotionsCategoryEnabled(enabled)
+    suspend fun setRemindersCategoryEnabled(enabled: Boolean) = featurePrefs.setRemindersCategoryEnabled(enabled)
     override suspend fun setDeveloperModeEnabled(enabled: Boolean) = featurePrefs.setDeveloperModeEnabled(enabled)
     suspend fun setLinkPreviewsEnabled(enabled: Boolean) = featurePrefs.setLinkPreviewsEnabled(enabled)
     suspend fun setAutoResponderEnabled(enabled: Boolean) = featurePrefs.setAutoResponderEnabled(enabled)

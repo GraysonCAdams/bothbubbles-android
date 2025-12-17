@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -27,6 +28,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.ui.zIndex
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -101,13 +103,18 @@ fun MessageSpotlightOverlay(
     val cardScale = remember { Animatable(0f) }
     val cardAlpha = remember { Animatable(0f) }
     val spotlightScale = remember { Animatable(1f) }
+    val spotlightElevation = remember { Animatable(0f) }
+    // Y offset for "lift toward center" effect (in pixels, negative = up)
+    val spotlightYOffset = remember { Animatable(0f) }
 
     // Close with animation
     val closeWithAnimation: suspend () -> Unit = {
         // Animate out in parallel
-        scope.launch { scrimAlpha.animateTo(0f, tween(200)) }
-        scope.launch { cardAlpha.animateTo(0f, tween(150)) }
-        scope.launch { spotlightScale.animateTo(1f, tween(150)) }
+        scope.launch { scrimAlpha.animateTo(0f, tween(MotionTokens.Duration.SHORT_4)) }
+        scope.launch { cardAlpha.animateTo(0f, tween(MotionTokens.Duration.SHORT_3)) }
+        scope.launch { spotlightScale.animateTo(1f, tween(MotionTokens.Duration.SHORT_4)) }
+        scope.launch { spotlightElevation.animateTo(0f, tween(MotionTokens.Duration.SHORT_4)) }
+        scope.launch { spotlightYOffset.animateTo(0f, tween(MotionTokens.Duration.SHORT_4)) }
         cardScale.animateTo(
             0f,
             spring(
@@ -119,14 +126,38 @@ fun MessageSpotlightOverlay(
         onDismiss()
     }
 
+    val density = LocalDensity.current
+    val view = LocalView.current
+    val screenHeight = view.height.toFloat()
+
     // Handle visibility changes
     LaunchedEffect(visible, anchorBounds) {
         if (visible && anchorBounds != null) {
             isPresent = true
-            // Entry animation - staggered for polish
-            launch { scrimAlpha.animateTo(0.32f, tween(200)) }
-            launch { spotlightScale.animateTo(1.02f, spring(stiffness = Spring.StiffnessMedium)) }
-            launch { cardAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
+            // Entry animation - M3-compliant "lift" effect
+            // 1. Dim background with stronger scrim (M3 style - no blur)
+            launch { scrimAlpha.animateTo(0.55f, tween(MotionTokens.Duration.MEDIUM_1)) }
+            // 2. Message lifts: scale up, elevate with pronounced shadow, shift toward center
+            launch {
+                spotlightScale.animateTo(
+                    1.05f,
+                    spring(
+                        dampingRatio = Spring.DampingRatioMediumBouncy,
+                        stiffness = Spring.StiffnessMedium
+                    )
+                )
+            }
+            // M3 Level 5 elevation (24dp) for maximum emphasis
+            launch { spotlightElevation.animateTo(24f, spring(stiffness = Spring.StiffnessMedium)) }
+            // Subtle Y shift toward vertical center (max 30px)
+            launch {
+                val messageCenter = (anchorBounds.top + anchorBounds.bottom) / 2
+                val viewCenter = screenHeight / 2f
+                val targetOffset = ((viewCenter - messageCenter) * 0.1f).coerceIn(-30f, 30f)
+                spotlightYOffset.animateTo(targetOffset, spring(stiffness = Spring.StiffnessMedium))
+            }
+            // 3. Card appears with bounce
+            launch { cardAlpha.animateTo(1f, tween(MotionTokens.Duration.SHORT_4, delayMillis = 80)) }
             cardScale.animateTo(
                 1f,
                 spring(
@@ -140,9 +171,6 @@ fun MessageSpotlightOverlay(
     }
 
     if (!isPresent || anchorBounds == null) return
-
-    val density = LocalDensity.current
-    val view = LocalView.current
 
     // Get window insets for safe zone calculation
     val windowInsets = remember(view) {
@@ -168,9 +196,8 @@ fun MessageSpotlightOverlay(
 
     // Get screen dimensions
     val screenWidth = view.width.toFloat()
-    val screenHeight = view.height.toFloat()
 
-    // Calculate card position relative to anchor
+    // Calculate card position relative to anchor (account for spotlight Y offset)
     val cardPosition = remember(anchorBounds, safeZone, screenWidth, screenHeight) {
         calculateCardPosition(
             anchorBounds = anchorBounds,
@@ -188,7 +215,7 @@ fun MessageSpotlightOverlay(
             .fillMaxSize()
             .zIndex(1000f) // Ensure we're above all other content
     ) {
-        // Layer 2: Scrim - dims background, dismisses on tap
+        // Layer 2: Scrim - dims background (M3 standard), dismisses on tap
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -200,13 +227,13 @@ fun MessageSpotlightOverlay(
                 }
         )
 
-        // Layer 3: Message Spotlight - re-rendered message at saved bounds
+        // Layer 3: Message Spotlight - re-rendered message with M3 elevation emphasis
         Box(
             modifier = Modifier
                 .offset {
                     IntOffset(
                         x = anchorBounds.left.roundToInt(),
-                        y = anchorBounds.top.roundToInt()
+                        y = (anchorBounds.top + spotlightYOffset.value).roundToInt()
                     )
                 }
                 .graphicsLayer {
@@ -214,18 +241,22 @@ fun MessageSpotlightOverlay(
                     scaleY = spotlightScale.value
                     // Scale from center
                     transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 0.5f)
+                    // Add elevation shadow for "lifted" effect
+                    shadowElevation = spotlightElevation.value
+                    shape = RoundedCornerShape(20.dp)
+                    clip = false
                 }
         ) {
             messageContent()
         }
 
-        // Layer 4: TapbackCard - positioned above or below spotlight
+        // Layer 4: TapbackCard - positioned above or below spotlight (follows spotlight Y offset)
         Box(
             modifier = Modifier
                 .offset {
                     IntOffset(
                         x = cardPosition.x.roundToInt(),
-                        y = cardPosition.y.roundToInt()
+                        y = (cardPosition.y + spotlightYOffset.value).roundToInt()
                     )
                 }
                 .graphicsLayer {

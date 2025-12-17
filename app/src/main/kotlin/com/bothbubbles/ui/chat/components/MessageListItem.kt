@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -154,10 +157,21 @@ fun MessageListItem(
         }
     }
 
+    // Hide the message when it's selected for tapback overlay (prevents double-vision)
+    val isSelectedForTapback = selectedMessageForTapback?.guid == message.guid
+    val tapbackHideAlpha by animateFloatAsState(
+        targetValue = if (isSelectedForTapback) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = MotionTokens.Duration.SHORT_3,
+            delayMillis = MotionTokens.Duration.SHORT_1
+        ),
+        label = "tapbackHideAlpha"
+    )
+
     Column(
         modifier = Modifier
             .zIndex(if (message.isPlacedSticker) 1f else 0f)
-            .alpha(stickerFadeAlpha)
+            .alpha(stickerFadeAlpha * tapbackHideAlpha)
             .offset(y = stickerOverlapOffset)
             .padding(top = topPadding)
             .newMessageEntrance(

@@ -9,6 +9,7 @@ import androidx.work.Constraints
 import androidx.work.ExistingWorkPolicy
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.OutOfQuotaPolicy
 import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.bothbubbles.data.local.db.BothBubblesDatabase
@@ -28,12 +29,8 @@ import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
-import com.bothbubbles.di.ApplicationScope
 import dagger.hilt.android.qualifiers.ApplicationContext
-import com.bothbubbles.services.messaging.MessageSender
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.launch
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.TimeUnit
@@ -63,9 +60,7 @@ class PendingMessageRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val attachmentDao: AttachmentDao,
     private val chatDao: ChatDao,
-    private val attachmentPersistenceManager: AttachmentPersistenceManager,
-    @ApplicationScope private val applicationScope: CoroutineScope,
-    private val messageSender: dagger.Lazy<MessageSender>  // Lazy to avoid circular dependency
+    private val attachmentPersistenceManager: AttachmentPersistenceManager
 ) : PendingMessageSource {
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
@@ -220,73 +215,8 @@ class PendingMessageRepository @Inject constructor(
             Timber.i("[SEND_TRACE] Created ${persistedAttachments.size} attachment echoes")
         }
 
-        // Try immediate send first (bypasses WorkManager 300-400ms scheduling latency)
-        // Fall back to WorkManager only if immediate send fails
-        Timber.i("[SEND_TRACE] Launching async IMMEDIATE SEND +${System.currentTimeMillis() - startTime}ms")
-        applicationScope.launch {
-            val sendStart = System.currentTimeMillis()
-            Timber.i("[SEND_TRACE] [IMMEDIATE] Attempting immediate send...")
-
-            try {
-                // Build attachment inputs from persisted data
-                val attachmentInputs = persistedAttachments.map { data ->
-                    PendingAttachmentInput(
-                        uri = Uri.fromFile(File(data.persistedPath)),
-                        caption = data.caption,
-                        mimeType = data.mimeType,
-                        name = data.fileName,
-                        size = data.fileSize
-                    )
-                }
-
-                // Update status to SENDING
-                pendingMessageDao.updateStatusWithTimestamp(
-                    messageId,
-                    PendingSyncStatus.SENDING.name,
-                    System.currentTimeMillis()
-                )
-
-                // Try to send immediately
-                val result = messageSender.get().sendUnified(
-                    chatGuid = chatGuid,
-                    text = text ?: "",
-                    replyToGuid = replyToGuid,
-                    effectId = effectId,
-                    subject = subject,
-                    attachments = attachmentInputs,
-                    deliveryMode = deliveryMode,
-                    tempGuid = clientGuid
-                )
-
-                if (result.isSuccess) {
-                    val sentMessage = result.getOrThrow()
-                    Timber.i("[SEND_TRACE] [IMMEDIATE] ✓ SUCCESS in ${System.currentTimeMillis() - sendStart}ms: $clientGuid -> ${sentMessage.guid}")
-
-                    // Mark as sent
-                    pendingMessageDao.markAsSent(messageId, sentMessage.guid)
-
-                    // Clean up persisted attachments
-                    if (persistedAttachments.isNotEmpty()) {
-                        attachmentPersistenceManager.cleanupAttachments(persistedAttachments.map { it.persistedPath })
-                    }
-                } else {
-                    val error = result.exceptionOrNull()
-                    Timber.w("[SEND_TRACE] [IMMEDIATE] ✗ FAILED in ${System.currentTimeMillis() - sendStart}ms: ${error?.message}")
-                    Timber.i("[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
-
-                    // Reset status and enqueue WorkManager for retry
-                    pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
-                    enqueueWorker(messageId, clientGuid)
-                }
-            } catch (e: Exception) {
-                Timber.e(e, "[SEND_TRACE] [IMMEDIATE] ✗ EXCEPTION")
-                Timber.i("[SEND_TRACE] [IMMEDIATE] Falling back to WorkManager for retry...")
-
-                // Reset status and enqueue WorkManager for retry
-                pendingMessageDao.updateStatus(messageId, PendingSyncStatus.PENDING.name)
-                enqueueWorker(messageId, clientGuid)
-            }
-        }
+        // Enqueue expedited WorkManager job for reliable, single-path delivery
+        enqueueWorker(messageId, clientGuid)
 
         Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage RETURNING: ${System.currentTimeMillis() - startTime}ms total ──")
         clientGuid
@@ -328,6 +258,7 @@ class PendingMessageRepository @Inject constructor(
 
     /**
      * Enqueue a WorkManager job to send a pending message.
+     * Uses expedited work for minimal latency while maintaining reliability.
      */
     private suspend fun enqueueWorker(pendingMessageId: Long, localId: String) {
         val constraints = Constraints.Builder()
@@ -335,6 +266,7 @@ class PendingMessageRepository @Inject constructor(
             .build()
 
         val workRequest = OneTimeWorkRequestBuilder<MessageSendWorker>()
+            .setExpedited(OutOfQuotaPolicy.RUN_AS_NON_EXPEDITED_WORK_REQUEST)
             .setConstraints(constraints)
             .setBackoffCriteria(
                 BackoffPolicy.EXPONENTIAL,

@@ -214,7 +214,11 @@ fun SettingsContent(
                 ConnectionState.NOT_CONFIGURED -> BadgeStatus.DISABLED
                 else -> BadgeStatus.ERROR
             }
-            val smsStatus = if (uiState.smsEnabled) BadgeStatus.CONNECTED else BadgeStatus.DISABLED
+            val smsStatus = when {
+                !uiState.smsEnabled -> BadgeStatus.DISABLED
+                uiState.isSmsFullyFunctional -> BadgeStatus.CONNECTED
+                else -> BadgeStatus.ERROR  // Enabled but needs setup
+            }
 
             MessagingSectionHeader(
                 iMessageStatus = iMessageStatus,

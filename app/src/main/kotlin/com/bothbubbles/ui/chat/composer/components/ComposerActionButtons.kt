@@ -18,9 +18,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
 
@@ -35,15 +37,18 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
  *
  * @param isExpanded Whether the media picker panel is currently expanded
  * @param onClick Callback when the button is tapped
+ * @param isEnabled Whether the button is enabled (disabled when SMS input is blocked)
  * @param modifier Modifier for the button
  */
 @Composable
 fun ComposerActionButtons(
     isExpanded: Boolean,
     onClick: () -> Unit,
+    isEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
+    val haptic = LocalHapticFeedback.current
 
     // Rotation animation: 0° (plus) → 45° (X shape)
     val rotation by animateFloatAsState(
@@ -81,10 +86,14 @@ fun ComposerActionButtons(
     )
 
     Surface(
-        onClick = onClick,
+        onClick = {
+            HapticUtils.onTap(haptic)
+            onClick()
+        },
         modifier = modifier.size(28.dp),
         shape = CircleShape,
-        color = backgroundColor
+        color = if (isEnabled) backgroundColor else backgroundColor.copy(alpha = 0.4f),
+        enabled = isEnabled
     ) {
         Box(
             modifier = Modifier.fillMaxSize(),

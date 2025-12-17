@@ -5,9 +5,9 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -186,10 +186,10 @@ fun ChatInputArea(
                 // Left side cancel button - only visible in preview mode (recording has controls in panel)
                 AnimatedVisibility(
                     visible = mode == InputMode.PREVIEW,
-                    enter = fadeIn(animationSpec = tween(150)) +
-                        slideInHorizontally(animationSpec = tween(200)) { -it / 2 },
-                    exit = fadeOut(animationSpec = tween(150)) +
-                        slideOutHorizontally(animationSpec = tween(200)) { -it / 2 }
+                    enter = fadeIn(animationSpec = tween(MotionTokens.Duration.QUICK)) +
+                        slideInHorizontally(animationSpec = tween(MotionTokens.Duration.NORMAL)) { -it / 2 },
+                    exit = fadeOut(animationSpec = tween(MotionTokens.Duration.QUICK)) +
+                        slideOutHorizontally(animationSpec = tween(MotionTokens.Duration.NORMAL)) { -it / 2 }
                 ) {
                     Row {
                         // Cancel button for preview mode
@@ -219,10 +219,10 @@ fun ChatInputArea(
                 AnimatedContent(
                     targetState = mode,
                     transitionSpec = {
-                        (fadeIn(animationSpec = tween(200)) +
-                            slideInHorizontally(animationSpec = tween(250)) { it / 3 })
-                            .togetherWith(fadeOut(animationSpec = tween(150)) +
-                                slideOutHorizontally(animationSpec = tween(200)) { -it / 3 })
+                        (fadeIn(animationSpec = tween(MotionTokens.Duration.NORMAL)) +
+                            slideInHorizontally(animationSpec = tween(MotionTokens.Duration.MEDIUM)) { it / 3 })
+                            .togetherWith(fadeOut(animationSpec = tween(MotionTokens.Duration.QUICK)) +
+                                slideOutHorizontally(animationSpec = tween(MotionTokens.Duration.NORMAL)) { -it / 3 })
                     },
                     modifier = Modifier.weight(1f),
                     label = "center_content"
@@ -272,10 +272,10 @@ fun ChatInputArea(
                 // Hide right side buttons during RECORDING mode (controls are in the expanded panel)
                 AnimatedVisibility(
                     visible = mode != InputMode.RECORDING,
-                    enter = fadeIn(animationSpec = tween(150)) +
-                        slideInHorizontally(animationSpec = tween(200)) { it / 2 },
-                    exit = fadeOut(animationSpec = tween(150)) +
-                        slideOutHorizontally(animationSpec = tween(200)) { it / 2 }
+                    enter = fadeIn(animationSpec = tween(MotionTokens.Duration.QUICK)) +
+                        slideInHorizontally(animationSpec = tween(MotionTokens.Duration.NORMAL)) { it / 2 },
+                    exit = fadeOut(animationSpec = tween(MotionTokens.Duration.QUICK)) +
+                        slideOutHorizontally(animationSpec = tween(MotionTokens.Duration.NORMAL)) { it / 2 }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Spacer(modifier = Modifier.width(6.dp))
@@ -380,7 +380,7 @@ internal fun VoiceMemoButton(
             isSmsMode -> bubbleColors.sendButtonSms
             else -> bubbleColors.sendButtonIMessage
         },
-        animationSpec = tween(150, easing = FastOutSlowInEasing),
+        animationSpec = tween(MotionTokens.Duration.QUICK, easing = MotionTokens.Easing.Standard),
         label = "voiceMemoButtonColor"
     )
 

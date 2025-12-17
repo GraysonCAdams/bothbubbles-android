@@ -5,8 +5,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -149,9 +149,6 @@ fun SettingsPanel(
                 )
             }
         ) { padding ->
-            // Determine if navigation is forward or backward for animation direction
-            val isForward = remember { mutableStateOf(true) }
-
             // Swipe gesture state for edge-swipe back navigation
             val scope = rememberCoroutineScope()
             val density = LocalDensity.current
@@ -175,7 +172,6 @@ fun SettingsPanel(
                                 scope.launch {
                                     if (swipeOffset.value > swipeThresholdPx) {
                                         // Swipe threshold reached - navigate back
-                                        isForward.value = false
                                         navigator.navigateBack()
                                     }
                                     // Animate back to 0
@@ -200,26 +196,26 @@ fun SettingsPanel(
             AnimatedContent(
                 targetState = navigator.currentPage,
                 transitionSpec = {
-                    if (isForward.value) {
+                    if (navigator.isNavigatingForward) {
                         // Forward navigation: slide in from right
                         (slideInHorizontally(
                             initialOffsetX = { it },
-                            animationSpec = tween(300, easing = FastOutSlowInEasing)
-                        ) + fadeIn(tween(200))) togetherWith
+                            animationSpec = tween(MotionTokens.Duration.EMPHASIZED, easing = MotionTokens.Easing.Emphasized)
+                        ) + fadeIn(tween(MotionTokens.Duration.NORMAL))) togetherWith
                         (slideOutHorizontally(
                             targetOffsetX = { -it / 4 },
-                            animationSpec = tween(300, easing = FastOutSlowInEasing)
-                        ) + fadeOut(tween(150)))
+                            animationSpec = tween(MotionTokens.Duration.EMPHASIZED, easing = MotionTokens.Easing.Emphasized)
+                        ) + fadeOut(tween(MotionTokens.Duration.QUICK)))
                     } else {
                         // Backward navigation: slide in from left
                         (slideInHorizontally(
                             initialOffsetX = { -it / 4 },
-                            animationSpec = tween(300, easing = FastOutSlowInEasing)
-                        ) + fadeIn(tween(200))) togetherWith
+                            animationSpec = tween(MotionTokens.Duration.EMPHASIZED, easing = MotionTokens.Easing.Emphasized)
+                        ) + fadeIn(tween(MotionTokens.Duration.NORMAL))) togetherWith
                         (slideOutHorizontally(
                             targetOffsetX = { it },
-                            animationSpec = tween(300, easing = FastOutSlowInEasing)
-                        ) + fadeOut(tween(150)))
+                            animationSpec = tween(MotionTokens.Duration.EMPHASIZED, easing = MotionTokens.Easing.Emphasized)
+                        ) + fadeOut(tween(MotionTokens.Duration.QUICK)))
                     }
                 },
                 modifier = Modifier
@@ -233,70 +229,22 @@ fun SettingsPanel(
                         SettingsContent(
                             modifier = Modifier.fillMaxSize(),
                             uiState = uiState,
-                            onServerSettingsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Server)
-                            },
-                            onArchivedClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Archived)
-                            },
-                            onBlockedClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Blocked)
-                            },
-                            onSpamClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Spam)
-                            },
-                            onCategorizationClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Categorization)
-                            },
-                            onSyncSettingsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Sync)
-                            },
-                            onExportClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Export)
-                            },
-                            onSmsSettingsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Sms)
-                            },
-                            onNotificationsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Notifications)
-                            },
-                            onSwipeSettingsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Swipe)
-                            },
-                            onEffectsSettingsClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Effects)
-                            },
-                            onImageQualityClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.ImageQuality)
-                            },
-                            onTemplatesClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.Templates)
-                            },
-                            onAutoResponderClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.AutoResponder)
-                            },
-                            onEtaSharingClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.EtaSharing)
-                            },
-                            onAboutClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.About)
-                            },
+                            onServerSettingsClick = { navigator.navigateTo(SettingsPanelPage.Server) },
+                            onArchivedClick = { navigator.navigateTo(SettingsPanelPage.Archived) },
+                            onBlockedClick = { navigator.navigateTo(SettingsPanelPage.Blocked) },
+                            onSpamClick = { navigator.navigateTo(SettingsPanelPage.Spam) },
+                            onCategorizationClick = { navigator.navigateTo(SettingsPanelPage.Categorization) },
+                            onSyncSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sync) },
+                            onExportClick = { navigator.navigateTo(SettingsPanelPage.Export) },
+                            onSmsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Sms) },
+                            onNotificationsClick = { navigator.navigateTo(SettingsPanelPage.Notifications) },
+                            onSwipeSettingsClick = { navigator.navigateTo(SettingsPanelPage.Swipe) },
+                            onEffectsSettingsClick = { navigator.navigateTo(SettingsPanelPage.Effects) },
+                            onImageQualityClick = { navigator.navigateTo(SettingsPanelPage.ImageQuality) },
+                            onTemplatesClick = { navigator.navigateTo(SettingsPanelPage.Templates) },
+                            onAutoResponderClick = { navigator.navigateTo(SettingsPanelPage.AutoResponder) },
+                            onEtaSharingClick = { navigator.navigateTo(SettingsPanelPage.EtaSharing) },
+                            onAboutClick = { navigator.navigateTo(SettingsPanelPage.About) },
                             viewModel = viewModel
                         )
                     }
@@ -328,10 +276,7 @@ fun SettingsPanel(
                     }
                     SettingsPanelPage.Sms -> {
                         SmsPanelContent(
-                            onBackupRestoreClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.SmsBackup)
-                            }
+                            onBackupRestoreClick = { navigator.navigateTo(SettingsPanelPage.SmsBackup) }
                         )
                     }
                     SettingsPanelPage.SmsBackup -> {
@@ -360,10 +305,7 @@ fun SettingsPanel(
                     }
                     SettingsPanelPage.About -> {
                         AboutContent(
-                            onOpenSourceLicensesClick = {
-                                isForward.value = true
-                                navigator.navigateTo(SettingsPanelPage.OpenSourceLicenses)
-                            }
+                            onOpenSourceLicensesClick = { navigator.navigateTo(SettingsPanelPage.OpenSourceLicenses) }
                         )
                     }
                     SettingsPanelPage.OpenSourceLicenses -> {

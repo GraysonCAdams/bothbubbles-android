@@ -139,6 +139,24 @@ class UiPreferences @Inject constructor(
         }
     }
 
+    // ===== Haptic Feedback Settings =====
+
+    /**
+     * Whether haptic feedback is enabled globally.
+     * When disabled, no haptic feedback will be triggered.
+     */
+    val hapticsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.HAPTICS_ENABLED] ?: true
+    }
+
+    /**
+     * Whether to sync haptic patterns with sound effects.
+     * When enabled, uses rich VibrationEffect.Composition patterns.
+     */
+    val audioHapticSyncEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.AUDIO_HAPTIC_SYNC_ENABLED] ?: true
+    }
+
     // ===== Conversation Filter Settings =====
 
     /**
@@ -324,6 +342,18 @@ class UiPreferences @Inject constructor(
         }
     }
 
+    suspend fun setHapticsEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.HAPTICS_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setAudioHapticSyncEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUDIO_HAPTIC_SYNC_ENABLED] = enabled
+        }
+    }
+
     suspend fun setConversationFilter(filter: String) {
         dataStore.edit { prefs ->
             prefs[Keys.CONVERSATION_FILTER] = filter
@@ -378,6 +408,10 @@ class UiPreferences @Inject constructor(
         // Sound Settings
         val MESSAGE_SOUNDS_ENABLED = booleanPreferencesKey("message_sounds_enabled")
         val SOUND_THEME = stringPreferencesKey("sound_theme")
+
+        // Haptic Feedback Settings
+        val HAPTICS_ENABLED = booleanPreferencesKey("haptics_enabled")
+        val AUDIO_HAPTIC_SYNC_ENABLED = booleanPreferencesKey("audio_haptic_sync_enabled")
 
         // Conversation Filter Settings
         val CONVERSATION_FILTER = stringPreferencesKey("conversation_filter")

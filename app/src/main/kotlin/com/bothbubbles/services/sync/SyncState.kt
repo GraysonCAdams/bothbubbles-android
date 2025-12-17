@@ -14,7 +14,6 @@ sealed class SyncState {
         val totalChats: Int = 0,
         val processedChats: Int = 0,
         val syncedMessages: Int = 0,
-        val totalMessagesExpected: Int = 0, // From server, for accurate progress display
         val currentChatName: String? = null,
         val isInitialSync: Boolean = false,
         // Separate progress tracking for iMessage and SMS
@@ -135,20 +134,33 @@ data class UnifiedSyncProgress(
     companion object {
         /**
          * Calculate weighted overall progress from stages.
-         * Ensures smooth progress by accounting for stage weights.
+         * Normalizes by total active weight so progress reaches 100% when all active stages complete.
          */
         fun calculateOverallProgress(stages: List<StageProgress>): Float {
             if (stages.isEmpty()) return 0f
 
-            return stages.sumOf { stage ->
+            // Calculate total weight of active stages (not WAITING or SKIPPED)
+            val activeWeight = stages.sumOf { stage ->
+                when (stage.status) {
+                    StageStatus.COMPLETE, StageStatus.IN_PROGRESS, StageStatus.ERROR -> stage.weight.toDouble()
+                    StageStatus.WAITING, StageStatus.SKIPPED -> 0.0
+                }
+            }.toFloat()
+
+            if (activeWeight <= 0f) return 0f
+
+            val weightedProgress = stages.sumOf { stage ->
                 val stageContribution = when (stage.status) {
                     StageStatus.COMPLETE -> stage.weight
                     StageStatus.IN_PROGRESS -> stage.weight * stage.progress
-                    StageStatus.ERROR -> stage.weight * stage.progress // Show progress up to error
+                    StageStatus.ERROR -> stage.weight * stage.progress
                     StageStatus.WAITING, StageStatus.SKIPPED -> 0f
                 }
                 stageContribution.toDouble()
-            }.toFloat().coerceIn(0f, 1f)
+            }.toFloat()
+
+            // Normalize by active weight so we reach 100% when all active stages complete
+            return (weightedProgress / activeWeight).coerceIn(0f, 1f)
         }
     }
 }

@@ -25,6 +25,9 @@ data class ConversationsUiState(
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
     val smsBannerState: SmsBannerState = SmsBannerState.Disabled,
+    // SMS capability state (for settings warning badge, independent of banner dismissal)
+    val smsEnabled: Boolean = false,
+    val isSmsFullyFunctional: Boolean = false,
     val conversations: StableList<ConversationUiModel> = emptyList<ConversationUiModel>().toStable(),
     val searchQuery: String = "",
     val error: String? = null,
@@ -35,10 +38,30 @@ data class ConversationsUiState(
     val userProfileAvatarUri: String? = null,
     // Categorization enabled flag (for settings)
     val categorizationEnabled: Boolean = false,
+    // Per-category enabled flags
+    val transactionsEnabled: Boolean = true,
+    val deliveriesEnabled: Boolean = true,
+    val promotionsEnabled: Boolean = true,
+    val remindersEnabled: Boolean = true,
     // Conversation filter state (persisted)
     val conversationFilter: String = "all",
     val categoryFilter: String? = null
 ) {
+    /**
+     * True when there's a problem in settings that needs attention.
+     * Used to show a warning badge on the settings gear icon.
+     * This is independent of banner dismissal state - warning persists until fixed.
+     */
+    val hasSettingsWarning: Boolean
+        get() {
+            // iMessage warning: not connected and not in "not configured" state (means connection issue)
+            val hasIMessageWarning = connectionState == ConnectionState.ERROR ||
+                    connectionState == ConnectionState.DISCONNECTED
+            // SMS warning: enabled but not fully functional (regardless of banner dismissal)
+            val hasSmsWarning = smsEnabled && !isSmsFullyFunctional
+            return hasIMessageWarning || hasSmsWarning
+        }
+
     /**
      * Calculate the unread count based on the current filter.
      * This is used for the notification badge and header display.

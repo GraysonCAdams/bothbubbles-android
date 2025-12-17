@@ -1,9 +1,9 @@
 package com.bothbubbles.ui.components.message
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -92,14 +92,8 @@ fun TapbackPopup(
 
     // Close with animation
     val closeWithAnimation: suspend () -> Unit = {
-        scope.launch { cardAlpha.animateTo(0f, tween(150)) }
-        cardScale.animateTo(
-            0f,
-            spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        )
+        scope.launch { cardAlpha.animateTo(0f, tween(MotionTokens.Duration.QUICK)) }
+        cardScale.animateTo(0f, MotionTokens.Springs.Gentle)
         isPresent = false
         onDismiss()
     }
@@ -109,14 +103,8 @@ fun TapbackPopup(
         if (visible && anchorBounds != null) {
             isPresent = true
             // Entry animation
-            launch { cardAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
-            cardScale.animateTo(
-                1f,
-                spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            )
+            launch { cardAlpha.animateTo(1f, tween(MotionTokens.Duration.QUICK, delayMillis = MotionTokens.Duration.STAGGER)) }
+            cardScale.animateTo(1f, MotionTokens.Springs.Bouncy)
         } else if (!visible && isPresent) {
             closeWithAnimation()
         }

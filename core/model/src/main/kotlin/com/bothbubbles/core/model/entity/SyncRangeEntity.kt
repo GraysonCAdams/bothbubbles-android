@@ -75,5 +75,6 @@ enum class SyncSource {
     INITIAL,      // Initial sync during setup
     INCREMENTAL,  // Periodic background sync
     ON_DEMAND,    // User scrolled to unsynced region
-    SOCKET        // Real-time message via socket
+    SOCKET,       // Real-time message via socket
+    REPAIR        // Repair sync for chats with missing messages
 }

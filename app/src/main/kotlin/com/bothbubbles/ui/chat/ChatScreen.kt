@@ -7,6 +7,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHost
@@ -24,7 +25,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -100,7 +100,6 @@ fun ChatScreen(
         cachedScrollPosition = cachedScrollPosition
     )
     val context = LocalContext.current
-    val hapticFeedback = LocalHapticFeedback.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
     // Consolidated scroll effects: keyboard hiding, load more, scroll position tracking
@@ -301,9 +300,6 @@ fun ChatScreen(
                 .zIndex(1f)
         ) {
             ChatInputUI(
-                // Wave 2: Delegates for internal state collection
-                sendDelegate = viewModel.send,
-                messageListDelegate = viewModel.messageList,
                 composerDelegate = viewModel.composer,
                 audioState = audioState,
                 isLocalSmsChat = chatInfoState.isLocalSmsChat,
@@ -314,7 +310,6 @@ fun ChatScreen(
                     viewModel.updateDraft(suggestion.text)
                     suggestion.templateId?.let { viewModel.composer.recordTemplateUsage(it) }
                 },
-                onCancelReply = { viewModel.send.clearReply() },
                 onComposerEvent = { event -> viewModel.onComposerEvent(event) },
                 onMediaSelected = { uris -> viewModel.composer.addAttachments(uris) },
                 onFileClick = { filePickerLauncher.launch(arrayOf("*/*")) },
@@ -337,10 +332,12 @@ fun ChatScreen(
 
         // Main content area - uses calculated padding for top/bottom bars
         // This avoids SubcomposeLayout by using pre-measured heights
+        // imePadding() ensures content shifts up when keyboard opens (no child recomposition)
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeightDp, bottom = bottomBarHeightDp)
+                .imePadding()
         ) {
         // Wave 2: Use effect settings from outer scope (collected at higher level)
         val autoPlayEffects = effectsStateForOverlay.autoPlayEffects

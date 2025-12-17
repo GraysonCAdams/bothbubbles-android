@@ -10,6 +10,7 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
@@ -260,8 +261,8 @@ private fun MainInputRow(
         // Left side: Cancel button for preview mode
         AnimatedVisibility(
             visible = state.inputMode == ComposerInputMode.VOICE_PREVIEW,
-            enter = fadeIn(tween(150)) + slideInHorizontally { -it / 2 },
-            exit = fadeOut(tween(150)) + slideOutHorizontally { -it / 2 }
+            enter = fadeIn(tween(MotionTokens.Duration.QUICK)) + slideInHorizontally { -it / 2 },
+            exit = fadeOut(tween(MotionTokens.Duration.QUICK)) + slideOutHorizontally { -it / 2 }
         ) {
             // Cancel button handled in PreviewContent
         }
@@ -270,8 +271,8 @@ private fun MainInputRow(
         AnimatedContent(
             targetState = state.inputMode,
             transitionSpec = {
-                (fadeIn(tween(200)) + slideInHorizontally { it / 3 })
-                    .togetherWith(fadeOut(tween(150)) + slideOutHorizontally { -it / 3 })
+                (fadeIn(tween(MotionTokens.Duration.NORMAL)) + slideInHorizontally { it / 3 })
+                    .togetherWith(fadeOut(tween(MotionTokens.Duration.QUICK)) + slideOutHorizontally { -it / 3 })
             },
             modifier = Modifier.weight(1f),
             label = "composer_center_content"
@@ -316,8 +317,8 @@ private fun MainInputRow(
         // Right side: Send/Voice button (hidden during recording)
         AnimatedVisibility(
             visible = state.inputMode != ComposerInputMode.VOICE_RECORDING,
-            enter = fadeIn(tween(150)) + slideInHorizontally { it / 2 },
-            exit = fadeOut(tween(150)) + slideOutHorizontally { it / 2 }
+            enter = fadeIn(tween(MotionTokens.Duration.QUICK)) + slideInHorizontally { it / 2 },
+            exit = fadeOut(tween(MotionTokens.Duration.QUICK)) + slideOutHorizontally { it / 2 }
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Spacer(modifier = Modifier.width(6.dp))
@@ -351,7 +352,8 @@ private fun TextInputContent(
         leadingContent = {
             ComposerActionButtons(
                 isExpanded = state.isPickerExpanded,
-                onClick = { onEvent(ComposerEvent.ToggleMediaPicker) }
+                onClick = { onEvent(ComposerEvent.ToggleMediaPicker) },
+                isEnabled = !state.smsInputBlocked
             )
         },
         trailingContent = {
@@ -359,7 +361,8 @@ private fun TextInputContent(
                 showCamera = state.text.isBlank(),
                 onCameraClick = { onEvent(ComposerEvent.OpenCamera) },
                 onImageClick = onGalleryClick,
-                onEmojiClick = { onEvent(ComposerEvent.ToggleEmojiPicker) }
+                onEmojiClick = { onEvent(ComposerEvent.ToggleEmojiPicker) },
+                isEnabled = !state.smsInputBlocked
             )
         }
     )

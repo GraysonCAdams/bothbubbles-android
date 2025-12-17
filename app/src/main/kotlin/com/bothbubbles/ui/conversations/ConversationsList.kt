@@ -18,7 +18,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -27,6 +26,7 @@ import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 import com.bothbubbles.ui.components.conversation.SwipeableConversationTile
 import com.bothbubbles.ui.components.dialogs.ContactInfo
+import com.bothbubbles.util.HapticUtils
 
 /**
  * Main conversations list with pinned section and regular conversations.
@@ -173,11 +173,11 @@ internal fun ConversationsList(
                         }
                     },
                     onLongClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        HapticUtils.onLongPress(haptic)
                         onConversationLongClick(conversation.guid)
                     },
                     onAvatarClick = {
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        HapticUtils.onTap(haptic)
                         onAvatarClick(conversation.toContactInfo())
                     }
                 )

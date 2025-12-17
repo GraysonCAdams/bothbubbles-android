@@ -1,6 +1,7 @@
 package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
@@ -23,6 +24,7 @@ import javax.inject.Singleton
 class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val tombstoneDao: TombstoneDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val api: BothBubblesApi,
     private val syncOps: ChatSyncOperations,
@@ -276,9 +278,11 @@ class ChatRepository @Inject constructor(
     }
 
     /**
-     * Delete a chat locally
+     * Delete a chat locally.
+     * Records a tombstone to prevent resurrection during sync.
      */
     suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
+        tombstoneDao.recordDeletedChat(guid)
         messageDao.deleteMessagesForChat(guid)
         chatDao.deleteChatByGuid(guid)
     }

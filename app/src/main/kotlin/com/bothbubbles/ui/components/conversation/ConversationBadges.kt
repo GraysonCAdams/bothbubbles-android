@@ -2,9 +2,9 @@ package com.bothbubbles.ui.components.conversation
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -35,12 +35,12 @@ fun UnreadBadge(
         visible = count > 0,
         enter = scaleIn(
             initialScale = 0.5f,
-            animationSpec = spring(dampingRatio = 0.6f, stiffness = Spring.StiffnessMedium)
-        ) + fadeIn(tween(100)),
+            animationSpec = MotionTokens.Springs.Bouncy
+        ) + fadeIn(tween(MotionTokens.Duration.FAST)),
         exit = scaleOut(
             targetScale = 0.5f,
-            animationSpec = tween(100)
-        ) + fadeOut(tween(100)),
+            animationSpec = tween(MotionTokens.Duration.FAST)
+        ) + fadeOut(tween(MotionTokens.Duration.FAST)),
         modifier = modifier
     ) {
         Surface(
@@ -53,7 +53,7 @@ fun UnreadBadge(
                 AnimatedContent(
                     targetState = count,
                     transitionSpec = {
-                        fadeIn(tween(100)) togetherWith fadeOut(tween(100))
+                        fadeIn(tween(MotionTokens.Duration.FAST)) togetherWith fadeOut(tween(MotionTokens.Duration.FAST))
                     },
                     label = "badgeCount"
                 ) { targetCount ->

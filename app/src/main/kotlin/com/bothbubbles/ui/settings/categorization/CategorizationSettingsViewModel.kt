@@ -34,11 +34,19 @@ class CategorizationSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             val categorizationEnabled = settingsDataStore.categorizationEnabled.first()
             val mlAutoUpdateOnCellular = settingsDataStore.mlAutoUpdateOnCellular.first()
+            val transactionsEnabled = settingsDataStore.transactionsCategoryEnabled.first()
+            val deliveriesEnabled = settingsDataStore.deliveriesCategoryEnabled.first()
+            val promotionsEnabled = settingsDataStore.promotionsCategoryEnabled.first()
+            val remindersEnabled = settingsDataStore.remindersCategoryEnabled.first()
 
             _uiState.update {
                 it.copy(
                     categorizationEnabled = categorizationEnabled,
-                    mlAutoUpdateOnCellular = mlAutoUpdateOnCellular
+                    mlAutoUpdateOnCellular = mlAutoUpdateOnCellular,
+                    transactionsEnabled = transactionsEnabled,
+                    deliveriesEnabled = deliveriesEnabled,
+                    promotionsEnabled = promotionsEnabled,
+                    remindersEnabled = remindersEnabled
                 )
             }
         }
@@ -71,6 +79,34 @@ class CategorizationSettingsViewModel @Inject constructor(
         viewModelScope.launch {
             settingsDataStore.setMlAutoUpdateOnCellular(enabled)
             _uiState.update { it.copy(mlAutoUpdateOnCellular = enabled) }
+        }
+    }
+
+    fun setTransactionsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setTransactionsCategoryEnabled(enabled)
+            _uiState.update { it.copy(transactionsEnabled = enabled) }
+        }
+    }
+
+    fun setDeliveriesEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setDeliveriesCategoryEnabled(enabled)
+            _uiState.update { it.copy(deliveriesEnabled = enabled) }
+        }
+    }
+
+    fun setPromotionsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setPromotionsCategoryEnabled(enabled)
+            _uiState.update { it.copy(promotionsEnabled = enabled) }
+        }
+    }
+
+    fun setRemindersEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setRemindersCategoryEnabled(enabled)
+            _uiState.update { it.copy(remindersEnabled = enabled) }
         }
     }
 
@@ -119,5 +155,10 @@ data class CategorizationSettingsUiState(
     val mlAutoUpdateOnCellular: Boolean = false,
     val isDownloading: Boolean = false,
     val isCategorizing: Boolean = false,
-    val downloadError: String? = null
+    val downloadError: String? = null,
+    // Per-category enabled states
+    val transactionsEnabled: Boolean = true,
+    val deliveriesEnabled: Boolean = true,
+    val promotionsEnabled: Boolean = true,
+    val remindersEnabled: Boolean = true
 )

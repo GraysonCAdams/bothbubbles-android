@@ -32,9 +32,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -121,11 +121,11 @@ fun SendButton(
                             isPressed = false
                         },
                         onTap = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            HapticUtils.onTap(haptic)
                             onClick()
                         },
                         onLongPress = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            HapticUtils.onLongPress(haptic)
                             onLongClick()
                         }
                     )

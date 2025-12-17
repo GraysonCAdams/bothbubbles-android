@@ -34,8 +34,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
+import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -63,7 +63,7 @@ fun ProfileHeader(
         modifier = modifier
             .fillMaxWidth()
             .clickable(onClick = {
-                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                HapticUtils.onTap(haptic)
                 onManageServerClick()
             })
             .padding(top = 24.dp, bottom = 16.dp),
@@ -271,7 +271,7 @@ fun SettingsMenuItem(
                         onClick = { offset ->
                             annotatedText.getStringAnnotations(tag = "action", start = offset, end = offset)
                                 .firstOrNull()?.let {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    HapticUtils.onTap(haptic)
                                     onSubtitleActionClick()
                                 }
                         }
@@ -316,7 +316,7 @@ fun SettingsMenuItem(
                         if (onInfoClick != null) {
                             IconButton(
                                 onClick = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    HapticUtils.onTap(haptic)
                                     onInfoClick()
                                 },
                                 modifier = Modifier.size(40.dp)
@@ -342,11 +342,11 @@ fun SettingsMenuItem(
                 enabled = true, // Always enabled for click handling
                 onClick = {
                     if (enabled && !isLoading) {
-                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        HapticUtils.onTap(haptic)
                         onClick()
                     } else if (!enabled && onDisabledClick != null) {
                         // Trigger shake + callback for disabled state
-                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        HapticUtils.onDisabledTap(haptic)
                         triggerShake()
                         onDisabledClick()
                     }
@@ -398,7 +398,7 @@ fun StatusBadge(
 
     Surface(
         onClick = {
-            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+            HapticUtils.onTap(haptic)
             onClick()
         },
         modifier = modifier
@@ -524,7 +524,7 @@ fun SettingsSwitch(
     Switch(
         checked = checked,
         onCheckedChange = {
-            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            HapticUtils.onConfirm(haptic)
             onCheckedChange(it)
         },
         enabled = enabled,

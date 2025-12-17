@@ -39,6 +39,9 @@ class EtaSharingManager @Inject constructor(
 
         // Terminal state protection
         const val TERMINAL_STATE_COOLDOWN_MS = 30 * 60 * 1000L  // 30 min before allowing new session
+
+        // Reset threshold: if ETA goes back up > 10 min from the 3 min mark, allow re-sending
+        const val RESET_THRESHOLD_MINUTES = 10
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -56,6 +59,11 @@ class EtaSharingManager @Inject constructor(
     private var autoShareCheckedForSession: Boolean = false
     private var activeAutoShareSessions: MutableList<EtaSharingSession> = mutableListOf()
 
+    // Track if arriving_soon was already sent this session (to prevent duplicates)
+    // Reset only if ETA goes back up > RESET_THRESHOLD_MINUTES
+    private var arrivingSoonSentForSession: Boolean = false
+    private var arrivingSoonSentAtEta: Int = 0  // Track what ETA we were at when we sent it
+
     // Auto-share state observable
     private val _autoShareState = MutableStateFlow<AutoShareState>(AutoShareState.Inactive)
     val autoShareState: StateFlow<AutoShareState> = _autoShareState.asStateFlow()
@@ -65,6 +73,11 @@ class EtaSharingManager @Inject constructor(
      */
     fun startSharing(chatGuid: String, displayName: String, initialEta: ParsedEtaData?) {
         Timber.d("Starting ETA sharing with $displayName (chat: $chatGuid)")
+
+        // Reset session tracking for new session
+        arrivingSoonSentForSession = false
+        arrivingSoonSentAtEta = 0
+        clearTerminalState()
 
         val session = EtaSharingSession(
             recipientGuid = chatGuid,
@@ -101,6 +114,11 @@ class EtaSharingManager @Inject constructor(
         }
 
         Timber.d("Stopping ETA sharing")
+
+        // Reset session tracking
+        arrivingSoonSentForSession = false
+        arrivingSoonSentAtEta = 0
+
         _state.value = EtaState(
             isSharing = false,
             session = null,
@@ -168,23 +186,34 @@ class EtaSharingManager @Inject constructor(
         val etaDelta = abs(newEtaMinutes - session.lastEtaMinutes)
         val changeThreshold = settingsDataStore.etaChangeThreshold.first()
 
-        // Priority 1: Check for arrival (terminal state)
+        // Check if ETA went back up significantly - reset arriving_soon tracking
+        // This allows re-sending if someone hits traffic and ETA jumps back up
+        if (arrivingSoonSentForSession && newEtaMinutes > RESET_THRESHOLD_MINUTES) {
+            Timber.d("ETA went back up to $newEtaMinutes min - resetting arriving_soon tracking")
+            arrivingSoonSentForSession = false
+            arrivingSoonSentAtEta = 0
+        }
+
+        // Priority 1: Check for arrival (terminal state - only send once EVER per session)
         if (newEtaMinutes <= ARRIVED_THRESHOLD && session.lastMessageType != EtaMessageType.ARRIVED) {
             Timber.d("Update type: ARRIVED (ETA: $newEtaMinutes min)")
             return EtaMessageType.ARRIVED
         }
 
-        // Priority 2: Check for "arriving soon" (only send once)
+        // Priority 2: Check for "arriving soon" (only send once per session, unless reset)
         if (newEtaMinutes <= ARRIVING_SOON_THRESHOLD &&
-            session.lastEtaMinutes > ARRIVING_SOON_THRESHOLD &&
-            session.lastMessageType != EtaMessageType.ARRIVING_SOON
+            !arrivingSoonSentForSession &&
+            session.lastMessageType != EtaMessageType.ARRIVED  // Don't send if already arrived
         ) {
             Timber.d("Update type: ARRIVING_SOON (ETA dropped to $newEtaMinutes min)")
+            arrivingSoonSentForSession = true
+            arrivingSoonSentAtEta = newEtaMinutes
             return EtaMessageType.ARRIVING_SOON
         }
 
         // Priority 3: Significant ETA change (user-configurable threshold)
-        if (etaDelta >= changeThreshold) {
+        // But don't send change updates once we're in the "arriving soon" zone
+        if (etaDelta >= changeThreshold && newEtaMinutes > ARRIVING_SOON_THRESHOLD) {
             Timber.d("Update type: CHANGE (delta: $etaDelta min, threshold: $changeThreshold)")
             return EtaMessageType.CHANGE
         }
@@ -224,7 +253,8 @@ class EtaSharingManager @Inject constructor(
      * Handle navigation stopped (notification removed)
      *
      * Logic:
-     * - If we were close to destination (≤3 min), assume we arrived
+     * - If we were at destination (≤1 min) AND haven't already sent arrived, send arrived
+     * - If we already sent arrived, do nothing (session is done)
      * - Otherwise, assume trip was cancelled
      */
     fun onNavigationStopped() {
@@ -234,8 +264,10 @@ class EtaSharingManager @Inject constructor(
         val currentState = _state.value
         _state.value = currentState.copy(isNavigationActive = false)
 
-        // Reset auto-share session check for next navigation
+        // Reset session tracking for next navigation
         autoShareCheckedForSession = false
+        arrivingSoonSentForSession = false
+        arrivingSoonSentAtEta = 0
 
         // Handle auto-share sessions
         if (activeAutoShareSessions.isNotEmpty()) {
@@ -249,13 +281,19 @@ class EtaSharingManager @Inject constructor(
             val session = currentState.session
             val lastEta = session.lastEtaMinutes
 
-            // If we were close (≤3 min), assume we arrived
-            val wasNearDestination = lastEta <= ARRIVING_SOON_THRESHOLD
+            // If we already sent ARRIVED, session is complete - don't send again
+            if (session.lastMessageType == EtaMessageType.ARRIVED) {
+                Timber.d("Navigation stopped - ARRIVED already sent, ending session")
+                stopSharing(sendFinalMessage = false)
+                return
+            }
+
+            // Only consider "arrived" if we were at ≤1 min (ARRIVED_THRESHOLD)
+            val wasAtDestination = lastEta <= ARRIVED_THRESHOLD
 
             scope.launch {
-                if (wasNearDestination) {
-                    Timber.d("Navigation stopped near destination - sending arrived message")
-                    // Create a fake ETA for the arrived message
+                if (wasAtDestination) {
+                    Timber.d("Navigation stopped at destination ($lastEta min) - sending arrived message")
                     val arrivedEta = ParsedEtaData(
                         etaMinutes = 0,
                         destination = null,
@@ -265,7 +303,7 @@ class EtaSharingManager @Inject constructor(
                     )
                     sendMessageForType(session, arrivedEta, EtaMessageType.ARRIVED)
                 } else {
-                    Timber.d("Navigation stopped - sending cancelled message")
+                    Timber.d("Navigation stopped at $lastEta min - sending cancelled message")
                     sendStoppedMessage(session)
                     stopSharing(sendFinalMessage = false)
                 }
@@ -301,6 +339,11 @@ class EtaSharingManager @Inject constructor(
         }
 
         Timber.d("Auto-share: Starting with ${contacts.size} contacts, ETA: ${etaData.etaMinutes} min")
+
+        // Reset session tracking for new auto-share session
+        arrivingSoonSentForSession = false
+        arrivingSoonSentAtEta = 0
+        clearTerminalState()
 
         // Create sessions for all contacts
         activeAutoShareSessions = contacts.map { contact ->
@@ -341,8 +384,15 @@ class EtaSharingManager @Inject constructor(
         if (activeAutoShareSessions.isEmpty()) return
 
         val updatedSessions = mutableListOf<EtaSharingSession>()
+        var allArrived = true
 
         for (session in activeAutoShareSessions) {
+            // Skip sessions that have already sent ARRIVED - they're done
+            if (session.lastMessageType == EtaMessageType.ARRIVED) {
+                Timber.d("Auto-share: ${session.recipientDisplayName} already arrived, skipping")
+                continue
+            }
+
             val messageType = determineUpdateType(session, etaData)
 
             if (messageType != null) {
@@ -367,13 +417,27 @@ class EtaSharingManager @Inject constructor(
                     updateCount = session.updateCount + 1,
                     lastMessageType = messageType
                 )
-                updatedSessions.add(updatedSession)
+
+                // If we sent ARRIVED, don't add to updated sessions - session is complete
+                if (messageType == EtaMessageType.ARRIVED) {
+                    Timber.d("Auto-share: ${session.recipientDisplayName} arrived - session complete")
+                } else {
+                    updatedSessions.add(updatedSession)
+                    allArrived = false
+                }
             } else {
                 updatedSessions.add(session)
+                allArrived = false
             }
         }
 
         activeAutoShareSessions = updatedSessions
+
+        // If all sessions are complete (all arrived), clear auto-share state
+        if (allArrived && updatedSessions.isEmpty()) {
+            Timber.d("Auto-share: All recipients arrived - ending auto-share")
+            _autoShareState.value = AutoShareState.Inactive
+        }
     }
 
     /**
@@ -382,18 +446,23 @@ class EtaSharingManager @Inject constructor(
     private suspend fun handleAutoShareNavigationStopped(lastEta: ParsedEtaData?) {
         if (activeAutoShareSessions.isEmpty()) return
 
-        val wasNearDestination = activeAutoShareSessions.firstOrNull()?.let {
-            it.lastEtaMinutes <= ARRIVING_SOON_THRESHOLD
-        } ?: false
-
         for (session in activeAutoShareSessions) {
-            val message = if (wasNearDestination) {
+            // If we already sent ARRIVED to this recipient, skip - session is complete
+            if (session.lastMessageType == EtaMessageType.ARRIVED) {
+                Timber.d("Auto-share: ${session.recipientDisplayName} - ARRIVED already sent, skipping")
+                continue
+            }
+
+            // Only send arrived if we were at ≤1 min (ARRIVED_THRESHOLD), not just "near" (3 min)
+            val wasAtDestination = session.lastEtaMinutes <= ARRIVED_THRESHOLD
+
+            val message = if (wasAtDestination) {
                 buildArrivedMessage()
             } else {
                 buildCancelledMessage()
             }
 
-            Timber.d("Auto-share: Sending ${if (wasNearDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName}")
+            Timber.d("Auto-share: Sending ${if (wasAtDestination) "arrived" else "cancelled"} to ${session.recipientDisplayName} (was at ${session.lastEtaMinutes} min)")
 
             pendingMessageSource.queueMessage(
                 chatGuid = session.recipientGuid,

@@ -18,6 +18,7 @@ import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
@@ -36,6 +37,7 @@ import com.bothbubbles.data.local.db.entity.SeenMessageEntity
 import com.bothbubbles.data.local.db.entity.SyncRangeEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 
 /**
@@ -67,9 +69,10 @@ import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
         SyncRangeEntity::class,
         AutoRespondedSenderEntity::class,
         VerifiedCounterpartCheckEntity::class,
-        AutoShareContactEntity::class
+        AutoShareContactEntity::class,
+        TombstoneEntity::class
     ],
-    version = 37,
+    version = 38,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -91,6 +94,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun verifiedCounterpartCheckDao(): VerifiedCounterpartCheckDao
     abstract fun chatQueryDao(): ChatQueryDao
     abstract fun autoShareContactDao(): AutoShareContactDao
+    abstract fun tombstoneDao(): TombstoneDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

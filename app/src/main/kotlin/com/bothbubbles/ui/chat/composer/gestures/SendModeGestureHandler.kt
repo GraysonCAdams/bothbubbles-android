@@ -13,7 +13,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalDensity
@@ -21,6 +20,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.composer.animations.SendModeGestureConfig
+import com.bothbubbles.util.HapticUtils
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -303,10 +303,10 @@ fun Modifier.sendModeGesture(
                             // Haptic at threshold crossing
                             val hasPassedThreshold = state.hasPassedThreshold
                             if (hasPassedThreshold && !state.hasTriggeredThresholdHaptic) {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                                HapticUtils.onThresholdCrossed(hapticFeedback)
                                 state.hasTriggeredThresholdHaptic = true
                             } else if (!hasPassedThreshold && state.hasTriggeredThresholdHaptic) {
-                                hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                HapticUtils.onDragTransition(hapticFeedback)
                                 state.hasTriggeredThresholdHaptic = false
                             }
                         }
@@ -348,7 +348,7 @@ private fun handleSwipeRelease(
 
         val direction = if (normalizedProgress < 0f) -1f else 1f
 
-        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+        HapticUtils.onConfirm(hapticFeedback)
 
         scope.launch {
             state.snapToTarget(willSwitch = true, direction = direction)

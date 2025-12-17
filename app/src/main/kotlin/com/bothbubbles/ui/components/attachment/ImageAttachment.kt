@@ -5,6 +5,7 @@ import java.io.File
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
@@ -109,8 +110,8 @@ fun ImageAttachment(
         // Loading indicator with fade animation - minimal for transparent images
         AnimatedVisibility(
             visible = isLoading,
-            enter = fadeIn(tween(150, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(100, easing = FastOutSlowInEasing))
+            enter = fadeIn(tween(MotionTokens.Duration.QUICK, easing = MotionTokens.Easing.Standard)),
+            exit = fadeOut(tween(MotionTokens.Duration.FAST, easing = MotionTokens.Easing.Standard))
         ) {
             if (isTransparent) {
                 // No background for transparent images - just show spinner
@@ -140,8 +141,8 @@ fun ImageAttachment(
         // Error state with fade animation - minimal for transparent images
         AnimatedVisibility(
             visible = isError,
-            enter = fadeIn(tween(150, easing = FastOutSlowInEasing)) + scaleIn(initialScale = 0.92f, animationSpec = tween(150)),
-            exit = fadeOut(tween(100, easing = FastOutSlowInEasing))
+            enter = fadeIn(tween(MotionTokens.Duration.QUICK, easing = MotionTokens.Easing.Standard)) + scaleIn(initialScale = 0.92f, animationSpec = tween(MotionTokens.Duration.QUICK)),
+            exit = fadeOut(tween(MotionTokens.Duration.FAST, easing = MotionTokens.Easing.Standard))
         ) {
             if (isTransparent) {
                 // Compact error for transparent images

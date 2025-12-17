@@ -160,6 +160,7 @@ fun ConversationMainContent(
                         }
                     } else {
                         val pinnedConversations = filteredConversations.filter { it.isPinned }
+                            .sortedWith(compareBy<ConversationUiModel> { it.pinIndex }.thenByDescending { it.lastMessageTimestamp })
                         val regularConversations = filteredConversations.filter { !it.isPinned }
 
                         // Animated pull indicator offset

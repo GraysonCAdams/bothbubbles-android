@@ -9,6 +9,7 @@ import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sync.SyncState
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -24,7 +25,8 @@ class SettingsViewModel @Inject constructor(
     private val syncService: SyncService,
     private val chatRepository: ChatRepository,
     private val settingsDataStore: SettingsDataStore,
-    private val soundPlayer: SoundPlayer
+    private val soundPlayer: SoundPlayer,
+    private val smsPermissionHelper: SmsPermissionHelper
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -41,6 +43,7 @@ class SettingsViewModel @Inject constructor(
         observeDeveloperMode()
         observeSmsEnabled()
         observeLinkPreviews()
+        checkSmsCapability()
     }
 
     private fun observeSmsEnabled() {
@@ -49,6 +52,11 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(smsEnabled = enabled) }
             }
         }
+    }
+
+    private fun checkSmsCapability() {
+        val status = smsPermissionHelper.getSmsCapabilityStatus()
+        _uiState.update { it.copy(isSmsFullyFunctional = status.isFullyFunctional) }
     }
 
     private fun observeAppTitleSetting() {
@@ -272,6 +280,7 @@ data class SettingsUiState(
     val isServerConfigured: Boolean = false,
     // SMS state
     val smsEnabled: Boolean = false,
+    val isSmsFullyFunctional: Boolean = false,
     // Developer mode
     val developerModeEnabled: Boolean = false,
     // Link previews

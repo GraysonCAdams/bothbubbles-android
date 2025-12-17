@@ -7,8 +7,8 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.runtime.*
 import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerInputScope
+import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.input.pointer.positionChange
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
@@ -87,11 +87,11 @@ internal suspend fun PointerInputScope.handleSwipeGesture(
                             val offset = state.swipeOffset.value
                             when {
                                 offset > state.swipeThresholdPx && rightAction != SwipeActionType.NONE -> {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    HapticUtils.onConfirm(haptic)
                                     onSwipeAction(rightAction)
                                 }
                                 offset < -state.swipeThresholdPx && leftAction != SwipeActionType.NONE -> {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                    HapticUtils.onConfirm(haptic)
                                     onSwipeAction(leftAction)
                                 }
                             }
@@ -135,7 +135,7 @@ internal suspend fun PointerInputScope.handleSwipeGesture(
                         // Haptic feedback at threshold
                         val isPastThreshold = constrainedOffset.absoluteValue > state.swipeThresholdPx
                         if (isPastThreshold && !state.hasTriggeredHaptic) {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            HapticUtils.onThresholdCrossed(haptic)
                             state.setHapticTriggered(true)
                         } else if (!isPastThreshold) {
                             state.setHapticTriggered(false)

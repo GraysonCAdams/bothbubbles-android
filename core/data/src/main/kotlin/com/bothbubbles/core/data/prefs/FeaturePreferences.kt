@@ -40,6 +40,23 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.CATEGORIZATION_ENABLED] ?: true
     }
 
+    // Per-category enabled settings
+    val transactionsCategoryEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.TRANSACTIONS_CATEGORY_ENABLED] ?: true
+    }
+
+    val deliveriesCategoryEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.DELIVERIES_CATEGORY_ENABLED] ?: true
+    }
+
+    val promotionsCategoryEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.PROMOTIONS_CATEGORY_ENABLED] ?: true
+    }
+
+    val remindersCategoryEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REMINDERS_CATEGORY_ENABLED] ?: true
+    }
+
     // ===== Developer Mode =====
 
     val developerModeEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -156,6 +173,30 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setTransactionsCategoryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.TRANSACTIONS_CATEGORY_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setDeliveriesCategoryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.DELIVERIES_CATEGORY_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setPromotionsCategoryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.PROMOTIONS_CATEGORY_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setRemindersCategoryEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REMINDERS_CATEGORY_ENABLED] = enabled
+        }
+    }
+
     suspend fun setDeveloperModeEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.DEVELOPER_MODE_ENABLED] = enabled
@@ -231,6 +272,10 @@ class FeaturePreferences @Inject constructor(
         val ML_MODEL_DOWNLOADED = booleanPreferencesKey("ml_model_downloaded")
         val ML_AUTO_UPDATE_ON_CELLULAR = booleanPreferencesKey("ml_auto_update_on_cellular")
         val CATEGORIZATION_ENABLED = booleanPreferencesKey("categorization_enabled")
+        val TRANSACTIONS_CATEGORY_ENABLED = booleanPreferencesKey("transactions_category_enabled")
+        val DELIVERIES_CATEGORY_ENABLED = booleanPreferencesKey("deliveries_category_enabled")
+        val PROMOTIONS_CATEGORY_ENABLED = booleanPreferencesKey("promotions_category_enabled")
+        val REMINDERS_CATEGORY_ENABLED = booleanPreferencesKey("reminders_category_enabled")
 
         // Developer Mode
         val DEVELOPER_MODE_ENABLED = booleanPreferencesKey("developer_mode_enabled")

@@ -6,6 +6,8 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.provider.Telephony
 import androidx.activity.result.ActivityResultLauncher
@@ -155,6 +157,18 @@ class SmsPermissionHelper @Inject constructor(
     }
 
     /**
+     * Check if cellular network is currently available.
+     * Returns false if device is on wifi-only, airplane mode, or has no cellular signal.
+     */
+    fun hasCellularConnectivity(): Boolean {
+        val connectivityManager = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivityManager.activeNetwork ?: return false
+        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    }
+
+    /**
      * Check if user should be shown permission rationale
      */
     fun shouldShowPermissionRationale(activity: Activity): Boolean {
@@ -191,7 +205,8 @@ class SmsPermissionHelper @Inject constructor(
             hasSendPermission = hasSendSmsPermission(),
             hasReceivePermission = hasReceiveSmsPermission(),
             isDefaultSmsApp = isDefaultSmsApp(),
-            missingPermissions = getMissingSmsPermissions()
+            missingPermissions = getMissingSmsPermissions(),
+            hasCellularConnectivity = hasCellularConnectivity()
         )
     }
 }
@@ -206,7 +221,8 @@ data class SmsCapabilityStatus(
     val hasSendPermission: Boolean,
     val hasReceivePermission: Boolean,
     val isDefaultSmsApp: Boolean,
-    val missingPermissions: List<String>
+    val missingPermissions: List<String>,
+    val hasCellularConnectivity: Boolean = true // Default true for backward compatibility
 ) {
     /**
      * Can we read existing SMS messages?
@@ -214,9 +230,14 @@ data class SmsCapabilityStatus(
     val canReadSms: Boolean get() = deviceSupportsSms && hasReadPermission
 
     /**
-     * Can we send SMS messages?
+     * Can we send SMS messages? (has capability, ignores connectivity)
      */
     val canSendSms: Boolean get() = deviceSupportsSms && hasSendPermission
+
+    /**
+     * Can we send SMS messages right now? (has capability AND cellular connectivity)
+     */
+    val canSendSmsNow: Boolean get() = canSendSms && isDefaultSmsApp && hasCellularConnectivity
 
     /**
      * Can we receive new SMS messages?
@@ -226,7 +247,7 @@ data class SmsCapabilityStatus(
     /**
      * Is SMS fully functional (read, write, receive)?
      */
-    val isFullyFunctional: Boolean get() = canReadSms && canSendSms && canReceiveSms
+    val isFullyFunctional: Boolean get() = canReadSms && canSendSms && canReceiveSms && isDefaultSmsApp
 
     /**
      * Do we need the user to do something to enable SMS?

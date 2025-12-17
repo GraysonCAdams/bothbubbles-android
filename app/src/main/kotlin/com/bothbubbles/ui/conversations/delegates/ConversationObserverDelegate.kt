@@ -434,15 +434,11 @@ class ConversationObserverDelegate @AssistedInject constructor(
     private fun buildIMessageDetail(state: SyncState.Syncing): String? {
         return buildString {
             if (state.totalChats > 0) {
-                append("${state.processedChats}/${state.totalChats} chats")
+                append("${state.processedChats} of ${state.totalChats} chats")
             }
             if (state.syncedMessages > 0) {
                 if (isNotEmpty()) append(" • ")
-                if (state.totalMessagesExpected > 0) {
-                    append("${state.syncedMessages} of ${state.totalMessagesExpected} messages")
-                } else {
-                    append("${state.syncedMessages} messages")
-                }
+                append("${state.syncedMessages} messages")
             }
         }.takeIf { it.isNotEmpty() }
     }

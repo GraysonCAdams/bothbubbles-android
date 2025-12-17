@@ -1,9 +1,9 @@
 package com.bothbubbles.ui.components.message
 
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -91,15 +91,9 @@ fun TapbackOverlay(
     // Close with animation - awaits completion before dismissing
     val closeWithAnimation: suspend () -> Unit = {
         // Animate out in parallel
-        scope.launch { scrimAlpha.animateTo(0f, tween(200)) }
-        scope.launch { overlayAlpha.animateTo(0f, tween(150)) }
-        overlayScale.animateTo(
-            0f,
-            spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        )
+        scope.launch { scrimAlpha.animateTo(0f, tween(MotionTokens.Duration.NORMAL)) }
+        scope.launch { overlayAlpha.animateTo(0f, tween(MotionTokens.Duration.QUICK)) }
+        overlayScale.animateTo(0f, MotionTokens.Springs.Gentle)
         // Now safe to dismiss
         isPresent = false
         onDismiss()
@@ -110,15 +104,9 @@ fun TapbackOverlay(
         if (visible && messageBounds != null) {
             isPresent = true
             // Entry animation - spring scale with fade
-            launch { scrimAlpha.animateTo(0.32f, tween(200)) }
-            launch { overlayAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
-            overlayScale.animateTo(
-                1f,
-                spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            )
+            launch { scrimAlpha.animateTo(MotionTokens.Alpha.Scrim, tween(MotionTokens.Duration.NORMAL)) }
+            launch { overlayAlpha.animateTo(1f, tween(MotionTokens.Duration.QUICK, delayMillis = MotionTokens.Duration.STAGGER)) }
+            overlayScale.animateTo(1f, MotionTokens.Springs.Bouncy)
         } else if (!visible && isPresent) {
             // Exit animation triggered externally
             closeWithAnimation()
@@ -365,15 +353,9 @@ fun ActionOnlyOverlay(
 
     // Close with animation
     val closeWithAnimation: suspend () -> Unit = {
-        scope.launch { scrimAlpha.animateTo(0f, tween(200)) }
-        scope.launch { overlayAlpha.animateTo(0f, tween(150)) }
-        overlayScale.animateTo(
-            0f,
-            spring(
-                dampingRatio = Spring.DampingRatioNoBouncy,
-                stiffness = Spring.StiffnessMediumLow
-            )
-        )
+        scope.launch { scrimAlpha.animateTo(0f, tween(MotionTokens.Duration.NORMAL)) }
+        scope.launch { overlayAlpha.animateTo(0f, tween(MotionTokens.Duration.QUICK)) }
+        overlayScale.animateTo(0f, MotionTokens.Springs.Gentle)
         isPresent = false
         onDismiss()
     }
@@ -382,15 +364,9 @@ fun ActionOnlyOverlay(
     LaunchedEffect(visible, messageBounds) {
         if (visible && messageBounds != null) {
             isPresent = true
-            launch { scrimAlpha.animateTo(0.32f, tween(200)) }
-            launch { overlayAlpha.animateTo(1f, tween(150, delayMillis = 50)) }
-            overlayScale.animateTo(
-                1f,
-                spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            )
+            launch { scrimAlpha.animateTo(MotionTokens.Alpha.Scrim, tween(MotionTokens.Duration.NORMAL)) }
+            launch { overlayAlpha.animateTo(1f, tween(MotionTokens.Duration.QUICK, delayMillis = MotionTokens.Duration.STAGGER)) }
+            overlayScale.animateTo(1f, MotionTokens.Springs.Bouncy)
         } else if (!visible && isPresent) {
             closeWithAnimation()
         }

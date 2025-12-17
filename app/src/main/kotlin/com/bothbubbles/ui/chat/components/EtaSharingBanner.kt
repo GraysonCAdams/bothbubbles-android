@@ -2,6 +2,7 @@ package com.bothbubbles.ui.chat.components
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import com.bothbubbles.ui.theme.MotionTokens
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -125,8 +126,8 @@ private fun EtaSharingBannerContent(
 
     AnimatedVisibility(
         visible = shouldShow,
-        enter = expandVertically(animationSpec = tween(300)) + fadeIn(animationSpec = tween(300)),
-        exit = shrinkVertically(animationSpec = tween(200)) + fadeOut(animationSpec = tween(200)),
+        enter = expandVertically(animationSpec = tween(MotionTokens.Duration.EMPHASIZED)) + fadeIn(animationSpec = tween(MotionTokens.Duration.EMPHASIZED)),
+        exit = shrinkVertically(animationSpec = tween(MotionTokens.Duration.NORMAL)) + fadeOut(animationSpec = tween(MotionTokens.Duration.NORMAL)),
         modifier = modifier
     ) {
         SwipeableBannerContent(

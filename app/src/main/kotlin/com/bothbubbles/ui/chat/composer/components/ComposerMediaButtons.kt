@@ -16,9 +16,11 @@ import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
 
@@ -37,6 +39,7 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
  * @param onCameraClick Callback when camera button is tapped
  * @param onImageClick Callback when image/gallery button is tapped
  * @param onEmojiClick Callback when emoji button is tapped
+ * @param isEnabled Whether the buttons are enabled (disabled when SMS input is blocked)
  * @param modifier Modifier for the button row
  */
 @Composable
@@ -45,11 +48,14 @@ fun ComposerMediaButtons(
     onCameraClick: () -> Unit,
     onImageClick: () -> Unit,
     onEmojiClick: () -> Unit,
+    isEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
+    val haptic = LocalHapticFeedback.current
     val buttonSize = ComposerMotionTokens.Dimension.ActionButtonSize
     val iconSize = 20.dp
+    val iconTint = if (isEnabled) inputColors.inputIcon else inputColors.inputIcon.copy(alpha = 0.4f)
 
     Row(
         modifier = modifier,
@@ -62,13 +68,17 @@ fun ComposerMediaButtons(
             exit = fadeOut() + scaleOut(targetScale = 0.8f)
         ) {
             IconButton(
-                onClick = onCameraClick,
-                modifier = Modifier.size(buttonSize)
+                onClick = {
+                    HapticUtils.onTap(haptic)
+                    onCameraClick()
+                },
+                modifier = Modifier.size(buttonSize),
+                enabled = isEnabled
             ) {
                 Icon(
                     imageVector = Icons.Outlined.CameraAlt,
                     contentDescription = stringResource(R.string.picker_camera),
-                    tint = inputColors.inputIcon,
+                    tint = iconTint,
                     modifier = Modifier.size(iconSize)
                 )
             }
@@ -76,26 +86,34 @@ fun ComposerMediaButtons(
 
         // Emoji button
         IconButton(
-            onClick = onEmojiClick,
-            modifier = Modifier.size(buttonSize)
+            onClick = {
+                HapticUtils.onTap(haptic)
+                onEmojiClick()
+            },
+            modifier = Modifier.size(buttonSize),
+            enabled = isEnabled
         ) {
             Icon(
                 imageVector = Icons.Outlined.EmojiEmotions,
                 contentDescription = stringResource(R.string.emoji),
-                tint = inputColors.inputIcon,
+                tint = iconTint,
                 modifier = Modifier.size(iconSize)
             )
         }
 
         // Image/Gallery button
         IconButton(
-            onClick = onImageClick,
-            modifier = Modifier.size(buttonSize)
+            onClick = {
+                HapticUtils.onTap(haptic)
+                onImageClick()
+            },
+            modifier = Modifier.size(buttonSize),
+            enabled = isEnabled
         ) {
             Icon(
                 imageVector = Icons.Outlined.Image,
                 contentDescription = stringResource(R.string.image),
-                tint = inputColors.inputIcon,
+                tint = iconTint,
                 modifier = Modifier.size(iconSize)
             )
         }

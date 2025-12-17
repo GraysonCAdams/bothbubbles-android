@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
@@ -52,6 +53,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -59,7 +61,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.common.GroupAvatar
+import com.bothbubbles.util.HapticUtils
+import kotlin.math.roundToInt
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun PinnedConversationsRow(
     conversations: List<ConversationUiModel>,
@@ -79,6 +84,7 @@ internal fun PinnedConversationsRow(
     val itemWidth = 112.dp
     val density = LocalDensity.current
     val itemWidthPx = with(density) { itemWidth.toPx() }
+    val haptic = LocalHapticFeedback.current
 
     // Threshold for drag-to-unpin (drag downward past this to unpin)
     val unpinThresholdPx = with(density) { 60.dp.toPx() }
@@ -88,6 +94,7 @@ internal fun PinnedConversationsRow(
     var draggedItemGuid by remember { mutableStateOf<String?>(null) }
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     var dragOffsetY by remember { mutableFloatStateOf(0f) }
+    var overlayDragOffsetX by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
 
     // Track item positions for overlay
@@ -98,7 +105,9 @@ internal fun PinnedConversationsRow(
 
     // Reset order when conversations change
     LaunchedEffect(conversations) {
-        currentOrder = conversations.map { it.guid }
+        if (!isDragging) {
+            currentOrder = conversations.map { it.guid }
+        }
     }
 
     // Map guid to conversation for lookup
@@ -148,6 +157,7 @@ internal fun PinnedConversationsRow(
 
             Box(
                 modifier = Modifier
+                    .animateItem()
                     .onGloballyPositioned { coordinates ->
                         itemPositions[guid] = coordinates.positionInRoot()
                     }
@@ -172,22 +182,25 @@ internal fun PinnedConversationsRow(
                             isDragging = true
                             dragOffsetX = 0f
                             dragOffsetY = 0f
+                            overlayDragOffsetX = 0f
                             // Notify overlay with initial position
                             val position = itemPositions[guid] ?: Offset.Zero
                             onDragOverlayStart(conversation, position)
+                            HapticUtils.onLongPress(haptic)
                         }
                     },
                     onDrag = { dragAmountX, dragAmountY ->
                         if (isDragging && draggedItemIndex >= 0) {
                             dragOffsetX += dragAmountX
                             dragOffsetY += dragAmountY
+                            overlayDragOffsetX += dragAmountX
 
                             // Update overlay position
-                            onDragOverlayMove(Offset(dragOffsetX, dragOffsetY))
+                            onDragOverlayMove(Offset(overlayDragOffsetX, dragOffsetY))
 
                             // Calculate if we should swap with neighbor (horizontal reordering)
                             val draggedPosition = draggedItemIndex
-                            val offsetInItems = (dragOffsetX / itemWidthPx).toInt()
+                            val offsetInItems = (dragOffsetX / itemWidthPx).roundToInt()
                             val newPosition = (draggedPosition + offsetInItems).coerceIn(0, currentOrder.size - 1)
 
                             if (newPosition != draggedPosition) {
@@ -199,9 +212,9 @@ internal fun PinnedConversationsRow(
 
                                 // Update dragged index and reset offset for smooth movement
                                 draggedItemIndex = newPosition
-                                dragOffsetX -= offsetInItems * itemWidthPx
-                                // Update overlay offset after swap
-                                onDragOverlayMove(Offset(dragOffsetX, dragOffsetY))
+                                dragOffsetX -= (newPosition - draggedPosition) * itemWidthPx
+
+                                HapticUtils.onDragTransition(haptic)
                             }
                         }
                     },
@@ -224,6 +237,7 @@ internal fun PinnedConversationsRow(
                         draggedItemGuid = null
                         dragOffsetX = 0f
                         dragOffsetY = 0f
+                        overlayDragOffsetX = 0f
                     },
                     onDragCancel = {
                         // Reset to original order on cancel
@@ -234,6 +248,7 @@ internal fun PinnedConversationsRow(
                         draggedItemGuid = null
                         dragOffsetX = 0f
                         dragOffsetY = 0f
+                        overlayDragOffsetX = 0f
                     }
                 )
             }
@@ -267,6 +282,9 @@ internal fun PinnedDragOverlay(
     val unpinProgress = (dragOffset.y / unpinThresholdPx).coerceIn(0f, 1f)
     val scale = 1.08f - (unpinProgress * 0.15f)
     val overlayAlpha = 1f - (unpinProgress * 0.5f)
+    
+    // Slight rotation for visual feedback
+    val rotation = -2f * (1f - unpinProgress)
 
     // Calculate position relative to the container (not root)
     val relativeX = startPosition.x - containerRootPosition.x
@@ -282,6 +300,7 @@ internal fun PinnedDragOverlay(
             }
             .zIndex(100f)
             .scale(scale)
+            .rotate(rotation)
             .alpha(overlayAlpha)
             .shadow(8.dp, RoundedCornerShape(12.dp))
     ) {

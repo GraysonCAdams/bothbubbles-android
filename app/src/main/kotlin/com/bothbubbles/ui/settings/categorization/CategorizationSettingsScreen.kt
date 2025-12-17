@@ -205,30 +205,31 @@ fun CategorizationSettingsContent(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
                 MessageCategory.entries.forEachIndexed { index, category ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = category.icon,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.width(16.dp))
-                        Column {
-                            Text(
-                                text = category.displayName,
-                                style = MaterialTheme.typography.titleMedium
-                            )
-                            Text(
-                                text = category.description,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                    val isEnabled = when (category) {
+                        MessageCategory.TRANSACTIONS -> uiState.transactionsEnabled
+                        MessageCategory.DELIVERIES -> uiState.deliveriesEnabled
+                        MessageCategory.PROMOTIONS -> uiState.promotionsEnabled
+                        MessageCategory.REMINDERS -> uiState.remindersEnabled
+                    }
+                    val onToggle: (Boolean) -> Unit = when (category) {
+                        MessageCategory.TRANSACTIONS -> viewModel::setTransactionsEnabled
+                        MessageCategory.DELIVERIES -> viewModel::setDeliveriesEnabled
+                        MessageCategory.PROMOTIONS -> viewModel::setPromotionsEnabled
+                        MessageCategory.REMINDERS -> viewModel::setRemindersEnabled
+                    }
+
+                    SettingsMenuItem(
+                        icon = category.icon,
+                        title = category.displayName,
+                        subtitle = category.description,
+                        onClick = { onToggle(!isEnabled) },
+                        trailingContent = {
+                            Switch(
+                                checked = isEnabled,
+                                onCheckedChange = onToggle
                             )
                         }
-                    }
+                    )
 
                     if (index < MessageCategory.entries.size - 1) {
                         HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

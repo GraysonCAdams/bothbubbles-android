@@ -8,8 +8,8 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.compose.runtime.*
 import androidx.compose.ui.hapticfeedback.HapticFeedback
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.core.net.toUri
+import com.bothbubbles.util.HapticUtils
 import kotlinx.coroutines.delay
 import java.io.File
 
@@ -113,7 +113,7 @@ class ChatAudioState {
                 isRecording = true
                 ensureSoundsLoaded()
                 mediaActionSound?.play(MediaActionSound.START_VIDEO_RECORDING)
-                hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                HapticUtils.onConfirm(hapticFeedback)
             },
             onError = onError
         )
@@ -132,7 +132,7 @@ class ChatAudioState {
             mediaRecorder?.release()
             ensureSoundsLoaded()
             mediaActionSound?.play(MediaActionSound.STOP_VIDEO_RECORDING)
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            HapticUtils.onConfirm(hapticFeedback)
         } catch (_: Exception) {
             // May fail if recording was too short
         }

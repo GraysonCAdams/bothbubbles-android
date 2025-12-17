@@ -189,8 +189,17 @@ fun SyncSettingsContent(
                                 )
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
+                                    // Show chat progress with message count
+                                    val chatProgress = if (syncState.totalChats > 0) {
+                                        "${syncState.processedChats}/${syncState.totalChats} chats"
+                                    } else {
+                                        "Fetching chats..."
+                                    }
+                                    val messageCount = if (syncState.syncedMessages > 0) {
+                                        " • ${syncState.syncedMessages} messages"
+                                    } else ""
                                     Text(
-                                        text = "iMessage: ${(syncState.iMessageProgress * 100).toInt()}%",
+                                        text = "iMessage: $chatProgress$messageCount",
                                         style = MaterialTheme.typography.bodyMedium
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
@@ -233,22 +242,41 @@ fun SyncSettingsContent(
             SettingsCard {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // Sync now
+                    val isSyncing = syncState is SyncState.Syncing
                     ListItem(
-                        headlineContent = { Text("Sync now") },
-                        supportingContent = { Text("Download new messages from server") },
-                        leadingContent = {
-                            Icon(Icons.Default.Sync, contentDescription = null)
+                        headlineContent = {
+                            Text(
+                                text = if (isSyncing) "Syncing now..." else "Sync now",
+                                color = if (isSyncing) {
+                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurface
+                                }
+                            )
                         },
-                        trailingContent = if (syncState is SyncState.Syncing) {
-                            {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(24.dp),
-                                    strokeWidth = 2.dp
-                                )
-                            }
-                        } else null,
+                        supportingContent = {
+                            Text(
+                                text = "Download new messages from server",
+                                color = if (isSyncing) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
+                        leadingContent = {
+                            Icon(
+                                Icons.Default.Sync,
+                                contentDescription = null,
+                                tint = if (isSyncing) {
+                                    MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f)
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                }
+                            )
+                        },
                         modifier = Modifier.then(
-                            if (syncState !is SyncState.Syncing) Modifier.clickable { viewModel.syncNow() }
+                            if (!isSyncing) Modifier.clickable(onClick = viewModel::syncNow)
                             else Modifier
                         )
                     )
@@ -263,7 +291,7 @@ fun SyncSettingsContent(
                             Icon(Icons.Default.CloudDownload, contentDescription = null)
                         },
                         modifier = Modifier.then(
-                            if (syncState !is SyncState.Syncing) Modifier.clickable { viewModel.fullSync() }
+                            if (!isSyncing) Modifier.clickable(onClick = viewModel::fullSync)
                             else Modifier
                         )
                     )

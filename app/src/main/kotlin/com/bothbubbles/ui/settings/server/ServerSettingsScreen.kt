@@ -3,10 +3,12 @@ package com.bothbubbles.ui.settings.server
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -14,9 +16,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.DialogProperties
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.core.model.ServerCapabilities
 import com.bothbubbles.ui.settings.components.SettingsCard
 
 private val ConnectedGreen = Color(0xFF34A853)
@@ -144,25 +148,63 @@ fun ServerSettingsContent(
             // Server Info Card (when connected)
             val serverVersion = uiState.serverVersion
             if (uiState.connectionState == ConnectionState.CONNECTED && serverVersion != null) {
+                // Build server capabilities for the dialog
+                val capabilities = remember(uiState.serverOsVersion, serverVersion, uiState.serverPrivateApiEnabled, uiState.helperConnected) {
+                    ServerCapabilities.fromServerInfo(
+                        osVersion = uiState.serverOsVersion,
+                        serverVersion = serverVersion,
+                        privateApiEnabled = uiState.serverPrivateApiEnabled,
+                        helperConnected = uiState.helperConnected
+                    )
+                }
+
                 SettingsCard {
-                    Column(
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp)
+                            .padding(start = 16.dp, end = 4.dp, top = 12.dp, bottom = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "Server Version",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Server",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
 
-                        Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
-                        Text(
-                            text = serverVersion,
-                            style = MaterialTheme.typography.bodyLarge
-                        )
+                            // Combined version + OS display
+                            val osDisplay = capabilities.macOsName?.let { name ->
+                                uiState.serverOsVersion?.let { version -> "$version ($name)" }
+                            } ?: uiState.serverOsVersion
+
+                            Text(
+                                text = buildString {
+                                    append("v$serverVersion")
+                                    osDisplay?.let { append(" • macOS $it") }
+                                },
+                                style = MaterialTheme.typography.bodyLarge
+                            )
+                        }
+
+                        // Info button to show capabilities
+                        IconButton(onClick = viewModel::showCapabilitiesDialog) {
+                            Icon(
+                                imageVector = Icons.Outlined.Info,
+                                contentDescription = "View server capabilities",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                }
+
+                // Capabilities Dialog
+                if (uiState.showCapabilitiesDialog) {
+                    ServerCapabilitiesDialog(
+                        capabilities = capabilities,
+                        onDismiss = viewModel::hideCapabilitiesDialog
+                    )
                 }
             }
 
@@ -294,3 +336,217 @@ fun ServerSettingsContent(
             }
         }
     }
+
+/**
+ * Dialog showing server capabilities and available features.
+ * Uses Material Design 3 AlertDialog with custom content.
+ */
+@Composable
+private fun ServerCapabilitiesDialog(
+    capabilities: ServerCapabilities,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .fillMaxWidth(0.9f)
+            .padding(16.dp),
+        shape = RoundedCornerShape(28.dp),
+        title = {
+            Text(
+                text = "Server Capabilities",
+                style = MaterialTheme.typography.headlineSmall
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                // Server Info Section
+                ServerInfoSection(capabilities)
+
+                HorizontalDivider()
+
+                // Features Section
+                Text(
+                    text = "Features",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                FeaturesList(capabilities)
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+private fun ServerInfoSection(capabilities: ServerCapabilities) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        // macOS Version
+        capabilities.macOsName?.let { name ->
+            capabilities.osVersion?.let { version ->
+                InfoRow(
+                    label = "macOS",
+                    value = "$version ($name)"
+                )
+            }
+        } ?: capabilities.osVersion?.let { version ->
+            InfoRow(label = "macOS", value = version)
+        }
+
+        // Server Version
+        capabilities.serverVersion?.let { version ->
+            InfoRow(label = "Server", value = "v$version")
+        }
+
+        // Private API Status
+        InfoRow(
+            label = "Private API",
+            value = if (capabilities.privateApiEnabled) "Enabled" else "Disabled",
+            valueColor = if (capabilities.privateApiEnabled) ConnectedGreen else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        // Helper Status
+        InfoRow(
+            label = "Helper",
+            value = if (capabilities.helperConnected) "Connected" else "Not connected",
+            valueColor = if (capabilities.helperConnected) ConnectedGreen else MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+}
+
+@Composable
+private fun InfoRow(
+    label: String,
+    value: String,
+    valueColor: Color = MaterialTheme.colorScheme.onSurface
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = valueColor
+        )
+    }
+}
+
+@Composable
+private fun FeaturesList(capabilities: ServerCapabilities) {
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Core features (always available)
+        FeatureItem(
+            name = "Send & receive messages",
+            available = true
+        )
+        FeatureItem(
+            name = "Attachments",
+            available = true
+        )
+
+        // Private API features
+        FeatureItem(
+            name = "Tapbacks (reactions)",
+            available = capabilities.canSendTapbacks,
+            requirement = if (!capabilities.canSendTapbacks) "Requires Private API" else null
+        )
+        FeatureItem(
+            name = "Reply to messages",
+            available = capabilities.canSendReplies,
+            requirement = if (!capabilities.canSendReplies) "Requires Private API" else null
+        )
+        FeatureItem(
+            name = "Message effects",
+            available = capabilities.canSendWithEffects,
+            requirement = if (!capabilities.canSendWithEffects) "Requires Private API" else null
+        )
+        FeatureItem(
+            name = "Typing indicators",
+            available = capabilities.canSendTypingIndicators,
+            requirement = if (!capabilities.canSendTypingIndicators) "Requires Private API" else null
+        )
+        FeatureItem(
+            name = "Mark as read",
+            available = capabilities.canMarkAsRead,
+            requirement = if (!capabilities.canMarkAsRead) "Requires Private API" else null
+        )
+
+        // macOS version + Private API features
+        FeatureItem(
+            name = "Edit messages",
+            available = capabilities.canEditMessages,
+            requirement = when {
+                !capabilities.privateApiEnabled -> "Requires Private API"
+                capabilities.macOsVersion?.let { (major, _) -> major < 13 } == true -> "Requires macOS 13+"
+                else -> null
+            }
+        )
+        FeatureItem(
+            name = "Unsend messages",
+            available = capabilities.canUnsendMessages,
+            requirement = when {
+                !capabilities.privateApiEnabled -> "Requires Private API"
+                capabilities.macOsVersion?.let { (major, _) -> major < 13 } == true -> "Requires macOS 13+"
+                else -> null
+            }
+        )
+
+        // macOS version features
+        FeatureItem(
+            name = "FindMy devices",
+            available = capabilities.canUseFindMyDevices,
+            requirement = if (!capabilities.canUseFindMyDevices) "Requires macOS 11+" else null
+        )
+    }
+}
+
+@Composable
+private fun FeatureItem(
+    name: String,
+    available: Boolean,
+    requirement: String? = null
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(
+            imageVector = if (available) Icons.Default.Check else Icons.Default.Close,
+            contentDescription = if (available) "Available" else "Not available",
+            modifier = Modifier.size(18.dp),
+            tint = if (available) ConnectedGreen else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        )
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (available) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+            )
+            if (!available && requirement != null) {
+                Text(
+                    text = requirement,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                )
+            }
+        }
+    }
+}

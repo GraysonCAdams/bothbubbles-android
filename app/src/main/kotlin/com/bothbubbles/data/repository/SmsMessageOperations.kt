@@ -5,6 +5,7 @@ import android.net.Uri
 import android.provider.Telephony
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.services.sms.SmsContentProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +18,7 @@ class SmsMessageOperations(
     private val context: Context,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val tombstoneDao: TombstoneDao,
     private val smsContentProvider: SmsContentProvider
 ) {
 
@@ -39,10 +41,14 @@ class SmsMessageOperations(
     }
 
     /**
-     * Delete a message
+     * Delete a message.
+     * Records a tombstone to prevent resurrection during sync.
      */
     suspend fun deleteMessage(messageGuid: String): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            // Record tombstone to prevent resurrection during sync
+            tombstoneDao.recordDeletedMessage(messageGuid)
+
             // Delete from our database
             messageDao.deleteMessageByGuid(messageGuid)
 
@@ -73,13 +79,17 @@ class SmsMessageOperations(
     }
 
     /**
-     * Delete all messages in a thread
+     * Delete all messages in a thread.
+     * Records a tombstone to prevent resurrection during sync.
      */
     suspend fun deleteThread(
         chatGuid: String,
         getThreadIdForChat: suspend (String) -> Long?
     ): Result<Unit> = withContext(Dispatchers.IO) {
         runCatching {
+            // Record tombstone to prevent resurrection during sync
+            tombstoneDao.recordDeletedChat(chatGuid)
+
             val threadId = getThreadIdForChat(chatGuid)
             if (threadId != null) {
                 // Delete SMS messages

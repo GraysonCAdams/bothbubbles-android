@@ -1,6 +1,7 @@
 package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.TombstoneDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -32,6 +33,7 @@ import javax.inject.Singleton
 class MessageRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
+    private val tombstoneDao: TombstoneDao,
     private val api: BothBubblesApi,
     private val syncRangeTracker: SyncRangeTracker,
     private val attachmentRepository: AttachmentRepository,
@@ -215,7 +217,16 @@ class MessageRepository @Inject constructor(
                 throw Exception(body?.message ?: "Failed to fetch messages")
             }
 
-            val messages = body.data.orEmpty().map { it.toEntity(chatGuid) }
+            val allMessages = body.data.orEmpty().map { it.toEntity(chatGuid) }
+
+            // Filter out tombstoned messages (user deleted, should not resurrect)
+            val tombstonedGuids = tombstoneDao.findTombstoned(allMessages.map { it.guid })
+            val messages = if (tombstonedGuids.isEmpty()) {
+                allMessages
+            } else {
+                Timber.d("Skipping ${tombstonedGuids.size} tombstoned messages during sync")
+                allMessages.filter { it.guid !in tombstonedGuids }
+            }
 
             // Batch insert messages (more efficient than individual inserts)
             messageDao.insertMessages(messages)
@@ -325,16 +336,26 @@ class MessageRepository @Inject constructor(
                 }
             }
 
+            // Filter out tombstoned messages (user deleted, should not resurrect)
+            val allGuids = messagesWithChats.map { it.second.guid }
+            val tombstonedGuids = tombstoneDao.findTombstoned(allGuids)
+            val filteredMessagesWithChats = if (tombstonedGuids.isEmpty()) {
+                messagesWithChats
+            } else {
+                Timber.d("Skipping ${tombstonedGuids.size} tombstoned messages during global sync")
+                messagesWithChats.filter { it.second.guid !in tombstonedGuids }
+            }
+
             // Batch insert all valid messages (more efficient than individual inserts)
-            val messages = messagesWithChats.map { it.second }
+            val messages = filteredMessagesWithChats.map { it.second }
             messageDao.insertMessages(messages)
 
             // Sync attachments for all messages via AttachmentRepository (data layer, no service dependency)
-            messagesWithChats.forEach { (messageDto, _) ->
+            filteredMessagesWithChats.forEach { (messageDto, _) ->
                 attachmentRepository.syncAttachmentsFromDto(messageDto)
             }
 
-            val syncedCount = messagesWithChats.size
+            val syncedCount = filteredMessagesWithChats.size
             Timber.i("Global message sync: fetched ${messageDtos.size}, synced $syncedCount")
             syncedCount
         }
@@ -364,9 +385,11 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Delete a message locally
+     * Delete a message locally.
+     * Records a tombstone to prevent resurrection during sync.
      */
     suspend fun deleteMessageLocally(messageGuid: String) {
+        tombstoneDao.recordDeletedMessage(messageGuid)
         messageDao.deleteMessage(messageGuid)
     }
 

@@ -22,6 +22,8 @@ import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.sync.BackgroundSyncWorker
+import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
 import dagger.hilt.android.HiltAndroidApp
@@ -94,6 +96,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     lateinit var pendingMessageSource: PendingMessageSource
 
     @Inject
+    lateinit var syncService: SyncService
+
+    @Inject
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
@@ -150,6 +155,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         // Initialize developer mode from settings
         initializeDeveloperMode()
 
+        // Initialize haptics enabled state from settings
+        initializeHapticsSettings()
+
         // Initialize connection mode manager (handles Socket <-> FCM auto-switching)
         val connectionModeId = PerformanceProfiler.start("App.connectionModeManager")
         connectionModeManager.initialize()
@@ -170,6 +178,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         // Schedule background sync worker (catches messages missed by push/socket)
         initializeBackgroundSync()
 
+        // Self-healing: repair chats with missing messages
+        initializeRepairSync()
+
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
     }
@@ -188,6 +199,22 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 }
             } catch (e: Exception) {
                 Timber.w(e, "Error initializing developer mode")
+            }
+        }
+    }
+
+    /**
+     * Initialize haptics settings.
+     * Sets HapticUtils.enabled from user preferences.
+     */
+    private fun initializeHapticsSettings() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val hapticsEnabled = settingsDataStore.hapticsEnabled.first()
+                HapticUtils.enabled = hapticsEnabled
+                Timber.d("Haptics initialized: enabled=$hapticsEnabled")
+            } catch (e: Exception) {
+                Timber.w(e, "Error initializing haptics settings")
             }
         }
     }
@@ -330,6 +357,34 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 BackgroundSyncWorker.schedule(this@BothBubblesApp)
             } catch (e: Exception) {
                 Timber.w(e, "Error scheduling background sync")
+            }
+        }
+    }
+
+    /**
+     * Self-healing repair sync for chats with missing messages.
+     *
+     * This detects and repairs chats where:
+     * - Chat exists with latest_message_date set (server indicated messages exist)
+     * - No messages were ever synced (sync_ranges empty, messages empty)
+     *
+     * This is idempotent: runs a fast local query first (~10ms), only triggers
+     * server sync if broken chats are found. Subsequent app launches will find
+     * nothing to repair once messages are synced.
+     */
+    private fun initializeRepairSync() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                val initialSyncComplete = settingsDataStore.initialSyncComplete.first()
+                if (!initialSyncComplete) return@launch
+
+                // Start repair sync (fast local check, server sync only if needed)
+                syncService.startRepairSync()
+            } catch (e: Exception) {
+                Timber.w(e, "Error initializing repair sync")
             }
         }
     }
