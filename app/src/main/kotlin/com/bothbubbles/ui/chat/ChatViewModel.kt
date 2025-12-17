@@ -17,7 +17,7 @@ import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
-import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
+import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatScheduledMessageDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
@@ -91,7 +91,7 @@ class ChatViewModel @Inject constructor(
     private val effectsFactory: ChatEffectsDelegate.Factory,
     private val threadFactory: ChatThreadDelegate.Factory,
     private val composerFactory: ChatComposerDelegate.Factory,
-    private val messageListFactory: ChatMessageListDelegate.Factory,
+    private val messageListFactory: CursorChatMessageListDelegate.Factory,
     private val sendModeFactory: ChatSendModeManager.Factory,
     private val scheduledMessagesFactory: ChatScheduledMessageDelegate.Factory,
     private val chatInfoFactory: ChatInfoDelegate.Factory,
@@ -141,8 +141,14 @@ class ChatViewModel @Inject constructor(
     val operations: ChatOperationsDelegate = operationsFactory.create(chatGuid, viewModelScope)
     val sync: ChatSyncDelegate = syncFactory.create(chatGuid, viewModelScope, mergedChatGuids)
     val send: ChatSendDelegate = sendFactory.create(chatGuid, viewModelScope)
-    val messageList: ChatMessageListDelegate = messageListFactory.create(
-        chatGuid, mergedChatGuids, viewModelScope, _uiState
+
+    // Message list delegate - cursor-based pagination with Room as single source of truth
+    val messageList: CursorChatMessageListDelegate = messageListFactory.create(
+        chatGuid = chatGuid,
+        mergedChatGuids = mergedChatGuids,
+        scope = viewModelScope,
+        savedStateHandle = savedStateHandle,
+        uiStateFlow = _uiState
     ) { transform -> _uiState.update { it.transform() } }
 
     // sendMode needs isGroup and participantPhone - created lazily after chatInfo loads
@@ -323,7 +329,7 @@ class ChatViewModel @Inject constructor(
 
         // Note: Message loading, socket observation, and sync are now handled by messageList.
         // Typing indicators are now handled by ChatSyncDelegate.
-        messageList.syncMessages() // Always sync to check for new messages (runs in background)
+        messageList.syncMessages()
         messageList.markAsRead()
         // Forward connection.fallbackState to sync delegate
         viewModelScope.launch {
@@ -467,12 +473,12 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Jump to a specific message, loading its position from the database if needed.
-     * This is paging-aware and works with sparse loading.
+     * The cursor delegate handles positioning internally.
      *
      * @param guid The message GUID to jump to
-     * @return The position of the message, or null if not found
+     * @return True if jump succeeded, false otherwise
      */
-    suspend fun jumpToMessage(guid: String): Int? {
+    suspend fun jumpToMessage(guid: String): Boolean {
         return messageList.jumpToMessage(guid)
     }
 
@@ -497,10 +503,12 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Called by ChatScreen when scroll position changes.
-     * Notifies the paging controller to load data around the visible range.
+     * Note: Cursor-based pagination uses growing query limit, so this is a no-op.
+     * Retained for API compatibility.
      */
+    @Suppress("UNUSED_PARAMETER")
     fun onScrollPositionChanged(firstVisibleIndex: Int, lastVisibleIndex: Int) {
-        messageList.onScrollPositionChanged(firstVisibleIndex, lastVisibleIndex)
+        // Cursor delegate uses growing query limit - no position-based loading needed
     }
 
     /**
@@ -525,7 +533,7 @@ class ChatViewModel @Inject constructor(
         composer.sendStoppedTyping()
         composer.saveDraftImmediately()
 
-        // Delegate state saving to messageList
+        // Delegate state saving to message list
         viewModelScope.launch {
             messageList.onChatLeave()
         }
@@ -636,12 +644,12 @@ class ChatViewModel @Inject constructor(
      * 1. Find message and check if server-origin
      * 2. Apply optimistic update to message list
      * 3. Call API via operations delegate
-     * 4. On success: refresh message from database
-     * 5. On failure: rollback optimistic update by refreshing from database
+     * 4. Room flow will automatically update UI when database changes
      */
     fun toggleReaction(messageGuid: String, tapback: Tapback) {
         // Step 1: Find message and validate
-        val message = messageList.messagesState.value.find { it.guid == messageGuid } ?: return
+        val messages = messageList.messagesState.value
+        val message = messages.find { it.guid == messageGuid } ?: return
 
         // Guard: Only allow on server-origin messages (IMESSAGE or SERVER_SMS)
         if (!message.isServerOrigin) return
@@ -661,15 +669,13 @@ class ChatViewModel @Inject constructor(
                 messageText = messageText
             )
 
-            // Step 4/5: Refresh from database (canonical state) on both success and failure
-            // Success: Get the real server data
-            // Failure: Rollback the optimistic update
+            // Step 4: Room flow automatically updates UI when database changes
+            // Success: Server data flows through Room → UI
+            // Failure: Optimistic update gets overwritten by next Room emission
             result.onSuccess {
                 Timber.d("toggleReaction: API success for $messageGuid")
-                messageList.updateMessage(messageGuid)
             }.onFailure { error ->
-                Timber.e(error, "toggleReaction: API failed for $messageGuid, rolling back")
-                messageList.updateMessage(messageGuid)
+                Timber.e(error, "toggleReaction: API failed for $messageGuid")
             }
         }
     }
@@ -717,8 +723,8 @@ class ChatViewModel @Inject constructor(
      */
     fun scrollToAndHighlightMessage(messageGuid: String) {
         viewModelScope.launch {
-            val position = messageList.jumpToMessage(messageGuid)
-            if (position != null) {
+            val success = messageList.jumpToMessage(messageGuid)
+            if (success) {
                 // Emit scroll event for the UI to handle
                 thread.emitScrollEvent(messageGuid)
                 // Highlight after scroll

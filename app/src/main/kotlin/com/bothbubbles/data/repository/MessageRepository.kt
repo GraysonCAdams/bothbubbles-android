@@ -64,6 +64,44 @@ class MessageRepository @Inject constructor(
     fun observeMessagesBeforeForChats(chatGuids: List<String>, beforeTimestamp: Long, limit: Int): Flow<List<MessageEntity>> =
         messageDao.observeMessagesBeforeForChats(chatGuids, beforeTimestamp, limit)
 
+    // ===== Cursor-Based Pagination =====
+
+    /**
+     * Observe recent messages with a dynamic limit (cursor-based pagination).
+     * The main driver for the new chat message list.
+     *
+     * Room Flow automatically emits when:
+     * - New messages are inserted
+     * - Messages are updated (delivery status, reactions)
+     * - Messages are soft-deleted
+     *
+     * @param chatGuids List of chat GUIDs (supports merged iMessage + SMS)
+     * @param limit Dynamic limit that grows as user scrolls up
+     */
+    fun observeRecentMessages(chatGuids: List<String>, limit: Int): Flow<List<MessageEntity>> =
+        messageDao.observeRecentMessages(chatGuids, limit)
+
+    /**
+     * Observe messages within a time window (for Archive/Jump-to-message mode).
+     *
+     * @param chatGuids List of chat GUIDs
+     * @param windowStart Start of time window (targetTimestamp - windowMs)
+     * @param windowEnd End of time window (targetTimestamp + windowMs)
+     */
+    fun observeMessagesInWindow(
+        chatGuids: List<String>,
+        windowStart: Long,
+        windowEnd: Long
+    ): Flow<List<MessageEntity>> =
+        messageDao.observeMessagesInWindow(chatGuids, windowStart, windowEnd)
+
+    /**
+     * Count messages for cursor pagination checks.
+     * Used to determine if more messages are available locally.
+     */
+    suspend fun countMessagesForCursor(chatGuids: List<String>): Int =
+        messageDao.countMessagesForCursor(chatGuids)
+
     fun observeMessage(guid: String): Flow<MessageEntity?> =
         messageDao.observeMessageByGuid(guid)
 

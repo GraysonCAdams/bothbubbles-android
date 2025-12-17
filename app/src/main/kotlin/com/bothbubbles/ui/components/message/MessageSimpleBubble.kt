@@ -450,18 +450,27 @@ internal fun SimpleBubbleContent(
                         // }
 
                         // Subject line (bold, before message text)
+                        // For local MMS: hide empty subjects (carriers often set empty subject metadata)
+                        // For server messages (iMessage/server SMS): show "(no subject)" if explicitly blank
                         message.subject?.let { subject ->
-                            val textColor = when {
-                                message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
-                                message.isFromMe -> bubbleColors.smsSentText
-                                else -> bubbleColors.receivedText
+                            val shouldShow = if (message.isServerOrigin) {
+                                true // Server messages: always show subject if field exists
+                            } else {
+                                subject.isNotBlank() // Local MMS: only show if has content
                             }
-                            val displaySubject = if (subject.isBlank()) "(no subject)" else subject
-                            Text(
-                                text = displaySubject,
-                                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                                color = textColor
-                            )
+                            if (shouldShow) {
+                                val textColor = when {
+                                    message.isFromMe && isIMessage -> bubbleColors.iMessageSentText
+                                    message.isFromMe -> bubbleColors.smsSentText
+                                    else -> bubbleColors.receivedText
+                                }
+                                val displaySubject = if (subject.isBlank()) "(no subject)" else subject
+                                Text(
+                                    text = displaySubject,
+                                    style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = textColor
+                                )
+                            }
                         }
 
                         // Text content with clickable dates, phone numbers, codes, and search highlighting

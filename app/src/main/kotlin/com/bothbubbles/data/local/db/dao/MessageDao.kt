@@ -284,6 +284,67 @@ interface MessageDao {
     """)
     fun observeMessageCountForChats(chatGuids: List<String>): Flow<Int>
 
+    // ===== Cursor-Based Pagination Queries =====
+    // These queries support the new cursor-based pagination model where Room is the
+    // single source of truth. The growing query limit pattern replaces BitSet pagination.
+
+    /**
+     * Observe recent messages with a dynamic limit (cursor-based pagination).
+     * The main driver for the chat message list.
+     *
+     * Key features:
+     * - ORDER BY date_created DESC, guid DESC for deterministic ordering
+     * - Room Flow automatically emits on INSERT/UPDATE
+     * - EXCLUDES reactions (displayed as overlays on parent messages)
+     *
+     * @param chatGuids List of chat GUIDs (supports merged iMessage + SMS)
+     * @param limit Dynamic limit that grows as user scrolls up
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+        ORDER BY date_created DESC, guid DESC
+        LIMIT :limit
+    """)
+    fun observeRecentMessages(chatGuids: List<String>, limit: Int): Flow<List<MessageEntity>>
+
+    /**
+     * Observe messages within a time window (for Archive/Jump-to-message mode).
+     * Used when user taps a search result or deep link to jump to a specific message.
+     *
+     * @param chatGuids List of chat GUIDs
+     * @param windowStart Start of time window (targetTimestamp - windowMs)
+     * @param windowEnd End of time window (targetTimestamp + windowMs)
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+        AND date_created >= :windowStart
+        AND date_created <= :windowEnd
+        ORDER BY date_created DESC, guid DESC
+    """)
+    fun observeMessagesInWindow(
+        chatGuids: List<String>,
+        windowStart: Long,
+        windowEnd: Long
+    ): Flow<List<MessageEntity>>
+
+    /**
+     * Count messages for cursor pagination (includes reactions in count).
+     * Used to determine if more messages are available locally vs need server fetch.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE chat_guid IN (:chatGuids)
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+    """)
+    suspend fun countMessagesForCursor(chatGuids: List<String>): Int
+
     /**
      * Position-based pagination for BitSet sparse loading.
      * Fetches messages at specific positions (used when BitSet detects gaps).

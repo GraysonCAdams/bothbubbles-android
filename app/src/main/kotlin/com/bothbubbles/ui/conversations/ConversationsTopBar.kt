@@ -37,10 +37,12 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.sp
 import com.bothbubbles.R
 import com.bothbubbles.services.categorization.MessageCategory
 import com.bothbubbles.ui.theme.KumbhSansFamily
+import com.bothbubbles.util.HapticUtils
 
 /**
  * Main top bar for the Conversations screen (non-selection mode).
@@ -62,6 +64,7 @@ internal fun ConversationsTopBar(
     onTitleClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val haptic = LocalHapticFeedback.current
     var showFilterDropdown by remember { mutableStateOf(false) }
     val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
 
@@ -96,7 +99,10 @@ internal fun ConversationsTopBar(
 
         // Filter dropdown
         Box {
-            IconButton(onClick = { showFilterDropdown = true }) {
+            IconButton(onClick = {
+                HapticUtils.onTap(haptic)
+                showFilterDropdown = true
+            }) {
                 Icon(
                     imageVector = if (hasActiveFilter) {
                         Icons.Default.FilterList
@@ -131,7 +137,10 @@ internal fun ConversationsTopBar(
         }
 
         // Search button
-        IconButton(onClick = onSearchClick) {
+        IconButton(onClick = {
+            HapticUtils.onTap(haptic)
+            onSearchClick()
+        }) {
             Icon(
                 Icons.Default.Search,
                 contentDescription = stringResource(R.string.search_conversations),
@@ -141,7 +150,10 @@ internal fun ConversationsTopBar(
 
         // Settings button with warning badge
         Box {
-            IconButton(onClick = onSettingsClick) {
+            IconButton(onClick = {
+                HapticUtils.onTap(haptic)
+                onSettingsClick()
+            }) {
                 Icon(
                     Icons.Outlined.Settings,
                     contentDescription = "Settings",

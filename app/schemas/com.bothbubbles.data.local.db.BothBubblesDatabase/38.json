@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 38,
-    "identityHash": "e0bedd5e4685778ca13a941f2906e7d4",
+    "identityHash": "d4350dc3aa6f35f0eeb6a3e116996f14",
     "entities": [
       {
         "tableName": "chats",
@@ -692,15 +692,16 @@
             "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_date_deleted` ON `${TABLE_NAME}` (`chat_guid`, `date_deleted`)"
           },
           {
-            "name": "index_messages_chat_guid_date_created_date_deleted",
+            "name": "index_messages_chat_guid_date_created_date_deleted_guid",
             "unique": false,
             "columnNames": [
               "chat_guid",
               "date_created",
-              "date_deleted"
+              "date_deleted",
+              "guid"
             ],
             "orders": [],
-            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_date_created_date_deleted` ON `${TABLE_NAME}` (`chat_guid`, `date_created`, `date_deleted`)"
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_date_created_date_deleted_guid` ON `${TABLE_NAME}` (`chat_guid`, `date_created`, `date_deleted`, `guid`)"
           },
           {
             "name": "index_messages_is_reaction",
@@ -710,6 +711,18 @@
             ],
             "orders": [],
             "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_is_reaction` ON `${TABLE_NAME}` (`is_reaction`)"
+          },
+          {
+            "name": "index_messages_chat_guid_is_reaction_date_created_guid",
+            "unique": false,
+            "columnNames": [
+              "chat_guid",
+              "is_reaction",
+              "date_created",
+              "guid"
+            ],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_messages_chat_guid_is_reaction_date_created_guid` ON `${TABLE_NAME}` (`chat_guid`, `is_reaction`, `date_created`, `guid`)"
           }
         ],
         "foreignKeys": [
@@ -2320,7 +2333,7 @@
     "views": [],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'e0bedd5e4685778ca13a941f2906e7d4')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, 'd4350dc3aa6f35f0eeb6a3e116996f14')"
     ]
   }
 }

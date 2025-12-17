@@ -25,8 +25,11 @@ import com.bothbubbles.util.error.NetworkError
 import com.bothbubbles.util.error.SmsError
 import com.bothbubbles.util.error.safeCall
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
@@ -41,6 +44,16 @@ enum class MessageDeliveryMode {
     LOCAL_MMS,     // Direct MMS from Android device
     AUTO           // Auto-select based on chat type
 }
+
+/**
+ * Event emitted when a message's temp GUID is replaced with the server GUID.
+ * Used to notify the UI to update its cached message state.
+ */
+data class GuidReplacementEvent(
+    val chatGuid: String,
+    val tempGuid: String,
+    val serverGuid: String
+)
 
 /**
  * Represents the progress of an attachment upload
@@ -90,6 +103,20 @@ class MessageSendingService @Inject constructor(
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
     override val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
+
+    // ===== GUID Replacement Events =====
+
+    private val _guidReplacementEvents = MutableSharedFlow<GuidReplacementEvent>(extraBufferCapacity = 10)
+    override val guidReplacementEvents: SharedFlow<GuidReplacementEvent> = _guidReplacementEvents.asSharedFlow()
+
+    /**
+     * Emit a GUID replacement event for UI updates.
+     * Called by sender strategies after successful GUID replacement.
+     */
+    fun emitGuidReplacement(chatGuid: String, tempGuid: String, serverGuid: String) {
+        Timber.i("[SEND_TRACE] Emitting GuidReplacementEvent: $tempGuid -> $serverGuid")
+        _guidReplacementEvents.tryEmit(GuidReplacementEvent(chatGuid, tempGuid, serverGuid))
+    }
 
     /**
      * Reset upload progress state
@@ -149,6 +176,15 @@ class MessageSendingService @Inject constructor(
         Timber.i("[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
         val result = strategy.send(options).toResult()
         Timber.i("[SEND_TRACE] strategy.send() returned: success=${result.isSuccess} +${System.currentTimeMillis() - sendStart}ms")
+
+        // Emit GUID replacement event on success so UI can update cached message state
+        if (result.isSuccess && tempGuid != null) {
+            val serverGuid = result.getOrNull()?.guid
+            if (serverGuid != null && serverGuid != tempGuid) {
+                emitGuidReplacement(chatGuid, tempGuid, serverGuid)
+            }
+        }
+
         Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified END: ${System.currentTimeMillis() - sendStart}ms ──")
         return result
     }

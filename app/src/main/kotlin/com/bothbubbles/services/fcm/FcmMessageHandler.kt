@@ -123,6 +123,7 @@ class FcmMessageHandler @Inject constructor(
         // Extract basic info from parsed JSON
         val messageGuid = messageJson.optString("guid", "")
         val messageText = messageJson.optString("text", "")
+        val messageSubject = messageJson.optString("subject", null)?.takeIf { it.isNotEmpty() }
         val isFromMe = messageJson.optBoolean("isFromMe", false)
         val expressiveSendStyleId = messageJson.optString("expressiveSendStyleId", null)
         val hasAttachments = messageJson.optJSONArray("attachments")?.length()?.let { it > 0 } ?: false
@@ -234,7 +235,8 @@ class FcmMessageHandler @Inject constructor(
             senderAddress = senderAddress,
             isGroup = isGroup,
             avatarUri = senderAvatarUri,
-            participantNames = participantNames
+            participantNames = participantNames,
+            subject = messageSubject
         )
         Timber.d("DEBUG: Notification shown successfully!")
 

@@ -203,7 +203,8 @@ class MessageEventHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 linkPreviewTitle = linkTitle,
                 linkPreviewDomain = linkDomain,
-                participantNames = participantNames
+                participantNames = participantNames,
+                subject = savedMessage.subject
             )
         }
     }

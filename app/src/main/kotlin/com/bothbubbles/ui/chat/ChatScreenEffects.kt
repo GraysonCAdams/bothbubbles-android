@@ -80,13 +80,17 @@ fun ChatScreenEffects(
     LaunchedEffect(targetMessageGuid) {
         if (targetMessageGuid != null && !state.targetMessageHandled) {
             // Use paging-aware jump which loads data if needed
-            val position = viewModel.jumpToMessage(targetMessageGuid)
-            if (position != null) {
+            val success = viewModel.jumpToMessage(targetMessageGuid)
+            if (success) {
                 // Small delay to let data load
                 delay(100)
-                // Scroll with offset so message isn't at the very top edge
-                // In reversed layout, negative offset moves item down (away from visual top)
-                state.listState.animateScrollToItem(position, scrollOffset = -100)
+                // Find the message position in the current list
+                val position = messages.indexOfFirst { it.guid == targetMessageGuid }
+                if (position >= 0) {
+                    // Scroll with offset so message isn't at the very top edge
+                    // In reversed layout, negative offset moves item down (away from visual top)
+                    state.listState.animateScrollToItem(position, scrollOffset = -100)
+                }
                 // Trigger highlight animation after scroll
                 viewModel.highlightMessage(targetMessageGuid)
                 state.targetMessageHandled = true
@@ -99,11 +103,15 @@ fun ChatScreenEffects(
     LaunchedEffect(Unit) {
         viewModel.thread.scrollToGuid.collect { guid ->
             // Use paging-aware jump which loads data if needed
-            val position = viewModel.jumpToMessage(guid)
-            if (position != null) {
+            val success = viewModel.jumpToMessage(guid)
+            if (success) {
                 // Small delay to let data load
                 delay(50)
-                state.listState.animateScrollToItem(position)
+                // Find the message position in the current list
+                val position = messages.indexOfFirst { it.guid == guid }
+                if (position >= 0) {
+                    state.listState.animateScrollToItem(position)
+                }
             }
         }
     }

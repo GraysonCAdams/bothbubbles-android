@@ -59,6 +59,7 @@ class NotificationBuilder @Inject constructor(
      *
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
+     * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
      */
     fun buildMessageNotification(
         chatGuid: String,
@@ -71,7 +72,8 @@ class NotificationBuilder @Inject constructor(
         avatarUri: String?,
         linkPreviewTitle: String?,
         linkPreviewDomain: String?,
-        participantNames: List<String>
+        participantNames: List<String>,
+        subject: String? = null
     ): android.app.Notification {
         val notificationId = chatGuid.hashCode()
 
@@ -138,8 +140,10 @@ class NotificationBuilder @Inject constructor(
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        // Format display text with link preview if available
+        // Format display text - subject takes priority, then link preview, then message body
+        // When subject is present, show ONLY the subject (like iOS does)
         val displayText = when {
+            subject != null -> if (subject.isBlank()) "(no subject)" else subject
             linkPreviewTitle != null && linkPreviewDomain != null -> "$linkPreviewTitle ($linkPreviewDomain)"
             linkPreviewTitle != null -> linkPreviewTitle
             linkPreviewDomain != null -> linkPreviewDomain

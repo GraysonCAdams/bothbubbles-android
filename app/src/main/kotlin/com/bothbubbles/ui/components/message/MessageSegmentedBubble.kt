@@ -624,14 +624,23 @@ internal fun TextBubbleSegment(
             }
 
             // Subject line (bold, before message text)
+            // For local MMS: hide empty subjects (carriers often set empty subject metadata)
+            // For server messages (iMessage/server SMS): show "(no subject)" if explicitly blank
             if (showSubject) {
                 message.subject?.let { subject ->
-                    val displaySubject = if (subject.isBlank()) "(no subject)" else subject
-                    Text(
-                        text = displaySubject,
-                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
-                        color = textColor
-                    )
+                    val shouldShow = if (message.isServerOrigin) {
+                        true // Server messages: always show subject if field exists
+                    } else {
+                        subject.isNotBlank() // Local MMS: only show if has content
+                    }
+                    if (shouldShow) {
+                        val displaySubject = if (subject.isBlank()) "(no subject)" else subject
+                        Text(
+                            text = displaySubject,
+                            style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                            color = textColor
+                        )
+                    }
                 }
             }
 

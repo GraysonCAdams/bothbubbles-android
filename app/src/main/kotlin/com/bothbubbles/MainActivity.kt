@@ -1,6 +1,7 @@
 package com.bothbubbles
 
 import android.content.Intent
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -8,6 +9,9 @@ import android.os.Parcelable
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.material3.dynamicDarkColorScheme
+import androidx.compose.material3.dynamicLightColorScheme
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -54,6 +58,19 @@ class MainActivity : ComponentActivity() {
         installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+
+        // Sync window background with dynamic color theme on Android 12+
+        // This prevents flash when using Material You dynamic colors
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val isDark = resources.configuration.uiMode and
+                    Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            val dynamicScheme = if (isDark) {
+                dynamicDarkColorScheme(this)
+            } else {
+                dynamicLightColorScheme(this)
+            }
+            window.decorView.setBackgroundColor(dynamicScheme.background.toArgb())
+        }
 
         // Parse share intent data
         val shareIntentData = parseShareIntent(intent)

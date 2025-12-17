@@ -109,7 +109,7 @@ fun ChatScreen(
         keyboardController = keyboardController,
         canLoadMore = uiState.canLoadMore,
         isLoadingMore = uiState.isLoadingMore,
-        onLoadMore = { viewModel.messageList.loadMoreMessages() },
+        onLoadMore = { viewModel.messageList.loadMore() },
         onScrollPositionChanged = { index, offset, visibleCount ->
             viewModel.updateScrollPosition(index, offset, visibleCount)
             viewModel.onScrollPositionChanged(index, index + visibleCount - 1)
@@ -426,7 +426,7 @@ fun ChatScreen(
             chatScreenState = state,
             messages = messages,
 
-            // Wave 2: All delegates for internal state collection
+            // Message list delegate (cursor-based pagination)
             messageListDelegate = viewModel.messageList,
             sendDelegate = viewModel.send,
             searchDelegate = viewModel.search,
@@ -441,10 +441,6 @@ fun ChatScreen(
 
             // UI state
             highlightedMessageGuid = uiState.highlightedMessageGuid,
-            isLoadingMore = uiState.isLoadingMore,
-            isSyncingMessages = uiState.isSyncingMessages,
-            // Wave 2: isLoadingFromServer, initialLoadComplete, autoDownloadEnabled
-            // now collected internally from delegates
 
             // Socket new message flow
             socketNewMessageFlow = viewModel.messageList.socketNewMessage,

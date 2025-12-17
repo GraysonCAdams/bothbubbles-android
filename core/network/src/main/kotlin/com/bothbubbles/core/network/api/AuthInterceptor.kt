@@ -31,6 +31,7 @@ class AuthInterceptor @Inject constructor(
     private val _initialized = MutableStateFlow(false)
 
     override fun intercept(chain: Interceptor.Chain): Response {
+        val interceptStart = System.currentTimeMillis()
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url
 
@@ -41,7 +42,12 @@ class AuthInterceptor @Inject constructor(
         }
 
         // Get credentials (blocking call on OkHttp thread)
+        val credStart = System.currentTimeMillis()
         val credentials = getCredentialsBlocking()
+        val credTime = System.currentTimeMillis() - credStart
+        if (credTime > 50) {
+            Timber.w("[SEND_TRACE] AuthInterceptor getCredentials took ${credTime}ms (slow!)")
+        }
         val serverAddress = credentials.serverAddress
         val authKey = credentials.authKey
         val customHeaders = credentials.customHeaders
@@ -93,7 +99,13 @@ class AuthInterceptor @Inject constructor(
         val finalRequest = requestBuilder.build()
         Timber.d("Request URL = ${finalRequest.url}")
         Timber.d("Request method = ${finalRequest.method}")
-        return chain.proceed(finalRequest)
+
+        val proceedStart = System.currentTimeMillis()
+        val response = chain.proceed(finalRequest)
+        val proceedTime = System.currentTimeMillis() - proceedStart
+        val totalTime = System.currentTimeMillis() - interceptStart
+        Timber.i("[SEND_TRACE] HTTP ${finalRequest.method} ${finalRequest.url.encodedPath}: network=${proceedTime}ms, total=${totalTime}ms, status=${response.code}")
+        return response
     }
 
     /**

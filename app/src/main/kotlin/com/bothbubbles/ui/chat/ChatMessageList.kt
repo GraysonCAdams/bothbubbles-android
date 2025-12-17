@@ -43,11 +43,22 @@ import com.bothbubbles.ui.chat.components.MessageListOverlays
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
-import com.bothbubbles.ui.chat.delegates.ChatMessageListDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSearchDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSyncDelegate
+import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
+import com.bothbubbles.util.error.AppError
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.Alignment
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.components.common.MessageBubbleSkeleton
 import com.bothbubbles.ui.components.common.MessageListSkeleton
@@ -138,8 +149,8 @@ fun ChatMessageList(
     chatScreenState: ChatScreenState,
     messages: List<MessageUiModel>,
 
-    // Wave 2: All delegates for internal state collection
-    messageListDelegate: ChatMessageListDelegate,
+    // Message list delegate (cursor-based pagination)
+    messageListDelegate: CursorChatMessageListDelegate,
     sendDelegate: ChatSendDelegate,
     searchDelegate: ChatSearchDelegate,
     syncDelegate: ChatSyncDelegate,
@@ -153,8 +164,6 @@ fun ChatMessageList(
 
     // UI state
     highlightedMessageGuid: String?,
-    isLoadingMore: Boolean,
-    isSyncingMessages: Boolean,
 
     // Socket new message flow for "x new messages" indicator
     socketNewMessageFlow: Flow<String>,
@@ -194,6 +203,11 @@ fun ChatMessageList(
     val isLoadingFromServer by messageListDelegate.isLoadingFromServer.collectAsStateWithLifecycle()
     val initialLoadComplete by messageListDelegate.initialLoadComplete.collectAsStateWithLifecycle()
     val autoDownloadEnabled by attachmentDelegate.autoDownloadEnabled.collectAsStateWithLifecycle()
+
+    // Cursor pagination state
+    val hasMoreMessages by messageListDelegate.hasMoreMessages.collectAsStateWithLifecycle()
+    val loadError by messageListDelegate.loadError.collectAsStateWithLifecycle()
+    val isLoadingMore by messageListDelegate.isLoadingFromServer.collectAsStateWithLifecycle()
 
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
@@ -325,6 +339,23 @@ fun ChatMessageList(
                 delay(100)
                 listState.scrollToItem(0)
             }
+        }
+    }
+
+    // Auto-pagination: triggers loadMore() when scrolling near the oldest messages
+    LaunchedEffect(listState.firstVisibleItemIndex, messages.size) {
+        if (!hasMoreMessages) return@LaunchedEffect
+        if (isLoadingMore) return@LaunchedEffect
+        if (messages.isEmpty()) return@LaunchedEffect
+
+        val layoutInfo = listState.layoutInfo
+        val totalItems = layoutInfo.totalItemsCount
+        val lastVisibleIndex = listState.firstVisibleItemIndex + layoutInfo.visibleItemsInfo.size
+
+        // Trigger load when within 20% of the oldest messages (top of reversed list)
+        val loadThreshold = (totalItems * 0.8).toInt()
+        if (lastVisibleIndex >= loadThreshold) {
+            messageListDelegate.loadMore()
         }
     }
 
@@ -550,37 +581,20 @@ fun ChatMessageList(
                             )
                         }
 
-                        // Loading more indicator
-                        if (isLoadingMore) {
+                        // Error footer for pagination failures
+                        if (loadError != null) {
+                            item(key = "load_error", contentType = ContentType.BANNER) {
+                                CursorPaginationErrorFooter(
+                                    error = loadError!!,
+                                    onRetry = { messageListDelegate.retryLoad() }
+                                )
+                            }
+                        }
+
+                        // Loading more messages indicator
+                        if (isLoadingMore && hasMoreMessages) {
                             item(key = "loading_more", contentType = ContentType.LOADING_SKELETON) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    MessageBubbleSkeleton(isFromMe = false)
-                                    MessageBubbleSkeleton(isFromMe = true)
-                                }
-                            }
-                        }
-
-                        // Loading from server indicator
-                        if (isLoadingFromServer && messages.isNotEmpty()) {
-                            item(key = "loading_more_indicator", contentType = ContentType.LOADING_SKELETON) {
                                 LoadingMoreIndicator()
-                            }
-                        }
-
-                        // Syncing indicator
-                        if (isSyncingMessages && messages.isNotEmpty()) {
-                            item(key = "sync_skeleton", contentType = ContentType.LOADING_SKELETON) {
-                                Column(
-                                    modifier = Modifier.padding(vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    MessageBubbleSkeleton(isFromMe = false)
-                                    MessageBubbleSkeleton(isFromMe = true)
-                                    MessageBubbleSkeleton(isFromMe = false)
-                                }
                             }
                         }
                     }
@@ -605,6 +619,39 @@ fun ChatMessageList(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Error footer shown when cursor pagination fails to load more messages.
+ */
+@Composable
+private fun CursorPaginationErrorFooter(
+    error: AppError,
+    onRetry: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center
+    ) {
+        Text(
+            text = "Failed to load more messages",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.error
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        TextButton(onClick = onRetry) {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = "Retry",
+                modifier = Modifier.padding(end = 4.dp)
+            )
+            Text("Retry")
         }
     }
 }

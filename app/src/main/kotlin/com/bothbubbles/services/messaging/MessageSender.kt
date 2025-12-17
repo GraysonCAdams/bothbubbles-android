@@ -3,6 +3,7 @@ package com.bothbubbles.services.messaging
 import android.net.Uri
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.model.PendingAttachmentInput
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -21,6 +22,12 @@ interface MessageSender {
      * Current upload progress for attachment sends.
      */
     val uploadProgress: StateFlow<UploadProgress?>
+
+    /**
+     * Events emitted when a temp GUID is replaced with the server GUID.
+     * UI components should observe this to update cached message state.
+     */
+    val guidReplacementEvents: SharedFlow<GuidReplacementEvent>
 
     /**
      * Send a message via the appropriate channel.

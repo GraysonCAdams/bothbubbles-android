@@ -261,6 +261,9 @@ class PendingMessageRepository @Inject constructor(
      * Uses expedited work for minimal latency while maintaining reliability.
      */
     private suspend fun enqueueWorker(pendingMessageId: Long, localId: String) {
+        val enqueueStart = System.currentTimeMillis()
+        Timber.i("[SEND_TRACE] ▶ enqueueWorker START for $localId (pendingId=$pendingMessageId)")
+
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -276,6 +279,8 @@ class PendingMessageRepository @Inject constructor(
             .setInputData(workDataOf(MessageSendWorker.KEY_PENDING_MESSAGE_ID to pendingMessageId))
             .build()
 
+        Timber.i("[SEND_TRACE] WorkRequest built +${System.currentTimeMillis() - enqueueStart}ms")
+
         // Use unique work to prevent duplicate sends
         // KEEP policy prevents replacing an in-flight job, avoiding race conditions
         workManager.enqueueUniqueWork(
@@ -284,10 +289,12 @@ class PendingMessageRepository @Inject constructor(
             workRequest
         )
 
+        Timber.i("[SEND_TRACE] ▶ enqueueUniqueWork CALLED +${System.currentTimeMillis() - enqueueStart}ms")
+
         // Store work request ID for cancellation
         pendingMessageDao.updateWorkRequestId(pendingMessageId, workRequest.id.toString())
 
-        Timber.d("Enqueued send worker for $localId (workId=${workRequest.id})")
+        Timber.i("[SEND_TRACE] ▶ enqueueWorker DONE: ${System.currentTimeMillis() - enqueueStart}ms total (workId=${workRequest.id})")
     }
 
     /**

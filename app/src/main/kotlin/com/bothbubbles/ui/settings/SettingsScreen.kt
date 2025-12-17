@@ -511,6 +511,42 @@ fun SettingsContent(
                         )
                     }
                 }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Haptic feedback toggle
+                SettingsMenuItem(
+                    icon = Icons.Default.Vibration,
+                    title = "Haptic feedback",
+                    subtitle = if (uiState.hapticsEnabled) "Vibration feedback enabled" else "Vibration feedback disabled",
+                    onClick = { viewModel.setHapticsEnabled(!uiState.hapticsEnabled) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.hapticsEnabled,
+                            onCheckedChange = { viewModel.setHapticsEnabled(it) },
+                            showIcons = false
+                        )
+                    }
+                )
+
+                // Audio-haptic sync toggle (only show when haptics are enabled)
+                if (uiState.hapticsEnabled) {
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                    SettingsMenuItem(
+                        icon = Icons.Default.GraphicEq,
+                        title = "Sync haptics with sounds",
+                        subtitle = "Play haptic patterns matched to sound effects",
+                        onClick = { viewModel.setAudioHapticSyncEnabled(!uiState.audioHapticSyncEnabled) },
+                        trailingContent = {
+                            SettingsSwitch(
+                                checked = uiState.audioHapticSyncEnabled,
+                                onCheckedChange = { viewModel.setAudioHapticSyncEnabled(it) },
+                                showIcons = false
+                            )
+                        }
+                    )
+                }
             }
         }
 

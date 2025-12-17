@@ -18,9 +18,13 @@ import androidx.room.PrimaryKey
         Index(value = ["message_source"]),
         Index(value = ["chat_guid", "date_deleted"]),
         // Covering index for pagination queries - enables O(1) position-based lookups
-        Index(value = ["chat_guid", "date_created", "date_deleted"]),
+        // Includes guid as tie-breaker for deterministic ordering when timestamps are equal
+        Index(value = ["chat_guid", "date_created", "date_deleted", "guid"]),
         // Index for efficient filtering by reaction status in BitSet pagination
-        Index(value = ["is_reaction"])
+        Index(value = ["is_reaction"]),
+        // Index for cursor-based pagination: chat_guid + is_reaction + date_created + guid
+        // This supports the ORDER BY date_created DESC, guid DESC LIMIT :limit pattern
+        Index(value = ["chat_guid", "is_reaction", "date_created", "guid"])
     ],
     foreignKeys = [
         ForeignKey(

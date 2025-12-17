@@ -9,6 +9,7 @@ import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sync.SyncState
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -40,6 +41,7 @@ class SettingsViewModel @Inject constructor(
         observeAppTitleSetting()
         observePrivateApiSettings()
         observeSoundSettings()
+        observeHapticsSettings()
         observeDeveloperMode()
         observeSmsEnabled()
         observeLinkPreviews()
@@ -127,6 +129,34 @@ class SettingsViewModel @Inject constructor(
             settingsDataStore.setSoundTheme(theme)
             // Preview the sounds when theme is selected
             soundPlayer.previewSounds(theme)
+        }
+    }
+
+    private fun observeHapticsSettings() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.hapticsEnabled,
+                settingsDataStore.audioHapticSyncEnabled
+            ) { enabled, syncEnabled ->
+                enabled to syncEnabled
+            }.collect { (enabled, syncEnabled) ->
+                _uiState.update { it.copy(hapticsEnabled = enabled, audioHapticSyncEnabled = syncEnabled) }
+                // Update global haptics state
+                HapticUtils.enabled = enabled
+            }
+        }
+    }
+
+    fun setHapticsEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setHapticsEnabled(enabled)
+            HapticUtils.enabled = enabled
+        }
+    }
+
+    fun setAudioHapticSyncEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setAudioHapticSyncEnabled(enabled)
         }
     }
 
@@ -276,6 +306,9 @@ data class SettingsUiState(
     // Sound settings
     val messageSoundsEnabled: Boolean = true,
     val soundTheme: SoundTheme = SoundTheme.DEFAULT,
+    // Haptics settings
+    val hapticsEnabled: Boolean = true,
+    val audioHapticSyncEnabled: Boolean = true,
     // Server configuration state
     val isServerConfigured: Boolean = false,
     // SMS state

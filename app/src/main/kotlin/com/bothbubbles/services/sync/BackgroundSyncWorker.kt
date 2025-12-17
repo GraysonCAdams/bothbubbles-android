@@ -257,7 +257,8 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 senderAddress = senderAddress,
                 isGroup = isGroup,
                 avatarUri = senderAvatarUri,
-                participantNames = participantNames
+                participantNames = participantNames,
+                subject = message.subject
             )
         }
     }

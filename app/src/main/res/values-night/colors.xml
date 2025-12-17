@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match Compose DarkColorScheme.background exactly (0xFF1C1B1F) -->
+    <color name="dark_background">#1C1B1F</color>
+    <color name="dark_surface">#1C1B1F</color>
+</resources>

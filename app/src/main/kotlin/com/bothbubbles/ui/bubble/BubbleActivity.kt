@@ -6,9 +6,11 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 /**
  * Activity that hosts the chat bubble UI.
@@ -20,9 +22,18 @@ import dagger.hilt.android.AndroidEntryPoint
  * - Recent message history
  * - Quick reply functionality
  * - Expand to full app option
+ *
+ * Note: This activity registers with [ActiveConversationManager] to suppress
+ * notifications for the active chat while the bubble is open, following
+ * Android's conversation bubble best practices.
  */
 @AndroidEntryPoint
 class BubbleActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var activeConversationManager: ActiveConversationManager
+
+    private var currentChatGuid: String? = null
 
     companion object {
         const val EXTRA_CHAT_GUID = NotificationChannelManager.EXTRA_CHAT_GUID
@@ -51,6 +62,11 @@ class BubbleActivity : ComponentActivity() {
         }
         val chatTitle = intent.getStringExtra(EXTRA_CHAT_TITLE) ?: ""
 
+        currentChatGuid = chatGuid
+
+        // Register this bubble as the active conversation to suppress notifications
+        activeConversationManager.setActiveConversation(chatGuid)
+
         setContent {
             BothBubblesTheme {
                 BubbleChatScreen(
@@ -61,6 +77,27 @@ class BubbleActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Re-register when bubble becomes visible again
+        currentChatGuid?.let { chatGuid ->
+            activeConversationManager.setActiveConversation(chatGuid)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Clear active conversation when bubble is hidden
+        // This ensures notifications show when bubble is collapsed
+        activeConversationManager.clearActiveConversation()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Ensure cleanup on destroy
+        activeConversationManager.clearActiveConversation()
     }
 
     /**

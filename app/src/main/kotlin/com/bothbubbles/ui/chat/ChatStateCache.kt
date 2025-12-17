@@ -1,8 +1,6 @@
 package com.bothbubbles.ui.chat
 
 import timber.log.Timber
-import com.bothbubbles.ui.chat.paging.MessagePagingController
-import com.bothbubbles.ui.chat.paging.SparseMessageList
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -10,13 +8,13 @@ import javax.inject.Singleton
  * LRU cache for recently-viewed chat states.
  *
  * When users navigate between chats, this cache preserves:
- * - The paging controller with loaded messages
  * - Scroll position (first visible item index + offset)
+ * - Query limit for cursor-based pagination
  * - Last access time for LRU eviction
  *
- * This enables instant restoration when returning to a recently-viewed chat:
- * - Messages appear immediately at the exact scroll position
- * - Background sync checks for new messages without blocking UI
+ * This enables fast restoration when returning to a recently-viewed chat:
+ * - Scroll position is restored immediately
+ * - Query limit is preserved to avoid re-loading the same range
  *
  * Cache size is limited to 5 chats to balance memory usage with UX.
  */
@@ -31,19 +29,17 @@ class ChatStateCache @Inject constructor() {
      *
      * @param chatGuid The primary chat GUID (or primary GUID for merged chats)
      * @param mergedGuids All GUIDs if this is a merged chat, otherwise just [chatGuid]
-     * @param messages Snapshot of loaded messages (sparse list)
-     * @param totalCount Total message count at time of caching
      * @param scrollPosition First visible item index in LazyColumn
      * @param scrollOffset Pixel offset of first visible item
+     * @param queryLimit The query limit at time of caching (for cursor pagination)
      * @param lastAccessTime System time when this state was last accessed
      */
     data class CachedChatState(
         val chatGuid: String,
         val mergedGuids: List<String>,
-        val messages: SparseMessageList,
-        val totalCount: Int,
         val scrollPosition: Int,
         val scrollOffset: Int,
+        val queryLimit: Int = 50,
         val lastAccessTime: Long = System.currentTimeMillis()
     )
 
@@ -84,7 +80,7 @@ class ChatStateCache @Inject constructor() {
      */
     @Synchronized
     fun put(state: CachedChatState) {
-        Timber.d("Caching chat state: ${state.chatGuid}, messages=${state.messages.size}, scrollPos=${state.scrollPosition}")
+        Timber.d("Caching chat state: ${state.chatGuid}, queryLimit=${state.queryLimit}, scrollPos=${state.scrollPosition}")
         cache[state.chatGuid] = state.copy(lastAccessTime = System.currentTimeMillis())
     }
 

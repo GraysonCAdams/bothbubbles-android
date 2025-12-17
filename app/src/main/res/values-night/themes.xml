@@ -1,22 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Base App Theme (Light) -->
-    <style name="Theme.BothBubbles" parent="android:Theme.Material.Light.NoActionBar">
-        <!-- Match Compose LightColorScheme.background (0xFFFFFBFE) -->
-        <item name="android:windowBackground">@color/light_background</item>
-        <item name="android:colorBackground">@color/light_background</item>
+    <!-- Base App Theme (Dark) -->
+    <style name="Theme.BothBubbles" parent="android:Theme.Material.NoActionBar">
+        <!-- Match Compose DarkColorScheme.background (0xFF1C1B1F) -->
+        <item name="android:windowBackground">@color/dark_background</item>
+        <item name="android:colorBackground">@color/dark_background</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
         <item name="android:navigationBarColor">@android:color/transparent</item>
-        <item name="android:windowLightStatusBar">true</item>
-        <item name="android:windowLightNavigationBar">true</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowLightNavigationBar">false</item>
         <item name="android:enforceStatusBarContrast">false</item>
         <item name="android:enforceNavigationBarContrast">false</item>
         <item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>
     </style>
 
-    <!-- Dedicated Splash Theme (Light) -->
+    <!-- Dedicated Splash Theme (Dark) -->
     <style name="Theme.BothBubbles.Splash" parent="Theme.SplashScreen">
-        <item name="windowSplashScreenBackground">@color/light_background</item>
+        <item name="windowSplashScreenBackground">@color/dark_background</item>
         <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
         <item name="postSplashScreenTheme">@style/Theme.BothBubbles</item>
     </style>

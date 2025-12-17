@@ -498,10 +498,11 @@ The `observeMessagesAround()` query needs deterministic boundaries:
 
 ```kotlin
 @Query("""
-    SELECT * FROM message
-    WHERE chatGuid IN (:chatGuids)
-    AND dateCreated BETWEEN :targetTimestamp - :windowMs AND :targetTimestamp + :windowMs
-    ORDER BY dateCreated DESC, guid DESC
+    SELECT * FROM messages
+    WHERE chat_guid IN (:chatGuids)
+    AND date_deleted IS NULL
+    AND date_created BETWEEN :targetTimestamp - :windowMs AND :targetTimestamp + :windowMs
+    ORDER BY date_created DESC, guid DESC
 """)
 fun observeMessagesAround(
     chatGuids: List<String>,
@@ -681,11 +682,12 @@ Ensure the `BETWEEN` clause doesn't accidentally include "Now" for old archives:
 
 ```kotlin
 @Query("""
-    SELECT * FROM message
-    WHERE chatGuid IN (:chatGuids)
-    AND dateCreated >= :windowStart
-    AND dateCreated <= :windowEnd
-    ORDER BY dateCreated DESC, guid DESC
+    SELECT * FROM messages
+    WHERE chat_guid IN (:chatGuids)
+    AND date_deleted IS NULL
+    AND date_created >= :windowStart
+    AND date_created <= :windowEnd
+    ORDER BY date_created DESC, guid DESC
 """)
 fun observeMessagesInWindow(
     chatGuids: List<String>,
@@ -843,15 +845,16 @@ fun `verify message query uses index`() {
     val db = Room.databaseBuilder(...).build()
     val cursor = db.query(
         SimpleSQLiteQuery(
-            "EXPLAIN QUERY PLAN SELECT * FROM message " +
-            "WHERE chatGuid IN ('test') " +
-            "ORDER BY dateCreated DESC, guid DESC LIMIT 50"
+            "EXPLAIN QUERY PLAN SELECT * FROM messages " +
+            "WHERE chat_guid IN ('test') " +
+            "AND date_deleted IS NULL " +
+            "ORDER BY date_created DESC, guid DESC LIMIT 50"
         )
     )
     cursor.moveToFirst()
     val plan = cursor.getString(3)  // "detail" column
 
-    // Should see "USING INDEX idx_message_chatGuid_dateCreated_guid"
+    // Should see "USING INDEX idx_messages_chat_guid_date_created_date_deleted_guid"
     assertThat(plan).contains("USING INDEX")
     assertThat(plan).doesNotContain("SCAN")  // No full table scan
 }

@@ -3,10 +3,97 @@ package com.bothbubbles.ui.components.message
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.ui.components.message.ReactionUiModel
-import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
+
+// ===== Cursor-Based Pagination Models =====
+
+/**
+ * View mode for the chat message list.
+ *
+ * **Recent mode**: Standard view anchored to NOW - new messages appear automatically.
+ * **Archive mode**: History view anchored to a specific message - used for jump-to-message
+ *                   from search results or deep links. New messages don't appear automatically.
+ */
+@Stable
+sealed class ChatViewMode {
+    /** Standard view anchored to the most recent messages */
+    data object Recent : ChatViewMode()
+
+    /**
+     * Archive/History view anchored to a specific message.
+     * Used when jumping to a search result or deep link.
+     *
+     * @param targetGuid The message GUID that triggered the jump
+     * @param targetTimestamp The timestamp of the target message (center of window)
+     * @param windowMs Time window in milliseconds (±12 hours by default)
+     */
+    data class Archive(
+        val targetGuid: String,
+        val targetTimestamp: Long,
+        val windowMs: Long = 12 * 60 * 60 * 1000L // ±12 hours
+    ) : ChatViewMode()
+}
+
+/**
+ * Sealed interface for items in the chat message list.
+ * Supports messages and date separators with stable keys for Compose diffing.
+ *
+ * Each item provides:
+ * - [key]: Stable identifier for LazyColumn key-based diffing (GUID for messages, date string for headers)
+ * - [contentType]: Integer type for Compose item prefetching optimization
+ */
+@Stable
+sealed interface ChatListItem {
+    val key: String
+    val contentType: Int
+
+    /**
+     * A message bubble in the chat.
+     */
+    @Stable
+    data class Message(val message: MessageUiModel) : ChatListItem {
+        override val key: String = message.guid
+        override val contentType: Int = CONTENT_TYPE_MESSAGE
+    }
+
+    /**
+     * A date separator header (e.g., "Today", "Yesterday", "December 15").
+     *
+     * @param dateKey ISO date key for stable identity (e.g., "2024-12-15")
+     * @param displayText Formatted display text (e.g., "Today", "Yesterday", "December 15")
+     */
+    @Stable
+    data class DateSeparator(
+        val dateKey: String,
+        val displayText: String
+    ) : ChatListItem {
+        override val key: String = "date_$dateKey"
+        override val contentType: Int = CONTENT_TYPE_DATE_SEPARATOR
+    }
+
+    /**
+     * Typing indicator shown at the bottom of the list.
+     * Ephemeral - not stored in Room, combined from memory-only flow.
+     *
+     * @param senderName Display name of person typing (null for 1:1 chats)
+     * @param senderAddress Address/handle of person typing
+     */
+    @Stable
+    data class TypingIndicator(
+        val senderName: String?,
+        val senderAddress: String
+    ) : ChatListItem {
+        override val key: String = "typing_$senderAddress"
+        override val contentType: Int = CONTENT_TYPE_TYPING
+    }
+
+    companion object {
+        const val CONTENT_TYPE_MESSAGE = 1
+        const val CONTENT_TYPE_DATE_SEPARATOR = 2
+        const val CONTENT_TYPE_TYPING = 3
+    }
+}
 
 /**
  * Result of analyzing text for emoji-only content.
