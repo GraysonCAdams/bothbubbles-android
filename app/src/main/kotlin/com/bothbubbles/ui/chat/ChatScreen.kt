@@ -486,10 +486,12 @@ fun ChatScreen(
     } // End of content Box
 
 
-    // SnackbarHost overlay
+    // SnackbarHost overlay - positioned above the composer
     SnackbarHost(
         hostState = state.snackbarHostState,
-        modifier = Modifier.align(Alignment.BottomCenter)
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(bottom = bottomBarHeightDp)
     )
 
     // Screen effect overlay (above all other content) - connected to ViewModel

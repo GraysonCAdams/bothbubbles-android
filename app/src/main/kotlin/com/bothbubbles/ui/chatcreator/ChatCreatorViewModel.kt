@@ -239,6 +239,9 @@ class ChatCreatorViewModel @Inject constructor(
 
     /**
      * Continue action - handles 1 recipient vs multiple recipients
+     *
+     * For group chats, waits for pending iMessage availability checks to complete
+     * before determining the group service type (iMessage vs MMS).
      */
     fun onContinue() {
         val recipients = _uiState.value.selectedRecipients
@@ -249,23 +252,34 @@ class ChatCreatorViewModel @Inject constructor(
                 _uiState.update { it.copy(error = "Please add at least one recipient") }
             }
             recipients.size == 1 -> {
-                // Single recipient - create direct chat
+                // Single recipient - create direct chat (chat screen handles service detection)
                 val recipient = recipients.first()
                 Timber.d("Starting conversation with ${recipient.address} (${recipient.service})")
                 startConversationWithAddress(recipient.address, recipient.service)
             }
             else -> {
-                // Multiple recipients - delegate handles group setup navigation
-                when (val result = chatCreationDelegate.handleContinue(recipients)) {
-                    is ChatCreationDelegate.ChatCreationResult.NavigateToGroupSetup -> {
-                        // Navigation state is already updated by delegate
-                        Timber.d("Navigating to group setup")
+                // Multiple recipients - wait for pending iMessage checks before creating group
+                viewModelScope.launch {
+                    if (recipientSelectionDelegate.hasPendingChecks()) {
+                        _uiState.update { it.copy(isCheckingAvailability = true) }
+                        recipientSelectionDelegate.awaitPendingChecks()
+                        _uiState.update { it.copy(isCheckingAvailability = false) }
                     }
-                    is ChatCreationDelegate.ChatCreationResult.Error -> {
-                        _uiState.update { it.copy(error = result.message) }
-                    }
-                    is ChatCreationDelegate.ChatCreationResult.Success -> {
-                        // Should not happen for multiple recipients
+
+                    // Get updated recipients after checks complete
+                    val updatedRecipients = _uiState.value.selectedRecipients
+
+                    when (val result = chatCreationDelegate.handleContinue(updatedRecipients)) {
+                        is ChatCreationDelegate.ChatCreationResult.NavigateToGroupSetup -> {
+                            // Navigation state is already updated by delegate
+                            Timber.d("Navigating to group setup")
+                        }
+                        is ChatCreationDelegate.ChatCreationResult.Error -> {
+                            _uiState.update { it.copy(error = result.message) }
+                        }
+                        is ChatCreationDelegate.ChatCreationResult.Success -> {
+                            // Should not happen for multiple recipients
+                        }
                     }
                 }
             }

@@ -498,10 +498,14 @@ fun ChatMessageList(
                 }
 
                 Box(modifier = Modifier.fillMaxSize()) {
+                    // Disable scrolling when tapback overlay is visible
+                    val isOverlayVisible = selectedMessageForTapback != null
+
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
                         state = listState,
                         reverseLayout = true,
+                        userScrollEnabled = !isOverlayVisible,
                         contentPadding = PaddingValues(
                             start = 16.dp,
                             end = 16.dp,

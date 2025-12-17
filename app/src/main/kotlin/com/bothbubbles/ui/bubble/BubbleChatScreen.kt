@@ -35,6 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.composer.ChatComposer
+import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.message.MessageBubble
 import com.bothbubbles.ui.components.message.MessageGroupPosition
@@ -62,6 +64,7 @@ fun BubbleChatScreen(
     viewModel: BubbleChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val composerState by viewModel.composerState.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     // Use title from ViewModel if loaded, otherwise fall back to passed title
@@ -89,20 +92,17 @@ fun BubbleChatScreen(
             )
         },
         bottomBar = {
-            BubbleComposer(
-                text = uiState.draftText,
-                onTextChange = viewModel::updateDraft,
-                onSendClick = {
-                    if (uiState.draftText.isNotBlank()) {
-                        viewModel.sendMessage()
+            ChatComposer(
+                state = composerState,
+                onEvent = { event ->
+                    viewModel.onComposerEvent(event)
+                    // Scroll to bottom after sending
+                    if (event is ComposerEvent.Send) {
                         scope.launch {
-                            // Scroll to show sent message
                             listState.animateScrollToItem(0)
                         }
                     }
                 },
-                isSending = uiState.isSending,
-                isLocalSmsChat = uiState.isLocalSmsChat,
                 modifier = Modifier.imePadding()
             )
         }

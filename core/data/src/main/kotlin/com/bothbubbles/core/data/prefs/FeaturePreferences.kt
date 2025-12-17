@@ -66,7 +66,7 @@ class FeaturePreferences @Inject constructor(
     // ===== Link Previews =====
 
     val linkPreviewsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.LINK_PREVIEWS_ENABLED] ?: false  // Default false until pagination is implemented
+        prefs[Keys.LINK_PREVIEWS_ENABLED] ?: true
     }
 
     // ===== ETA Sharing =====

@@ -155,59 +155,9 @@ fun SettingsContent(
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
         ) {
-        // Quick Actions Card
-        item {
-            SettingsCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                // Archived
-                SettingsMenuItem(
-                    icon = Icons.Outlined.Archive,
-                    title = "Archived",
-                    onClick = onArchivedClick,
-                    trailingContent = if (uiState.archivedCount > 0) {
-                        {
-                            Text(
-                                text = uiState.archivedCount.toString(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    } else null
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Blocked contacts
-                SettingsMenuItem(
-                    icon = Icons.Default.Block,
-                    title = "Blocked contacts",
-                    onClick = onBlockedClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Spam protection
-                SettingsMenuItem(
-                    icon = Icons.Default.Shield,
-                    title = "Spam protection",
-                    subtitle = "Automatic spam detection settings",
-                    onClick = onSpamClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Message categorization
-                SettingsMenuItem(
-                    icon = Icons.Default.Category,
-                    title = "Message categorization",
-                    subtitle = "Sort messages into categories with ML",
-                    onClick = onCategorizationClick
-                )
-            }
-        }
-
-        // Messaging Section
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 1: Connection Status Header
+        // ═══════════════════════════════════════════════════════════════
         item {
             val iMessageStatus = when (uiState.connectionState) {
                 ConnectionState.CONNECTED -> BadgeStatus.CONNECTED
@@ -228,75 +178,12 @@ fun SettingsContent(
             )
         }
 
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 2: Connection & Server
+        // Focus: The "pipes" that make the app work
+        // ═══════════════════════════════════════════════════════════════
         item {
-            SettingsCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                // Notifications
-                SettingsMenuItem(
-                    icon = Icons.Default.Notifications,
-                    title = stringResource(R.string.settings_notifications),
-                    subtitle = "Sound, vibration, and display",
-                    onClick = onNotificationsClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // iMessage (BlueBubbles server)
-                SettingsMenuItem(
-                    icon = Icons.Default.Cloud,
-                    title = "iMessage",
-                    subtitle = "BlueBubbles server settings",
-                    onClick = onServerSettingsClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // SMS/MMS settings
-                SettingsMenuItem(
-                    icon = Icons.Default.CellTower,
-                    title = stringResource(R.string.settings_sms),
-                    subtitle = "Local SMS messaging options",
-                    onClick = onSmsSettingsClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Quick reply templates
-                SettingsMenuItem(
-                    icon = Icons.Default.Quickreply,
-                    title = "Quick reply templates",
-                    subtitle = "Saved responses and smart suggestions",
-                    onClick = onTemplatesClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Auto-responder
-                SettingsMenuItem(
-                    icon = Icons.Default.SmartToy,
-                    title = "Auto-responder",
-                    subtitle = "Greet first-time iMessage contacts",
-                    onClick = onAutoResponderClick
-                )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // ETA Sharing
-                SettingsMenuItem(
-                    icon = Icons.Outlined.Navigation,
-                    title = "ETA sharing",
-                    subtitle = "Share arrival time while navigating",
-                    onClick = onEtaSharingClick
-                )
-            }
-        }
-
-        // iMessage Features Section
-        item {
-            SettingsSectionTitle(
-                title = if (uiState.isServerConfigured) "iMessage features" else "iMessage features (server required)"
-            )
+            SettingsSectionTitle(title = "Connection & server")
         }
 
         item {
@@ -313,7 +200,6 @@ fun SettingsContent(
                 PrivateApiHelpSheet(
                     onDismiss = { showPrivateApiHelp = false },
                     onLearnMore = {
-                        // Could open a URL in browser
                         showPrivateApiHelp = false
                     }
                 )
@@ -322,8 +208,17 @@ fun SettingsContent(
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Private API toggle - uses icon switch for emphasis
-                // Enhanced with: shake on disabled click, loading state, actionable error subtitle, contextual help
+                // iMessage (BlueBubbles server)
+                SettingsMenuItem(
+                    icon = Icons.Default.Cloud,
+                    title = "iMessage",
+                    subtitle = "BlueBubbles server settings",
+                    onClick = onServerSettingsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Private API toggle - nested under iMessage
                 SettingsMenuItem(
                     icon = Icons.Default.VpnKey,
                     title = "Enable Private API",
@@ -334,7 +229,6 @@ fun SettingsContent(
                         uiState.enablePrivateApi -> "Advanced iMessage features enabled"
                         else -> "Enables typing indicators, reactions, and more"
                     },
-                    // Actionable link when disconnected
                     subtitleAction = if (isDisconnected && uiState.isServerConfigured) "Tap to reconnect" else null,
                     onSubtitleActionClick = if (isDisconnected && uiState.isServerConfigured) {
                         { viewModel.reconnect() }
@@ -346,9 +240,7 @@ fun SettingsContent(
                     },
                     enabled = uiState.isServerConfigured && !isConnecting,
                     isLoading = isConnecting,
-                    // Info button opens help sheet
                     onInfoClick = { showPrivateApiHelp = true },
-                    // Shake + snackbar when tapping disabled row
                     onDisabledClick = {
                         if (!uiState.isServerConfigured) {
                             showDisabledSnackbar(
@@ -371,8 +263,7 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Send typing indicators toggle
-                // Enhanced with: shake on disabled click, dependency explanation
+                // Send typing indicators - nested under Private API
                 SettingsMenuItem(
                     icon = Icons.Default.Keyboard,
                     title = "Send typing indicators",
@@ -387,7 +278,6 @@ fun SettingsContent(
                         }
                     },
                     enabled = uiState.isServerConfigured && uiState.enablePrivateApi,
-                    // Shake + snackbar when tapping disabled row
                     onDisabledClick = {
                         when {
                             !uiState.isServerConfigured -> {
@@ -409,32 +299,6 @@ fun SettingsContent(
                             checked = uiState.sendTypingIndicators && uiState.enablePrivateApi && uiState.isServerConfigured,
                             onCheckedChange = { viewModel.setSendTypingIndicators(it) },
                             enabled = uiState.isServerConfigured && uiState.enablePrivateApi,
-                            showIcons = false  // Secondary toggle, no icons
-                        )
-                    }
-                )
-            }
-        }
-
-        // Appearance & Behavior Section
-        item {
-            SettingsSectionTitle(title = "Appearance & behavior")
-        }
-
-        item {
-            SettingsCard(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                // Simple app title toggle
-                SettingsMenuItem(
-                    icon = Icons.Default.TextFields,
-                    title = "Simple app title",
-                    subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
-                    onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.useSimpleAppTitle,
-                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) },
                             showIcons = false
                         )
                     }
@@ -442,32 +306,44 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Swipe gestures
+                // SMS/MMS settings
                 SettingsMenuItem(
-                    icon = Icons.Default.SwipeRight,
-                    title = "Swipe actions",
-                    subtitle = "Customize conversation swipe gestures",
-                    onClick = onSwipeSettingsClick
+                    icon = Icons.Default.CellTower,
+                    title = stringResource(R.string.settings_sms),
+                    subtitle = "Local SMS messaging options",
+                    onClick = onSmsSettingsClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Message effects
+                // Sync settings
                 SettingsMenuItem(
-                    icon = Icons.Default.AutoAwesome,
-                    title = "Message effects",
-                    subtitle = "Animations for screen and bubble effects",
-                    onClick = onEffectsSettingsClick
+                    icon = Icons.Default.Sync,
+                    title = "Sync settings",
+                    subtitle = "Last synced: ${uiState.lastSyncFormatted}",
+                    onClick = onSyncSettingsClick
                 )
+            }
+        }
 
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 3: Notifications & Alerts
+        // Focus: How the app gets your attention
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Notifications & alerts")
+        }
 
-                // Image quality
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Notifications
                 SettingsMenuItem(
-                    icon = Icons.Default.HighQuality,
-                    title = "Image quality",
-                    subtitle = "Compression settings for photo attachments",
-                    onClick = onImageQualityClick
+                    icon = Icons.Default.Notifications,
+                    title = stringResource(R.string.settings_notifications),
+                    subtitle = "Sound, vibration, and display",
+                    onClick = onNotificationsClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -511,6 +387,55 @@ fun SettingsContent(
                         )
                     }
                 }
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 4: Appearance & Interaction
+        // Focus: Visual customization and tactile feedback
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Appearance & interaction")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Simple app title toggle
+                SettingsMenuItem(
+                    icon = Icons.Default.TextFields,
+                    title = "Simple app title",
+                    subtitle = if (uiState.useSimpleAppTitle) "Showing \"Messages\"" else "Showing \"BothBubbles\"",
+                    onClick = { viewModel.setUseSimpleAppTitle(!uiState.useSimpleAppTitle) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.useSimpleAppTitle,
+                            onCheckedChange = { viewModel.setUseSimpleAppTitle(it) },
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Message effects
+                SettingsMenuItem(
+                    icon = Icons.Default.AutoAwesome,
+                    title = "Message effects",
+                    subtitle = "Animations for screen and bubble effects",
+                    onClick = onEffectsSettingsClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Swipe gestures
+                SettingsMenuItem(
+                    icon = Icons.Default.SwipeRight,
+                    title = "Swipe actions",
+                    subtitle = "Customize conversation swipe gestures",
+                    onClick = onSwipeSettingsClick
+                )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -550,31 +475,44 @@ fun SettingsContent(
             }
         }
 
-        // Connection & Data Section
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 5: Messaging Features
+        // Focus: Enhancements to the composing and sending experience
+        // ═══════════════════════════════════════════════════════════════
         item {
-            SettingsSectionTitle(title = "Connection & data")
+            SettingsSectionTitle(title = "Messaging features")
         }
 
         item {
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
-                // Sync settings
+                // Quick reply templates
                 SettingsMenuItem(
-                    icon = Icons.Default.Sync,
-                    title = "Sync settings",
-                    subtitle = "Last synced: ${uiState.lastSyncFormatted}",
-                    onClick = onSyncSettingsClick
+                    icon = Icons.Default.Quickreply,
+                    title = "Quick reply templates",
+                    subtitle = "Saved responses and smart suggestions",
+                    onClick = onTemplatesClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // Export messages
+                // Auto-responder
                 SettingsMenuItem(
-                    icon = Icons.Default.Download,
-                    title = "Export messages",
-                    subtitle = "Save conversations as HTML or PDF",
-                    onClick = onExportClick
+                    icon = Icons.Default.SmartToy,
+                    title = "Auto-responder",
+                    subtitle = "Greet first-time iMessage contacts",
+                    onClick = onAutoResponderClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // ETA Sharing
+                SettingsMenuItem(
+                    icon = Icons.Outlined.Navigation,
+                    title = "ETA sharing",
+                    subtitle = "Share arrival time while navigating",
+                    onClick = onEtaSharingClick
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -593,10 +531,104 @@ fun SettingsContent(
                         )
                     }
                 )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Image quality
+                SettingsMenuItem(
+                    icon = Icons.Default.HighQuality,
+                    title = "Image quality",
+                    subtitle = "Compression settings for photo attachments",
+                    onClick = onImageQualityClick
+                )
             }
         }
 
-        // About (always at bottom)
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 6: Privacy & Organization
+        // Focus: Managing the inbox and security
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Privacy & organization")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Blocked contacts
+                SettingsMenuItem(
+                    icon = Icons.Default.Block,
+                    title = "Blocked contacts",
+                    onClick = onBlockedClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Spam protection
+                SettingsMenuItem(
+                    icon = Icons.Default.Shield,
+                    title = "Spam protection",
+                    subtitle = "Automatic spam detection settings",
+                    onClick = onSpamClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Message categorization
+                SettingsMenuItem(
+                    icon = Icons.Default.Category,
+                    title = "Message categorization",
+                    subtitle = "Sort messages into categories with ML",
+                    onClick = onCategorizationClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Archived
+                SettingsMenuItem(
+                    icon = Icons.Outlined.Archive,
+                    title = "Archived",
+                    onClick = onArchivedClick,
+                    trailingContent = if (uiState.archivedCount > 0) {
+                        {
+                            Text(
+                                text = uiState.archivedCount.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    } else null
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 7: Data & Backup
+        // Focus: Long-term data management
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Data & backup")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Export messages
+                SettingsMenuItem(
+                    icon = Icons.Default.Download,
+                    title = "Export messages",
+                    subtitle = "Save conversations as HTML or PDF",
+                    onClick = onExportClick
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 8: About
+        // Focus: App information (always at bottom)
+        // ═══════════════════════════════════════════════════════════════
         item {
             Spacer(modifier = Modifier.height(8.dp))
         }

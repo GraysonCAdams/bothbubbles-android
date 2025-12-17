@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -14,9 +15,11 @@ import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.components.message.JumpToBottomIndicator
 import com.bothbubbles.ui.components.message.MessageBubble
 import com.bothbubbles.ui.components.message.MessageGroupPosition
-import com.bothbubbles.ui.components.message.MessageSpotlightOverlay
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.Tapback
+import com.bothbubbles.ui.components.message.focus.MessageFocusOverlay
+import com.bothbubbles.ui.components.message.focus.MessageFocusState
+import kotlinx.collections.immutable.toImmutableSet
 import kotlinx.coroutines.launch
 
 /**
@@ -69,17 +72,28 @@ fun MessageListOverlays(
                 .padding(bottom = 16.dp)
         )
 
-        // Message Spotlight Overlay
-        MessageSpotlightOverlay(
-            visible = selectedMessageForTapback != null && selectedMessageBounds != null,
-            anchorBounds = selectedMessageBounds,
-            isFromMe = selectedMessageForTapback?.isFromMe == true,
-            composerHeight = composerHeight,
-            myReactions = selectedMessageForTapback?.myReactions ?: emptySet(),
-            canReply = selectedMessageForTapback?.isServerOrigin == true,
-            canCopy = !selectedMessageForTapback?.text.isNullOrBlank(),
-            canForward = true,
-            showReactions = selectedMessageForTapback?.isServerOrigin == true && isServerConnected,
+        // Build focus state from selected message
+        val focusState = remember(selectedMessageForTapback, selectedMessageBounds, isServerConnected) {
+            if (selectedMessageForTapback != null && selectedMessageBounds != null) {
+                MessageFocusState(
+                    visible = true,
+                    messageId = selectedMessageForTapback.guid,
+                    messageBounds = selectedMessageBounds,
+                    isFromMe = selectedMessageForTapback.isFromMe,
+                    myReactions = selectedMessageForTapback.myReactions.toImmutableSet(),
+                    canReact = selectedMessageForTapback.isServerOrigin && isServerConnected,
+                    canCopy = !selectedMessageForTapback.text.isNullOrBlank(),
+                    canForward = true,
+                    canReply = selectedMessageForTapback.isServerOrigin
+                )
+            } else {
+                MessageFocusState.Empty
+            }
+        }
+
+        // Message Focus Overlay
+        MessageFocusOverlay(
+            state = focusState,
             onDismiss = {
                 onSelectMessageForTapback(null)
                 onSelectedBoundsChange(null)
@@ -107,6 +121,7 @@ fun MessageListOverlays(
                 }
             }
         ) {
+            // Render the focused message as the "ghost"
             selectedMessageForTapback?.let { message ->
                 MessageBubble(
                     message = message,

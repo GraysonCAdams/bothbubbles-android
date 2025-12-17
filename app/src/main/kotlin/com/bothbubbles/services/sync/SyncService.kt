@@ -10,6 +10,7 @@ import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoffResult
 import kotlinx.coroutines.CoroutineDispatcher
@@ -37,6 +38,7 @@ class SyncService @Inject constructor(
     private val messageSyncHelper: MessageSyncHelper,
     private val syncOperations: SyncOperations,
     private val smsRepository: SmsRepository,
+    private val notifier: Notifier,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -219,6 +221,8 @@ class SyncService @Inject constructor(
         // Only update internal state if no external progress handler
         if (onProgress == null) {
             _syncState.value = SyncState.Completed
+            // Show notification that BlueBubbles sync is complete
+            notifier.showBlueBubblesSyncCompleteNotification(progressTracker.syncedMessages.get())
         } else {
             onProgress(100, progressTracker.processedChats.get(), progressTracker.totalChatsFound.get(), progressTracker.syncedMessages.get())
         }
@@ -295,6 +299,8 @@ class SyncService @Inject constructor(
         // Note: Categorization now runs in background on ConversationsScreen after all syncs complete
 
         _syncState.value = SyncState.Completed
+        // Show notification that BlueBubbles sync is complete
+        notifier.showBlueBubblesSyncCompleteNotification(progressTracker.syncedMessages.get())
     }.onFailure { e ->
         Timber.e(e, "Resume sync failed")
         _syncState.value = createErrorState(e)

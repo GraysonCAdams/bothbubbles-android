@@ -2,8 +2,6 @@ package com.bothbubbles.ui.chatcreator.delegates
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.core.network.api.dto.CreateChatRequest
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.GroupChatUiModel
@@ -19,14 +17,13 @@ import javax.inject.Inject
  * Delegate responsible for creating chats.
  *
  * This delegate handles:
- * - Creating direct chats (single recipient)
- * - Creating SMS chats locally
- * - Creating iMessage chats via BlueBubbles API
+ * - Creating direct chats (single recipient) by navigating to chat screen
+ * - The actual iMessage chat creation happens when the first message is sent
+ *   (BlueBubbles Private API requires a message to create a new chat)
  * - Preparing group chat setup navigation
  * - Selecting existing group chats
  */
 class ChatCreationDelegate @Inject constructor(
-    private val api: BothBubblesApi,
     private val chatRepository: ChatRepository
 ) {
     /**
@@ -45,92 +42,100 @@ class ChatCreationDelegate @Inject constructor(
     val navigateToGroupSetup: StateFlow<GroupSetupNavigation?> = _navigateToGroupSetup.asStateFlow()
 
     /**
-     * Select a contact and create a direct chat
+     * Select a contact and create/navigate to a direct chat.
+     * Delegates to startConversationWithAddress for consistent behavior.
      */
     suspend fun selectContact(contact: ContactUiModel): ChatCreationResult {
-        return try {
-            // Create a new chat with the selected contact
-            val response = api.createChat(
-                CreateChatRequest(
-                    addresses = listOf(contact.address),
-                    service = contact.service
-                )
-            )
-
-            val body = response.body()
-            val chatData = body?.data
-            if (response.isSuccessful && chatData != null) {
-                val chatGuid = chatData.guid
-                _createdChatGuid.value = chatGuid
-                ChatCreationResult.Success(chatGuid)
-            } else {
-                ChatCreationResult.Error(body?.message ?: "Failed to create chat")
-            }
-        } catch (e: Exception) {
-            ChatCreationResult.Error(e.message ?: "Failed to create chat")
-        }
+        Timber.d("selectContact: ${contact.address} (${contact.service})")
+        return startConversationWithAddress(contact.address, contact.service)
     }
 
     /**
      * Start a conversation with a manually entered address (phone number or email).
+     *
+     * For both iMessage and SMS, we first look for existing chats with this address.
+     * If no existing chat with messages is found, we create a local chat entry.
+     * The actual chat creation on the server (for iMessage) happens when the first message is sent,
+     * since BlueBubbles Private API requires a message to create a new chat.
      */
     suspend fun startConversationWithAddress(address: String, service: String): ChatCreationResult {
         Timber.d("startConversationWithAddress: address=$address, service=$service")
 
         return try {
-            // For SMS mode or when iMessage is not available, create a local SMS chat
-            if (service == "SMS") {
-                // Normalize address to prevent duplicate conversations
-                val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
-                // Create local SMS chat GUID
-                val chatGuid = "sms;-;$normalizedAddress"
-
-                // Try to find or create the chat in the local database
-                val existingChat = chatRepository.getChatByGuid(chatGuid)
-                if (existingChat == null) {
-                    // Create a minimal chat entry for local SMS
-                    val newChat = ChatEntity(
-                        guid = chatGuid,
-                        chatIdentifier = normalizedAddress,
-                        displayName = null,
-                        isArchived = false,
-                        isPinned = false,
-                        isGroup = false,
-                        hasUnreadMessage = false,
-                        unreadCount = 0,
-                        lastMessageDate = System.currentTimeMillis(),
-                        lastMessageText = null
-                    )
-                    chatRepository.insertChat(newChat)
-                }
-
-                Timber.d("SMS chat created/found: $chatGuid")
-                _createdChatGuid.value = chatGuid
-                ChatCreationResult.Success(chatGuid)
+            // Normalize phone numbers, keep emails as-is
+            val normalizedAddress = if (address.contains("@")) {
+                address.lowercase()
             } else {
-                // Use BlueBubbles server to create iMessage chat
-                Timber.d("Creating iMessage chat via server API")
-                val response = api.createChat(
-                    CreateChatRequest(
-                        addresses = listOf(address),
-                        service = service
-                    )
-                )
+                PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
+            }
 
-                val body = response.body()
-                val chatData = body?.data
-                Timber.d("createChat response: code=${response.code()}, message=${body?.message}, data=$chatData")
-                if (response.isSuccessful && chatData != null) {
-                    val chatGuid = chatData.guid
-                    Timber.d("iMessage chat created: $chatGuid")
-                    _createdChatGuid.value = chatGuid
-                    ChatCreationResult.Success(chatGuid)
-                } else {
-                    val errorMsg = body?.message ?: "Failed to create chat"
-                    Timber.e("Failed to create iMessage chat: $errorMsg")
-                    ChatCreationResult.Error(errorMsg)
+            // Determine if this is iMessage or local messaging (SMS/RCS/MMS)
+            val isIMessage = service.equals("iMessage", ignoreCase = true)
+
+            // Check all possible GUID variants for this address
+            // Server uses different prefixes: iMessage, SMS, RCS, MMS (case-sensitive)
+            val possibleGuids = if (isIMessage) {
+                listOf("iMessage;-;$normalizedAddress")
+            } else {
+                // For local messaging, check all variants (server uses uppercase)
+                listOf(
+                    "SMS;-;$normalizedAddress",
+                    "RCS;-;$normalizedAddress",
+                    "MMS;-;$normalizedAddress",
+                    "sms;-;$normalizedAddress"  // Lowercase fallback
+                )
+            }
+
+            Timber.d("Looking for existing chats: $possibleGuids")
+
+            // Find the best existing chat (prefer ones with messages)
+            var bestChat: ChatEntity? = null
+            for (guid in possibleGuids) {
+                val chat = chatRepository.getChatByGuid(guid)
+                if (chat != null) {
+                    // Prefer chats that have messages (lastMessageText is not null)
+                    if (chat.lastMessageText != null) {
+                        Timber.d("Found existing chat with messages: ${chat.guid}")
+                        _createdChatGuid.value = chat.guid
+                        return ChatCreationResult.Success(chat.guid)
+                    }
+                    // Keep track of first empty chat as fallback
+                    if (bestChat == null) {
+                        bestChat = chat
+                    }
                 }
             }
+
+            // If we found an empty chat, use it
+            if (bestChat != null) {
+                Timber.d("Using existing empty chat: ${bestChat.guid}")
+                _createdChatGuid.value = bestChat.guid
+                return ChatCreationResult.Success(bestChat.guid)
+            }
+
+            // No existing chat found - create a new one
+            // Use uppercase prefix to match server convention
+            val servicePrefix = if (isIMessage) "iMessage" else "SMS"
+            val newGuid = "$servicePrefix;-;$normalizedAddress"
+
+            Timber.d("Creating local chat entry: $newGuid")
+            val newChat = ChatEntity(
+                guid = newGuid,
+                chatIdentifier = normalizedAddress,
+                displayName = null,
+                isArchived = false,
+                isPinned = false,
+                isGroup = false,
+                hasUnreadMessage = false,
+                unreadCount = 0,
+                lastMessageDate = System.currentTimeMillis(),
+                lastMessageText = null
+            )
+            chatRepository.insertChat(newChat)
+
+            Timber.d("Chat created: $newGuid")
+            _createdChatGuid.value = newGuid
+            ChatCreationResult.Success(newGuid)
         } catch (e: Exception) {
             Timber.e(e, "Failed to start conversation")
             ChatCreationResult.Error(e.message ?: "Failed to create chat")

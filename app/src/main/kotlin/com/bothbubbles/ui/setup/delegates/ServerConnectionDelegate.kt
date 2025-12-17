@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.setup.delegates
 
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.core.network.api.AuthInterceptor
 import com.bothbubbles.core.network.api.BothBubblesApi
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
@@ -22,6 +23,7 @@ import kotlinx.coroutines.launch
 class ServerConnectionDelegate @AssistedInject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val api: BothBubblesApi,
+    private val authInterceptor: AuthInterceptor,
     @Assisted private val scope: CoroutineScope
 ) {
     @AssistedFactory
@@ -75,6 +77,9 @@ class ServerConnectionDelegate @AssistedInject constructor(
                 // Save settings temporarily to make the API call
                 settingsDataStore.setServerAddress(serverUrl)
                 settingsDataStore.setGuidAuthKey(password)
+
+                // Invalidate cached credentials so AuthInterceptor uses the new values
+                authInterceptor.invalidateCache()
 
                 // Test connection
                 val response = api.getServerInfo()
