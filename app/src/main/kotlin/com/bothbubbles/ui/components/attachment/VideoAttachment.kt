@@ -48,6 +48,7 @@ import coil.request.ImageRequest
 import coil.size.Precision
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.theme.MediaSizing
 import timber.log.Timber
 
 /**
@@ -70,18 +71,9 @@ fun VideoAttachment(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // IMPORTANT: Don't fall back to webUrl for inbound - ExoPlayer OkHttp doesn't have auth headers
-    // The auth interceptor is only on the Retrofit client, not the ExoPlayer data source
-    val videoUrl = if (attachment.localPath != null) {
-        attachment.localPath
-    } else if (attachment.isOutgoing) {
-        attachment.webUrl  // Outgoing can try webUrl (server may allow)
-    } else {
-        null  // Inbound must wait for auto-download - can't auth to server from ExoPlayer
-    }
-
-    // Determine if we should show downloading state (inbound attachment without local file)
-    val isAwaitingDownload = videoUrl == null && !attachment.isOutgoing
+    // Use displayUrl from model - handles localPath vs webUrl logic centrally
+    // IMPORTANT: For inbound attachments, webUrl won't work (ExoPlayer lacks auth headers)
+    val videoUrl = attachment.displayUrl
 
     // DEBUG LOGGING
     Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -89,7 +81,7 @@ fun VideoAttachment(
     Timber.tag("AttachmentDebug").d("   RESOLVED videoUrl=$videoUrl")
     Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}")
     Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
-    Timber.tag("AttachmentDebug").d("   isOutgoing=${attachment.isOutgoing}, isAwaitingDownload=$isAwaitingDownload")
+    Timber.tag("AttachmentDebug").d("   isOutgoing=${attachment.isOutgoing}, isAwaitingDownload=${attachment.isAwaitingDownload}")
     Timber.tag("AttachmentDebug").d("   mimeType=${attachment.mimeType}")
     Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
@@ -224,8 +216,9 @@ private fun VideoPlayerActive(
 ) {
     Box(
         modifier = modifier
-            .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .widthIn(max = MediaSizing.MAX_WIDTH)
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(Color.Black)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -251,9 +244,7 @@ private fun VideoPlayerActive(
             update = { playerView ->
                 playerView.player = exoPlayer
             },
-            modifier = Modifier
-                .widthIn(max = 250.dp)
-                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+            modifier = Modifier.fillMaxSize()
         )
 
         // Mute/Unmute button (top-left corner)
@@ -333,13 +324,16 @@ private fun VideoThumbnailWithControls(
     val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
 
     val density = LocalDensity.current
-    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     Box(
         modifier = modifier
-            .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .widthIn(max = MediaSizing.MAX_WIDTH)
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .pointerInput(Unit) {
                 detectTapGestures(
@@ -354,13 +348,11 @@ private fun VideoThumbnailWithControls(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
@@ -369,8 +361,7 @@ private fun VideoThumbnailWithControls(
         } else {
             Box(
                 modifier = Modifier
-                    .width(200.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .fillMaxSize()
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         }
@@ -483,13 +474,16 @@ private fun VideoThumbnailFallback(
 
     // Calculate target size in pixels for memory-efficient loading
     val density = LocalDensity.current
-    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     Box(
         modifier = modifier
-            .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .widthIn(max = MediaSizing.MAX_WIDTH)
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .clickable(onClick = onClick),
         contentAlignment = Alignment.Center
@@ -499,13 +493,11 @@ private fun VideoThumbnailFallback(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
+                modifier = Modifier.fillMaxSize(),
                 contentScale = ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
@@ -516,8 +508,7 @@ private fun VideoThumbnailFallback(
             // No thumbnail available, show placeholder
             Box(
                 modifier = Modifier
-                    .width(200.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                    .fillMaxSize()
                     .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             )
         }

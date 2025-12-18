@@ -65,6 +65,20 @@ class PendingMessageRepository @Inject constructor(
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
 
+    // ============================================================================
+    // GLOBAL DUPLICATE DETECTION (Singleton-level tracking across all chats)
+    // ============================================================================
+    private data class GlobalRecentSend(
+        val chatGuid: String,
+        val textHash: Int,
+        val textPreview: String,
+        val timestamp: Long,
+        val localId: String
+    )
+    private val globalRecentSends = mutableListOf<GlobalRecentSend>()
+    private val maxGlobalRecentSends = 50
+    private val globalDuplicateWindowMs = 10 * 60 * 1000L // 10 minutes
+
     /**
      * Queue a message for sending.
      *
@@ -86,7 +100,8 @@ class PendingMessageRepository @Inject constructor(
         effectId: String?,
         attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
-        forcedLocalId: String?
+        forcedLocalId: String?,
+        attributedBodyJson: String?
     ): Result<String> = runCatching {
         val startTime = System.currentTimeMillis()
         Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
@@ -96,6 +111,58 @@ class PendingMessageRepository @Inject constructor(
         val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
         Timber.i("[SEND_TRACE] clientGuid=$clientGuid +${System.currentTimeMillis() - startTime}ms")
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // GLOBAL DUPLICATE DETECTION at Repository level
+        // ═══════════════════════════════════════════════════════════════════════════
+        val textForHash = text?.trim() ?: ""
+        if (textForHash.isNotBlank()) {
+            val textHash = textForHash.hashCode()
+            val textPreview = textForHash.take(30)
+
+            // Clean up old entries
+            val cutoffTime = createdAt - globalDuplicateWindowMs
+            synchronized(globalRecentSends) {
+                globalRecentSends.removeAll { it.timestamp < cutoffTime }
+
+                // Check for duplicate in same chat
+                val sameChatDuplicate = globalRecentSends.find {
+                    it.chatGuid == chatGuid && it.textHash == textHash
+                }
+                if (sameChatDuplicate != null) {
+                    val timeSince = (createdAt - sameChatDuplicate.timestamp) / 1000
+                    Timber.w("[REPO_DUPLICATE] ⚠️ ═══════════════════════════════════════════════════════")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ DUPLICATE QUEUED at Repository level!")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ Text: \"$textPreview...\"")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ Same text queued ${timeSince}s ago in same chat")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ Previous localId: ${sameChatDuplicate.localId}")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ Current localId: $clientGuid")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ Chat: $chatGuid")
+                    Timber.w("[REPO_DUPLICATE] ⚠️ ═══════════════════════════════════════════════════════")
+                }
+
+                // Check for duplicate across ANY chat (very suspicious)
+                val anyChatDuplicate = globalRecentSends.find {
+                    it.chatGuid != chatGuid && it.textHash == textHash
+                }
+                if (anyChatDuplicate != null) {
+                    val timeSince = (createdAt - anyChatDuplicate.timestamp) / 1000
+                    Timber.i("[REPO_DUPLICATE] Same text sent to different chat ${timeSince}s ago (probably intentional forward)")
+                }
+
+                // Record this queue
+                globalRecentSends.add(GlobalRecentSend(
+                    chatGuid = chatGuid,
+                    textHash = textHash,
+                    textPreview = textPreview,
+                    timestamp = createdAt,
+                    localId = clientGuid
+                ))
+                if (globalRecentSends.size > maxGlobalRecentSends) {
+                    globalRecentSends.removeAt(0)
+                }
+            }
+        }
 
         // Determine message source based on delivery mode
         val messageSource = inferMessageSource(chatGuid, deliveryMode)
@@ -146,7 +213,8 @@ class PendingMessageRepository @Inject constructor(
                 effectId = effectId,
                 deliveryMode = deliveryMode.name,
                 syncStatus = PendingSyncStatus.PENDING.name,
-                createdAt = createdAt
+                createdAt = createdAt,
+                attributedBodyJson = attributedBodyJson
             )
             val pendingId = pendingMessageDao.insert(pendingMessage)
 

@@ -123,6 +123,29 @@ fun DateSeparator(
 }
 
 /**
+ * Group event indicator (participant joined/left, name changed, photo changed).
+ * Styled as a centered, muted system message similar to DateSeparator.
+ */
+@Composable
+fun GroupEventIndicator(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+        )
+    }
+}
+
+/**
  * Floating button to jump to the bottom of the message list.
  * Shows "X new messages" if there are unread messages, otherwise "Jump to latest".
  *

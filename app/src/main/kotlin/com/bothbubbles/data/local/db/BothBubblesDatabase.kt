@@ -72,7 +72,7 @@ import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
         AutoShareContactEntity::class,
         TombstoneEntity::class
     ],
-    version = 38,
+    version = 39,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {

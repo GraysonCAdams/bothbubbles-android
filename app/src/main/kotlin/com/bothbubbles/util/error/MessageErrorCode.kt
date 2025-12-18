@@ -76,6 +76,9 @@ object MessageErrorCode {
 
     /**
      * Returns whether the error is retryable (same delivery method).
+     *
+     * NOTE: This is a legacy function. For WorkManager retry logic, use [isNetworkError] instead.
+     * We only retry if the message never reached the server (network error).
      */
     fun isRetryable(errorCode: Int): Boolean {
         return when (errorCode) {
@@ -83,6 +86,24 @@ object MessageErrorCode {
             NOT_REGISTERED_WITH_IMESSAGE -> false // Retry won't help, need SMS
             TIMEOUT, NO_CONNECTION, SERVER_ERROR, GENERIC_ERROR -> true
             else -> true
+        }
+    }
+
+    /**
+     * Returns whether the error indicates the message never reached the BlueBubbles server.
+     *
+     * These are the ONLY errors that should trigger automatic retry, because:
+     * - If we never reached the server, retrying might succeed
+     * - If the server responded with an error, retrying won't help (server already rejected it)
+     *
+     * @param errorCode The error code from the failed send attempt
+     * @return true if the message never reached the server (network/connection failure)
+     */
+    fun isNetworkError(errorCode: Int): Boolean {
+        return when (errorCode) {
+            NO_CONNECTION -> true  // DNS failure, connection refused, no internet
+            TIMEOUT -> true        // Connection or read timeout (server didn't respond in time)
+            else -> false          // Server responded with an error - don't retry
         }
     }
 

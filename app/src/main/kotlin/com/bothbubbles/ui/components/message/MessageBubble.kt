@@ -2,6 +2,7 @@ package com.bothbubbles.ui.components.message
 
 import timber.log.Timber
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -95,7 +96,11 @@ fun MessageBubble(
     // Show avatar only on last message in a consecutive group from same sender
     showAvatar: Boolean = false,
     // Callback for reporting message bounds (for tapback overlay positioning)
-    onBoundsChanged: ((Rect) -> Unit)? = null
+    onBoundsChanged: ((Rect) -> Unit)? = null,
+    // Callback when sender avatar is clicked in group chat (for contact details)
+    onAvatarClick: (() -> Unit)? = null,
+    // Callback when a mention is clicked (opens contact details)
+    onMentionClick: ((String) -> Unit)? = null
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -147,7 +152,15 @@ fun MessageBubble(
                         name = message.senderName ?: "?",
                         avatarPath = message.senderAvatarPath,
                         size = avatarSize,
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier
+                            .padding(end = 8.dp)
+                            .then(
+                                if (onAvatarClick != null) {
+                                    Modifier.clickable(onClick = onAvatarClick)
+                                } else {
+                                    Modifier
+                                }
+                            )
                     )
                 } else {
                     // Empty space to maintain alignment
@@ -176,6 +189,7 @@ fun MessageBubble(
                     onDeleteMessage = onDeleteMessage,
                     canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
+                    onMentionClick = onMentionClick,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -198,6 +212,7 @@ fun MessageBubble(
                     onDeleteMessage = onDeleteMessage,
                     canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
+                    onMentionClick = onMentionClick,
                     modifier = Modifier.weight(1f)
                 )
             }

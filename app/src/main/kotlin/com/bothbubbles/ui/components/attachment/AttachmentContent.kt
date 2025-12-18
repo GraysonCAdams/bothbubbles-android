@@ -26,6 +26,7 @@ import timber.log.Timber
  * @param attachment The attachment to render
  * @param isFromMe Whether this message is from the current user
  * @param onMediaClick Callback when media is clicked for viewing
+ * @param onTimestampToggle Callback to toggle timestamp display (for images/GIFs lower tap zone)
  * @param onDownloadClick Optional callback for manual download mode. When provided and attachment
  *                        needs download, shows a placeholder with download button instead of
  *                        streaming from webUrl.
@@ -41,6 +42,7 @@ fun AttachmentContent(
     isFromMe: Boolean,
     onMediaClick: (String) -> Unit,
     modifier: Modifier = Modifier,
+    onTimestampToggle: () -> Unit = {},
     onDownloadClick: ((String) -> Unit)? = null,
     isDownloading: Boolean = false,
     downloadProgress: Float = 0f,
@@ -109,6 +111,8 @@ fun AttachmentContent(
                 attachment = attachment,
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) },
+                    onTimestampAreaClick = onTimestampToggle,
+                    onLongPress = { onMediaClick(attachment.guid) },
                     isUploading = isUploading,
                     uploadProgress = effectiveUploadProgress
                 )
@@ -117,6 +121,8 @@ fun AttachmentContent(
                 attachment = attachment,
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) },
+                    onTimestampAreaClick = onTimestampToggle,
+                    onLongPress = { onMediaClick(attachment.guid) },
                     isUploading = isUploading,
                     uploadProgress = effectiveUploadProgress
                 )
@@ -184,6 +190,7 @@ fun AttachmentContent(
  * @param attachment The attachment to render
  * @param isFromMe Whether this message is from the current user
  * @param onMediaClick Callback when media is clicked for viewing
+ * @param onTimestampToggle Callback to toggle timestamp display (for images/GIFs lower tap zone)
  * @param maxWidth Maximum width constraint for the media
  * @param onDownloadClick Optional callback for manual download mode
  * @param isDownloading Whether this attachment is currently being downloaded
@@ -198,6 +205,7 @@ fun BorderlessMediaContent(
     attachment: AttachmentUiModel,
     isFromMe: Boolean,
     onMediaClick: (String) -> Unit,
+    onTimestampToggle: () -> Unit = {},
     maxWidth: androidx.compose.ui.unit.Dp = 240.dp,
     modifier: Modifier = Modifier,
     onDownloadClick: ((String) -> Unit)? = null,
@@ -262,7 +270,9 @@ fun BorderlessMediaContent(
         attachment.isGif -> BorderlessGifAttachment(
             attachment = attachment,
             interactions = AttachmentInteractions(
-                onClick = { onMediaClick(attachment.guid) }
+                onClick = { onMediaClick(attachment.guid) },
+                onTimestampAreaClick = onTimestampToggle,
+                onLongPress = { onMediaClick(attachment.guid) }
             ),
             maxWidth = effectiveMaxWidth,
             modifier = modifier,
@@ -272,7 +282,9 @@ fun BorderlessMediaContent(
         attachment.isImage -> BorderlessImageAttachment(
             attachment = attachment,
             interactions = AttachmentInteractions(
-                onClick = { onMediaClick(attachment.guid) }
+                onClick = { onMediaClick(attachment.guid) },
+                onTimestampAreaClick = onTimestampToggle,
+                onLongPress = { onMediaClick(attachment.guid) }
             ),
             maxWidth = effectiveMaxWidth,
             modifier = modifier,

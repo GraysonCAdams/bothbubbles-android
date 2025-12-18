@@ -3,6 +3,7 @@ package com.bothbubbles.ui.chat.delegates
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.data.local.db.entity.firstName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
@@ -99,6 +100,8 @@ class ChatInfoDelegate @AssistedInject constructor(
                                 avatarPath = participants.firstOrNull()?.cachedAvatarPath,
                                 participantNames = participants.map { p -> p.displayName }.toStable(),
                                 participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
+                                participantAddresses = participants.map { p -> p.address }.toStable(),
+                                participantFirstNames = participants.map { p -> p.firstName }.toStable(),
                                 participantPhone = it.chatIdentifier,
                                 isLocalSmsChat = it.isLocalSms,
                                 isIMessageChat = it.isIMessage,

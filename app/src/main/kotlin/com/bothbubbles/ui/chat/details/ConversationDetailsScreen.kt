@@ -92,6 +92,7 @@ fun ConversationDetailsScreen(
                             displayName = uiState.displayName,
                             isGroup = uiState.chat?.isGroup == true,
                             participantNames = uiState.participants.map { it.displayName },
+                            participantAvatars = uiState.participants.map { it.cachedAvatarPath },
                             avatarPath = avatarPath,
                             size = 40.dp
                         )
@@ -160,6 +161,7 @@ fun ConversationDetailsScreen(
                         subtitle = uiState.subtitle,
                         isGroup = uiState.chat?.isGroup == true,
                         participantNames = uiState.participants.map { it.displayName },
+                        participantAvatars = uiState.participants.map { it.cachedAvatarPath },
                         avatarPath = headerAvatarPath,
                         collapseProgress = collapseProgress
                     )

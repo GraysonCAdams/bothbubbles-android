@@ -20,8 +20,11 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.ProgressRequestBody
+import com.bothbubbles.core.network.api.dto.AttributedBodyDto
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.core.network.api.dto.SendMessageRequest
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import com.bothbubbles.services.media.ImageCompressor
 import com.bothbubbles.services.media.VideoCompressor
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
@@ -68,6 +71,17 @@ class IMessageSenderStrategy @Inject constructor(
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
     override val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress.asStateFlow()
 
+    // Moshi adapter for parsing attributedBody JSON
+    private val moshi: Moshi by lazy {
+        Moshi.Builder()
+            .addLast(KotlinJsonAdapterFactory())
+            .build()
+    }
+
+    private val attributedBodyAdapter by lazy {
+        moshi.adapter(AttributedBodyDto::class.java)
+    }
+
     override fun canHandle(deliveryMode: MessageDeliveryMode): Boolean {
         return deliveryMode == MessageDeliveryMode.IMESSAGE
     }
@@ -75,10 +89,21 @@ class IMessageSenderStrategy @Inject constructor(
     override suspend fun send(options: SendOptions): SendResult {
         Timber.i("[SEND_TRACE] ── IMessageSenderStrategy.send START ──")
         Timber.i("[SEND_TRACE] hasAttachments=${options.hasAttachments}, text=\"${options.text.take(30)}...\"")
+
+        // Parse attributedBody from JSON if present
+        val attributedBody = options.attributedBodyJson?.let { json ->
+            try {
+                attributedBodyAdapter.fromJson(json)
+            } catch (e: Exception) {
+                Timber.w(e, "[SEND_TRACE] Failed to parse attributedBodyJson")
+                null
+            }
+        }
+
         val result = if (options.hasAttachments) {
-            sendWithAttachments(options)
+            sendWithAttachments(options, attributedBody)
         } else {
-            sendTextOnly(options)
+            sendTextOnly(options, attributedBody)
         }
         Timber.i("[SEND_TRACE] ── IMessageSenderStrategy.send END: ${if (result is SendResult.Success) "SUCCESS" else "FAILURE"} ──")
         return result
@@ -88,10 +113,10 @@ class IMessageSenderStrategy @Inject constructor(
         _uploadProgress.value = null
     }
 
-    private suspend fun sendTextOnly(options: SendOptions): SendResult {
+    private suspend fun sendTextOnly(options: SendOptions, attributedBody: AttributedBodyDto?): SendResult {
         val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
-        Timber.i("[SEND_TRACE] sendTextOnly: tempGuid=$tempGuid")
+        Timber.i("[SEND_TRACE] sendTextOnly: tempGuid=$tempGuid, hasAttributedBody=${attributedBody != null}")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
@@ -130,14 +155,28 @@ class IMessageSenderStrategy @Inject constructor(
                     tempGuid = tempGuid,
                     selectedMessageGuid = options.replyToGuid,
                     effectId = options.effectId,
-                    subject = options.subject
+                    subject = options.subject,
+                    attributedBody = attributedBody
                 )
             )
             Timber.i("[SEND_TRACE] ◀◀◀ api.sendMessage RETURNED: ${System.currentTimeMillis() - apiStart}ms (status=${response.code()})")
 
             val body = response.body()
             if (!response.isSuccessful || body == null || body.status != 200) {
-                Timber.e("[SEND_TRACE] API FAILED: code=${response.code()}, message=${body?.message}")
+                val errorMessage = body?.message ?: body?.error?.message ?: ""
+                Timber.e("[SEND_TRACE] API FAILED: code=${response.code()}, message=$errorMessage")
+
+                // Check if server says message is already in transit
+                if (isAlreadyInTransitError(errorMessage)) {
+                    Timber.i("[SEND_TRACE] Server reports message already in transit - waiting for confirmation")
+                    // Try to find the server GUID from an existing message
+                    val existingServerMessage = messageDao.getMessageByGuid(tempGuid)
+                    return SendResult.AlreadyInTransit(
+                        serverGuid = existingServerMessage?.guid?.takeIf { !it.startsWith("temp-") },
+                        tempGuid = tempGuid
+                    )
+                }
+
                 // Parse error code from response - check for specific error codes like 22
                 val errorCode = MessageErrorCode.parseFromMessage(body?.message)
                     ?: MessageErrorCode.parseFromMessage(body?.error?.message)
@@ -179,10 +218,10 @@ class IMessageSenderStrategy @Inject constructor(
         }
     }
 
-    private suspend fun sendWithAttachments(options: SendOptions): SendResult {
+    private suspend fun sendWithAttachments(options: SendOptions, attributedBody: AttributedBodyDto?): SendResult {
         val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
-        Timber.i("[SEND_TRACE] sendWithAttachments: tempGuid=$tempGuid, attachments=${options.attachments.size}")
+        Timber.i("[SEND_TRACE] sendWithAttachments: tempGuid=$tempGuid, attachments=${options.attachments.size}, hasAttributedBody=${attributedBody != null}")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
@@ -286,7 +325,8 @@ class IMessageSenderStrategy @Inject constructor(
                         tempGuid = tempGuid,
                         selectedMessageGuid = options.replyToGuid,
                         effectId = options.effectId,
-                        subject = options.subject
+                        subject = options.subject,
+                        attributedBody = attributedBody
                     )
                 )
 
@@ -561,5 +601,21 @@ class IMessageSenderStrategy @Inject constructor(
             messageSource = source,
             isReactionDb = ReactionClassifier.isReaction(associatedMessageGuid, associatedMessageType)
         )
+    }
+
+    /**
+     * Check if an error message indicates the message is already in transit.
+     * This happens when we retry after a timeout and the server has already received
+     * the original message.
+     */
+    private fun isAlreadyInTransitError(errorMessage: String): Boolean {
+        val lowerMessage = errorMessage.lowercase()
+        return lowerMessage.contains("already sent") ||
+               lowerMessage.contains("already in progress") ||
+               lowerMessage.contains("already exists") ||
+               lowerMessage.contains("duplicate") ||
+               lowerMessage.contains("in transit") ||
+               lowerMessage.contains("already queued") ||
+               lowerMessage.contains("already processing")
     }
 }

@@ -167,6 +167,8 @@ data class MessageUiModel(
     val attachments: StableList<AttachmentUiModel>,
     val senderName: String?,
     val senderAvatarPath: String? = null,
+    /** Sender's address (phone or email) for group chat avatar clicks */
+    val senderAddress: String? = null,
     val messageSource: String,
     val reactions: StableList<ReactionUiModel> = emptyList<ReactionUiModel>().toStable(),
     val myReactions: Set<Tapback> = emptySet(),
@@ -177,7 +179,15 @@ data class MessageUiModel(
     val threadOriginatorGuid: String? = null,
     val replyPreview: ReplyPreviewData? = null,
     // Pre-computed emoji analysis to avoid recalculating on every composition
-    val emojiAnalysis: EmojiAnalysis? = null
+    val emojiAnalysis: EmojiAnalysis? = null,
+    // Group event fields (participant changes, name changes, icon changes)
+    /** True if this is a group event message (participant added/removed, name/icon change) */
+    val isGroupEvent: Boolean = false,
+    /** Display text for group events (e.g., "Group photo changed", "John joined the group") */
+    val groupEventText: String? = null,
+    // Mentions (from attributedBody)
+    /** Parsed mentions from the message's attributedBody (if any) */
+    val mentions: StableList<MentionUiModel> = emptyList<MentionUiModel>().toStable()
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean
@@ -192,6 +202,25 @@ data class MessageUiModel(
     val isServerOrigin: Boolean
         get() = messageSource == MessageSource.IMESSAGE.name ||
                 messageSource == MessageSource.SERVER_SMS.name
+}
+
+/**
+ * UI model for a mention within a message.
+ * Used for rendering mentions with special styling and click handling.
+ */
+@Stable
+data class MentionUiModel(
+    /** Starting character index of the mention in the message text */
+    val startIndex: Int,
+    /** Length of the mention text */
+    val length: Int,
+    /** Address (phone or email) of the mentioned person */
+    val mentionedAddress: String,
+    /** Display name of the mentioned person (resolved at display time) */
+    val displayName: String? = null
+) {
+    /** End index of the mention (exclusive) */
+    val endIndex: Int get() = startIndex + length
 }
 
 @Stable
@@ -225,6 +254,22 @@ data class AttachmentUiModel(
      */
     val needsDownload: Boolean
         get() = !isOutgoing && localPath == null
+
+    /**
+     * The URL to display for this attachment.
+     * - If localPath exists, use it
+     * - If outgoing (my message), can fall back to webUrl (server may allow unauthenticated access)
+     * - If inbound, return null (Coil doesn't have auth headers, must wait for download)
+     */
+    val displayUrl: String?
+        get() = localPath ?: if (isOutgoing) webUrl else null
+
+    /**
+     * True if this attachment is waiting for auto-download to complete.
+     * Used to show a loading indicator instead of an error state.
+     */
+    val isAwaitingDownload: Boolean
+        get() = displayUrl == null && !isOutgoing
 
     /** True if this attachment is currently uploading */
     val isUploading: Boolean

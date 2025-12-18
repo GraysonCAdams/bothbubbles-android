@@ -19,11 +19,20 @@ import com.bothbubbles.ui.chat.AttachmentWarning
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.chat.ChatUiState
 import com.bothbubbles.ui.chat.composer.AttachmentItem
+import com.bothbubbles.ui.chat.composer.AttributedBodyBuilder
 import com.bothbubbles.ui.chat.composer.ComposerAttachmentWarning
 import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.ComposerPanel
 import com.bothbubbles.ui.chat.composer.ComposerState
+import com.bothbubbles.ui.chat.composer.MentionNavigationDirection
+import com.bothbubbles.ui.chat.composer.MentionPopupState
+import com.bothbubbles.ui.chat.composer.MentionPositionTracker
+import com.bothbubbles.ui.chat.composer.MentionSpan
+import com.bothbubbles.ui.chat.composer.MentionSuggestion
 import com.bothbubbles.ui.chat.composer.MessagePreview
+import com.bothbubbles.ui.chat.composer.ParticipantName
+import com.bothbubbles.core.network.api.dto.AttributedBodyDto
+import kotlinx.collections.immutable.toImmutableList
 import com.bothbubbles.ui.chat.state.SendState
 import com.bothbubbles.ui.chat.state.SyncState
 import com.bothbubbles.ui.components.input.SuggestionItem
@@ -80,6 +89,7 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val smartReplyService: SmartReplyService,
     private val socketConnection: SocketConnection,
     private val chatRepository: ChatRepository,
+    private val moshi: com.squareup.moshi.Moshi,
     @Assisted private val chatGuid: String,
     @Assisted private val scope: CoroutineScope,
     @Assisted private val uiStateFlow: StateFlow<ChatUiState>,
@@ -147,6 +157,24 @@ class ChatComposerDelegate @AssistedInject constructor(
 
     // Remember quality setting
     private val _rememberQuality = MutableStateFlow(false)
+
+    // ============================================================================
+    // MENTION STATE
+    // ============================================================================
+
+    private val _mentions = MutableStateFlow<List<MentionSpan>>(emptyList())
+    val mentions: StateFlow<List<MentionSpan>> = _mentions.asStateFlow()
+
+    private val _mentionPopupState = MutableStateFlow(MentionPopupState.Hidden)
+    val mentionPopupState: StateFlow<MentionPopupState> = _mentionPopupState.asStateFlow()
+
+    private val _cursorPosition = MutableStateFlow(0)
+
+    // Participant suggestions for mentions (only populated for group chats)
+    private val _participantSuggestions = MutableStateFlow<List<MentionSuggestion>>(emptyList())
+
+    // Whether this is a group chat (mentions only enabled for groups)
+    private val _isGroupChat = MutableStateFlow(false)
 
     // ============================================================================
     // MEMOIZATION CACHES
@@ -232,6 +260,15 @@ class ChatComposerDelegate @AssistedInject constructor(
             )
         }.distinctUntilChanged()
 
+        // Combine mention-related flows into a single projection
+        val mentionState = combine(
+            _mentions,
+            _mentionPopupState,
+            _isGroupChat
+        ) { mentions, popupState, isGroup ->
+            Triple(mentions, popupState, isGroup)
+        }
+
         // Combine all composer-related flows with memoization
         return combine(
             composerRelevantState,
@@ -239,7 +276,8 @@ class ChatComposerDelegate @AssistedInject constructor(
             _draftText,
             _pendingAttachments,
             _attachmentQuality,
-            _activePanel
+            _activePanel,
+            mentionState
         ) { values: Array<Any?> ->
             @Suppress("UNCHECKED_CAST")
             val relevant = values[0] as? ComposerRelevantState ?: ComposerRelevantState()
@@ -248,6 +286,10 @@ class ChatComposerDelegate @AssistedInject constructor(
             val attachments = values[3] as? List<PendingAttachmentInput> ?: emptyList()
             val quality = values[4] as? AttachmentQuality ?: AttachmentQuality.STANDARD
             val panel = values[5] as? ComposerPanel ?: ComposerPanel.None
+            val mentionTriple = values[6] as? Triple<List<MentionSpan>, MentionPopupState, Boolean>
+            val mentions = mentionTriple?.first ?: emptyList()
+            val popupState = mentionTriple?.second ?: MentionPopupState.Hidden
+            val isGroup = mentionTriple?.third ?: false
 
             // Memoized attachment transformation - only rebuild if inputs changed
             val attachmentItems = if (attachments === _lastAttachmentInputs && quality == _lastAttachmentQuality) {
@@ -303,7 +345,10 @@ class ChatComposerDelegate @AssistedInject constructor(
                 smsInputBlocked = relevant.smsInputBlocked,
                 isLocalSmsChat = relevant.isLocalSmsChat || relevant.isInSmsFallbackMode,
                 currentImageQuality = quality,
-                activePanel = panel
+                activePanel = panel,
+                mentions = mentions.toImmutableList(),
+                mentionPopupState = popupState,
+                isGroupChat = isGroup
             )
         }
             .distinctUntilChanged()
@@ -365,6 +410,8 @@ class ChatComposerDelegate @AssistedInject constructor(
                 clearAttachments()
             }
             is ComposerEvent.Send -> {
+                Timber.i("[SEND_TRACE] 📨 ChatComposerDelegate received ComposerEvent.Send, invoking onSend() at ${System.currentTimeMillis()}")
+                Timber.i("[SEND_TRACE]    draftText='${_draftText.value.take(30)}...', attachments=${_pendingAttachments.value.size}")
                 onSend()
             }
             is ComposerEvent.ToggleSendMode -> {
@@ -401,6 +448,19 @@ class ChatComposerDelegate @AssistedInject constructor(
                         currentList.find { it.uri == uri }
                     }
                 }
+            }
+            // Mention events
+            is ComposerEvent.TextChangedWithCursor -> {
+                handleTextChangeWithCursor(event.text, event.cursorPosition)
+            }
+            is ComposerEvent.SelectMention -> {
+                handleMentionSelection(event.suggestion)
+            }
+            is ComposerEvent.DismissMentionPopup -> {
+                dismissMentionPopup()
+            }
+            is ComposerEvent.MentionPopupNavigate -> {
+                handleMentionNavigation(event.direction)
             }
             else -> {
                 // Handle other events or ignore
@@ -860,6 +920,159 @@ class ChatComposerDelegate @AssistedInject constructor(
                     _mlSuggestions.value = suggestions
                 }
         }
+    }
+
+    // ============================================================================
+    // MENTIONS
+    // ============================================================================
+
+    /**
+     * Set participants for mention suggestions.
+     * Called by ChatViewModel when chat info is loaded.
+     */
+    fun setParticipants(participants: List<MentionSuggestion>, isGroup: Boolean) {
+        _participantSuggestions.value = participants
+        _isGroupChat.value = isGroup
+    }
+
+    /**
+     * Handle text change with cursor position for mention detection.
+     */
+    private fun handleTextChangeWithCursor(newText: String, cursorPosition: Int) {
+        val oldText = _draftText.value
+        _draftText.value = newText
+        _cursorPosition.value = cursorPosition
+
+        // Handle typing indicator
+        handleTypingIndicator(newText)
+
+        // Persist draft
+        persistDraft(newText)
+
+        // Only process mentions for group chats
+        if (!_isGroupChat.value) {
+            return
+        }
+
+        // Adjust existing mention positions
+        if (_mentions.value.isNotEmpty()) {
+            val participantMap = _participantSuggestions.value.associate {
+                it.address to ParticipantName(it.firstName, it.fullName)
+            }
+            val result = MentionPositionTracker.adjustMentions(
+                oldText = oldText,
+                newText = newText,
+                mentions = _mentions.value,
+                participants = participantMap,
+                editPosition = cursorPosition
+            )
+            _mentions.value = result.adjustedMentions
+        }
+
+        // Detect if we should show the mention popup
+        val popupState = MentionPositionTracker.detectMentionTrigger(
+            text = newText,
+            cursorPosition = cursorPosition,
+            participants = _participantSuggestions.value,
+            existingMentions = _mentions.value
+        )
+
+        _mentionPopupState.value = popupState ?: MentionPopupState.Hidden
+    }
+
+    /**
+     * Handle mention selection from the popup.
+     */
+    private fun handleMentionSelection(suggestion: MentionSuggestion) {
+        val currentPopup = _mentionPopupState.value
+        if (!currentPopup.isVisible) return
+
+        val (newText, newCursor, mention) = MentionPositionTracker.insertMention(
+            text = _draftText.value,
+            triggerPosition = currentPopup.triggerPosition,
+            cursorPosition = _cursorPosition.value,
+            suggestion = suggestion
+        )
+
+        // Add the new mention
+        _mentions.update { it + mention }
+
+        // Update text
+        _draftText.value = newText
+        _cursorPosition.value = newCursor
+
+        // Hide popup
+        _mentionPopupState.value = MentionPopupState.Hidden
+
+        // Persist draft
+        persistDraft(newText)
+    }
+
+    /**
+     * Dismiss the mention popup.
+     */
+    private fun dismissMentionPopup() {
+        _mentionPopupState.value = MentionPopupState.Hidden
+    }
+
+    /**
+     * Handle keyboard navigation in the mention popup.
+     */
+    private fun handleMentionNavigation(direction: MentionNavigationDirection) {
+        val current = _mentionPopupState.value
+        if (!current.isVisible || current.suggestions.isEmpty()) return
+
+        val newIndex = when (direction) {
+            MentionNavigationDirection.UP -> {
+                if (current.selectedIndex <= 0) current.suggestions.size - 1
+                else current.selectedIndex - 1
+            }
+            MentionNavigationDirection.DOWN -> {
+                if (current.selectedIndex >= current.suggestions.size - 1) 0
+                else current.selectedIndex + 1
+            }
+        }
+
+        _mentionPopupState.value = current.copy(selectedIndex = newIndex)
+    }
+
+    /**
+     * Get the current mentions for sending.
+     */
+    fun getCurrentMentions(): List<MentionSpan> = _mentions.value
+
+    /**
+     * Build attributedBody for sending a message with mentions.
+     * Returns null if there are no mentions.
+     */
+    fun buildAttributedBody(): AttributedBodyDto? {
+        val text = _draftText.value
+        val mentions = _mentions.value
+        return AttributedBodyBuilder.build(text, mentions)
+    }
+
+    /**
+     * Build attributedBody JSON string for sending a message with mentions.
+     * Returns null if there are no mentions.
+     * This is the serialized form ready for the pending message queue.
+     */
+    fun buildAttributedBodyJson(): String? {
+        val dto = buildAttributedBody() ?: return null
+        return try {
+            val adapter = moshi.adapter(AttributedBodyDto::class.java)
+            adapter.toJson(dto)
+        } catch (e: Exception) {
+            timber.log.Timber.e(e, "Failed to serialize attributedBody")
+            null
+        }
+    }
+
+    /**
+     * Clear mentions (called after sending).
+     */
+    fun clearMentions() {
+        _mentions.value = emptyList()
+        _mentionPopupState.value = MentionPopupState.Hidden
     }
 
 }

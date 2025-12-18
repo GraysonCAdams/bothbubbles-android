@@ -110,7 +110,9 @@ internal fun SimpleBubbleContent(
     onRetryAsSms: ((String) -> Unit)? = null,
     onDeleteMessage: ((String) -> Unit)? = null,
     canRetryAsSms: Boolean = false,
-    onBoundsChanged: ((Rect) -> Unit)? = null
+    onBoundsChanged: ((Rect) -> Unit)? = null,
+    // Callback when a mention is clicked (opens contact details)
+    onMentionClick: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -517,12 +519,15 @@ internal fun SimpleBubbleContent(
                                 MaterialTheme.typography.bodyLarge
                             }
 
+                            // Check if message has mentions
+                            val hasMentions = message.mentions.isNotEmpty() && onMentionClick != null
+
                             val hasClickableContent = detectedDates.isNotEmpty() ||
                                     detectedPhoneNumbers.isNotEmpty() ||
                                     detectedCodes.isNotEmpty()
 
-                            // Build annotated string with search highlighting (skip for large emoji)
-                            val annotatedText = if (isLargeEmoji) {
+                            // Build annotated string with search highlighting (skip for large emoji and mentions)
+                            val annotatedText = if (isLargeEmoji || hasMentions) {
                                 null
                             } else if (!searchQuery.isNullOrBlank() && displayText.contains(searchQuery, ignoreCase = true)) {
                                 buildSearchHighlightedText(
@@ -543,7 +548,16 @@ internal fun SimpleBubbleContent(
                                 null
                             }
 
-                            if (annotatedText != null) {
+                            // Use MentionText for messages with mentions
+                            if (hasMentions && !isLargeEmoji) {
+                                MentionText(
+                                    text = displayText,
+                                    mentions = message.mentions,
+                                    onMentionClick = { address -> onMentionClick?.invoke(address) },
+                                    textColor = textColor,
+                                    style = textStyle
+                                )
+                            } else if (annotatedText != null) {
                                 // Create local val for use in lambda (Kotlin doesn't smart-cast captured variables)
                                 val clickableText = annotatedText
                                 ClickableText(

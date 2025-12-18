@@ -52,6 +52,7 @@ import com.bothbubbles.ui.chat.composer.components.ComposerActionButtons
 import com.bothbubbles.ui.chat.composer.components.ComposerMediaButtons
 import com.bothbubbles.ui.chat.composer.components.ComposerSendButton
 import com.bothbubbles.ui.chat.composer.components.ComposerTextField
+import com.bothbubbles.ui.chat.composer.components.MentionPopup
 import com.bothbubbles.ui.chat.composer.components.ReplyPreviewBar
 import com.bothbubbles.ui.chat.composer.components.SmartReplyRow
 import com.bothbubbles.ui.chat.composer.panels.ComposerPanelHost
@@ -191,6 +192,18 @@ fun ChatComposer(
                 visible = state.showSmartReplies && state.inputMode == ComposerInputMode.TEXT,
                 onReplyClick = { onEvent(ComposerEvent.SelectSmartReply(it)) }
             )
+
+            // Mention suggestion popup (appears above input row)
+            // Placed here to avoid intrinsic measurement crash - LazyColumn inside IntrinsicSize.Min causes crash
+            if (state.isGroupChat && state.inputMode == ComposerInputMode.TEXT) {
+                MentionPopup(
+                    state = state.mentionPopupState,
+                    onSelectSuggestion = { suggestion ->
+                        onEvent(ComposerEvent.SelectMention(suggestion))
+                    },
+                    onDismiss = { onEvent(ComposerEvent.DismissMentionPopup) }
+                )
+            }
 
             // Main input row - moves with panel when dragging
             MainInputRow(
@@ -349,10 +362,15 @@ private fun TextInputContent(
     onEvent: (ComposerEvent) -> Unit,
     onGalleryClick: () -> Unit
 ) {
+    // MentionPopup moved to ChatComposer Column to avoid intrinsic measurement crash
     ComposerTextField(
         text = state.text,
         onTextChange = { onEvent(ComposerEvent.TextChanged(it)) },
         sendMode = state.sendMode,
+        mentions = state.mentions,
+        onTextChangedWithCursor = if (state.isGroupChat) {
+            { text, cursor -> onEvent(ComposerEvent.TextChangedWithCursor(text, cursor)) }
+        } else null,
         isEnabled = !state.smsInputBlocked,
         onSmsBlockedClick = { onEvent(ComposerEvent.SmsInputBlockedTapped) },
         onFocusChanged = { onEvent(ComposerEvent.TextFieldFocusChanged(it)) },

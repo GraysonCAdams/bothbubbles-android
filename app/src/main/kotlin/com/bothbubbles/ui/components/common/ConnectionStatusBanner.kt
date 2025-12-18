@@ -290,39 +290,34 @@ private fun ReconnectingBanner(
 }
 
 /**
- * Helper function to determine the banner state from connection info
+ * Helper function to determine the banner state from connection info.
+ *
+ * Note: Setup banners are no longer shown - the settings wheel badge indicates
+ * when setup is needed. Only the reconnecting banner is shown when a previously
+ * configured connection has issues.
  */
 fun determineConnectionBannerState(
     connectionState: ConnectionState,
     retryAttempt: Int,
-    isSetupBannerDismissed: Boolean,
     wasEverConnected: Boolean
 ): ConnectionBannerState {
     return when (connectionState) {
         ConnectionState.CONNECTED -> ConnectionBannerState.Connected
 
         ConnectionState.NOT_CONFIGURED -> {
-            // If user dismissed the setup banner and we haven't connected since, stay dismissed
-            if (isSetupBannerDismissed && !wasEverConnected) {
-                ConnectionBannerState.Dismissed
-            } else {
-                ConnectionBannerState.NotConfigured
-            }
+            // Don't show setup banner - settings wheel badge indicates setup needed
+            ConnectionBannerState.Dismissed
         }
 
         ConnectionState.CONNECTING,
         ConnectionState.ERROR,
         ConnectionState.DISCONNECTED -> {
-            // Show reconnecting banner if we were ever connected (meaning server was configured)
+            // Show reconnecting banner only if we were ever connected (meaning server was configured)
             if (wasEverConnected) {
                 ConnectionBannerState.Reconnecting(retryAttempt)
             } else {
-                // Not configured yet
-                if (isSetupBannerDismissed) {
-                    ConnectionBannerState.Dismissed
-                } else {
-                    ConnectionBannerState.NotConfigured
-                }
+                // Not configured yet - don't show banner (settings badge will indicate)
+                ConnectionBannerState.Dismissed
             }
         }
     }

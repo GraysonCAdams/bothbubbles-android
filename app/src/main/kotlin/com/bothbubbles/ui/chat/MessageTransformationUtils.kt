@@ -107,6 +107,7 @@ object MessageTransformationUtils {
             // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup
             senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName),
             senderAvatarPath = resolveSenderAvatarPath(senderAddress, addressToAvatarPath),
+            senderAddress = senderAddress,
             messageSource = messageSource,
             reactions = allReactions.toStable(),
             myReactions = myReactions,

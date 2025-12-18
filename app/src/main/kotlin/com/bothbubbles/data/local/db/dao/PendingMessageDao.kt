@@ -82,6 +82,16 @@ interface PendingMessageDao {
     suspend fun markAsSent(id: Long, serverGuid: String)
 
     /**
+     * Store the server GUID immediately after API success, BEFORE confirmation wait.
+     * This ensures retries can detect "API already succeeded" state even if worker
+     * dies during the 2-minute confirmation wait.
+     *
+     * Does NOT change sync_status - that remains SENDING until confirmation completes.
+     */
+    @Query("UPDATE pending_messages SET server_guid = :serverGuid WHERE id = :id")
+    suspend fun updateServerGuid(id: Long, serverGuid: String)
+
+    /**
      * Store WorkManager request ID for cancellation.
      */
     @Query("UPDATE pending_messages SET work_request_id = :workRequestId WHERE id = :id")

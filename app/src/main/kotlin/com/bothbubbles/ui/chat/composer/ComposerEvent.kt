@@ -237,4 +237,35 @@ sealed interface ComposerEvent {
      * User tapped on the blocked SMS input (to prompt for default SMS app).
      */
     data object SmsInputBlockedTapped : ComposerEvent
+
+    // ============================================
+    // Mention Events (group chats only)
+    // ============================================
+
+    /**
+     * Text changed with cursor position (for mention detection).
+     */
+    data class TextChangedWithCursor(val text: String, val cursorPosition: Int) : ComposerEvent
+
+    /**
+     * User selected a mention from the popup.
+     */
+    data class SelectMention(val suggestion: MentionSuggestion) : ComposerEvent
+
+    /**
+     * User dismissed the mention popup (Esc, tap outside, or text no longer matches).
+     */
+    data object DismissMentionPopup : ComposerEvent
+
+    /**
+     * User navigated in the mention popup (arrow keys).
+     */
+    data class MentionPopupNavigate(val direction: MentionNavigationDirection) : ComposerEvent
+}
+
+/**
+ * Direction for mention popup navigation.
+ */
+enum class MentionNavigationDirection {
+    UP, DOWN
 }

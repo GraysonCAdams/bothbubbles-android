@@ -56,6 +56,8 @@ class ChatScreenState(
     var canRetrySmsForMessage by mutableStateOf(false)
     var messageToForward by mutableStateOf<MessageUiModel?>(null)
     var swipingMessageGuid by mutableStateOf<String?>(null)
+    /** Message selected for viewing sender contact details (group chat avatar click) */
+    var selectedSenderMessage by mutableStateOf<MessageUiModel?>(null)
 
     // ===== Layout =====
     /** Height of the top bar in pixels */

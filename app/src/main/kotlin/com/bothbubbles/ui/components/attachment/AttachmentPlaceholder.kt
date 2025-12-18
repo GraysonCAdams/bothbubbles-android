@@ -30,6 +30,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.theme.MediaSizing
 import com.bothbubbles.util.rememberBlurhashBitmap
 
 /**
@@ -73,17 +74,16 @@ fun AttachmentPlaceholder(
         // Image/Video placeholder with blurhash background
         Box(
             modifier = modifier
-                .widthIn(max = 250.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .widthIn(max = MediaSizing.MAX_WIDTH)
+                .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+                .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .clickable(enabled = !isDownloading, onClick = onDownloadClick),
             contentAlignment = Alignment.Center
         ) {
             // Blurhash preview background (or fallback to solid color)
             Box(
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+                modifier = Modifier.fillMaxSize()
             ) {
                 if (blurhashBitmap != null) {
                     Image(
@@ -190,14 +190,14 @@ fun AttachmentPlaceholder(
     } else {
         // Non-media files (audio, documents, etc.)
         Surface(
-            shape = RoundedCornerShape(12.dp),
+            shape = RoundedCornerShape(MediaSizing.CORNER_RADIUS),
             color = if (isFromMe) {
                 MaterialTheme.colorScheme.surfaceContainerHigh
             } else {
                 MaterialTheme.colorScheme.surfaceContainerHighest
             },
             modifier = modifier
-                .widthIn(min = 180.dp, max = 250.dp)
+                .widthIn(min = 180.dp, max = MediaSizing.MAX_WIDTH)
                 .clickable(enabled = !isDownloading, onClick = onDownloadClick)
         ) {
             Row(
@@ -299,7 +299,7 @@ fun BorderlessAttachmentPlaceholder(
     onDownloadClick: () -> Unit,
     isDownloading: Boolean,
     downloadProgress: Float,
-    maxWidth: Dp,
+    maxWidth: Dp = MediaSizing.BORDERLESS_MAX_WIDTH,
     modifier: Modifier = Modifier
 ) {
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -319,16 +319,15 @@ fun BorderlessAttachmentPlaceholder(
     Box(
         modifier = modifier
             .widthIn(max = maxWidth)
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clickable(enabled = !isDownloading, onClick = onDownloadClick),
         contentAlignment = Alignment.Center
     ) {
         // Blurhash preview background (or fallback to solid color)
         Box(
-            modifier = Modifier
-                .widthIn(max = maxWidth)
-                .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+            modifier = Modifier.fillMaxSize()
         ) {
             if (blurhashBitmap != null) {
                 Image(

@@ -9,6 +9,8 @@ import com.bothbubbles.services.media.ExoPlayerPool
  *
  * @param onClick Generic click callback (e.g., open media viewer)
  * @param onFullscreenClick Callback when fullscreen/expand is requested (videos)
+ * @param onTimestampAreaClick Callback for tapping the lower portion of images (toggles timestamp)
+ * @param onLongPress Callback for long pressing images (opens fullscreen)
  * @param onDownloadClick Optional callback for manual download mode
  * @param onRetryClick Optional callback for retrying failed downloads
  * @param isUploading Whether the attachment is currently being uploaded
@@ -17,6 +19,8 @@ import com.bothbubbles.services.media.ExoPlayerPool
 data class AttachmentInteractions(
     val onClick: () -> Unit,
     val onFullscreenClick: () -> Unit = {},
+    val onTimestampAreaClick: () -> Unit = {},
+    val onLongPress: () -> Unit = {},
     val onDownloadClick: (() -> Unit)? = null,
     val onRetryClick: (() -> Unit)? = null,
     val isUploading: Boolean = false,

@@ -34,6 +34,7 @@ import com.bothbubbles.ui.chat.shouldShowTimeSeparator
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.components.common.newMessageEntrance
 import com.bothbubbles.ui.components.message.DateSeparator
+import com.bothbubbles.ui.components.message.GroupEventIndicator
 import com.bothbubbles.ui.components.message.MessageBubble
 import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
@@ -57,7 +58,8 @@ data class MessageItemCallbacks(
     val onBubbleEffectCompleted: (messageGuid: String) -> Unit,
     val onClearHighlight: () -> Unit,
     val onDownloadAttachment: ((guid: String) -> Unit)?,
-    val onStopSharingEta: () -> Unit
+    val onStopSharingEta: () -> Unit,
+    val onAvatarClick: ((MessageUiModel) -> Unit)?
 )
 
 /**
@@ -198,6 +200,14 @@ fun MessageListItem(
             )
         }
 
+        // Group events (participant changes, name/icon changes) render as centered system messages
+        if (message.isGroupEvent) {
+            GroupEventIndicator(
+                text = message.groupEventText ?: "Group updated"
+            )
+            return@Column
+        }
+
         if (showSenderName) {
             Text(
                 text = message.senderName!!,
@@ -281,6 +291,9 @@ fun MessageListItem(
                     showAvatar = showAvatar,
                     onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->
                         onSelectedBoundsChange(bounds)
+                    } else null,
+                    onAvatarClick = if (showAvatar && callbacks.onAvatarClick != null) {
+                        { callbacks.onAvatarClick.invoke(message) }
                     } else null
                 )
             }

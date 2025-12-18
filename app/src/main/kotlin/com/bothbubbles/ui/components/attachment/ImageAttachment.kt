@@ -10,7 +10,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -24,6 +24,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -32,9 +33,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
@@ -42,6 +47,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.theme.MediaSizing
 import timber.log.Timber
 
 /**
@@ -60,20 +66,12 @@ fun ImageAttachment(
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
+    var containerHeight by remember { mutableIntStateOf(0) }
+    val hapticFeedback = LocalHapticFeedback.current
 
-    // Use full-resolution image for crisp display in chat (thumbnails are only 300px)
-    // Coil handles memory-efficient loading via size() constraint
-    // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
-    val imageUrl = if (attachment.localPath != null) {
-        attachment.localPath
-    } else if (attachment.isOutgoing) {
-        attachment.webUrl  // Outgoing can try webUrl (server may allow)
-    } else {
-        null  // Inbound must wait for auto-download - can't auth to server from Coil
-    }
-
-    // Determine if we should show downloading state (inbound attachment without local file)
-    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
+    // Use displayUrl from model - handles localPath vs webUrl logic centrally
+    // IMPORTANT: For inbound attachments, webUrl won't work (Coil lacks auth headers)
+    val imageUrl = attachment.displayUrl
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -82,13 +80,16 @@ fun ImageAttachment(
         1f
     }
 
-    // For transparent images, don't clip corners or add background
+    // For transparent images, use Fit to preserve content; for regular images, use Crop
     val isTransparent = attachment.mayHaveTransparency
 
     // Calculate target size in pixels for memory-efficient loading
     val density = LocalDensity.current
-    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
+    // Calculate natural height based on aspect ratio, clamped to our constraints
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     // DEBUG LOGGING
     SideEffect {
@@ -96,14 +97,32 @@ fun ImageAttachment(
         Timber.tag("AttachmentDebug").d("   RESOLVED imageUrl=$imageUrl")
         Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}, webUrl=${attachment.webUrl}")
         Timber.tag("AttachmentDebug").d("   isLoading=$isLoading, isError=$isError")
-        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, size=${maxWidthPx}x$targetHeightPx")
+        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, size=${maxWidthPx}x$naturalHeightPx")
     }
 
     Box(
         modifier = modifier
-            .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = interactions.onClick),
+            .widthIn(max = MediaSizing.MAX_WIDTH)
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .onSizeChanged { containerHeight = it.height }
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
+            .pointerInput(interactions) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        // Lower 20% of image = timestamp zone
+                        val timestampZoneStart = containerHeight * 0.8f
+                        if (offset.y >= timestampZoneStart) {
+                            interactions.onTimestampAreaClick()
+                        } else {
+                            interactions.onClick()
+                        }
+                    },
+                    onLongPress = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        interactions.onLongPress()
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         if (imageUrl != null) {
@@ -111,14 +130,14 @@ fun ImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
-                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                // For transparent images (stickers/PNG), use Fit to preserve content
+                // For regular images, use Crop to fill the container and ensure rounded corners work
+                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -128,7 +147,7 @@ fun ImageAttachment(
                     }
                 }
             )
-        } else if (isAwaitingDownload) {
+        } else if (attachment.isAwaitingDownload) {
             // No URL available yet - waiting for auto-download to complete
             Timber.tag("AttachmentDebug").d("🖼️ ImageAttachment AWAITING DOWNLOAD: guid=${attachment.guid}")
         } else {
@@ -138,7 +157,7 @@ fun ImageAttachment(
 
         // Loading indicator with fade animation - show when Coil loading OR awaiting download
         AnimatedVisibility(
-            visible = isLoading || isAwaitingDownload,
+            visible = isLoading || attachment.isAwaitingDownload,
             enter = fadeIn(tween(MotionTokens.Duration.QUICK, easing = MotionTokens.Easing.Standard)),
             exit = fadeOut(tween(MotionTokens.Duration.FAST, easing = MotionTokens.Easing.Standard))
         ) {
@@ -152,9 +171,8 @@ fun ImageAttachment(
             } else {
                 Box(
                     modifier = Modifier
-                        .widthIn(max = 250.dp)
-                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                        .clip(RoundedCornerShape(12.dp))
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
@@ -185,7 +203,7 @@ fun ImageAttachment(
                 Box(
                     modifier = Modifier
                         .size(100.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
@@ -256,18 +274,11 @@ fun GifAttachment(
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
+    var containerHeight by remember { mutableIntStateOf(0) }
+    val hapticFeedback = LocalHapticFeedback.current
 
-    // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
-    val imageUrl = if (attachment.localPath != null) {
-        attachment.localPath
-    } else if (attachment.isOutgoing) {
-        attachment.webUrl
-    } else {
-        null  // Inbound must wait for auto-download
-    }
-
-    // Determine if we should show downloading state (inbound attachment without local file)
-    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
+    // Use displayUrl from model - handles localPath vs webUrl logic centrally
+    val imageUrl = attachment.displayUrl
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -276,19 +287,39 @@ fun GifAttachment(
         1f
     }
 
-    // GIFs can have transparency - don't clip corners or add background
+    // GIFs can have transparency - use Fit to preserve content
     val isTransparent = attachment.mayHaveTransparency
 
     // Calculate target size in pixels for memory-efficient loading
     val density = LocalDensity.current
-    val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     Box(
         modifier = modifier
-            .widthIn(max = 250.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = interactions.onClick),
+            .widthIn(max = MediaSizing.MAX_WIDTH)
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .onSizeChanged { containerHeight = it.height }
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
+            .pointerInput(interactions) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        // Lower 20% of image = timestamp zone
+                        val timestampZoneStart = containerHeight * 0.8f
+                        if (offset.y >= timestampZoneStart) {
+                            interactions.onTimestampAreaClick()
+                        } else {
+                            interactions.onClick()
+                        }
+                    },
+                    onLongPress = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        interactions.onLongPress()
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         if (imageUrl != null) {
@@ -296,27 +327,26 @@ fun GifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
-                modifier = Modifier
-                    .widthIn(max = 250.dp)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
-                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                // For transparent GIFs, use Fit to preserve content; otherwise Crop
+                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
                 }
             )
-        } else if (isAwaitingDownload) {
+        } else if (attachment.isAwaitingDownload) {
             // No URL available yet - waiting for auto-download
         } else {
             isError = true
         }
 
         // Loading indicator - show when Coil loading OR awaiting download
-        if (isLoading || isAwaitingDownload) {
+        if (isLoading || attachment.isAwaitingDownload) {
             if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
@@ -326,9 +356,8 @@ fun GifAttachment(
             } else {
                 Box(
                     modifier = Modifier
-                        .widthIn(max = 250.dp)
-                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                        .clip(RoundedCornerShape(12.dp))
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
@@ -376,7 +405,7 @@ fun GifAttachment(
                 Box(
                     modifier = Modifier
                         .size(100.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerHighest),
                     contentAlignment = Alignment.Center
                 ) {
@@ -452,13 +481,15 @@ fun GifAttachment(
 fun BorderlessImageAttachment(
     attachment: AttachmentUiModel,
     interactions: AttachmentInteractions,
-    maxWidth: Dp = 240.dp,
+    maxWidth: Dp = MediaSizing.BORDERLESS_MAX_WIDTH,
     modifier: Modifier = Modifier,
     isPlacedSticker: Boolean = false,
     messageGuid: String = ""
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
+    var containerHeight by remember { mutableIntStateOf(0) }
+    val hapticFeedback = LocalHapticFeedback.current
 
     // Memoize file resolution to avoid File allocations and exists() checks on every recomposition
     // Key on localPath and webUrl to recalculate only when attachment data changes
@@ -503,20 +534,16 @@ fun BorderlessImageAttachment(
                     path // Use local path (it exists or is a content URI we can't easily check)
                 }
             } else {
-                // No localPath - for outgoing attachments we can try webUrl, but for inbound we must wait for download
-                // because Coil doesn't have auth headers for the server API
-                if (attachment.isOutgoing) {
-                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Outgoing no localPath, using webUrl: ${attachment.webUrl}")
-                    attachment.webUrl
-                } else {
-                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Inbound no localPath, awaiting download (webUrl=${attachment.webUrl})")
-                    null  // Don't try webUrl - Coil can't auth. Show loading state instead.
-                }
+                // No localPath - use centralized displayUrl logic (handles isOutgoing check)
+                Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: No localPath, using displayUrl: ${attachment.displayUrl}")
+                attachment.displayUrl
             }
         }
     }
 
-    // Determine if we should show downloading state (inbound attachment without local file)
+    // Determine if we should show downloading state
+    // Note: Can't use attachment.isAwaitingDownload directly because our imageUrl
+    // may differ due to file existence checks that displayUrl doesn't perform
     val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
@@ -543,7 +570,9 @@ fun BorderlessImageAttachment(
     val density = LocalDensity.current
     val effectiveMaxWidth = maxWidth * sizeScale
     val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     // DEBUG LOGGING
     SideEffect {
@@ -561,14 +590,31 @@ fun BorderlessImageAttachment(
     Box(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
-            .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .onSizeChanged { containerHeight = it.height }
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .then(
                 if (isPlacedSticker) {
                     Modifier.graphicsLayer { rotationZ = rotation }
                 } else Modifier
             )
-            .clickable(onClick = interactions.onClick),
+            .pointerInput(interactions) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        // Lower 20% of image = timestamp zone
+                        val timestampZoneStart = containerHeight * 0.8f
+                        if (offset.y >= timestampZoneStart) {
+                            interactions.onTimestampAreaClick()
+                        } else {
+                            interactions.onClick()
+                        }
+                    },
+                    onLongPress = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        interactions.onLongPress()
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         if (imageUrl != null) {
@@ -576,7 +622,7 @@ fun BorderlessImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
@@ -640,7 +686,7 @@ fun BorderlessImageAttachment(
                 Box(
                     modifier = Modifier
                         .size(100.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {
@@ -671,13 +717,15 @@ fun BorderlessImageAttachment(
 fun BorderlessGifAttachment(
     attachment: AttachmentUiModel,
     interactions: AttachmentInteractions,
-    maxWidth: Dp = 240.dp,
+    maxWidth: Dp = MediaSizing.BORDERLESS_MAX_WIDTH,
     modifier: Modifier = Modifier,
     isPlacedSticker: Boolean = false,
     messageGuid: String = ""
 ) {
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
+    var containerHeight by remember { mutableIntStateOf(0) }
+    val hapticFeedback = LocalHapticFeedback.current
 
     // Memoize file resolution to avoid File allocations and exists() checks on every recomposition
     // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
@@ -711,13 +759,15 @@ fun BorderlessGifAttachment(
                     path // Use local path (it exists or is a content URI we can't easily check)
                 }
             } else {
-                // No localPath - for outgoing we can try webUrl, for inbound we must wait for download
-                if (attachment.isOutgoing) attachment.webUrl else null
+                // No localPath - use centralized displayUrl logic (handles isOutgoing check)
+                attachment.displayUrl
             }
         }
     }
 
-    // Determine if we should show downloading state (inbound attachment without local file)
+    // Determine if we should show downloading state
+    // Note: Can't use attachment.isAwaitingDownload directly because our imageUrl
+    // may differ due to file existence checks that displayUrl doesn't perform
     val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
@@ -745,18 +795,38 @@ fun BorderlessGifAttachment(
     // Calculate target size in pixels for memory-efficient loading
     val density = LocalDensity.current
     val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
-    val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
+    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
+    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
 
     Box(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
-            .clip(RoundedCornerShape(12.dp))
+            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .onSizeChanged { containerHeight = it.height }
+            .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .then(
                 if (isPlacedSticker) {
                     Modifier.graphicsLayer { rotationZ = rotation }
                 } else Modifier
             )
-            .clickable(onClick = interactions.onClick),
+            .pointerInput(interactions) {
+                detectTapGestures(
+                    onTap = { offset ->
+                        // Lower 20% of image = timestamp zone
+                        val timestampZoneStart = containerHeight * 0.8f
+                        if (offset.y >= timestampZoneStart) {
+                            interactions.onTimestampAreaClick()
+                        } else {
+                            interactions.onClick()
+                        }
+                    },
+                    onLongPress = {
+                        hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                        interactions.onLongPress()
+                    }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
         if (imageUrl != null) {
@@ -764,14 +834,13 @@ fun BorderlessGifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, targetHeightPx)
+                    .size(maxWidthPx, naturalHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
-                modifier = Modifier
-                    .widthIn(max = effectiveMaxWidth)
-                    .aspectRatio(aspectRatio.coerceIn(0.5f, 2f)),
-                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(),
+                // For transparent GIFs, use Fit to preserve content; otherwise Crop
+                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -795,9 +864,8 @@ fun BorderlessGifAttachment(
             } else {
                 Box(
                     modifier = Modifier
-                        .widthIn(max = maxWidth)
-                        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
-                        .clip(RoundedCornerShape(12.dp))
+                        .fillMaxSize()
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {
@@ -841,7 +909,7 @@ fun BorderlessGifAttachment(
                 Box(
                     modifier = Modifier
                         .size(100.dp)
-                        .clip(RoundedCornerShape(12.dp))
+                        .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
                         .background(MaterialTheme.colorScheme.surfaceContainerLow),
                     contentAlignment = Alignment.Center
                 ) {

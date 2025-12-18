@@ -94,7 +94,15 @@ data class PendingMessageEntity(
      * Last send attempt timestamp
      */
     @ColumnInfo(name = "last_attempt_at")
-    val lastAttemptAt: Long? = null
+    val lastAttemptAt: Long? = null,
+
+    /**
+     * Attributed body JSON for mentions.
+     * Only set for messages with mentions.
+     * Format: {"string": "...", "runs": [...]}
+     */
+    @ColumnInfo(name = "attributed_body_json")
+    val attributedBodyJson: String? = null
 )
 
 /**

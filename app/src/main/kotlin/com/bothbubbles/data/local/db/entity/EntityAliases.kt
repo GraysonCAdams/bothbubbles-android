@@ -82,3 +82,23 @@ val HandleEntity.rawDisplayName: String
         ?: inferredName
         ?: formattedAddress
         ?: PhoneNumberFormatter.format(address)
+
+/**
+ * Extracts the first name from the display name.
+ * For saved contacts, this is the first word of the cached display name.
+ * For inferred names, this is the inferred name itself (usually already first name only).
+ * Returns null if no name is available (only has phone number/email).
+ */
+val HandleEntity.firstName: String?
+    get() {
+        // For saved contacts, extract first word from display name
+        cachedDisplayName?.let { name ->
+            return name.trim().split(" ").firstOrNull()?.takeIf { it.isNotBlank() }
+        }
+        // For inferred names, use the whole thing (it's usually just a first name)
+        inferredName?.let { name ->
+            return name.trim().split(" ").firstOrNull()?.takeIf { it.isNotBlank() }
+        }
+        // No name available
+        return null
+    }

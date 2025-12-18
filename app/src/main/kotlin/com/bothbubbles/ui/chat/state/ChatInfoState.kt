@@ -15,6 +15,8 @@ data class ChatInfoState(
     val avatarPath: String? = null,
     val participantNames: StableList<String> = emptyList<String>().toStable(),
     val participantAvatarPaths: StableList<String?> = emptyList<String?>().toStable(),
+    val participantAddresses: StableList<String> = emptyList<String>().toStable(),
+    val participantFirstNames: StableList<String?> = emptyList<String?>().toStable(),
     val participantPhone: String? = null,
     val isLocalSmsChat: Boolean = false,
     val smsInputBlocked: Boolean = false,

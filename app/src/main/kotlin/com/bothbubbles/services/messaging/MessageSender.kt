@@ -42,7 +42,8 @@ interface MessageSender {
         attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
         subscriptionId: Int = -1,
-        tempGuid: String? = null
+        tempGuid: String? = null,
+        attributedBodyJson: String? = null
     ): Result<MessageEntity>
 
     /**

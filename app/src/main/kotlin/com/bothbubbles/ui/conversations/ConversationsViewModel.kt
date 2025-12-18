@@ -542,9 +542,8 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             combine(
                 observerDelegate.connectionState,
-                observerDelegate.startupGracePeriodPassed,
-                settingsDataStore.dismissedSetupBanner
-            ) { connectionState, gracePeriodPassed, isSetupBannerDismissed ->
+                observerDelegate.startupGracePeriodPassed
+            ) { connectionState, gracePeriodPassed ->
                 // Note: retryAttempt is internal to socketService, we use connectionState instead
                 if (!gracePeriodPassed && connectionState != ConnectionState.CONNECTED) {
                     ConnectionBannerState.Connected // Effectively hide the banner
@@ -552,7 +551,6 @@ class ConversationsViewModel @Inject constructor(
                     determineConnectionBannerState(
                         connectionState = connectionState,
                         retryAttempt = 0, // We don't have access to retry attempt anymore
-                        isSetupBannerDismissed = isSetupBannerDismissed,
                         wasEverConnected = observerDelegate.wasEverConnected()
                     )
                 }

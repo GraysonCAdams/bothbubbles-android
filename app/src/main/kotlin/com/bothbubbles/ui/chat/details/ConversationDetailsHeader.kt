@@ -22,16 +22,18 @@ fun ConversationHeader(
     subtitle: String,
     isGroup: Boolean,
     participantNames: List<String>,
+    participantAvatars: List<String?> = emptyList(),
     avatarPath: String?
 ) {
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.padding(vertical = 16.dp)
+        modifier = Modifier.padding(top = 0.dp, bottom = 16.dp)
     ) {
         ConversationAvatar(
             displayName = displayName,
             isGroup = isGroup,
             participantNames = participantNames,
+            participantAvatars = participantAvatars,
             avatarPath = avatarPath,
             size = 96.dp
         )
@@ -71,6 +73,7 @@ fun CollapsingConversationHeader(
     subtitle: String,
     isGroup: Boolean,
     participantNames: List<String>,
+    participantAvatars: List<String?> = emptyList(),
     avatarPath: String?,
     collapseProgress: Float
 ) {
@@ -81,7 +84,7 @@ fun CollapsingConversationHeader(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .padding(vertical = 16.dp)
+            .padding(top = 0.dp, bottom = 16.dp)
             .alpha(alpha)
             .scale(scale)
     ) {
@@ -89,6 +92,7 @@ fun CollapsingConversationHeader(
             displayName = displayName,
             isGroup = isGroup,
             participantNames = participantNames,
+            participantAvatars = participantAvatars,
             avatarPath = avatarPath,
             size = 96.dp
         )

@@ -12,6 +12,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -22,16 +23,24 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.ChatSendMode
+import com.bothbubbles.ui.chat.composer.MentionSpan
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 
 /**
  * Material Design 3 styled text input field for the chat composer.
@@ -42,10 +51,13 @@ import com.bothbubbles.ui.theme.BothBubblesTheme
  * - Smooth height animation for multiline input (max 4 lines)
  * - Dynamic placeholder based on send mode (iMessage vs SMS/Text)
  * - Support for disabled state when SMS input is blocked
+ * - Mention highlighting with styled spans
  *
  * @param text Current text value
  * @param onTextChange Callback when text changes
  * @param sendMode Current send mode for placeholder text
+ * @param mentions List of mention spans to highlight in the text
+ * @param onTextChangedWithCursor Callback with text and cursor position (for mention detection)
  * @param isEnabled Whether the text field is enabled
  * @param onSmsBlockedClick Callback when user taps disabled field
  * @param onFocusChanged Callback when focus state changes
@@ -58,6 +70,8 @@ fun ComposerTextField(
     text: String,
     onTextChange: (String) -> Unit,
     sendMode: ChatSendMode,
+    mentions: ImmutableList<MentionSpan> = persistentListOf(),
+    onTextChangedWithCursor: ((String, Int) -> Unit)? = null,
     isEnabled: Boolean = true,
     onSmsBlockedClick: () -> Unit = {},
     onFocusChanged: (Boolean) -> Unit = {},
@@ -71,6 +85,20 @@ fun ComposerTextField(
     // Track line count to force height updates when text wraps
     var lineCount by remember { mutableIntStateOf(1) }
 
+    // Use TextFieldValue to track both text and cursor position
+    var textFieldValue by remember { mutableStateOf(TextFieldValue(text)) }
+
+    // Sync external text changes (e.g., when mention is inserted)
+    LaunchedEffect(text) {
+        if (textFieldValue.text != text) {
+            // Keep cursor at end when text changes externally
+            textFieldValue = TextFieldValue(
+                text = text,
+                selection = TextRange(text.length)
+            )
+        }
+    }
+
     // Calculate minimum height based on line count
     // Line height ~24dp, base height 40dp for single line
     val calculatedMinHeight = (40 + (lineCount - 1) * 24).dp
@@ -81,6 +109,9 @@ fun ComposerTextField(
         sendMode == ChatSendMode.SMS -> stringResource(R.string.message_placeholder_text)
         else -> stringResource(R.string.message_placeholder_imessage)
     }
+
+    // Mention color for visual transformation
+    val mentionColor = MaterialTheme.colorScheme.primary
 
     Surface(
         modifier = modifier
@@ -111,8 +142,15 @@ fun ComposerTextField(
 
             // Text field with placeholder
             BasicTextField(
-                value = text,
-                onValueChange = { if (isEnabled) onTextChange(it) },
+                value = textFieldValue,
+                onValueChange = { newValue ->
+                    if (isEnabled) {
+                        textFieldValue = newValue
+                        onTextChange(newValue.text)
+                        // Notify about cursor position for mention detection
+                        onTextChangedWithCursor?.invoke(newValue.text, newValue.selection.start)
+                    }
+                },
                 enabled = isEnabled,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -148,6 +186,7 @@ fun ComposerTextField(
                         lineCount = newLineCount
                     }
                 },
+                visualTransformation = MentionVisualTransformation(mentions, mentionColor),
                 decorationBox = { innerTextField ->
                     Box {
                         if (text.isEmpty()) {
@@ -171,5 +210,62 @@ fun ComposerTextField(
                 }
             }
         }
+    }
+}
+
+/**
+ * Build an AnnotatedString with mention spans styled.
+ */
+@Composable
+private fun buildMentionAnnotatedString(
+    text: String,
+    mentions: ImmutableList<MentionSpan>,
+    mentionColor: androidx.compose.ui.graphics.Color
+): androidx.compose.ui.text.AnnotatedString {
+    return buildAnnotatedString {
+        append(text)
+        mentions.forEach { mention ->
+            if (mention.startIndex >= 0 && mention.endIndex <= text.length) {
+                addStyle(
+                    style = SpanStyle(
+                        color = mentionColor,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    start = mention.startIndex,
+                    end = mention.endIndex
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Visual transformation that applies mention styling to text.
+ */
+private class MentionVisualTransformation(
+    private val mentions: ImmutableList<MentionSpan>,
+    private val mentionColor: androidx.compose.ui.graphics.Color
+) : androidx.compose.ui.text.input.VisualTransformation {
+
+    override fun filter(text: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.input.TransformedText {
+        val builder = androidx.compose.ui.text.AnnotatedString.Builder(text)
+
+        mentions.forEach { mention ->
+            if (mention.startIndex >= 0 && mention.endIndex <= text.length) {
+                builder.addStyle(
+                    style = SpanStyle(
+                        color = mentionColor,
+                        fontWeight = FontWeight.SemiBold
+                    ),
+                    start = mention.startIndex,
+                    end = mention.endIndex
+                )
+            }
+        }
+
+        return androidx.compose.ui.text.input.TransformedText(
+            builder.toAnnotatedString(),
+            androidx.compose.ui.text.input.OffsetMapping.Identity
+        )
     }
 }

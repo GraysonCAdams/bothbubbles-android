@@ -885,6 +885,21 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 38 to 39: Add attributed_body_json column to pending_messages.
+     *
+     * This column stores the JSON representation of the attributedBody for messages
+     * with mentions. The format follows Apple's NSAttributedString structure:
+     * {"string": "...", "runs": [{"range": [start, length], "attributes": {...}}]}
+     *
+     * Only populated for messages with mentions in group chats.
+     */
+    val MIGRATION_38_39 = object : Migration(38, 39) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pending_messages ADD COLUMN attributed_body_json TEXT DEFAULT NULL")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -927,6 +942,7 @@ object DatabaseMigrations {
         MIGRATION_34_35,
         MIGRATION_35_36,
         MIGRATION_36_37,
-        MIGRATION_37_38
+        MIGRATION_37_38,
+        MIGRATION_38_39
     )
 }

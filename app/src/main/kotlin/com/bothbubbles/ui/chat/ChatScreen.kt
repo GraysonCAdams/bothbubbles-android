@@ -32,6 +32,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.components.ChatBackground
 import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
+import com.bothbubbles.ui.components.dialogs.ContactInfo
+import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
@@ -414,7 +416,11 @@ fun ChatScreen(
                 onCloseSearch = viewModel.search::closeSearch,
                 onNavigateSearchUp = viewModel.search::navigateSearchUp,
                 onNavigateSearchDown = viewModel.search::navigateSearchDown,
-                onViewAllSearchResults = viewModel.search::showResultsSheet
+                onViewAllSearchResults = viewModel.search::showResultsSheet,
+                // Avatar click in group chats opens contact details popup
+                onAvatarClick = { message ->
+                    currentState.selectedSenderMessage = message
+                }
             )
         }
 
@@ -565,6 +571,26 @@ fun ChatScreen(
         onClearPendingContactData = { state.pendingContactData = null },
         onClearMessageToForward = { state.messageToForward = null }
     )
+
+    // Contact quick actions popup for group chat avatar clicks
+    state.selectedSenderMessage?.let { message ->
+        message.senderAddress?.let { address ->
+            ContactQuickActionsPopup(
+                contactInfo = ContactInfo(
+                    chatGuid = "",  // Not used for navigation from here
+                    displayName = message.senderName ?: address,
+                    rawDisplayName = message.senderName ?: address,
+                    avatarPath = message.senderAvatarPath,
+                    address = address,
+                    isGroup = false,
+                    hasContact = false,  // TODO: Could check if contact exists
+                    hasInferredName = false
+                ),
+                onDismiss = { state.selectedSenderMessage = null },
+                onMessageClick = { state.selectedSenderMessage = null }
+            )
+        }
+    }
 }
 
 

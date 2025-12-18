@@ -465,13 +465,10 @@ class ChatSendModeManager @AssistedInject constructor(
                             if (smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity) {
                                 // SMS is available - switch to SMS mode
                                 _currentSendMode.value = ChatSendMode.SMS
-                                _serverFallbackBlocked.value = false
-                            } else {
-                                // SMS not available - block input and stay in iMessage mode
-                                // User needs to either wait for server or set up SMS
-                                _serverFallbackBlocked.value = true
-                                Timber.i("Server disconnected but SMS not available (functional=${smsCapability.isFullyFunctional}, cellular=${smsCapability.hasCellularConnectivity}) - blocking input")
                             }
+                            // If SMS isn't available, stay in iMessage mode - messages will queue
+                            // and send when server reconnects, or user can retry manually
+                            Timber.i("Server disconnected, SMS available=${smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity}, staying in ${_currentSendMode.value} mode")
                         }
                     }
                 }

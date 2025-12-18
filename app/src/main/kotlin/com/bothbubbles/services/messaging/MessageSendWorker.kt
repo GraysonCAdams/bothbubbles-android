@@ -13,12 +13,18 @@ import androidx.hilt.work.HiltWorker
 import androidx.work.CoroutineWorker
 import androidx.work.ForegroundInfo
 import androidx.work.WorkerParameters
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.PendingAttachmentInput
+import com.bothbubbles.services.messaging.sender.MessageAlreadyInTransitException
+import com.bothbubbles.util.error.MessageErrorCode
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 /**
@@ -46,15 +52,28 @@ class MessageSendWorker @AssistedInject constructor(
     private val pendingMessageDao: PendingMessageDao,
     private val pendingAttachmentDao: PendingAttachmentDao,
     private val attachmentDao: com.bothbubbles.data.local.db.dao.AttachmentDao,
+    private val messageDao: MessageDao,
     private val messageSendingService: MessageSendingService,
-    private val attachmentPersistenceManager: AttachmentPersistenceManager
+    private val attachmentPersistenceManager: AttachmentPersistenceManager,
+    private val settingsDataStore: SettingsDataStore
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
         private const val TAG = "MessageSendWorker"
         const val KEY_PENDING_MESSAGE_ID = "pending_message_id"
         const val UNIQUE_WORK_PREFIX = "send_message_"
+
+        /** Max retries ONLY for network errors (message never reached server) */
         private const val MAX_RETRY_COUNT = 3
+
+        /**
+         * Time to wait for BlueBubbles server to confirm message state after successful send.
+         * The server may report delivery failure (e.g., error 22 - not registered) via socket event.
+         */
+        private const val SERVER_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1000L // 2 minutes
+
+        /** Poll interval when waiting for server confirmation */
+        private const val CONFIRMATION_POLL_INTERVAL_MS = 2000L // 2 seconds
 
         private const val NOTIFICATION_CHANNEL_ID = "message_send_channel"
         private const val NOTIFICATION_ID = 9001
@@ -140,6 +159,36 @@ class MessageSendWorker @AssistedInject constructor(
             return Result.success()
         }
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // DUPLICATE PREVENTION: Check if API already succeeded on a previous attempt.
+        // If serverGuid is set, the API call succeeded but worker died during
+        // confirmation wait. Skip the API call and go straight to confirmation.
+        // ═══════════════════════════════════════════════════════════════════════════
+        val existingServerGuid = pendingMessage.serverGuid
+        if (existingServerGuid != null) {
+            Timber.w("[SEND_TRACE] ⚠️ API already succeeded on previous attempt!")
+            Timber.w("[SEND_TRACE] ⚠️ serverGuid=$existingServerGuid, skipping API call")
+            Timber.w("[SEND_TRACE] ⚠️ Going straight to confirmation wait...")
+
+            val confirmationResult = waitForServerConfirmation(
+                serverGuid = existingServerGuid,
+                pendingMessageId = pendingMessageId,
+                chatGuid = pendingMessage.chatGuid
+            )
+
+            return if (confirmationResult.isSuccess) {
+                Timber.i("[SEND_TRACE] ✓ Confirmation succeeded for previously-sent message")
+                pendingMessageDao.markAsSent(pendingMessageId, existingServerGuid)
+                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE (resumed): ${System.currentTimeMillis() - workerStartTime}ms")
+                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                Result.success()
+            } else {
+                Timber.e("[SEND_TRACE] ✗ Confirmation failed for previously-sent message")
+                handleServerError(pendingMessageId, pendingMessage.chatGuid, confirmationResult.exceptionOrNull())
+            }
+        }
+
         Timber.i("[SEND_TRACE] Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1}) +${System.currentTimeMillis() - workerStartTime}ms")
 
         // Update status to SENDING
@@ -191,68 +240,153 @@ class MessageSendWorker @AssistedInject constructor(
                 subject = pendingMessage.subject,
                 attachments = attachmentInputs,
                 deliveryMode = deliveryMode,
-                tempGuid = pendingMessage.localId
+                tempGuid = pendingMessage.localId,
+                attributedBodyJson = pendingMessage.attributedBodyJson
             )
             Timber.i("[SEND_TRACE] sendUnified RETURNED after ${System.currentTimeMillis() - sendStart}ms +${System.currentTimeMillis() - workerStartTime}ms total")
 
             if (result.isSuccess) {
                 val sentMessage = result.getOrThrow()
-                Timber.i("[SEND_TRACE] ✓ Message SENT SUCCESSFULLY: ${pendingMessage.localId} -> ${sentMessage.guid}")
+                Timber.i("[SEND_TRACE] ✓ Message accepted by server: ${pendingMessage.localId} -> ${sentMessage.guid}")
                 Timber.i("[SEND_TRACE] Server GUID: ${sentMessage.guid}")
 
-                // Mark as sent with server GUID
-                Timber.i("[SEND_TRACE] Marking as sent in DB +${System.currentTimeMillis() - workerStartTime}ms")
-                pendingMessageDao.markAsSent(pendingMessageId, sentMessage.guid)
+                // ═══════════════════════════════════════════════════════════════════════════
+                // CRITICAL: Save serverGuid IMMEDIATELY after API success, BEFORE confirmation.
+                // This ensures retries can detect "API already succeeded" even if worker dies
+                // during the 2-minute confirmation wait.
+                // ═══════════════════════════════════════════════════════════════════════════
+                Timber.i("[SEND_TRACE] 💾 Persisting serverGuid to prevent duplicate sends on retry")
+                pendingMessageDao.updateServerGuid(pendingMessageId, sentMessage.guid)
 
-                // Note: Attachment files are now relocated (not deleted) by IMessageSenderStrategy
-                // during the GUID replacement process. This preserves local previews and prevents
-                // the need to re-download already-uploaded files. The relocation moves files from
-                // pending_attachments/ to attachments/ and updates the database with the new path.
-                Timber.i("[SEND_TRACE] Attachments relocated to permanent storage by IMessageSenderStrategy")
+                // Wait for server to confirm delivery (or report failure via socket event)
+                // BlueBubbles may report delivery failure (e.g., error 22) asynchronously
+                val confirmationResult = waitForServerConfirmation(
+                    serverGuid = sentMessage.guid,
+                    pendingMessageId = pendingMessageId,
+                    chatGuid = pendingMessage.chatGuid
+                )
 
-                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-                Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE: ${System.currentTimeMillis() - workerStartTime}ms total")
-                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-                Result.success()
+                if (confirmationResult.isSuccess) {
+                    // Mark as sent with server GUID
+                    Timber.i("[SEND_TRACE] Marking as sent in DB +${System.currentTimeMillis() - workerStartTime}ms")
+                    pendingMessageDao.markAsSent(pendingMessageId, sentMessage.guid)
+
+                    // Note: Attachment files are now relocated (not deleted) by IMessageSenderStrategy
+                    // during the GUID replacement process. This preserves local previews and prevents
+                    // the need to re-download already-uploaded files.
+                    Timber.i("[SEND_TRACE] Attachments relocated to permanent storage by IMessageSenderStrategy")
+
+                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                    Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE: ${System.currentTimeMillis() - workerStartTime}ms total")
+                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
+                    Result.success()
+                } else {
+                    // Server reported failure during confirmation wait
+                    Timber.e("[SEND_TRACE] ✗ Server reported failure during confirmation: ${confirmationResult.exceptionOrNull()?.message}")
+                    handleServerError(pendingMessageId, pendingMessage.chatGuid, confirmationResult.exceptionOrNull())
+                }
             } else {
                 Timber.e("[SEND_TRACE] ✗ sendUnified FAILED: ${result.exceptionOrNull()?.message}")
-                handleFailure(pendingMessageId, result.exceptionOrNull())
+                handleFailure(pendingMessageId, pendingMessage.chatGuid, result.exceptionOrNull())
             }
         } catch (e: Exception) {
             Timber.e(e, "[SEND_TRACE] ✗ Exception during send: ${e.message}")
-            handleFailure(pendingMessageId, e)
+            handleFailure(pendingMessageId, pendingMessage.chatGuid, e)
         }
     }
 
-    private suspend fun handleFailure(pendingMessageId: Long, error: Throwable?): Result {
-        val errorMessage = error?.message ?: "Unknown error"
+    /**
+     * Wait for BlueBubbles server to confirm message delivery state.
+     *
+     * After server accepts a message, it may still fail during actual iMessage delivery
+     * (e.g., error 22 - recipient not registered). These failures arrive via socket event
+     * and update the message's error field in the database.
+     *
+     * @return kotlin.Result.success if message delivered or timeout with no error, kotlin.Result.failure if error detected
+     */
+    private suspend fun waitForServerConfirmation(
+        serverGuid: String,
+        pendingMessageId: Long,
+        chatGuid: String
+    ): kotlin.Result<Unit> {
+        val startTime = System.currentTimeMillis()
+        Timber.i("[SEND_TRACE] Waiting up to ${SERVER_CONFIRMATION_TIMEOUT_MS / 1000}s for server confirmation...")
 
-        // Sync attachment errors from AttachmentEntity to PendingAttachmentEntity
-        try {
-            val pendingMessage = pendingMessageDao.getById(pendingMessageId)
-            if (pendingMessage != null) {
-                val tempGuid = pendingMessage.localId
-                val attachments = attachmentDao.getAttachmentsForMessage(tempGuid)
-                val pendingAttachments = pendingAttachmentDao.getForMessage(pendingMessageId)
+        while (System.currentTimeMillis() - startTime < SERVER_CONFIRMATION_TIMEOUT_MS) {
+            val message = messageDao.getMessageByGuid(serverGuid)
 
-                pendingAttachments.forEach { pendingAtt ->
-                    val matchingAtt = attachments.find { it.guid == pendingAtt.localId }
-                    if (matchingAtt != null && matchingAtt.errorType != null) {
-                        pendingAttachmentDao.updateError(
-                            pendingAtt.id,
-                            matchingAtt.errorType,
-                            matchingAtt.errorMessage
-                        )
-                    }
+            if (message != null) {
+                // Check if server reported an error
+                if (message.error != 0) {
+                    val errorMessage = message.smsErrorMessage
+                        ?: MessageErrorCode.getUserMessage(message.error)
+                    Timber.e("[SEND_TRACE] Server reported error ${message.error}: $errorMessage")
+                    return kotlin.Result.failure(
+                        Exception("Delivery failed (error ${message.error}): $errorMessage")
+                    )
+                }
+
+                // Check if message was delivered (has dateDelivered)
+                if (message.dateDelivered != null && message.dateDelivered!! > 0) {
+                    Timber.i("[SEND_TRACE] ✓ Message delivery confirmed by server")
+                    return kotlin.Result.success(Unit)
                 }
             }
-        } catch (e: Exception) {
-            Timber.e(e, "Failed to sync attachment errors")
+
+            delay(CONFIRMATION_POLL_INTERVAL_MS)
         }
 
-        return if (runAttemptCount < MAX_RETRY_COUNT) {
-            // Retry with backoff - mark as PENDING to allow retry
-            Timber.w("Send failed, will retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_COUNT): $errorMessage")
+        // Timeout - no error reported, assume success (server accepted it)
+        Timber.i("[SEND_TRACE] Confirmation timeout reached with no error - assuming success")
+        return kotlin.Result.success(Unit)
+    }
+
+    /**
+     * Handle failure when message never reached the server (network error).
+     *
+     * ONLY retries for network errors (NO_CONNECTION, TIMEOUT).
+     * For all other errors, marks as FAILED immediately since the server already rejected it.
+     *
+     * Special case: If server says message is already in transit (from a previous attempt),
+     * we skip the retry and go straight to waiting for confirmation.
+     */
+    private suspend fun handleFailure(
+        pendingMessageId: Long,
+        chatGuid: String,
+        error: Throwable?
+    ): Result {
+        // Special case: Message already in transit - don't retry, just wait for confirmation
+        if (error is MessageAlreadyInTransitException) {
+            Timber.i("[SEND_TRACE] Message already in transit, waiting for confirmation...")
+            val guidToCheck = error.serverGuid ?: error.tempGuid
+
+            val confirmationResult = waitForServerConfirmation(
+                serverGuid = guidToCheck,
+                pendingMessageId = pendingMessageId,
+                chatGuid = chatGuid
+            )
+
+            return if (confirmationResult.isSuccess) {
+                Timber.i("[SEND_TRACE] ✓ In-transit message confirmed delivered")
+                pendingMessageDao.markAsSent(pendingMessageId, guidToCheck)
+                Result.success()
+            } else {
+                handleServerError(pendingMessageId, chatGuid, confirmationResult.exceptionOrNull())
+            }
+        }
+
+        val errorMessage = error?.message ?: "Unknown error"
+        val errorCode = MessageErrorCode.fromException(error ?: Exception(errorMessage))
+
+        // Sync attachment errors
+        syncAttachmentErrors(pendingMessageId)
+
+        // Only retry if message never reached the server (network error)
+        val isNetworkError = MessageErrorCode.isNetworkError(errorCode)
+
+        return if (isNetworkError && runAttemptCount < MAX_RETRY_COUNT) {
+            // Network error - retry with backoff
+            Timber.w("[SEND_TRACE] Network error, will retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_COUNT): $errorMessage")
             pendingMessageDao.updateStatusWithError(
                 pendingMessageId,
                 PendingSyncStatus.PENDING.name,
@@ -261,15 +395,109 @@ class MessageSendWorker @AssistedInject constructor(
             )
             Result.retry()
         } else {
-            // Max retries exceeded - mark as FAILED
-            Timber.e("Send failed after $MAX_RETRY_COUNT attempts: $errorMessage")
-            pendingMessageDao.updateStatusWithError(
-                pendingMessageId,
-                PendingSyncStatus.FAILED.name,
-                errorMessage,
-                System.currentTimeMillis()
-            )
-            Result.failure()
+            // Server responded with error OR max retries exceeded - mark as FAILED
+            if (!isNetworkError) {
+                Timber.e("[SEND_TRACE] Server returned error (no retry): $errorMessage")
+            } else {
+                Timber.e("[SEND_TRACE] Network error after $MAX_RETRY_COUNT attempts: $errorMessage")
+            }
+            markFailedAndTriggerSmsFallback(pendingMessageId, chatGuid, errorMessage, errorCode)
+        }
+    }
+
+    /**
+     * Handle failure reported by server during confirmation wait.
+     * Server errors are never retried - mark as FAILED and optionally trigger SMS fallback.
+     */
+    private suspend fun handleServerError(
+        pendingMessageId: Long,
+        chatGuid: String,
+        error: Throwable?
+    ): Result {
+        val errorMessage = error?.message ?: "Server reported delivery failure"
+
+        // Try to extract error code from message
+        val errorCode = MessageErrorCode.parseFromMessage(errorMessage)
+            ?: MessageErrorCode.GENERIC_ERROR
+
+        Timber.e("[SEND_TRACE] Server error (no retry): code=$errorCode, message=$errorMessage")
+
+        // Sync attachment errors
+        syncAttachmentErrors(pendingMessageId)
+
+        return markFailedAndTriggerSmsFallback(pendingMessageId, chatGuid, errorMessage, errorCode)
+    }
+
+    /**
+     * Mark message as FAILED and trigger SMS fallback if enabled.
+     */
+    private suspend fun markFailedAndTriggerSmsFallback(
+        pendingMessageId: Long,
+        chatGuid: String,
+        errorMessage: String,
+        errorCode: Int
+    ): Result {
+        // Mark as FAILED
+        pendingMessageDao.updateStatusWithError(
+            pendingMessageId,
+            PendingSyncStatus.FAILED.name,
+            errorMessage,
+            System.currentTimeMillis()
+        )
+
+        // Check if we should auto-retry as SMS
+        val autoRetryAsSms = settingsDataStore.autoRetryAsSms.first()
+        val pendingMessage = pendingMessageDao.getById(pendingMessageId)
+        val tempGuid = pendingMessage?.localId
+
+        if (autoRetryAsSms && tempGuid != null) {
+            // Check if SMS retry is possible for this message
+            val canRetry = messageSendingService.canRetryAsSms(tempGuid)
+
+            if (canRetry) {
+                Timber.i("[SEND_TRACE] Auto-retrying failed iMessage as SMS for chat: $chatGuid")
+                try {
+                    val smsResult = messageSendingService.retryAsSms(tempGuid)
+                    if (smsResult.isSuccess) {
+                        Timber.i("[SEND_TRACE] ✓ SMS fallback successful")
+                        pendingMessageDao.markAsSent(pendingMessageId, smsResult.getOrThrow().guid)
+                        return Result.success()
+                    } else {
+                        Timber.e("[SEND_TRACE] SMS fallback also failed: ${smsResult.exceptionOrNull()?.message}")
+                    }
+                } catch (e: Exception) {
+                    Timber.e(e, "[SEND_TRACE] SMS fallback threw exception")
+                }
+            } else {
+                Timber.i("[SEND_TRACE] SMS fallback not available for this message")
+            }
+        }
+
+        return Result.failure()
+    }
+
+    /**
+     * Sync attachment errors from AttachmentEntity to PendingAttachmentEntity.
+     */
+    private suspend fun syncAttachmentErrors(pendingMessageId: Long) {
+        try {
+            val pendingMessage = pendingMessageDao.getById(pendingMessageId) ?: return
+            val tempGuid = pendingMessage.localId
+            val attachments = attachmentDao.getAttachmentsForMessage(tempGuid)
+            val pendingAttachments = pendingAttachmentDao.getForMessage(pendingMessageId)
+
+            pendingAttachments.forEach { pendingAtt ->
+                val matchingAtt = attachments.find { it.guid == pendingAtt.localId }
+                if (matchingAtt != null && matchingAtt.errorType != null) {
+                    pendingAttachmentDao.updateError(
+                        pendingAtt.id,
+                        matchingAtt.errorType,
+                        matchingAtt.errorMessage
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to sync attachment errors")
         }
     }
 }

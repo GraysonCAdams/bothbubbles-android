@@ -113,7 +113,9 @@ internal fun SegmentedMessageBubble(
     onRetryAsSms: ((String) -> Unit)? = null,
     onDeleteMessage: ((String) -> Unit)? = null,
     canRetryAsSms: Boolean = false,
-    onBoundsChanged: ((Rect) -> Unit)? = null
+    onBoundsChanged: ((Rect) -> Unit)? = null,
+    // Callback when a mention is clicked (opens contact details)
+    onMentionClick: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -387,26 +389,20 @@ internal fun SegmentedMessageBubble(
                                 is MessageSegment.MediaSegment -> {
                                     val progressState = rememberDownloadProgress(attachmentDelegate, segment.attachment.guid)
                                     val progress = progressState.value
+                                    // Images/GIFs now have internal gesture handling:
+                                    // - Lower 20% tap: toggle timestamp (onTimestampToggle)
+                                    // - Upper 80% tap / long press: open fullscreen (onMediaClick)
                                     BorderlessMediaContent(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
+                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                         maxWidth = 240.dp,
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
                                         downloadProgress = progress ?: 0f,
                                         isPlacedSticker = message.isPlacedSticker,
-                                        messageGuid = message.guid,
-                                        modifier = Modifier
-                                            .pointerInput(message.guid) {
-                                                detectTapGestures(
-                                                    onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
-                                                    onLongPress = {
-                                                        HapticUtils.onLongPress(hapticFeedback)
-                                                        onLongPress()
-                                                    }
-                                                )
-                                            }
+                                        messageGuid = message.guid
                                     )
                                 }
 
@@ -420,7 +416,8 @@ internal fun SegmentedMessageBubble(
                                         isCurrentSearchMatch = isCurrentSearchMatch && isFirstTextSegment,
                                         onLongPress = onLongPress,
                                         onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
-                                        showSubject = isFirstTextSegment
+                                        showSubject = isFirstTextSegment,
+                                        onMentionClick = onMentionClick
                                     )
                                 }
 
@@ -448,6 +445,7 @@ internal fun SegmentedMessageBubble(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
+                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
                                         downloadProgress = progress ?: 0f
@@ -590,7 +588,8 @@ internal fun TextBubbleSegment(
     isCurrentSearchMatch: Boolean,
     onLongPress: () -> Unit,
     onTimestampToggle: () -> Unit,
-    showSubject: Boolean = false
+    showSubject: Boolean = false,
+    onMentionClick: ((String) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -684,12 +683,15 @@ internal fun TextBubbleSegment(
                 MaterialTheme.typography.bodyLarge
             }
 
+            // Check if message has mentions
+            val hasMentions = message.mentions.isNotEmpty() && onMentionClick != null
+
             val hasClickableContent = detectedDates.isNotEmpty() ||
                     detectedPhoneNumbers.isNotEmpty() ||
                     detectedCodes.isNotEmpty()
 
-            // Build annotated string (skip for large emoji)
-            val annotatedText = if (isLargeEmoji) {
+            // Build annotated string (skip for large emoji and mentions)
+            val annotatedText = if (isLargeEmoji || hasMentions) {
                 null
             } else if (!searchQuery.isNullOrBlank() && text.contains(searchQuery, ignoreCase = true)) {
                 buildSearchHighlightedText(
@@ -704,7 +706,16 @@ internal fun TextBubbleSegment(
                 null
             }
 
-            if (annotatedText != null) {
+            // Use MentionText for messages with mentions
+            if (hasMentions && !isLargeEmoji) {
+                MentionText(
+                    text = text,
+                    mentions = message.mentions,
+                    onMentionClick = { address -> onMentionClick?.invoke(address) },
+                    textColor = textColor,
+                    style = textStyle
+                )
+            } else if (annotatedText != null) {
                 ClickableText(
                     text = annotatedText,
                     style = textStyle.copy(color = textColor),

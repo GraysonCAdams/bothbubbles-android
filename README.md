@@ -4,7 +4,7 @@
 
 Native Android client for [BlueBubbles Server](https://github.com/BlueBubblesApp/BlueBubbles-Server). Pure Kotlin + Jetpack Compose.
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-PolyForm%20Noncommercial-blue.svg)](LICENSE)
 [![Android](https://img.shields.io/badge/Android-8.0%2B-green.svg)](https://developer.android.com)
 [![Kotlin](https://img.shields.io/badge/Kotlin-2.0-purple.svg)](https://kotlinlang.org)
 [![Jetpack Compose](https://img.shields.io/badge/Jetpack%20Compose-Material%203-teal.svg)](https://developer.android.com/jetpack/compose)
@@ -20,7 +20,7 @@ Native Android client for [BlueBubbles Server](https://github.com/BlueBubblesApp
 - **Android Auto** — Voice-controlled messaging
 - **Export** — PDF, HTML, text, CSV
 
-Open source (Apache 2.0), no ads, no tracking, no telemetry. Firebase is the only external service, configured through your own project.
+Source available ([PolyForm Noncommercial](LICENSE)), no ads, no tracking, no telemetry. Firebase is the only external service, configured through your own project.
 
 ---
 
@@ -32,7 +32,7 @@ Open source (Apache 2.0), no ads, no tracking, no telemetry. Firebase is the onl
 | **SMS/MMS** | ✅ | ✅ | ✅ | ✅ |
 | **RCS** | [❌](#why-no-rcs) | [❌](#why-no-rcs) | ✅ | ❌ |
 | **Framework** | Native Kotlin | Flutter | Native | Native Kotlin |
-| **Open source** | ✅ | ✅ | ❌ | ✅ |
+| **Source available** | ✅ | ✅ | ❌ | ✅ |
 | **Tapbacks / Effects** | ✅ | ✅ | 🔶 | ❌ |
 | **Smart reply (on-device)** | ✅ | ❌ | ✅ | ❌ |
 | **ETA sharing** | ✅ | ❌ | ❌ | ❌ |
@@ -121,4 +121,4 @@ Built on top of the [BlueBubbles](https://github.com/BlueBubblesApp) ecosystem. 
 
 ## License
 
-Apache 2.0 — see [LICENSE](LICENSE).
+[PolyForm Noncommercial 1.0.0](LICENSE) — free for personal and noncommercial use. Commercial use requires permission.

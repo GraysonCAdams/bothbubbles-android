@@ -6,6 +6,8 @@ import androidx.compose.runtime.Stable
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.ui.chat.ChatSendMode
 import com.bothbubbles.ui.components.message.MessageUiModel
+import kotlinx.collections.immutable.ImmutableList
+import kotlinx.collections.immutable.persistentListOf
 
 /**
  * Unified composer state with clear separation of concerns.
@@ -57,7 +59,12 @@ data class ComposerState(
 
     // Image quality selection
     val currentImageQuality: AttachmentQuality = AttachmentQuality.DEFAULT,
-    val showQualitySheet: Boolean = false
+    val showQualitySheet: Boolean = false,
+
+    // Mentions (group chats only)
+    val mentions: ImmutableList<MentionSpan> = persistentListOf(),
+    val mentionPopupState: MentionPopupState = MentionPopupState.Hidden,
+    val isGroupChat: Boolean = false
 ) {
     /**
      * Whether the composer has content that can be sent.

@@ -87,6 +87,16 @@ fun MessageEntity.toUiModel(
             )
         }
 
+    // Generate group event text if this is a group event
+    val groupEventText = if (isGroupEvent) {
+        formatGroupEventText(
+            itemType = itemType,
+            groupActionType = groupActionType,
+            groupTitle = groupTitle,
+            senderName = resolveSenderName(senderAddress, handleId, addressToName, handleIdToName)
+        )
+    } else null
+
     return MessageUiModel(
         guid = guid,
         text = text,
@@ -115,7 +125,10 @@ fun MessageEntity.toUiModel(
         threadOriginatorGuid = threadOriginatorGuid,
         replyPreview = replyPreview,
         // Pre-compute emoji analysis to avoid recalculating on every composition
-        emojiAnalysis = analyzeEmojis(text)
+        emojiAnalysis = analyzeEmojis(text),
+        // Group event fields
+        isGroupEvent = isGroupEvent,
+        groupEventText = groupEventText
     )
 }
 
@@ -246,4 +259,57 @@ fun resolveSenderAvatarPath(
         return addressToAvatarPath[normalized]
     }
     return null
+}
+
+/**
+ * Format group event text based on item type and action type.
+ *
+ * @param itemType The type of group event (1=participant, 2=name change, 3=icon change)
+ * @param groupActionType The subtype for participant events (0=joined, 1=left)
+ * @param groupTitle The new group name for name change events
+ * @param senderName The name of the person who triggered the event
+ */
+fun formatGroupEventText(
+    itemType: Int,
+    groupActionType: Int,
+    groupTitle: String?,
+    senderName: String?
+): String {
+    // Extract first name for cleaner display
+    val firstName = senderName?.let { extractFirstName(it) } ?: "Someone"
+
+    return when (itemType) {
+        1 -> { // Participant change
+            when (groupActionType) {
+                0 -> "$firstName joined the group"
+                1 -> "$firstName left the group"
+                else -> "Group membership changed"
+            }
+        }
+        2 -> groupTitle?.let { "Name changed to \"$it\"" } ?: "Group name changed"
+        3 -> "Group photo changed"
+        else -> "Group updated"
+    }
+}
+
+/**
+ * Extract the first name from a full name for cleaner display.
+ * Handles phone numbers by returning them as-is.
+ */
+private fun extractFirstName(fullName: String): String {
+    // If it looks like a phone number, return as-is
+    val stripped = fullName.replace(Regex("[+\\-()\\s]"), "")
+    if (stripped.all { it.isDigit() } && stripped.length >= 5) {
+        return fullName
+    }
+
+    // Get first word that contains letters
+    val words = fullName.trim().split(Regex("\\s+"))
+    for (word in words) {
+        val cleaned = word.filter { it.isLetterOrDigit() }
+        if (cleaned.isNotEmpty() && cleaned.any { it.isLetter() }) {
+            return cleaned
+        }
+    }
+    return words.firstOrNull() ?: fullName
 }

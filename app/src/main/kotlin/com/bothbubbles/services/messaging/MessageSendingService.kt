@@ -140,7 +140,8 @@ class MessageSendingService @Inject constructor(
         attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
         subscriptionId: Int,
-        tempGuid: String? // Stable ID for retry idempotency
+        tempGuid: String?, // Stable ID for retry idempotency
+        attributedBodyJson: String?
     ): Result<MessageEntity> {
         val sendStart = System.currentTimeMillis()
         Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified START ──")
@@ -170,7 +171,8 @@ class MessageSendingService @Inject constructor(
             subject = subject,
             attachments = attachments,
             subscriptionId = subscriptionId,
-            tempGuid = tempGuid
+            tempGuid = tempGuid,
+            attributedBodyJson = attributedBodyJson
         )
 
         Timber.i("[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
@@ -442,6 +444,11 @@ class MessageSendingService @Inject constructor(
 
         // Only failed iMessages can be retried as SMS
         if (message.error == 0 || message.messageSource != MessageSource.IMESSAGE.name) {
+            return false
+        }
+
+        // Check if SMS is available (we're the default SMS app)
+        if (!smsPermissionHelper.isDefaultSmsApp()) {
             return false
         }
 

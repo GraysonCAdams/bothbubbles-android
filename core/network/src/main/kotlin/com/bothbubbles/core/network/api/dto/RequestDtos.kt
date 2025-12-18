@@ -46,7 +46,8 @@ data class SendMessageRequest(
     @Json(name = "subject") val subject: String? = null,
     @Json(name = "selectedMessageGuid") val selectedMessageGuid: String? = null,
     @Json(name = "partIndex") val partIndex: Int? = null,
-    @Json(name = "ddScan") val ddScan: Boolean = false
+    @Json(name = "ddScan") val ddScan: Boolean = false,
+    @Json(name = "attributedBody") val attributedBody: AttributedBodyDto? = null
 )
 
 /**
@@ -110,4 +111,24 @@ data class MessageQueryRequest(
     @Json(name = "sort") val sort: String = "DESC",
     @Json(name = "after") val after: Long? = null,
     @Json(name = "before") val before: Long? = null
+)
+
+/**
+ * Attributed body for rich text formatting in messages (mentions, etc.).
+ * Used when sending messages with mentions via the BlueBubbles API.
+ */
+@JsonClass(generateAdapter = true)
+data class AttributedBodyDto(
+    @Json(name = "string") val string: String,
+    @Json(name = "runs") val runs: List<AttributedRunDto>
+)
+
+/**
+ * A single run (span) within an attributed body.
+ * Each run defines formatting for a range of characters.
+ */
+@JsonClass(generateAdapter = true)
+data class AttributedRunDto(
+    @Json(name = "range") val range: List<Int>,  // [startIndex, length]
+    @Json(name = "attributes") val attributes: Map<String, Any>
 )

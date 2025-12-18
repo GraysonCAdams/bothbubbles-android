@@ -32,6 +32,7 @@ interface PendingMessageSource {
      * @param attachments List of attachments to send
      * @param deliveryMode Delivery mode (AUTO, IMESSAGE, LOCAL_SMS, LOCAL_MMS)
      * @param forcedLocalId Optional local ID (for retry scenarios)
+     * @param attributedBodyJson JSON representation of attributedBody for mentions
      * @return Local ID (temp GUID) of the queued message for UI tracking
      */
     suspend fun queueMessage(
@@ -42,7 +43,8 @@ interface PendingMessageSource {
         effectId: String? = null,
         attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
-        forcedLocalId: String? = null
+        forcedLocalId: String? = null,
+        attributedBodyJson: String? = null
     ): Result<String>
 
     /**

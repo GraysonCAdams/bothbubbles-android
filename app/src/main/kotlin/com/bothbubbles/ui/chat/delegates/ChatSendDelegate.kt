@@ -85,6 +85,21 @@ class ChatSendDelegate @AssistedInject constructor(
     private val typingCooldownMs = 500L
 
     // ============================================================================
+    // DUPLICATE DETECTION TRACKING
+    // Tracks recent sends to detect potential duplicate messages.
+    // This helps diagnose issues where users accidentally send the same message twice.
+    // ============================================================================
+    private data class RecentSend(
+        val textHash: Int,
+        val textPreview: String,
+        val timestamp: Long,
+        val tempGuid: String
+    )
+    private val recentSends = mutableListOf<RecentSend>()
+    private val maxRecentSends = 10
+    private val duplicateWarningWindowMs = 5 * 60 * 1000L // 5 minutes
+
+    // ============================================================================
     // CONSOLIDATED SEND STATE
     // Single StateFlow containing all send-related state for reduced recompositions.
     // ChatScreen collects this directly instead of individual flows.
@@ -117,7 +132,8 @@ class ChatSendDelegate @AssistedInject constructor(
         attachments: List<PendingAttachmentInput>,
         currentSendMode: ChatSendMode,
         isLocalSmsChat: Boolean,
-        effectId: String? = null
+        effectId: String? = null,
+        attributedBodyJson: String? = null
     ): Result<QueuedMessageInfo> {
         val trimmedText = text.trim()
         if (trimmedText.isBlank() && attachments.isEmpty()) {
@@ -155,6 +171,47 @@ class ChatSendDelegate @AssistedInject constructor(
         val creationTime = System.currentTimeMillis()
         Timber.i("[SEND_TRACE] STEP 2: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
 
+        // ═══════════════════════════════════════════════════════════════════════════
+        // DUPLICATE DETECTION: Check if same text was sent recently
+        // ═══════════════════════════════════════════════════════════════════════════
+        val textHash = trimmedText.hashCode()
+        val textPreview = trimmedText.take(30)
+
+        // Clean up old entries
+        val cutoffTime = creationTime - duplicateWarningWindowMs
+        recentSends.removeAll { it.timestamp < cutoffTime }
+
+        // Check for potential duplicate
+        val potentialDuplicate = recentSends.find { it.textHash == textHash }
+        if (potentialDuplicate != null) {
+            val timeSinceLastSend = creationTime - potentialDuplicate.timestamp
+            val timeSinceSeconds = timeSinceLastSend / 1000
+            Timber.w("[DUPLICATE_DETECT] ⚠️ ════════════════════════════════════════════════════")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ POTENTIAL DUPLICATE MESSAGE DETECTED!")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Text: \"$textPreview...\"")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Same text hash sent ${timeSinceSeconds}s ago")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Previous tempGuid: ${potentialDuplicate.tempGuid}")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Current tempGuid: $tempGuid")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Previous timestamp: ${potentialDuplicate.timestamp}")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Current timestamp: $creationTime")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ Chat: $chatGuid")
+            Timber.w("[DUPLICATE_DETECT] ⚠️ ════════════════════════════════════════════════════")
+        } else {
+            Timber.d("[DUPLICATE_DETECT] No duplicate detected for text hash $textHash")
+        }
+
+        // Record this send for future duplicate detection
+        recentSends.add(RecentSend(
+            textHash = textHash,
+            textPreview = textPreview,
+            timestamp = creationTime,
+            tempGuid = tempGuid
+        ))
+        if (recentSends.size > maxRecentSends) {
+            recentSends.removeAt(0)
+        }
+        Timber.d("[DUPLICATE_DETECT] Tracking ${recentSends.size} recent sends for this chat")
+
         // Determine message source for the optimistic model
         val messageSource = when {
             isLocalSmsChat -> MessageSource.LOCAL_SMS.name
@@ -184,7 +241,8 @@ class ChatSendDelegate @AssistedInject constructor(
                 effectId = effectId,
                 attachments = attachments,
                 deliveryMode = deliveryMode,
-                forcedLocalId = tempGuid
+                forcedLocalId = tempGuid,
+                attributedBodyJson = attributedBodyJson
             ).fold(
                 onSuccess = { localId ->
                     Timber.i("[SEND_TRACE] STEP 4: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")

@@ -136,7 +136,8 @@ data class MessageListCallbacks(
     val onCloseSearch: () -> Unit,
     val onNavigateSearchUp: () -> Unit,
     val onNavigateSearchDown: () -> Unit,
-    val onViewAllSearchResults: () -> Unit
+    val onViewAllSearchResults: () -> Unit,
+    val onAvatarClick: ((MessageUiModel) -> Unit)?
 )
 
 /**
@@ -581,7 +582,8 @@ fun ChatMessageList(
                                     onBubbleEffectCompleted = callbacks.onBubbleEffectCompleted,
                                     onClearHighlight = callbacks.onClearHighlight,
                                     onDownloadAttachment = callbacks.onDownloadAttachment,
-                                    onStopSharingEta = callbacks.onStopSharingEta
+                                    onStopSharingEta = callbacks.onStopSharingEta,
+                                    onAvatarClick = callbacks.onAvatarClick
                                 )
                             )
                         }

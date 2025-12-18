@@ -16,7 +16,8 @@ data class SendOptions(
     val subject: String? = null,
     val attachments: List<PendingAttachmentInput> = emptyList(),
     val subscriptionId: Int = -1,
-    val tempGuid: String? = null
+    val tempGuid: String? = null,
+    val attributedBodyJson: String? = null
 ) {
     val hasAttachments: Boolean get() = attachments.isNotEmpty()
 }
@@ -28,9 +29,29 @@ sealed class SendResult {
     data class Success(val message: MessageEntity) : SendResult()
     data class Failure(val error: Throwable, val tempGuid: String? = null) : SendResult()
 
+    /**
+     * Message is already in transit from a previous send attempt.
+     * This happens when:
+     * 1. We sent a message but timed out before receiving a response
+     * 2. On retry, the server says the message is already being processed
+     *
+     * When this is returned, the worker should NOT resend. Instead, it should
+     * wait for the server to confirm delivery (or report an error).
+     *
+     * @param serverGuid The server-assigned GUID for the in-transit message (if known)
+     * @param tempGuid The temp GUID used for the original send
+     */
+    data class AlreadyInTransit(
+        val serverGuid: String?,
+        val tempGuid: String
+    ) : SendResult()
+
     fun toResult(): Result<MessageEntity> = when (this) {
         is Success -> Result.success(message)
         is Failure -> Result.failure(error)
+        is AlreadyInTransit -> Result.failure(
+            MessageAlreadyInTransitException(serverGuid, tempGuid)
+        )
     }
 
     companion object {
@@ -41,6 +62,15 @@ sealed class SendResult {
             )
     }
 }
+
+/**
+ * Exception indicating a message is already in transit.
+ * Used to signal the worker to wait for confirmation instead of retrying.
+ */
+class MessageAlreadyInTransitException(
+    val serverGuid: String?,
+    val tempGuid: String
+) : Exception("Message $tempGuid is already in transit (server guid: $serverGuid)")
 
 /**
  * Upload progress tracking.
