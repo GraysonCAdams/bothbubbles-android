@@ -441,14 +441,17 @@ interface MessageDao {
     /**
      * Find a matching message by content and timestamp within a tolerance window.
      * Used to detect duplicate SMS/MMS messages that may have different GUIDs.
+     * Handles NULL text properly (for attachment-only messages).
+     * Excludes the message with the given excludeGuid (if provided).
      */
     @Query("""
         SELECT * FROM messages
         WHERE chat_guid = :chatGuid
         AND date_deleted IS NULL
-        AND text = :text
+        AND (text = :text OR (text IS NULL AND :text IS NULL))
         AND is_from_me = :isFromMe
         AND ABS(date_created - :dateCreated) <= :toleranceMs
+        AND (:excludeGuid IS NULL OR guid != :excludeGuid)
         LIMIT 1
     """)
     suspend fun findMatchingMessage(
@@ -456,7 +459,8 @@ interface MessageDao {
         text: String?,
         isFromMe: Boolean,
         dateCreated: Long,
-        toleranceMs: Long = 5000
+        toleranceMs: Long = 5000,
+        excludeGuid: String? = null
     ): MessageEntity?
 
     // ===== Inserts/Updates =====

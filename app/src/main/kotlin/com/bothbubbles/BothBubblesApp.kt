@@ -340,6 +340,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 pendingMessageSource.reEnqueuePendingMessages()
                 pendingMessageSource.cleanupSentMessages()
 
+                // Clean up orphaned temp messages from race conditions
+                pendingMessageSource.cleanupOrphanedTempMessages()
+
                 val unsentCount = pendingMessageSource.getUnsentCount()
                 if (unsentCount > 0) {
                     Timber.i("Found $unsentCount unsent messages in queue")

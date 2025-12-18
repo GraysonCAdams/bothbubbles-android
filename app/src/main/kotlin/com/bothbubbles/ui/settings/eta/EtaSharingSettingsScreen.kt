@@ -94,7 +94,7 @@ fun EtaSharingSettingsScreen(
             modifier = Modifier.padding(paddingValues),
             uiState = uiState,
             onEnableChanged = viewModel::setEnabled,
-            onChangeThresholdChanged = viewModel::setChangeThreshold,
+            onChangeNotificationsEnabledChanged = viewModel::setChangeNotificationsEnabled,
             onMinimumEtaChanged = viewModel::setMinimumEtaMinutes,
             onOpenNotificationSettings = {
                 context.startActivity(viewModel.getNotificationAccessSettingsIntent())
@@ -109,7 +109,7 @@ fun EtaSharingSettingsContent(
     viewModel: EtaSharingSettingsViewModel = hiltViewModel(),
     uiState: EtaSharingSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     onEnableChanged: (Boolean) -> Unit = viewModel::setEnabled,
-    onChangeThresholdChanged: (Int) -> Unit = viewModel::setChangeThreshold,
+    onChangeNotificationsEnabledChanged: (Boolean) -> Unit = viewModel::setChangeNotificationsEnabled,
     onMinimumEtaChanged: (Int) -> Unit = viewModel::setMinimumEtaMinutes,
     onOpenNotificationSettings: (() -> Unit)? = null
 ) {
@@ -232,16 +232,14 @@ fun EtaSharingSettingsContent(
                 }
             }
 
-            // Change threshold
-            SettingsSection(title = "Update Sensitivity") {
-                IntervalSlider(
-                    label = "Notify when ETA changes by ${uiState.changeThresholdMinutes}+ minutes",
-                    description = "Updates are sent when your arrival time changes significantly, " +
-                        "when you're about to arrive (~3 min away), or when you've arrived.",
-                    value = uiState.changeThresholdMinutes,
-                    onValueChange = onChangeThresholdChanged,
-                    valueRange = 2f..15f,
-                    steps = 12
+            // ETA change notifications toggle
+            SettingsSection(title = "Update Notifications") {
+                SettingsToggleItem(
+                    title = "Send ETA change updates",
+                    subtitle = "Notify recipient when your arrival time changes by 5+ minutes. " +
+                        "A final \"almost there\" message is sent when you're ~2 min away.",
+                    checked = uiState.changeNotificationsEnabled,
+                    onCheckedChange = onChangeNotificationsEnabledChanged
                 )
             }
         }

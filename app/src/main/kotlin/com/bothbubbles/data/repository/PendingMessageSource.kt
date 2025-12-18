@@ -91,6 +91,13 @@ interface PendingMessageSource {
     suspend fun cleanupSentMessages()
 
     /**
+     * Clean up orphaned temp messages that weren't properly replaced.
+     * This handles race conditions where both temp and server messages exist.
+     * Called at app startup.
+     */
+    suspend fun cleanupOrphanedTempMessages()
+
+    /**
      * Get count of unsent messages (for startup indicator).
      *
      * @return Number of unsent messages

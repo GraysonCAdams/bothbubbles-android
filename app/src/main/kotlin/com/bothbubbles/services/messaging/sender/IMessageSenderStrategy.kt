@@ -292,16 +292,25 @@ class IMessageSenderStrategy @Inject constructor(
             }
 
             lastResponse?.let { serverMessage ->
-                try {
-                    val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
-                    val preservedLocalPaths = tempAttachments.mapNotNull { att ->
-                        att.localPath?.takeUnless { it.contains("/pending_attachments/") }
-                    }
-                    messageDao.replaceGuid(tempGuid, serverMessage.guid)
-                    syncOutboundAttachments(serverMessage, preservedLocalPaths)
-                } catch (e: Exception) {
-                    Timber.w("Non-critical error: ${e.message}")
+                // 1. Capture local paths BEFORE any DB operations
+                val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
+                val preservedLocalPaths = tempAttachments.mapNotNull { att ->
+                    att.localPath?.takeUnless { it.contains("/pending_attachments/") }
                 }
+
+                // 2. Perform the replacement (safe with DAO race handling)
+                try {
+                    messageDao.replaceGuid(tempGuid, serverMessage.guid)
+                } catch (e: Exception) {
+                    // Fallback: DAO fix should handle this, but ensure temp is deleted
+                    Timber.e(e, "Failed to replace GUID, cleaning up temp message")
+                    runCatching { messageDao.deleteMessage(tempGuid) }
+                }
+
+                // 3. ALWAYS sync attachments, linking the local file to the server message
+                // This prevents the "DOWNLOADING" state and re-download of already-uploaded files
+                syncOutboundAttachments(serverMessage, preservedLocalPaths)
+
                 return SendResult.Success(serverMessage.toEntity(options.chatGuid))
             }
 

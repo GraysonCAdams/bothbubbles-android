@@ -1,9 +1,16 @@
 package com.bothbubbles.ui.chatcreator
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.app.ActivityCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -47,9 +54,32 @@ fun ChatCreatorScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
-    val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
     val isGroupMode = uiState.mode == ChatCreatorMode.GROUP
+
+    // Contacts permission launcher - opens settings if permission was permanently denied
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        viewModel.refreshContactsPermission()
+        if (!granted) {
+            // Check if we should show rationale - if false, user permanently denied
+            val activity = context.findActivity()
+            val shouldShowRationale = activity?.let {
+                ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.READ_CONTACTS)
+            } ?: true
+
+            if (!shouldShowRationale) {
+                // Permission permanently denied - open app settings
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+        }
+    }
 
     // Refresh permission when returning from settings
     DisposableEffect(lifecycleOwner) {
@@ -208,10 +238,7 @@ fun ChatCreatorScreen(
             if (!uiState.hasContactsPermission && !uiState.isLoading) {
                 ContactsPermissionCard(
                     onOpenSettings = {
-                        val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                            data = Uri.fromParts("package", context.packageName, null)
-                        }
-                        context.startActivity(intent)
+                        contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
                     }
                 )
             }
@@ -438,4 +465,16 @@ fun ChatCreatorScreen(
             }
         }
     }
+}
+
+/**
+ * Find the Activity from a Context by unwrapping ContextWrappers.
+ */
+private fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
 }

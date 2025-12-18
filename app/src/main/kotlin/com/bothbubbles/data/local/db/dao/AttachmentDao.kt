@@ -297,6 +297,19 @@ interface AttachmentDao {
     @Query("SELECT * FROM attachments WHERE transfer_state = 'DOWNLOADING'")
     suspend fun getDownloadingAttachments(): List<AttachmentEntity>
 
+    // ===== Cleanup =====
+
+    /**
+     * Delete orphaned temp attachments whose parent message no longer exists.
+     * This handles cleanup after race conditions in message send flow.
+     */
+    @Query("""
+        DELETE FROM attachments
+        WHERE guid LIKE 'temp-%'
+        AND message_guid NOT IN (SELECT guid FROM messages)
+    """)
+    suspend fun deleteOrphanedTempAttachments(): Int
+
     // ===== Deletes =====
 
     @Query("DELETE FROM attachments WHERE guid = :guid")

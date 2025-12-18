@@ -410,6 +410,48 @@ class PendingMessageRepository @Inject constructor(
     }
 
     /**
+     * Clean up orphaned temp messages that weren't properly replaced.
+     * This handles race conditions where both temp and server messages exist.
+     * Called at app startup.
+     */
+    override suspend fun cleanupOrphanedTempMessages() {
+        Timber.d("cleanupOrphanedTempMessages: Starting cleanup")
+        // Find temp messages older than 5 minutes (legitimate temps should be replaced within seconds)
+        val staleThreshold = System.currentTimeMillis() - (5 * 60 * 1000)
+        val orphanedTemps = messageDao.getOrphanedTempMessages(staleThreshold)
+        Timber.d("cleanupOrphanedTempMessages: Found ${orphanedTemps.size} stale temp messages")
+
+        var cleanedCount = 0
+        for (tempMessage in orphanedTemps) {
+            Timber.d("cleanupOrphanedTempMessages: Checking temp message ${tempMessage.guid}")
+            // Check if a "real" message exists with same chat + similar timestamp
+            val possibleDuplicate = messageDao.findMatchingMessage(
+                chatGuid = tempMessage.chatGuid,
+                text = tempMessage.text,
+                isFromMe = true,
+                dateCreated = tempMessage.dateCreated,
+                toleranceMs = 30_000,  // 30 second window
+                excludeGuid = tempMessage.guid  // Exclude self
+            )
+            Timber.d("cleanupOrphanedTempMessages: possibleDuplicate=${possibleDuplicate?.guid}")
+
+            if (possibleDuplicate != null && !possibleDuplicate.guid.startsWith("temp-")) {
+                // Found the real message - safe to delete temp
+                Timber.i("Cleaning up orphaned temp message: ${tempMessage.guid}")
+                messageDao.deleteMessage(tempMessage.guid)
+                cleanedCount++
+            }
+        }
+
+        // Also clean up orphaned temp attachments
+        val orphanedAttachments = attachmentDao.deleteOrphanedTempAttachments()
+
+        if (cleanedCount > 0 || orphanedAttachments > 0) {
+            Timber.i("Cleaned up $cleanedCount orphaned temp messages and $orphanedAttachments orphaned temp attachments")
+        }
+    }
+
+    /**
      * Get count of unsent messages (for startup indicator).
      */
     override suspend fun getUnsentCount(): Int = pendingMessageDao.getUnsentCount()
