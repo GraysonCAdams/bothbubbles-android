@@ -59,6 +59,7 @@ class NotificationBuilder @Inject constructor(
      *
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
+     * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
      */
     fun buildMessageNotification(
@@ -73,6 +74,7 @@ class NotificationBuilder @Inject constructor(
         linkPreviewTitle: String?,
         linkPreviewDomain: String?,
         participantNames: List<String>,
+        participantAvatarPaths: List<String?> = emptyList(),
         subject: String? = null
     ): android.app.Notification {
         val notificationId = chatGuid.hashCode()
@@ -201,19 +203,30 @@ class NotificationBuilder @Inject constructor(
             .addMessage(displayText, System.currentTimeMillis(), sender)
 
         // Create conversation shortcut for bubble support
-        // Pass participant names for group collages with transparent backgrounds
+        // Pass participant names and avatar paths for group collages with actual contact photos
         val shortcutId = bubbleMetadataHelper.createConversationShortcut(
-            chatGuid,
-            chatTitle,
-            isGroup,
-            participantNames
+            chatGuid = chatGuid,
+            chatTitle = chatTitle,
+            isGroup = isGroup,
+            participantNames = participantNames,
+            chatAvatarPath = null, // No custom chat avatar from notification
+            senderAvatarPath = if (!isGroup) avatarUri else null,
+            participantAvatarPaths = participantAvatarPaths
         )
 
         // Create bubble metadata if bubbles are enabled for this conversation
         val shouldBubble = bubbleMetadataHelper.shouldShowBubble(chatGuid, senderAddress)
         Timber.d("Bubble check: shouldBubble=$shouldBubble, chatGuid=$chatGuid")
         val bubbleMetadata = if (shouldBubble) {
-            bubbleMetadataHelper.createBubbleMetadata(chatGuid, chatTitle, isGroup, participantNames)
+            bubbleMetadataHelper.createBubbleMetadata(
+                chatGuid = chatGuid,
+                chatTitle = chatTitle,
+                isGroup = isGroup,
+                participantNames = participantNames,
+                chatAvatarPath = null, // No custom chat avatar from notification
+                senderAvatarPath = if (!isGroup) avatarUri else null,
+                participantAvatarPaths = participantAvatarPaths
+            )
         } else {
             null
         }

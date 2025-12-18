@@ -1,8 +1,5 @@
 package com.bothbubbles.ui.chat.composer.components
 
-import androidx.compose.animation.animateContentSize
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -10,13 +7,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -71,6 +68,12 @@ fun ComposerTextField(
     val inputColors = BothBubblesTheme.bubbleColors
     val focusRequester = remember { FocusRequester() }
     var isFocused by remember { mutableStateOf(false) }
+    // Track line count to force height updates when text wraps
+    var lineCount by remember { mutableIntStateOf(1) }
+
+    // Calculate minimum height based on line count
+    // Line height ~24dp, base height 40dp for single line
+    val calculatedMinHeight = (40 + (lineCount - 1) * 24).dp
 
     // Placeholder text based on send mode and enabled state
     val placeholderText = when {
@@ -82,13 +85,7 @@ fun ComposerTextField(
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 40.dp)
-            .animateContentSize(
-                animationSpec = spring(
-                    dampingRatio = Spring.DampingRatioMediumBouncy,
-                    stiffness = Spring.StiffnessMedium
-                )
-            ),
+            .heightIn(min = calculatedMinHeight),
         shape = RoundedCornerShape(ComposerMotionTokens.Dimension.InputCornerRadius),
         color = inputColors.inputFieldBackground
     ) {
@@ -142,7 +139,15 @@ fun ComposerTextField(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Default
                 ),
+                minLines = 1,
                 maxLines = 4,
+                onTextLayout = { textLayoutResult ->
+                    // Track line count changes to trigger recomposition for height
+                    val newLineCount = textLayoutResult.lineCount.coerceIn(1, 4)
+                    if (newLineCount != lineCount) {
+                        lineCount = newLineCount
+                    }
+                },
                 decorationBox = { innerTextField ->
                     Box {
                         if (text.isEmpty()) {

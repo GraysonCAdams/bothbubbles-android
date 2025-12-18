@@ -32,6 +32,7 @@ data class ParsedEtaData(
     val destination: String?,
     val distanceText: String?,  // e.g. "5 mi" or "8 km"
     val arrivalTimeText: String?,  // e.g. "12:45 PM"
+    val arrivalTimeMillis: Long? = null,  // Absolute arrival timestamp for change detection
     val navigationApp: NavigationApp,
     val timestamp: Long = System.currentTimeMillis()
 )
@@ -45,6 +46,8 @@ data class EtaSharingSession(
     val startedAt: Long = System.currentTimeMillis(),
     val lastSentTime: Long = 0,
     val lastEtaMinutes: Int = 0,
+    val lastArrivalTimeMillis: Long? = null,  // For arrival-time-based change detection
+    val lastChangeMessageTime: Long = 0,       // For cooldown tracking
     val updateCount: Int = 0,
     val lastMessageType: EtaMessageType = EtaMessageType.INITIAL
 )

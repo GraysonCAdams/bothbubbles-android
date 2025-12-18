@@ -13,12 +13,12 @@ import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.ChatSendMode
+import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
 import com.bothbubbles.ui.chat.composer.AttachmentItem
 import com.bothbubbles.ui.chat.composer.ComposerEvent
 import com.bothbubbles.ui.chat.composer.ComposerPanel
 import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.components.message.MessageUiModel
-import com.bothbubbles.ui.util.StableList
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -151,28 +151,13 @@ class BubbleChatViewModel @Inject constructor(
     private fun loadMessages() {
         viewModelScope.launch {
             // Only load last 15 messages for the bubble (compact view)
+            // Use the shared toUiModel() transformation to ensure consistent rendering
             messageRepository.observeMessagesForChat(chatGuid, limit = 15, offset = 0).collect { messages ->
                 _uiState.update { state ->
                     state.copy(
                         messages = messages.map { msg ->
-                            MessageUiModel(
-                                guid = msg.guid,
-                                text = msg.text,
-                                isFromMe = msg.isFromMe,
-                                dateCreated = msg.dateCreated,
-                                formattedTime = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault()).format(java.util.Date(msg.dateCreated)),
-                                isSent = msg.dateCreated > 0,
-                                hasError = msg.error != 0,
-                                isDelivered = msg.dateDelivered != null,
-                                isRead = msg.dateRead != null,
-                                attachments = StableList(emptyList()),
-                                senderName = null,
-                                messageSource = if (msg.isFromMe) "me" else "them",
-                                reactions = StableList(emptyList()),
-                                myReactions = emptySet(),
-                                isReaction = false,
-                                expressiveSendStyleId = null
-                            )
+                            // Use shared transformation - skip reactions/attachments for compact view
+                            msg.toUiModel()
                         },
                         isLoading = false
                     )

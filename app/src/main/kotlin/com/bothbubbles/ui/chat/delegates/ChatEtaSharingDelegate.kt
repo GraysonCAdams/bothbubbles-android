@@ -96,7 +96,7 @@ class ChatEtaSharingDelegate @AssistedInject constructor(
      * Stop sharing ETA
      */
     fun stopSharingEta() {
-        etaSharingManager.stopSharing(sendFinalMessage = true)
+        etaSharingManager.stopSharing()
         _latestEtaMessageGuid.value = null
     }
 

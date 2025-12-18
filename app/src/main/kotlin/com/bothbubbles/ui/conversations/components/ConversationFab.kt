@@ -18,7 +18,7 @@ import com.bothbubbles.services.sync.UnifiedSyncProgress
 /**
  * Floating Action Button for starting a new chat.
  *
- * Automatically adjusts padding to stay above sync progress bar.
+ * Automatically adjusts padding to stay above sync progress bar and status banners.
  * Expands/collapses text label based on scroll position.
  */
 @Composable
@@ -27,6 +27,8 @@ fun ConversationFab(
     isExpanded: Boolean,
     unifiedSyncProgress: UnifiedSyncProgress?,
     isSearchActive: Boolean,
+    isConnectionBannerVisible: Boolean = false,
+    isSmsBannerVisible: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     // Calculate bottom padding based on unified progress bar visibility
@@ -38,8 +40,17 @@ fun ConversationFab(
     } else {
         80.dp
     }
+
+    // Calculate banner padding (72dp per banner: 56dp content + 16dp padding)
+    val singleBannerHeight = 72.dp
+    val bannerPadding = when {
+        isConnectionBannerVisible && isSmsBannerVisible -> singleBannerHeight * 2
+        isConnectionBannerVisible || isSmsBannerVisible -> singleBannerHeight
+        else -> 0.dp
+    }
+
     val fabBottomPadding by animateDpAsState(
-        targetValue = if (showProgressBar) progressBarHeight else 0.dp,
+        targetValue = (if (showProgressBar) progressBarHeight else 0.dp) + bannerPadding,
         animationSpec = tween(durationMillis = 300),
         label = "fabPadding"
     )

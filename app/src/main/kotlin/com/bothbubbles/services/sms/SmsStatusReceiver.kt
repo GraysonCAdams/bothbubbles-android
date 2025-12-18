@@ -16,6 +16,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -38,6 +39,10 @@ class SmsStatusReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "SmsStatusReceiver"
         private const val EXTRA_ERROR_CODE = "errorCode"
+
+        // Delay before marking as failed to give carrier time to correct status.
+        // Some carriers report failure initially then success shortly after.
+        private const val FAILURE_DELAY_MS = 10_000L
     }
 
     @Inject
@@ -116,15 +121,22 @@ class SmsStatusReceiver : BroadcastReceiver() {
             }
         }
 
-        // Check if this is a retryable error and attempt auto-retry
-        if (status == "failed" && SmsErrorHelper.isRetryable(resultCode)) {
-            val retryInitiated = smsSendService.retrySms(messageGuid, resultCode)
-            if (retryInitiated) {
-                Timber.d("Auto-retry initiated for message: $messageGuid")
-                return // Don't update status - retrySms handles it
+        // For failures, delay briefly before marking as failed.
+        // This gives the carrier time to potentially send a corrected success status,
+        // and avoids the user seeing a flash of "failed" for transient issues.
+        // We intentionally do NOT auto-retry to avoid duplicate SMS sends - carriers
+        // sometimes report failure even when the message was actually delivered.
+        if (status == "failed") {
+            Timber.d("SMS reported failed, waiting ${FAILURE_DELAY_MS}ms before marking: $messageGuid")
+            delay(FAILURE_DELAY_MS)
+
+            // Check if message was already marked as sent during the delay
+            // (e.g., a success broadcast came through for another part)
+            val currentStatus = smsSendService.getMessageStatus(messageGuid)
+            if (currentStatus == "sent" || currentStatus == "delivered") {
+                Timber.d("SMS $messageGuid already marked as $currentStatus, ignoring failure")
+                return
             }
-            // If retry not initiated (max retries exceeded), fall through to update as failed
-            Timber.d("Auto-retry not possible for message: $messageGuid (max retries exceeded)")
         }
 
         smsSendService.updateMessageStatus(

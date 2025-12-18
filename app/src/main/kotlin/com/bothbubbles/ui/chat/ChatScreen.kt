@@ -289,9 +289,9 @@ fun ChatScreen(
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .onSizeChanged { newSize ->
-                    // Track actual height of bottom bar (composer + smart reply chips)
-                    // Keyboard handling is done via imePadding() on the content Box,
-                    // so we can safely track the full height here.
+                    // Track full height of bottom bar (includes imePadding from ChatInputUI).
+                    // Content Box does NOT have imePadding - it relies on this measurement
+                    // to properly clear the composer area including keyboard.
                     state.bottomBarBaseHeightPx = newSize.height.toFloat()
                 }
                 .zIndex(1f)
@@ -328,12 +328,12 @@ fun ChatScreen(
 
         // Main content area - uses calculated padding for top/bottom bars
         // This avoids SubcomposeLayout by using pre-measured heights
-        // imePadding() ensures content shifts up when keyboard opens (no child recomposition)
+        // Note: NO imePadding() here - ChatInputUI has imePadding() and its measured height
+        // (bottomBarHeightDp) already includes keyboard clearance when keyboard is open.
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(top = topBarHeightDp, bottom = bottomBarHeightDp)
-                .imePadding()
         ) {
         // Wave 2: Use effect settings from outer scope (collected at higher level)
         val autoPlayEffects = effectsStateForOverlay.autoPlayEffects

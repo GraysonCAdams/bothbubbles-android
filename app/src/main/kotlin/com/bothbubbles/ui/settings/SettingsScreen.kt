@@ -1,5 +1,8 @@
 package com.bothbubbles.ui.settings
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.selection.selectable
@@ -16,6 +19,9 @@ import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.core.data.ConnectionState
@@ -51,6 +57,23 @@ fun SettingsScreen(
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+
+    // Contacts permission launcher
+    val contactsPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { viewModel.refreshContactsPermission() }
+
+    // Re-check contacts permission when returning from system settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshContactsPermission()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // MD3 LargeTopAppBar with scroll-to-collapse behavior
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -97,6 +120,9 @@ fun SettingsScreen(
             onAutoResponderClick = onAutoResponderClick,
             onEtaSharingClick = onEtaSharingClick,
             onAboutClick = onAboutClick,
+            onRequestContactsPermission = {
+                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
+            },
             viewModel = viewModel
         )
     }
@@ -130,6 +156,7 @@ fun SettingsContent(
     onAutoResponderClick: () -> Unit,
     onEtaSharingClick: () -> Unit = {},
     onAboutClick: () -> Unit,
+    onRequestContactsPermission: () -> Unit = {},
     viewModel: SettingsViewModel
 ) {
     // Snackbar host state for disabled click feedback
@@ -545,17 +572,50 @@ fun SettingsContent(
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // SECTION 6: Privacy & Organization
-        // Focus: Managing the inbox and security
+        // SECTION 6: Privacy & Permissions
+        // Focus: Managing the inbox, security, and app permissions
         // ═══════════════════════════════════════════════════════════════
         item {
-            SettingsSectionTitle(title = "Privacy & organization")
+            SettingsSectionTitle(title = "Privacy & permissions")
         }
 
         item {
             SettingsCard(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
             ) {
+                // Contacts access
+                SettingsMenuItem(
+                    icon = Icons.Default.Contacts,
+                    title = "Contacts access",
+                    subtitle = if (uiState.hasContactsPermission) {
+                        "Showing names and photos in conversations"
+                    } else {
+                        "Tap to enable contact names and photos"
+                    },
+                    onClick = {
+                        if (!uiState.hasContactsPermission) {
+                            onRequestContactsPermission()
+                        }
+                    },
+                    trailingContent = if (uiState.hasContactsPermission) {
+                        {
+                            Icon(
+                                Icons.Default.CheckCircle,
+                                contentDescription = "Granted",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    } else {
+                        {
+                            FilledTonalButton(onClick = onRequestContactsPermission) {
+                                Text("Grant")
+                            }
+                        }
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Blocked contacts
                 SettingsMenuItem(
                     icon = Icons.Default.Block,

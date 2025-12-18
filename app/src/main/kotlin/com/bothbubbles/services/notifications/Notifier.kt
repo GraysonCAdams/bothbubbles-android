@@ -27,6 +27,7 @@ interface Notifier {
      * @param linkPreviewTitle Optional link preview title
      * @param linkPreviewDomain Optional link preview domain
      * @param participantNames List of participant names for group chats (used for group avatar collage)
+     * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
      */
     fun showMessageNotification(
@@ -41,6 +42,7 @@ interface Notifier {
         linkPreviewTitle: String? = null,
         linkPreviewDomain: String? = null,
         participantNames: List<String> = emptyList(),
+        participantAvatarPaths: List<String?> = emptyList(),
         subject: String? = null
     )
 

@@ -511,14 +511,14 @@ fun ContactsPermissionCard(
 
             // Title
             Text(
-                text = "Contacts access needed",
+                text = "See your contacts here",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurface
             )
 
             // Description
             Text(
-                text = "Allow access to your contacts to see them here. You can still type phone numbers or email addresses manually.",
+                text = "Enable contacts to quickly find and message people. You can always type phone numbers or email addresses instead.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -531,7 +531,7 @@ fun ContactsPermissionCard(
                     containerColor = MaterialTheme.colorScheme.primary
                 )
             ) {
-                Text("Open Settings")
+                Text("Enable Contacts")
             }
         }
     }

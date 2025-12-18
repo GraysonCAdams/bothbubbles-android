@@ -152,16 +152,18 @@ class FirebaseConfigManager @Inject constructor(
                 projectId = appConfig.projectId,
                 appId = appConfig.appId,
                 apiKey = appConfig.apiKey,
-                storageBucket = appConfig.storageBucket
+                storageBucket = appConfig.storageBucket,
+                databaseUrl = appConfig.firebaseUrl
             )
 
-            // Save config for offline use
+            // Save config for offline use (including database URL for dynamic server URL sync)
             settingsDataStore.setFirebaseConfig(
                 projectNumber = config.projectNumber,
                 projectId = config.projectId,
                 appId = config.appId,
                 apiKey = config.apiKey,
-                storageBucket = config.storageBucket
+                storageBucket = config.storageBucket,
+                databaseUrl = config.databaseUrl
             )
 
             // Initialize Firebase
@@ -230,6 +232,7 @@ class FirebaseConfigManager @Inject constructor(
         val appId = settingsDataStore.firebaseAppId.first()
         val apiKey = settingsDataStore.firebaseApiKey.first()
         val storageBucket = settingsDataStore.firebaseStorageBucket.first()
+        val databaseUrl = settingsDataStore.firebaseDatabaseUrl.first()
 
         if (projectNumber.isBlank() || projectId.isBlank() || appId.isBlank() || apiKey.isBlank()) {
             return null
@@ -240,21 +243,26 @@ class FirebaseConfigManager @Inject constructor(
             projectId = projectId,
             appId = appId,
             apiKey = apiKey,
-            storageBucket = storageBucket
+            storageBucket = storageBucket,
+            databaseUrl = databaseUrl.ifBlank { null }
         )
     }
 
     private fun initializeFirebaseApp(config: FirebaseConfig) {
-        val options = FirebaseOptions.Builder()
+        val builder = FirebaseOptions.Builder()
             .setGcmSenderId(config.projectNumber)
             .setProjectId(config.projectId)
             .setApplicationId(config.appId)
             .setApiKey(config.apiKey)
             .setStorageBucket(config.storageBucket)
-            .build()
+
+        // Set database URL if available (used for dynamic server URL sync)
+        if (!config.databaseUrl.isNullOrBlank()) {
+            builder.setDatabaseUrl(config.databaseUrl)
+        }
 
         // Initialize as default app so FirebaseMessaging.getInstance() works
-        FirebaseApp.initializeApp(context, options)
+        FirebaseApp.initializeApp(context, builder.build())
     }
 }
 
@@ -266,7 +274,8 @@ data class FirebaseConfig(
     val projectId: String,
     val appId: String,
     val apiKey: String,
-    val storageBucket: String
+    val storageBucket: String,
+    val databaseUrl: String? = null
 )
 
 /**

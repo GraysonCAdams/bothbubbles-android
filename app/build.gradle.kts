@@ -174,6 +174,8 @@ dependencies {
     // Firebase (only messaging for push notifications - no tracking/analytics)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.messaging)
+    implementation(libs.firebase.database)
+    implementation(libs.firebase.firestore)
 
     // Google Play Services
     implementation(libs.play.services.location)

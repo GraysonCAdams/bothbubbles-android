@@ -3,6 +3,7 @@ package com.bothbubbles.services.fcm
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.services.ActiveConversationManager
@@ -29,15 +30,19 @@ import javax.inject.Singleton
  * Handles incoming FCM push notification messages.
  *
  * This handler processes FCM data payloads from the BlueBubbles server.
- * If the Socket.IO connection is active, notifications are skipped since
- * the socket will handle message delivery with full data.
+ * FCM serves as a reliable sync trigger - when a push arrives, we show
+ * the notification immediately (optimistic UI) and trigger a chat sync
+ * to ensure the message is saved to the database.
  *
- * FCM serves as a backup wake mechanism when the socket is disconnected.
+ * This approach handles the "stale socket" problem where the socket reports
+ * connected but isn't receiving events. MessageDeduplicator prevents duplicate
+ * notifications when both FCM and socket deliver the same message.
  */
 @Singleton
 class FcmMessageHandler @Inject constructor(
     private val socketService: SocketService,
     private val notificationService: NotificationService,
+    private val messageRepository: MessageRepository,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val androidContactsService: AndroidContactsService,
@@ -102,6 +107,9 @@ class FcmMessageHandler @Inject constructor(
     }
 
     private suspend fun handleNewMessage(data: Map<String, String>) {
+        // Log raw FCM data for debugging
+        Timber.d("FCM_DEBUG: Raw data keys=${data.keys}, values=${data.entries.joinToString { "${it.key}=${it.value.take(200)}" }}")
+
         // BlueBubbles server sends message data as a JSON string in the "data" field
         val dataJsonString = data["data"]
         if (dataJsonString.isNullOrBlank()) {
@@ -109,6 +117,8 @@ class FcmMessageHandler @Inject constructor(
             triggerSocketReconnect()
             return
         }
+
+        Timber.d("FCM_DEBUG: dataJsonString (first 500 chars)=${dataJsonString.take(500)}")
 
         // Parse the JSON data
         val messageJson: JSONObject
@@ -120,13 +130,19 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
+        Timber.d("FCM_DEBUG: Parsed JSON keys=${messageJson.keys().asSequence().toList()}")
+
         // Extract basic info from parsed JSON
+        // Note: optString returns "null" string when value is JSON null, so we must handle that
         val messageGuid = messageJson.optString("guid", "")
-        val messageText = messageJson.optString("text", "")
-        val messageSubject = messageJson.optString("subject", null)?.takeIf { it.isNotEmpty() }
+        val rawText = messageJson.optString("text", "")
+        val messageText = rawText.takeIf { it != "null" } ?: ""
+        val messageSubject = messageJson.optString("subject", null)?.takeIf { it.isNotEmpty() && it != "null" }
         val isFromMe = messageJson.optBoolean("isFromMe", false)
         val expressiveSendStyleId = messageJson.optString("expressiveSendStyleId", null)
         val hasAttachments = messageJson.optJSONArray("attachments")?.length()?.let { it > 0 } ?: false
+
+        Timber.d("FCM_DEBUG: Extracted - rawText='$rawText', messageText='$messageText', guid=$messageGuid, hasAttachments=$hasAttachments")
 
         // Extract chat GUID from chats array
         val chatsArray = messageJson.optJSONArray("chats")
@@ -145,29 +161,26 @@ class FcmMessageHandler @Inject constructor(
             return
         }
 
-        // If socket is connected, it will handle the message with full data
-        if (socketService.isConnected()) {
-            Timber.d("Socket connected, skipping FCM notification (socket will handle)")
-            return
-        }
-
-        // Skip if message is from me
+        // Skip notification for own messages but still sync (sent from laptop/other device)
         if (isFromMe) {
-            Timber.d("Skipping notification for own message")
+            Timber.d("Skipping notification for own message, but syncing")
+            triggerChatSync(chatGuid)
             return
         }
 
         // Check for duplicate notification (message may arrive via both FCM and socket)
         if (!messageDeduplicator.shouldNotifyForMessage(messageGuid)) {
             Timber.d("Message $messageGuid already notified, skipping FCM duplicate notification")
-            triggerSocketReconnect()
+            // Still sync to ensure message is saved (socket may have notified but not saved due to race)
+            triggerChatSync(chatGuid)
             return
         }
 
         // Check if user is currently viewing this conversation
         if (activeConversationManager.isConversationActive(chatGuid)) {
             Timber.d("Chat $chatGuid is currently active, skipping FCM notification")
-            triggerSocketReconnect()
+            // Still sync - ChatViewModel polling may not have caught it yet
+            triggerChatSync(chatGuid)
             return
         }
 
@@ -177,19 +190,22 @@ class FcmMessageHandler @Inject constructor(
         // Check if notifications are disabled for this chat
         if (chat?.notificationsEnabled == false) {
             Timber.d("Notifications disabled for chat $chatGuid, skipping FCM notification")
-            triggerSocketReconnect()
+            // Must still sync to save the message even if we don't notify
+            triggerChatSync(chatGuid)
             return
         }
 
         // Check if chat is snoozed
         if (chat?.isSnoozed == true) {
             Timber.d("Chat $chatGuid is snoozed, skipping FCM notification")
-            triggerSocketReconnect()
+            // Must still sync to save the message even if we don't notify
+            triggerChatSync(chatGuid)
             return
         }
 
         // Resolve sender name and avatar - try contact lookup first
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
+        Timber.d("FCM_DEBUG: Resolved sender - name='$senderName', avatarUri='$senderAvatarUri', address='$senderAddress'")
 
         // For 1:1 chats, use sender's contact name as title; for groups, use group name
         val isGroup = chat?.isGroup ?: false
@@ -204,10 +220,12 @@ class FcmMessageHandler @Inject constructor(
 
         // Check for invisible ink effect (expressiveSendStyleId and hasAttachments already extracted above)
         val isInvisibleInk = MessageEffect.fromStyleId(expressiveSendStyleId) == MessageEffect.Bubble.InvisibleInk
-        val notificationText = if (isInvisibleInk) {
-            if (hasAttachments) "Image sent with Invisible Ink" else "Message sent with Invisible Ink"
-        } else {
-            messageText
+        val notificationText = when {
+            isInvisibleInk && hasAttachments -> "Image sent with Invisible Ink"
+            isInvisibleInk -> "Message sent with Invisible Ink"
+            messageText.isNotBlank() -> messageText
+            hasAttachments -> "📷 Photo"
+            else -> "New message"
         }
 
         // For group chats, extract first name for cleaner notification display
@@ -217,12 +235,14 @@ class FcmMessageHandler @Inject constructor(
             senderName
         }
 
-        // For group chats, fetch participant names for the group avatar collage
-        val participantNames = if (isGroup) {
-            chatDao.getParticipantsForChat(chatGuid).map { it.rawDisplayName }
+        // For group chats, fetch participant names and avatar paths for the group avatar collage
+        val participants = if (isGroup) {
+            chatDao.getParticipantsForChat(chatGuid)
         } else {
             emptyList()
         }
+        val participantNames = participants.map { it.rawDisplayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
 
         // Show notification
         Timber.d("DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
@@ -236,12 +256,13 @@ class FcmMessageHandler @Inject constructor(
             isGroup = isGroup,
             avatarUri = senderAvatarUri,
             participantNames = participantNames,
+            participantAvatarPaths = participantAvatarPaths,
             subject = messageSubject
         )
         Timber.d("DEBUG: Notification shown successfully!")
 
-        // Trigger socket reconnect to sync full data
-        triggerSocketReconnect()
+        // Sync this chat to ensure message is saved (heals any gaps from stale socket)
+        triggerChatSync(chatGuid)
     }
 
     /**
@@ -342,6 +363,19 @@ class FcmMessageHandler @Inject constructor(
                 delay(1000)
                 socketService.connect()
             }
+        }
+    }
+
+    /**
+     * Trigger a sync for a specific chat to ensure messages are saved.
+     * This heals any gaps caused by stale socket connections - fetching the last N messages
+     * ensures we catch not just this message but any others that may have been missed.
+     */
+    private fun triggerChatSync(chatGuid: String) {
+        applicationScope.launch(ioDispatcher) {
+            Timber.d("Triggering chat sync for $chatGuid after FCM")
+            messageRepository.syncMessagesForChat(chatGuid, limit = 10)
+                .onFailure { Timber.e(it, "Failed to sync chat $chatGuid after FCM") }
         }
     }
 

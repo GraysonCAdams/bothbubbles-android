@@ -15,6 +15,7 @@ import com.bothbubbles.MainActivity
 import com.bothbubbles.R
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -57,6 +58,9 @@ class NavigationListenerService : NotificationListenerService() {
     @Inject
     lateinit var activeConversationManager: ActiveConversationManager
 
+    @Inject
+    lateinit var permissionStateMonitor: PermissionStateMonitor
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val handler = Handler(Looper.getMainLooper())
 
@@ -83,17 +87,30 @@ class NavigationListenerService : NotificationListenerService() {
         super.onListenerConnected()
         Timber.d("Notification listener connected")
 
+        // Guard: Check if required permissions are available before accessing protected resources.
+        // When the process restarts after permission revocation, skip initialization to avoid crash loop.
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.w("Notification listener connected but contacts permission missing - skipping initialization")
+            return
+        }
+
         // Check for any existing navigation notifications
         try {
             activeNotifications?.forEach { sbn ->
                 checkNavigationNotification(sbn)
             }
+        } catch (e: SecurityException) {
+            Timber.w(e, "SecurityException checking notifications - permission may have been revoked")
         } catch (e: Exception) {
             Timber.e(e, "Error checking existing notifications")
         }
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
+        // Guard: Ignore notifications if required permissions were revoked
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            return
+        }
         checkNavigationNotification(sbn)
     }
 

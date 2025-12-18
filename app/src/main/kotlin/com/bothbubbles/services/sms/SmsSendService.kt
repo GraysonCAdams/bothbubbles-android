@@ -234,6 +234,13 @@ class SmsSendService @Inject constructor(
     }
 
     /**
+     * Get the current SMS status for a message
+     */
+    suspend fun getMessageStatus(messageGuid: String): String? = withContext(Dispatchers.IO) {
+        messageDao.getMessageByGuid(messageGuid)?.smsStatus
+    }
+
+    /**
      * Get available SIM subscriptions
      */
     fun getAvailableSubscriptions(): List<SimInfo> {

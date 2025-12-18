@@ -66,11 +66,17 @@ data class ComposerState(
         get() = text.isNotBlank() || attachments.isNotEmpty()
 
     /**
-     * Whether the attachment picker panel is expanded (for add button animation).
-     * Derives from activePanel state.
+     * Whether any picker panel is expanded (for add button X animation).
+     * Includes MediaPicker and GifPicker - tapping X should close either.
      */
     val isPickerExpanded: Boolean
-        get() = activePanel == ComposerPanel.MediaPicker
+        get() = activePanel == ComposerPanel.MediaPicker || activePanel == ComposerPanel.GifPicker
+
+    /**
+     * Whether the emoji keyboard is active (for emoji button highlighting).
+     */
+    val isEmojiPickerActive: Boolean
+        get() = activePanel == ComposerPanel.EmojiKeyboard
 
     /**
      * Whether to show the voice memo button instead of send button.

@@ -28,6 +28,7 @@ class NotificationService @Inject constructor(
      *
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
+     * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
      */
     override fun showMessageNotification(
@@ -42,6 +43,7 @@ class NotificationService @Inject constructor(
         linkPreviewTitle: String?,
         linkPreviewDomain: String?,
         participantNames: List<String>,
+        participantAvatarPaths: List<String?>,
         subject: String?
     ) {
         if (!hasNotificationPermission()) return
@@ -58,6 +60,7 @@ class NotificationService @Inject constructor(
             linkPreviewTitle = linkPreviewTitle,
             linkPreviewDomain = linkPreviewDomain,
             participantNames = participantNames,
+            participantAvatarPaths = participantAvatarPaths,
             subject = subject
         )
 

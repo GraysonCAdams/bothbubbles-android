@@ -213,12 +213,14 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
         val isGroup = chat.isGroup
 
-        // For group chats, get participant names for avatar collage
-        val participantNames = if (isGroup) {
-            chatDao.getParticipantsForChat(chat.guid).map { it.rawDisplayName }
+        // For group chats, get participant names and avatar paths for avatar collage
+        val participants = if (isGroup) {
+            chatDao.getParticipantsForChat(chat.guid)
         } else {
             emptyList()
         }
+        val participantNames = participants.map { it.rawDisplayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
 
         for (message in messagesFromOthers) {
             // Resolve sender info
@@ -257,7 +259,10 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 senderAddress = senderAddress,
                 isGroup = isGroup,
                 avatarUri = senderAvatarUri,
+                linkPreviewTitle = null,
+                linkPreviewDomain = null,
                 participantNames = participantNames,
+                participantAvatarPaths = participantAvatarPaths,
                 subject = message.subject
             )
         }

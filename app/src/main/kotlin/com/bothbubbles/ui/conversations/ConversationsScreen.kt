@@ -404,7 +404,9 @@ fun ConversationsScreen(
                     onClick = onNewMessageClick,
                     isExpanded = isFabExpanded,
                     unifiedSyncProgress = uiState.unifiedSyncProgress,
-                    isSearchActive = isSearchActive
+                    isSearchActive = isSearchActive,
+                    isConnectionBannerVisible = isConnectionBannerVisible,
+                    isSmsBannerVisible = isSmsBannerVisible
                 )
             }
         ) { padding ->

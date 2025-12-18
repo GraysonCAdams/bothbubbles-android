@@ -185,12 +185,14 @@ class MessageEventHandler @Inject constructor(
                     ?: ""
             }
 
-            // For group chats, fetch participant names for the group avatar collage
-            val participantNames = if (chat?.isGroup == true) {
-                chatDao.getParticipantsForChat(event.chatGuid).map { it.rawDisplayName }
+            // For group chats, fetch participant names and avatar paths for the group avatar collage
+            val participants = if (chat?.isGroup == true) {
+                chatDao.getParticipantsForChat(event.chatGuid)
             } else {
                 emptyList()
             }
+            val participantNames = participants.map { it.rawDisplayName }
+            val participantAvatarPaths = participants.map { it.cachedAvatarPath }
 
             notificationService.showMessageNotification(
                 chatGuid = event.chatGuid,
@@ -204,6 +206,7 @@ class MessageEventHandler @Inject constructor(
                 linkPreviewTitle = linkTitle,
                 linkPreviewDomain = linkDomain,
                 participantNames = participantNames,
+                participantAvatarPaths = participantAvatarPaths,
                 subject = savedMessage.subject
             )
         }

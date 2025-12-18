@@ -248,7 +248,13 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 messageGuid = message.guid,
                 senderName = senderName,
                 senderAddress = address,
-                avatarUri = senderAvatarUri
+                isGroup = false,
+                avatarUri = senderAvatarUri,
+                linkPreviewTitle = null,
+                linkPreviewDomain = null,
+                participantNames = emptyList(),
+                participantAvatarPaths = emptyList(),
+                subject = null
             )
 
             Timber.d("Saved incoming SMS from $address: ${fullBody.take(50)}...")

@@ -26,6 +26,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
@@ -362,10 +363,13 @@ internal fun SegmentedMessageBubble(
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Render segments with reactions on first segment
+                // graphicsLayer with clip = false allows reactions to extend above the bubble without clipping
                 Box(
-                    modifier = Modifier.onGloballyPositioned { coordinates ->
-                        onBoundsChanged?.invoke(coordinates.boundsInWindow())
-                    }
+                    modifier = Modifier
+                        .graphicsLayer { clip = false }
+                        .onGloballyPositioned { coordinates ->
+                            onBoundsChanged?.invoke(coordinates.boundsInWindow())
+                        }
                 ) {
                     Column(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
@@ -577,6 +581,10 @@ internal fun TextBubbleSegment(
     var showPhoneMenu by remember { mutableStateOf(false) }
     var selectedPhoneNumber by remember { mutableStateOf<DetectedPhoneNumber?>(null) }
 
+    // Check for emoji-only messages with 3 or fewer emojis - compute before Surface
+    val emojiAnalysis = message.emojiAnalysis ?: remember(text) { analyzeEmojis(text) }
+    val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
+
     val bubbleShape = when (groupPosition) {
         MessageGroupPosition.SINGLE -> if (message.isFromMe) MessageShapes.sentSingle else MessageShapes.receivedSingle
         MessageGroupPosition.FIRST -> if (message.isFromMe) MessageShapes.sentFirst else MessageShapes.receivedFirst
@@ -586,7 +594,7 @@ internal fun TextBubbleSegment(
 
     Surface(
         shape = bubbleShape,
-        color = when {
+        color = if (isLargeEmoji) Color.Transparent else when {
             message.isFromMe && isIMessage -> bubbleColors.iMessageSent
             message.isFromMe -> bubbleColors.smsSent
             else -> bubbleColors.received
@@ -644,10 +652,7 @@ internal fun TextBubbleSegment(
                 }
             }
 
-            // Check for emoji-only messages with 3 or fewer emojis
-            // Use pre-computed value if available and text matches, otherwise compute
-            val emojiAnalysis = message.emojiAnalysis ?: remember(text) { analyzeEmojis(text) }
-            val isLargeEmoji = emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
+            // Text style based on emoji analysis (computed before Surface)
             val textStyle = if (isLargeEmoji) {
                 MaterialTheme.typography.bodyLarge.copy(fontSize = 48.sp)
             } else {

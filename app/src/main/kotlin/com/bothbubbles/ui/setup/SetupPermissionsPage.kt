@@ -116,7 +116,7 @@ internal fun PermissionsPage(
         PermissionItem(
             icon = Icons.Default.Contacts,
             title = "Contacts",
-            description = "Show contact names in conversations",
+            description = "See your contacts here and show names in conversations",
             isGranted = uiState.hasContactsPermission,
             onRequest = {
                 contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)

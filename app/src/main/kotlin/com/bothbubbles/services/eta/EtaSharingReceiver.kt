@@ -96,7 +96,7 @@ class EtaSharingReceiver : BroadcastReceiver() {
 
     private fun handleStopSharing(context: Context) {
         Timber.d("Stopping ETA sharing")
-        etaSharingManager.stopSharing(sendFinalMessage = true)
+        etaSharingManager.stopSharing()
         cancelSharingNotification(context)
     }
 

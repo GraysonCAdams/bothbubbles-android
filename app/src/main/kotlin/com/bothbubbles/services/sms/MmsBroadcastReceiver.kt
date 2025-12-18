@@ -250,7 +250,13 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                     messageGuid = "mms-pending-$mmsId",
                     senderName = senderName,
                     senderAddress = address,
-                    avatarUri = senderAvatarUri
+                    isGroup = false,
+                    avatarUri = senderAvatarUri,
+                    linkPreviewTitle = null,
+                    linkPreviewDomain = null,
+                    participantNames = emptyList(),
+                    participantAvatarPaths = emptyList(),
+                    subject = null
                 )
             }
 

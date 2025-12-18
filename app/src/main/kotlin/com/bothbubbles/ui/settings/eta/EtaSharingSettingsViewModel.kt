@@ -27,7 +27,7 @@ import javax.inject.Inject
 data class EtaSharingSettingsUiState(
     val enabled: Boolean = false,
     val hasNotificationAccess: Boolean = false,
-    val changeThresholdMinutes: Int = 5,
+    val changeNotificationsEnabled: Boolean = true,
     val minimumEtaMinutes: Int = 5,
     val isNavigationActive: Boolean = false,
     val isCurrentlySharing: Boolean = false,
@@ -58,7 +58,7 @@ class EtaSharingSettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<EtaSharingSettingsUiState> = combine(
         settingsDataStore.etaSharingEnabled,
-        settingsDataStore.etaChangeThreshold,
+        featurePreferences.etaChangeNotificationsEnabled,
         featurePreferences.autoShareMinimumEtaMinutes,
         _hasNotificationAccess,
         etaSharingManager.isNavigationActive,
@@ -71,7 +71,7 @@ class EtaSharingSettingsViewModel @Inject constructor(
         val contacts = values[7] as? List<AutoShareContact> ?: emptyList()
         EtaSharingSettingsUiState(
             enabled = values[0] as? Boolean ?: false,
-            changeThresholdMinutes = values[1] as? Int ?: 5,
+            changeNotificationsEnabled = values[1] as? Boolean ?: true,
             minimumEtaMinutes = values[2] as? Int ?: 5,
             hasNotificationAccess = values[3] as? Boolean ?: false,
             isNavigationActive = values[4] as? Boolean ?: false,
@@ -93,9 +93,9 @@ class EtaSharingSettingsViewModel @Inject constructor(
         }
     }
 
-    fun setChangeThreshold(minutes: Int) {
+    fun setChangeNotificationsEnabled(enabled: Boolean) {
         viewModelScope.launch {
-            settingsDataStore.setEtaChangeThreshold(minutes)
+            featurePreferences.setEtaChangeNotificationsEnabled(enabled)
         }
     }
 

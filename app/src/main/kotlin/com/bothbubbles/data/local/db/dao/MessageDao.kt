@@ -529,9 +529,28 @@ interface MessageDao {
             deleteMessage(tempGuid)
         } else {
             // Normal case - update the temp message with the real GUID
-            replaceGuidDirect(tempGuid, newGuid)
+            try {
+                replaceGuidDirect(tempGuid, newGuid)
+            } catch (e: Exception) {
+                // Race condition hit: Socket inserted message while we were checking.
+                // The UNIQUE constraint failed, so we know the server message exists.
+                // Safe to delete temp.
+                deleteMessage(tempGuid)
+            }
         }
     }
+
+    /**
+     * Find orphaned temp messages that are older than a threshold.
+     * Used for cleanup of messages that weren't properly replaced.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE guid LIKE 'temp-%'
+        AND is_from_me = 1
+        AND date_created < :beforeTimestamp
+    """)
+    suspend fun getOrphanedTempMessages(beforeTimestamp: Long): List<MessageEntity>
 
     // ===== Deletes =====
 

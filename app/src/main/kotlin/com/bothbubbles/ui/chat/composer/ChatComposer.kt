@@ -112,6 +112,13 @@ fun ChatComposer(
         }
     }
 
+    // Close panel when text field is focused (user tapped on input to type)
+    LaunchedEffect(state.isTextFieldFocused) {
+        if (state.isTextFieldFocused && state.activePanel != ComposerPanel.None) {
+            onEvent(ComposerEvent.DismissPanel)
+        }
+    }
+
     // Drag state for swipe-to-dismiss panels (unified with ComposerPanelHost)
     var dragOffset by remember { mutableFloatStateOf(0f) }
     var isDragging by remember { mutableStateOf(false) }
@@ -362,6 +369,7 @@ private fun TextInputContent(
                 onCameraClick = { onEvent(ComposerEvent.OpenCamera) },
                 onImageClick = onGalleryClick,
                 onEmojiClick = { onEvent(ComposerEvent.ToggleEmojiPicker) },
+                isEmojiActive = state.isEmojiPickerActive,
                 isEnabled = !state.smsInputBlocked
             )
         }

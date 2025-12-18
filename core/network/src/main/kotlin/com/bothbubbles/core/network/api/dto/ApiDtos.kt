@@ -169,7 +169,8 @@ data class FcmClientDto(
             projectId = projectId,
             appId = appId,
             apiKey = apiKey,
-            storageBucket = storageBucket
+            storageBucket = storageBucket,
+            firebaseUrl = projectInfo.firebaseUrl
         )
     }
 }
@@ -178,7 +179,8 @@ data class FcmClientDto(
 data class FcmProjectInfo(
     @Json(name = "project_number") val projectNumber: String? = null,
     @Json(name = "project_id") val projectId: String? = null,
-    @Json(name = "storage_bucket") val storageBucket: String? = null
+    @Json(name = "storage_bucket") val storageBucket: String? = null,
+    @Json(name = "firebase_url") val firebaseUrl: String? = null
 )
 
 @JsonClass(generateAdapter = true)
@@ -211,7 +213,8 @@ data class FcmAppConfig(
     val projectId: String,
     val appId: String,
     val apiKey: String,
-    val storageBucket: String
+    val storageBucket: String,
+    val firebaseUrl: String? = null
 )
 
 /**

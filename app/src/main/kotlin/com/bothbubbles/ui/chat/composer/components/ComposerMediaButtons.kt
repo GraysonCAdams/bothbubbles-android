@@ -8,9 +8,11 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.material.icons.outlined.CameraAlt
 import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.runtime.Composable
@@ -48,6 +50,7 @@ fun ComposerMediaButtons(
     onCameraClick: () -> Unit,
     onImageClick: () -> Unit,
     onEmojiClick: () -> Unit,
+    isEmojiActive: Boolean = false,
     isEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
@@ -56,6 +59,11 @@ fun ComposerMediaButtons(
     val buttonSize = ComposerMotionTokens.Dimension.ActionButtonSize
     val iconSize = 20.dp
     val iconTint = if (isEnabled) inputColors.inputIcon else inputColors.inputIcon.copy(alpha = 0.4f)
+    val emojiTint = when {
+        !isEnabled -> inputColors.inputIcon.copy(alpha = 0.4f)
+        isEmojiActive -> MaterialTheme.colorScheme.primary
+        else -> inputColors.inputIcon
+    }
 
     Row(
         modifier = modifier,
@@ -84,7 +92,7 @@ fun ComposerMediaButtons(
             }
         }
 
-        // Emoji button
+        // Emoji button - highlighted when active
         IconButton(
             onClick = {
                 HapticUtils.onTap(haptic)
@@ -94,9 +102,9 @@ fun ComposerMediaButtons(
             enabled = isEnabled
         ) {
             Icon(
-                imageVector = Icons.Outlined.EmojiEmotions,
+                imageVector = if (isEmojiActive) Icons.Filled.EmojiEmotions else Icons.Outlined.EmojiEmotions,
                 contentDescription = stringResource(R.string.emoji),
-                tint = iconTint,
+                tint = emojiTint,
                 modifier = Modifier.size(iconSize)
             )
         }

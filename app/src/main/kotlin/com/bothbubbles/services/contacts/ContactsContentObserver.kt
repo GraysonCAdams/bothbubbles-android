@@ -9,6 +9,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -38,6 +39,7 @@ class ContactsContentObserver @Inject constructor(
     @ApplicationContext private val context: Context,
     private val handleDao: HandleDao,
     private val androidContactsService: AndroidContactsService,
+    private val permissionStateMonitor: PermissionStateMonitor,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -53,10 +55,17 @@ class ContactsContentObserver @Inject constructor(
     val isObserving: StateFlow<Boolean> = _isObserving.asStateFlow()
 
     /**
-     * Start observing contacts database for changes
+     * Start observing contacts database for changes.
+     * Will not start if contacts permission is not granted.
      */
     fun startObserving() {
         if (_isObserving.value) return
+
+        // Guard: Don't start observing if we don't have permission
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.w("Cannot start contacts observer - permission not granted")
+            return
+        }
 
         Timber.d("Starting contacts content observer")
 
@@ -64,20 +73,30 @@ class ContactsContentObserver @Inject constructor(
 
         observer = object : ContentObserver(handler) {
             override fun onChange(selfChange: Boolean) {
+                // Guard: Skip refresh if permission was revoked
+                if (!permissionStateMonitor.hasContactsPermission()) {
+                    Timber.w("Contacts permission revoked - skipping refresh")
+                    stopObserving()
+                    return
+                }
                 Timber.d("Contacts database changed")
                 debounceAndRefresh()
             }
         }
 
-        observer?.let {
-            context.contentResolver.registerContentObserver(
-                ContactsContract.Contacts.CONTENT_URI,
-                true,
-                it
-            )
+        try {
+            observer?.let {
+                context.contentResolver.registerContentObserver(
+                    ContactsContract.Contacts.CONTENT_URI,
+                    true,
+                    it
+                )
+            }
+            _isObserving.value = true
+        } catch (e: SecurityException) {
+            Timber.w("SecurityException registering contacts observer - permission may have been revoked")
+            observer = null
         }
-
-        _isObserving.value = true
     }
 
     /**
@@ -107,8 +126,15 @@ class ContactsContentObserver @Inject constructor(
     /**
      * Refresh cached contact info for all handles in the database.
      * Called when contacts database changes are detected.
+     * Skips refresh if contacts permission is not granted.
      */
     private suspend fun refreshAllCachedContacts() {
+        // Guard: Skip refresh if permission was revoked
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.w("Contacts permission not granted - skipping contact cache refresh")
+            return
+        }
+
         Timber.i("Refreshing cached contact info for all handles")
 
         try {
@@ -139,6 +165,9 @@ class ContactsContentObserver @Inject constructor(
             }
 
             Timber.i("Contact cache refresh complete. Updated $updated of ${handles.size} handles")
+        } catch (e: SecurityException) {
+            // Permission was revoked during refresh - return gracefully
+            Timber.w("SecurityException refreshing contacts cache - permission may have been revoked")
         } catch (e: Exception) {
             Timber.e(e, "Error refreshing cached contacts")
         }
@@ -147,8 +176,13 @@ class ContactsContentObserver @Inject constructor(
     /**
      * Force a refresh of cached contacts.
      * Can be called manually from settings or after permission grant.
+     * Skips refresh if contacts permission is not granted.
      */
     suspend fun forceRefresh() {
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.w("Cannot force refresh contacts - permission not granted")
+            return
+        }
         Timber.i("Force refreshing cached contacts")
         refreshAllCachedContacts()
     }

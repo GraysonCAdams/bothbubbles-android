@@ -1,19 +1,15 @@
 package com.bothbubbles.ui.chat.composer.panels
 
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -48,7 +44,6 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
@@ -85,7 +80,6 @@ sealed class GifPickerState {
  * - Grid of GIF results with staggered layout
  * - Loading and error states
  * - Trending GIFs shown initially
- * - Height expands when keyboard is hidden
  * - Scroll triggers keyboard dismiss
  *
  * Note: Integration with Giphy/Tenor API should be done in the ViewModel.
@@ -113,24 +107,12 @@ fun GifPickerPanel(
 ) {
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
-    val density = LocalDensity.current
 
-    // Track IME (keyboard) visibility for height expansion
-    val imeBottomInset = WindowInsets.ime.getBottom(density)
-    val isKeyboardVisible = imeBottomInset > 0
-
-    // Base height + extra space when keyboard is hidden
-    val baseHeight = ComposerMotionTokens.Dimension.PanelHeight
-    val expandedHeight = baseHeight + ComposerMotionTokens.Dimension.PanelExpandedExtra
-
-    val animatedContentHeight by animateDpAsState(
-        targetValue = if (isKeyboardVisible) baseHeight else expandedHeight,
-        animationSpec = spring(
-            dampingRatio = ComposerMotionTokens.Spring.Responsive.dampingRatio,
-            stiffness = ComposerMotionTokens.Spring.Responsive.stiffness
-        ),
-        label = "contentHeight"
-    )
+    // Use fixed expanded height to avoid animation race with imePadding
+    // When panel opens, keyboard is hidden anyway. Using dynamic height based on keyboard
+    // visibility caused jarring shift-down-then-up animation.
+    val contentHeight = ComposerMotionTokens.Dimension.PanelHeight +
+        ComposerMotionTokens.Dimension.PanelExpandedExtra
 
     // Auto-focus search field when panel becomes visible
     LaunchedEffect(visible) {
@@ -168,11 +150,11 @@ fun GifPickerPanel(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Content based on state - height expands when keyboard hidden
+            // Content based on state - fixed expanded height for consistent UX
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(animatedContentHeight),
+                    .height(contentHeight),
                 contentAlignment = Alignment.Center
             ) {
                 when (state) {

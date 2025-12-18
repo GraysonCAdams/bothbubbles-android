@@ -219,7 +219,13 @@ class SmsContentObserver @Inject constructor(
                                 messageGuid = existingGuid,
                                 senderName = senderName,
                                 senderAddress = normalizedAddress,
-                                avatarUri = senderAvatarUri
+                                isGroup = false,
+                                avatarUri = senderAvatarUri,
+                                linkPreviewTitle = null,
+                                linkPreviewDomain = null,
+                                participantNames = emptyList(),
+                                participantAvatarPaths = emptyList(),
+                                subject = null
                             )
                         }
                     }
@@ -360,7 +366,13 @@ class SmsContentObserver @Inject constructor(
                                 messageGuid = existingGuid,
                                 senderName = if (isGroup) (senderName ?: primaryAddress) else senderName,
                                 senderAddress = primaryAddress,
-                                avatarUri = senderAvatarUri
+                                isGroup = isGroup,
+                                avatarUri = senderAvatarUri,
+                                linkPreviewTitle = null,
+                                linkPreviewDomain = null,
+                                participantNames = emptyList(),
+                                participantAvatarPaths = emptyList(),
+                                subject = null
                             )
                         }
                     }

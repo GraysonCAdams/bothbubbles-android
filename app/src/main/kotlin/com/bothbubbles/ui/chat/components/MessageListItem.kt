@@ -127,11 +127,15 @@ fun MessageListItem(
 
     val showDeliveryIndicator = message.isFromMe && index == lastOutgoingIndex
 
-    val topPadding = when {
+    // Base padding for message grouping
+    val basePadding = when {
         message.isPlacedSticker -> 0.dp
         groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
         else -> 2.dp
     }
+    // Add extra padding if this message has reactions to prevent overlap with previous message
+    // Reactions are positioned at -14dp Y offset, so add 14dp extra for messages with reactions
+    val topPadding = if (message.reactions.isNotEmpty()) basePadding + 14.dp else basePadding
     val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
     val targetGuid = message.associatedMessageGuid?.let { guid ->

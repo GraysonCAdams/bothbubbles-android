@@ -171,17 +171,24 @@ data class ChatEntity(
         get() = guid.startsWith("sms;") || guid.startsWith("mms;")
 
     /**
-     * Whether this is any SMS chat (local or server text forwarding).
+     * Whether this is an imported RCS chat.
+     * RCS chats are imported from the device's RCS app but can only deliver SMS.
+     */
+    val isRcs: Boolean
+        get() = guid.startsWith("RCS;")
+
+    /**
+     * Whether this is any SMS chat (local, server text forwarding, or imported RCS).
      * Use this for UI styling decisions (green bubbles, SMS placeholder, etc.)
      */
     val isSmsChat: Boolean
-        get() = isLocalSms || isTextForwarding
+        get() = isLocalSms || isTextForwarding || isRcs
 
     /**
      * Whether this is an iMessage chat
      */
     val isIMessage: Boolean
-        get() = !isTextForwarding && !isLocalSms
+        get() = !isTextForwarding && !isLocalSms && !isRcs
 
     /**
      * Whether this chat is currently snoozed.

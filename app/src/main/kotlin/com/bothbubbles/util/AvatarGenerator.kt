@@ -107,13 +107,16 @@ object AvatarGenerator {
         // Get consistent color based on name hash
         val backgroundColor = getAvatarColorInt(name)
 
-        // Draw circular background
+        // Draw circular background with 5% inset padding to prevent double-mask
+        // artifacts when Android's Bubble system applies its own circular clipping
         val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = backgroundColor
             style = Paint.Style.FILL
         }
-        val radius = sizePx / 2f
-        canvas.drawCircle(radius, radius, radius, circlePaint)
+        val center = sizePx / 2f
+        val padding = sizePx * 0.05f
+        val radius = center - padding
+        canvas.drawCircle(center, center, radius, circlePaint)
 
         // Determine icon type based on name and contact info
         // Only apply business heuristic if we don't have contact info (prevents "ALICE" being shown as business)
@@ -143,12 +146,12 @@ object AvatarGenerator {
                     textAlign = Paint.Align.CENTER
                 }
 
-                // Center text vertically
+                // Center text vertically (use center, not radius, for positioning)
                 val textBounds = android.graphics.Rect()
                 textPaint.getTextBounds(initials, 0, initials.length, textBounds)
-                val yPos = radius - textBounds.exactCenterY()
+                val yPos = center - textBounds.exactCenterY()
 
-                canvas.drawText(initials, radius, yPos, textPaint)
+                canvas.drawText(initials, center, yPos, textPaint)
             }
         }
 
@@ -221,20 +224,48 @@ object AvatarGenerator {
 
     /**
      * Alternative method to load contact photo using ContactsContract API.
-     * Extracts contact ID from URI and uses openContactPhotoInputStream.
+     * Handles multiple URI formats:
+     * - content://com.android.contacts/contacts/{id}/photo
+     * - content://com.android.contacts/contacts/{id}/display_photo
+     * - content://com.android.contacts/display_photo/{id} (hi-res photo file - NOT a contact ID!)
+     * - content://com.android.contacts/data/{id}
      */
     private fun loadContactPhotoAlternative(context: Context, photoUri: Uri, sizePx: Int): Bitmap? {
         return try {
-            // Try to extract contact ID using robust parsing methods
-            // Supported URI formats:
-            // content://com.android.contacts/contacts/{id}/photo
-            // content://com.android.contacts/contacts/{id}/display_photo
-            // content://com.android.contacts/data/{id}
             val segments = photoUri.pathSegments
+
+            // Handle display_photo/{id} format specially - this is a photo file ID, not a contact ID
+            // These URIs should be directly openable, so try one more time with explicit permission handling
+            if (segments.size >= 2 && segments[0] == "display_photo") {
+                Timber.d("Detected display_photo format, attempting direct stream read: $photoUri")
+                return try {
+                    context.contentResolver.openInputStream(photoUri)?.use { stream ->
+                        val sourceBitmap = BitmapFactory.decodeStream(stream)
+                        if (sourceBitmap != null) {
+                            val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
+                            if (scaledBitmap != sourceBitmap) sourceBitmap.recycle()
+                            val circularBitmap = createCircularBitmap(scaledBitmap)
+                            if (circularBitmap != scaledBitmap) scaledBitmap.recycle()
+                            Timber.d("Successfully loaded display_photo via direct stream")
+                            circularBitmap
+                        } else {
+                            Timber.w("Failed to decode display_photo stream")
+                            null
+                        }
+                    }
+                } catch (e: SecurityException) {
+                    Timber.w(e, "SecurityException reading display_photo - permission may be missing")
+                    null
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to read display_photo stream")
+                    null
+                }
+            }
+
+            // For other formats, try to extract contact ID
             val contactId: Long? = when {
                 // Format: /contacts/{id}/photo or /contacts/{id}/display_photo
                 segments.size >= 2 && segments[0] == "contacts" -> {
-                    // Use safe parsing instead of manual segment extraction
                     segments.getOrNull(1)?.toLongOrNull()
                 }
                 // Format: /data/{id} - try to use ContentUris.parseId as fallback
@@ -266,7 +297,7 @@ object AvatarGenerator {
             )
 
             if (photoStream == null) {
-                Timber.w("openContactPhotoInputStream also returned null for contact: $contactId")
+                Timber.w("openContactPhotoInputStream returned null for contact: $contactId")
                 return null
             }
 
@@ -287,7 +318,7 @@ object AvatarGenerator {
                     scaledBitmap.recycle()
                 }
 
-                Timber.d("Successfully loaded photo via alternative method for contact: $contactId")
+                Timber.d("Successfully loaded photo via openContactPhotoInputStream for contact: $contactId")
                 circularBitmap
             }
         } catch (e: Exception) {
@@ -299,6 +330,8 @@ object AvatarGenerator {
     /**
      * Create a circular bitmap from a square bitmap.
      * Clips the source bitmap into a circle to match the app's avatar style.
+     * Includes 5% inset padding to prevent double-mask artifacts when Android's
+     * Bubble system applies its own circular clipping.
      */
     private fun createCircularBitmap(source: Bitmap): Bitmap {
         val size = min(source.width, source.height)
@@ -306,14 +339,21 @@ object AvatarGenerator {
         val canvas = Canvas(output)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-        val radius = size / 2f
+        val center = size / 2f
+        val padding = size * 0.05f
+        val radius = center - padding
 
-        // Draw the circular mask
-        canvas.drawCircle(radius, radius, radius, paint)
+        // Draw the circular mask with padding
+        canvas.drawCircle(center, center, radius, paint)
 
-        // Draw the source bitmap using SRC_IN to clip to the circle
+        // Scale source to fit within the padded circle and draw using SRC_IN to clip
         paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-        canvas.drawBitmap(source, 0f, 0f, paint)
+        val scaledSize = (radius * 2).toInt()
+        val scaledSource = Bitmap.createScaledBitmap(source, scaledSize, scaledSize, true)
+        canvas.drawBitmap(scaledSource, padding, padding, paint)
+        if (scaledSource != source) {
+            scaledSource.recycle()
+        }
 
         return output
     }

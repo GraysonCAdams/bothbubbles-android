@@ -21,6 +21,7 @@ import com.bothbubbles.services.contacts.ContactsContentObserver
 import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
+import com.bothbubbles.services.fcm.FirebaseDatabaseService
 import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.HapticUtils
@@ -97,6 +98,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var syncService: SyncService
+
+    @Inject
+    lateinit var firebaseDatabaseService: FirebaseDatabaseService
 
     @Inject
     @ApplicationScope
@@ -180,6 +184,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Self-healing: repair chats with missing messages
         initializeRepairSync()
+
+        // Start Firebase Database listener for dynamic server URL sync
+        initializeFirebaseDatabaseListener()
 
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
@@ -385,6 +392,37 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 syncService.startRepairSync()
             } catch (e: Exception) {
                 Timber.w(e, "Error initializing repair sync")
+            }
+        }
+    }
+
+    /**
+     * Start Firebase Database listener for dynamic server URL sync.
+     *
+     * This listens to Firebase Realtime Database (with Firestore fallback) for server URL changes.
+     * When the BlueBubbles server URL changes (e.g., dynamic DNS update), the listener
+     * automatically updates the local settings and reconnects the socket.
+     *
+     * Only starts if setup is complete and Firebase is configured.
+     */
+    private fun initializeFirebaseDatabaseListener() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Check if Firebase Database URL is configured
+                val databaseUrl = settingsDataStore.firebaseDatabaseUrl.first()
+                if (databaseUrl.isBlank()) {
+                    Timber.d("Firebase Database URL not configured, skipping listener initialization")
+                    return@launch
+                }
+
+                // Start listening for server URL changes
+                firebaseDatabaseService.startListening()
+                Timber.i("Firebase Database listener started for dynamic server URL sync")
+            } catch (e: Exception) {
+                Timber.w(e, "Error initializing Firebase Database listener")
             }
         }
     }

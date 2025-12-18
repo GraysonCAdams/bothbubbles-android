@@ -61,6 +61,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.common.GroupAvatar
+import com.bothbubbles.ui.components.conversation.UnreadBadge
 import com.bothbubbles.util.HapticUtils
 import kotlin.math.roundToInt
 
@@ -313,19 +314,34 @@ internal fun PinnedDragOverlay(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(12.dp))
-            if (conversation.isGroup) {
-                GroupAvatar(
-                    names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
-                    avatarPaths = conversation.participantAvatarPaths,
-                    size = 56.dp
-                )
-            } else {
-                Avatar(
-                    name = conversation.displayName,
-                    avatarPath = conversation.avatarPath,
-                    size = 56.dp
-                )
+
+            // Avatar with unread badge
+            Box(modifier = Modifier.size(60.dp)) {
+                if (conversation.isGroup) {
+                    GroupAvatar(
+                        names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
+                        avatarPaths = conversation.participantAvatarPaths,
+                        size = 56.dp
+                    )
+                } else {
+                    Avatar(
+                        name = conversation.displayName,
+                        avatarPath = conversation.avatarPath,
+                        size = 56.dp
+                    )
+                }
+
+                // Unread badge at top-right
+                if (conversation.unreadCount > 0) {
+                    UnreadBadge(
+                        count = conversation.unreadCount,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 4.dp, y = (-4).dp)
+                    )
+                }
             }
+
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = conversation.displayName,
@@ -425,6 +441,16 @@ internal fun PinnedConversationItem(
                     }
                 }
 
+                // Unread badge at top-right
+                if (conversation.unreadCount > 0 && !isSelected) {
+                    UnreadBadge(
+                        count = conversation.unreadCount,
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 4.dp, y = (-4).dp)
+                    )
+                }
+
                 // Typing indicator
                 if (conversation.isTyping && !isSelected) {
                     Surface(
@@ -448,37 +474,21 @@ internal fun PinnedConversationItem(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Name row with unread badge to the left
+            // Name with bold weight when unread (badge is now on avatar)
             val formattedName = formatDisplayName(conversation.displayName)
             val hasUnread = conversation.unreadCount > 0 && !isSelected
 
-            Row(
-                modifier = Modifier.widthIn(max = 92.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Unread badge to the left of the name
-                if (hasUnread) {
-                    Surface(
-                        color = MaterialTheme.colorScheme.inverseSurface,
-                        shape = CircleShape,
-                        modifier = Modifier
-                            .size(8.dp)
-                    ) {}
-                    Spacer(modifier = Modifier.width(4.dp))
-                }
-
-                Text(
-                    text = formattedName,
-                    style = MaterialTheme.typography.labelMedium.copy(
-                        fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal
-                    ),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center
-                )
-            }
+            Text(
+                text = formattedName,
+                style = MaterialTheme.typography.labelMedium.copy(
+                    fontWeight = if (hasUnread) FontWeight.Bold else FontWeight.Normal
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 92.dp)
+            )
         }
     }
 }

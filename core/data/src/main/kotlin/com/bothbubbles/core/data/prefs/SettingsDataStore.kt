@@ -81,6 +81,7 @@ class SettingsDataStore @Inject constructor(
     val firebaseAppId: Flow<String> get() = notificationPrefs.firebaseAppId
     val firebaseApiKey: Flow<String> get() = notificationPrefs.firebaseApiKey
     val firebaseStorageBucket: Flow<String> get() = notificationPrefs.firebaseStorageBucket
+    val firebaseDatabaseUrl: Flow<String> get() = notificationPrefs.firebaseDatabaseUrl
     override val keepAlive: Flow<Boolean> get() = notificationPrefs.keepAlive
 
     suspend fun setNotificationsEnabled(enabled: Boolean) = notificationPrefs.setNotificationsEnabled(enabled)
@@ -97,8 +98,9 @@ class SettingsDataStore @Inject constructor(
         projectId: String,
         appId: String,
         apiKey: String,
-        storageBucket: String
-    ) = notificationPrefs.setFirebaseConfig(projectNumber, projectId, appId, apiKey, storageBucket)
+        storageBucket: String,
+        databaseUrl: String? = null
+    ) = notificationPrefs.setFirebaseConfig(projectNumber, projectId, appId, apiKey, storageBucket, databaseUrl)
     suspend fun clearFirebaseConfig() = notificationPrefs.clearFirebaseConfig()
     suspend fun setKeepAlive(enabled: Boolean) = notificationPrefs.setKeepAlive(enabled)
 
@@ -242,7 +244,7 @@ class SettingsDataStore @Inject constructor(
     val autoResponderRecommendedAlias: Flow<String> get() = featurePrefs.autoResponderRecommendedAlias
     val etaSharingEnabled: Flow<Boolean> get() = featurePrefs.etaSharingEnabled
     val etaUpdateInterval: Flow<Int> get() = featurePrefs.etaUpdateInterval
-    val etaChangeThreshold: Flow<Int> get() = featurePrefs.etaChangeThreshold
+    val etaChangeNotificationsEnabled: Flow<Boolean> get() = featurePrefs.etaChangeNotificationsEnabled
     val autoShareMinimumEtaMinutes: Flow<Int> get() = featurePrefs.autoShareMinimumEtaMinutes
     val androidAutoPrivacyMode: Flow<Boolean> get() = featurePrefs.androidAutoPrivacyMode
 
@@ -263,7 +265,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setAutoResponderRecommendedAlias(alias: String) = featurePrefs.setAutoResponderRecommendedAlias(alias)
     suspend fun setEtaSharingEnabled(enabled: Boolean) = featurePrefs.setEtaSharingEnabled(enabled)
     suspend fun setEtaUpdateInterval(minutes: Int) = featurePrefs.setEtaUpdateInterval(minutes)
-    suspend fun setEtaChangeThreshold(minutes: Int) = featurePrefs.setEtaChangeThreshold(minutes)
+    suspend fun setEtaChangeNotificationsEnabled(enabled: Boolean) = featurePrefs.setEtaChangeNotificationsEnabled(enabled)
     suspend fun setAutoShareMinimumEtaMinutes(minutes: Int) = featurePrefs.setAutoShareMinimumEtaMinutes(minutes)
     suspend fun setAndroidAutoPrivacyMode(enabled: Boolean) = featurePrefs.setAndroidAutoPrivacyMode(enabled)
 

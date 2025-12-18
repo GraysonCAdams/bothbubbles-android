@@ -12,6 +12,7 @@ import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sync.SyncState
+import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -27,7 +28,8 @@ class SettingsViewModel @Inject constructor(
     private val chatRepository: ChatRepository,
     private val settingsDataStore: SettingsDataStore,
     private val soundPlayer: SoundPlayer,
-    private val smsPermissionHelper: SmsPermissionHelper
+    private val smsPermissionHelper: SmsPermissionHelper,
+    private val permissionStateMonitor: PermissionStateMonitor
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -46,6 +48,7 @@ class SettingsViewModel @Inject constructor(
         observeSmsEnabled()
         observeLinkPreviews()
         refreshSmsCapability()
+        refreshContactsPermission()
     }
 
     private fun observeSmsEnabled() {
@@ -67,6 +70,16 @@ class SettingsViewModel @Inject constructor(
                 isSmsFullyFunctional = status.isFullyFunctional,
                 isDefaultSmsApp = status.isDefaultSmsApp
             )
+        }
+    }
+
+    /**
+     * Refresh contacts permission status. Called on screen resume to ensure
+     * up-to-date status after returning from permission request or system settings.
+     */
+    fun refreshContactsPermission() {
+        _uiState.update {
+            it.copy(hasContactsPermission = permissionStateMonitor.hasContactsPermission())
         }
     }
 
@@ -327,5 +340,7 @@ data class SettingsUiState(
     // Developer mode
     val developerModeEnabled: Boolean = false,
     // Link previews
-    val linkPreviewsEnabled: Boolean = false
+    val linkPreviewsEnabled: Boolean = false,
+    // Contacts permission
+    val hasContactsPermission: Boolean = false
 )

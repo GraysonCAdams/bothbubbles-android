@@ -83,10 +83,11 @@ class FeaturePreferences @Inject constructor(
     }
 
     /**
-     * Minimum ETA change (in minutes) to trigger an update
+     * Whether to send ETA change notifications when arrival time shifts significantly.
+     * When enabled, sends updates if arrival time changes by ≥5 minutes (with 10 min cooldown).
      */
-    val etaChangeThreshold: Flow<Int> = dataStore.data.map { prefs ->
-        prefs[Keys.ETA_CHANGE_THRESHOLD] ?: 5
+    val etaChangeNotificationsEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.ETA_CHANGE_NOTIFICATIONS_ENABLED] ?: true
     }
 
     /**
@@ -221,9 +222,9 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
-    suspend fun setEtaChangeThreshold(minutes: Int) {
+    suspend fun setEtaChangeNotificationsEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
-            prefs[Keys.ETA_CHANGE_THRESHOLD] = minutes.coerceIn(2, 15)
+            prefs[Keys.ETA_CHANGE_NOTIFICATIONS_ENABLED] = enabled
         }
     }
 
@@ -292,7 +293,7 @@ class FeaturePreferences @Inject constructor(
         // ETA Sharing
         val ETA_SHARING_ENABLED = booleanPreferencesKey("eta_sharing_enabled")
         val ETA_UPDATE_INTERVAL = intPreferencesKey("eta_update_interval")
-        val ETA_CHANGE_THRESHOLD = intPreferencesKey("eta_change_threshold")
+        val ETA_CHANGE_NOTIFICATIONS_ENABLED = booleanPreferencesKey("eta_change_notifications_enabled")
         val AUTO_SHARE_MINIMUM_ETA_MINUTES = intPreferencesKey("auto_share_minimum_eta_minutes")
 
         // Android Auto

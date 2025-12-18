@@ -94,6 +94,7 @@ class NavigationEtaParser @Inject constructor() {
             destination = destination,
             distanceText = distance,
             arrivalTimeText = parseArrivalTime(combinedText),
+            arrivalTimeMillis = parseArrivalTimeToMillis(combinedText),
             navigationApp = app
         )
     }
@@ -124,6 +125,7 @@ class NavigationEtaParser @Inject constructor() {
             destination = destination,
             distanceText = distance,
             arrivalTimeText = parseArrivalTime(combinedText),
+            arrivalTimeMillis = parseArrivalTimeToMillis(combinedText),
             navigationApp = app
         )
     }
@@ -237,9 +239,10 @@ class NavigationEtaParser @Inject constructor() {
     }
 
     /**
-     * Parse arrival time format ("Arrive 17:30" or "Arrive 5:30 PM") and convert to minutes from now
+     * Parse arrival time and return both minutes-from-now and absolute timestamp.
+     * Returns Pair(minutesFromNow, absoluteMillis) or null if parsing fails.
      */
-    private fun parseArrivalTimeToMinutes(text: String): Int? {
+    private fun parseArrivalTimeData(text: String): Pair<Int, Long>? {
         // Match "Arrive HH:MM" or just "HH:MM" with optional AM/PM
         val arrivePattern = Regex("""(?:Arrive\s+)?(\d{1,2}):(\d{2})\s*(AM|PM)?""", RegexOption.IGNORE_CASE)
         val match = arrivePattern.find(text) ?: return null
@@ -269,11 +272,27 @@ class NavigationEtaParser @Inject constructor() {
             }
         }
 
-        val diffMs = arrival.timeInMillis - now.timeInMillis
+        val arrivalMillis = arrival.timeInMillis
+        val diffMs = arrivalMillis - now.timeInMillis
         val diffMinutes = (diffMs / 60000).toInt()
 
         Timber.d("Arrival time parsed: $hour24:$minute, diff from now: $diffMinutes min")
-        return if (diffMinutes > 0) diffMinutes else null
+        return if (diffMinutes > 0) Pair(diffMinutes, arrivalMillis) else null
+    }
+
+    /**
+     * Parse arrival time format ("Arrive 17:30" or "Arrive 5:30 PM") and convert to minutes from now
+     */
+    private fun parseArrivalTimeToMinutes(text: String): Int? {
+        return parseArrivalTimeData(text)?.first
+    }
+
+    /**
+     * Parse arrival time format and return absolute timestamp in milliseconds.
+     * Used for change detection (comparing arrival times, not travel time remaining).
+     */
+    private fun parseArrivalTimeToMillis(text: String): Long? {
+        return parseArrivalTimeData(text)?.second
     }
 
     /**

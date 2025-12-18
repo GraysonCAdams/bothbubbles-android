@@ -184,11 +184,8 @@ class ChatSendDelegate @AssistedInject constructor(
                     Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                     PerformanceProfiler.end(sendId, "queued")
 
-                    // Play sound for SMS delivery (optimistic)
-                    val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
-                    if (isSmsSend) {
-                        soundPlayer.playSendSound()
-                    }
+                    // Play send sound for all message types (iMessage and SMS)
+                    soundPlayer.playSendSound()
 
                     Result.success(queuedInfo)
                 },
@@ -323,11 +320,8 @@ class ChatSendDelegate @AssistedInject constructor(
                         Timber.d("Message queued successfully: $localId")
                         PerformanceProfiler.end(sendId, "queued")
 
-                        // Play sound for SMS delivery (optimistic)
-                        val isSmsSend = isLocalSmsChat || currentSendMode == ChatSendMode.SMS
-                        if (isSmsSend) {
-                            soundPlayer.playSendSound()
-                        }
+                        // Play send sound for all message types (iMessage and SMS)
+                        soundPlayer.playSendSound()
                     },
                     onFailure = { e ->
                         Timber.e(e, "Failed to queue message")
@@ -355,9 +349,6 @@ class ChatSendDelegate @AssistedInject constructor(
         if (trimmedText.isBlank() && attachments.isEmpty()) return
 
         scope.launch {
-            val isLocalSms = deliveryMode == MessageDeliveryMode.LOCAL_SMS ||
-                            deliveryMode == MessageDeliveryMode.LOCAL_MMS
-
             // Clear UI state immediately
             onClearInput()
             onDraftCleared()
@@ -371,9 +362,8 @@ class ChatSendDelegate @AssistedInject constructor(
             ).fold(
                 onSuccess = { localId ->
                     Timber.d("Message queued via $deliveryMode: $localId")
-                    if (isLocalSms) {
-                        soundPlayer.playSendSound()
-                    }
+                    // Play send sound for all message types (iMessage and SMS)
+                    soundPlayer.playSendSound()
                 },
                 onFailure = { e ->
                     Timber.e(e, "Failed to queue message via $deliveryMode")

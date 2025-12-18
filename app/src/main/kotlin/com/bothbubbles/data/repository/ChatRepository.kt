@@ -250,24 +250,44 @@ class ChatRepository @Inject constructor(
     suspend fun fetchChat(guid: String): Result<ChatEntity> = syncOps.fetchChat(guid)
 
     /**
-     * Mark chat as read on server and locally
+     * Mark chat as read on server and locally.
+     * Uses optimistic local-first update for instant UI feedback.
      */
     suspend fun markChatAsRead(guid: String): Result<Unit> = runCatching {
         // Update locally first for immediate UI feedback
         chatDao.updateUnreadStatus(guid, false)
         chatDao.updateUnreadCount(guid, 0)
 
-        // Then sync to server
-        api.markChatRead(guid)
+        // Sync to server (fire-and-forget, don't block local update)
+        try {
+            val response = api.markChatRead(guid)
+            if (!response.isSuccessful) {
+                Timber.w("Failed to mark chat as read on server: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to sync read status to server for chat: $guid")
+        }
     }
 
     /**
-     * Mark chat as unread locally
+     * Mark chat as unread on server and locally.
+     * Uses optimistic local-first update for instant UI feedback.
      */
     suspend fun markChatAsUnread(guid: String): Result<Unit> = runCatching {
+        // Update locally first for immediate UI feedback
         chatDao.updateUnreadStatus(guid, true)
         // Set unread count to 1 to indicate there are unread messages
         chatDao.updateUnreadCount(guid, 1)
+
+        // Sync to server (fire-and-forget, don't block local update)
+        try {
+            val response = api.markChatUnread(guid)
+            if (!response.isSuccessful) {
+                Timber.w("Failed to mark chat as unread on server: ${response.code()}")
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to sync unread status to server for chat: $guid")
+        }
     }
 
     /**

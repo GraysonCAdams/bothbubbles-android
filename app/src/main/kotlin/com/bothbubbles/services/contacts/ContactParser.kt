@@ -3,6 +3,7 @@ package com.bothbubbles.services.contacts
 import android.content.Context
 import android.provider.ContactsContract
 import timber.log.Timber
+import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -27,14 +28,22 @@ data class PhoneContact(
  */
 @Singleton
 class ContactParser @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val permissionStateMonitor: PermissionStateMonitor
 ) {
     /**
      * Get all contacts from the phone with valid display names.
      * Returns contacts with at least one phone number or email address.
      * Runs on IO dispatcher. Results are sorted by display name.
+     * Returns empty list if contacts permission is not granted.
      */
     suspend fun getAllContacts(): List<PhoneContact> = withContext(Dispatchers.IO) {
+        // Guard: Return empty list if contacts permission was revoked
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.d("Contacts permission not granted - returning empty contact list")
+            return@withContext emptyList()
+        }
+
         val contactsMap = mutableMapOf<Long, PhoneContact>()
 
         try {
@@ -88,6 +97,10 @@ class ContactParser @Inject constructor(
             // Batch query emails for all contacts
             parseEmails(contactsMap)
 
+        } catch (e: SecurityException) {
+            // Permission was revoked after our check - return gracefully
+            Timber.w("SecurityException fetching contacts - permission may have been revoked")
+            return@withContext emptyList()
         } catch (e: Exception) {
             Timber.e(e, "Error fetching contacts")
             return@withContext emptyList()
@@ -102,8 +115,15 @@ class ContactParser @Inject constructor(
     /**
      * Get all phone numbers and emails that belong to starred (favorite) contacts.
      * Returns a set of addresses for quick lookup.
+     * Returns empty set if contacts permission is not granted.
      */
     suspend fun getAllStarredAddresses(): Set<String> = withContext(Dispatchers.IO) {
+        // Guard: Return empty set if contacts permission was revoked
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            Timber.d("Contacts permission not granted - returning empty starred addresses")
+            return@withContext emptySet()
+        }
+
         val starredAddresses = mutableSetOf<String>()
 
         try {
@@ -120,6 +140,9 @@ class ContactParser @Inject constructor(
             // Get emails for starred contacts
             parseStarredEmails(starredContactIds, starredAddresses)
 
+        } catch (e: SecurityException) {
+            // Permission was revoked after our check - return gracefully
+            Timber.w("SecurityException fetching starred addresses - permission may have been revoked")
         } catch (e: Exception) {
             Timber.e(e, "Error fetching starred addresses")
         }

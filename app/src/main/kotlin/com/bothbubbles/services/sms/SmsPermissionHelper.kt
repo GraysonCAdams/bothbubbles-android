@@ -26,7 +26,10 @@ class SmsPermissionHelper @Inject constructor(
 ) {
     companion object {
         /**
-         * All permissions required for full SMS functionality
+         * All permissions required for full SMS functionality.
+         * Note: READ_CONTACTS is NOT included here - it is managed separately
+         * in Privacy settings since contacts access is valuable for iMessage
+         * conversations even without SMS enabled.
          */
         val SMS_PERMISSIONS = arrayOf(
             Manifest.permission.SEND_SMS,
@@ -35,16 +38,14 @@ class SmsPermissionHelper @Inject constructor(
             Manifest.permission.RECEIVE_MMS,
             Manifest.permission.RECEIVE_WAP_PUSH,
             Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.READ_PHONE_NUMBERS,
-            Manifest.permission.READ_CONTACTS
+            Manifest.permission.READ_PHONE_NUMBERS
         )
 
         /**
          * Minimum permissions for basic SMS reading
          */
         val SMS_READ_PERMISSIONS = arrayOf(
-            Manifest.permission.READ_SMS,
-            Manifest.permission.READ_CONTACTS
+            Manifest.permission.READ_SMS
         )
 
         /**
@@ -190,7 +191,6 @@ class SmsPermissionHelper @Inject constructor(
             Manifest.permission.RECEIVE_WAP_PUSH -> "Receive MMS download notifications"
             Manifest.permission.READ_PHONE_STATE -> "Access phone state for dual SIM support"
             Manifest.permission.READ_PHONE_NUMBERS -> "Read your phone number"
-            Manifest.permission.READ_CONTACTS -> "Show contact names in conversations"
             else -> "Unknown permission"
         }
     }

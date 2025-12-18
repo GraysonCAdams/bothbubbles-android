@@ -374,7 +374,13 @@ class ChatComposerDelegate @AssistedInject constructor(
                 onDismissReply()
             }
             is ComposerEvent.ToggleMediaPicker -> {
-                _activePanel.update { if (it == ComposerPanel.MediaPicker) ComposerPanel.None else ComposerPanel.MediaPicker }
+                // Close any picker (MediaPicker or GifPicker), or open MediaPicker if none open
+                _activePanel.update { current ->
+                    when (current) {
+                        ComposerPanel.MediaPicker, ComposerPanel.GifPicker -> ComposerPanel.None
+                        else -> ComposerPanel.MediaPicker
+                    }
+                }
             }
             is ComposerEvent.ToggleEmojiPicker -> {
                 _activePanel.update { if (it == ComposerPanel.EmojiKeyboard) ComposerPanel.None else ComposerPanel.EmojiKeyboard }

@@ -85,6 +85,15 @@ class NotificationPreferences @Inject constructor(
         prefs[Keys.FIREBASE_STORAGE_BUCKET] ?: ""
     }
 
+    /**
+     * Firebase Realtime Database URL.
+     * Used for dynamic server URL sync - the BlueBubbles server writes its current URL
+     * to Firebase Database, allowing the app to auto-update when the server URL changes.
+     */
+    val firebaseDatabaseUrl: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.FIREBASE_DATABASE_URL] ?: ""
+    }
+
     // ===== Background Service =====
 
     val keepAlive: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -154,7 +163,8 @@ class NotificationPreferences @Inject constructor(
         projectId: String,
         appId: String,
         apiKey: String,
-        storageBucket: String
+        storageBucket: String,
+        databaseUrl: String? = null
     ) {
         dataStore.edit { prefs ->
             prefs[Keys.FIREBASE_PROJECT_NUMBER] = projectNumber
@@ -162,6 +172,9 @@ class NotificationPreferences @Inject constructor(
             prefs[Keys.FIREBASE_APP_ID] = appId
             prefs[Keys.FIREBASE_API_KEY] = apiKey
             prefs[Keys.FIREBASE_STORAGE_BUCKET] = storageBucket
+            if (databaseUrl != null) {
+                prefs[Keys.FIREBASE_DATABASE_URL] = databaseUrl
+            }
         }
     }
 
@@ -172,6 +185,7 @@ class NotificationPreferences @Inject constructor(
             prefs.remove(Keys.FIREBASE_APP_ID)
             prefs.remove(Keys.FIREBASE_API_KEY)
             prefs.remove(Keys.FIREBASE_STORAGE_BUCKET)
+            prefs.remove(Keys.FIREBASE_DATABASE_URL)
             prefs.remove(Keys.FCM_TOKEN)
             prefs[Keys.FCM_TOKEN_REGISTERED] = false
         }
@@ -198,6 +212,7 @@ class NotificationPreferences @Inject constructor(
         val FIREBASE_APP_ID = stringPreferencesKey("firebase_app_id")
         val FIREBASE_API_KEY = stringPreferencesKey("firebase_api_key")
         val FIREBASE_STORAGE_BUCKET = stringPreferencesKey("firebase_storage_bucket")
+        val FIREBASE_DATABASE_URL = stringPreferencesKey("firebase_database_url")
 
         // Background
         val KEEP_ALIVE = booleanPreferencesKey("keep_alive")

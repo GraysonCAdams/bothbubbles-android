@@ -287,16 +287,12 @@ fun ChatMessageList(
         scrollDebugLog { "📜 isNewMessage=$isNewMessage (prev=${previousNewestGuid?.takeLast(8)} vs new=${newestGuid.takeLast(8)})" }
         previousNewestGuid = newestGuid
 
-        // For sent messages: always scroll to bottom when near bottom (with animation)
-        if (newestMessage.isFromMe) {
-            if (isNewMessage && isNearBottom) {
-                scrollDebugLog { "📜 SCROLLING for SENT message: isNearBottom=$isNearBottom" }
-                delay(50)
-                listState.animateScrollToItem(0)
-                scrollDebugLog { "📜 Scroll complete for sent, now at index=${listState.firstVisibleItemIndex}" }
-            } else {
-                scrollDebugLog { "📜 SKIP sent message scroll: isNewMessage=$isNewMessage, isNearBottom=$isNearBottom" }
-            }
+        // For sent messages: ALWAYS scroll to bottom so user sees their message
+        if (newestMessage.isFromMe && isNewMessage) {
+            scrollDebugLog { "📜 SCROLLING for SENT message (always scroll for own messages)" }
+            delay(50)
+            listState.animateScrollToItem(0)
+            scrollDebugLog { "📜 Scroll complete for sent, now at index=${listState.firstVisibleItemIndex}" }
             return@LaunchedEffect
         }
 
