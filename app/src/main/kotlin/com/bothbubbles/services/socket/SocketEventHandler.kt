@@ -44,7 +44,11 @@ sealed class UiRefreshEvent {
     data class GroupChatUpdated(val chatGuid: String) : UiRefreshEvent()
 
     /** A message send failed - update UI to show error state */
-    data class MessageSendFailed(val tempGuid: String, val errorMessage: String) : UiRefreshEvent()
+    data class MessageSendFailed(
+        val tempGuid: String,
+        val errorMessage: String,
+        val errorCode: Int = 1
+    ) : UiRefreshEvent()
 
     /** Incoming FaceTime call */
     data class IncomingFaceTime(val caller: String) : UiRefreshEvent()

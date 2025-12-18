@@ -2,6 +2,7 @@ package com.bothbubbles.services.socket
 
 import timber.log.Timber
 import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.util.error.MessageErrorCode
 import com.squareup.moshi.Moshi
 import io.socket.emitter.Emitter
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -98,10 +99,19 @@ class SocketEventParser(
             val tempGuid = data.optString("tempGuid", data.optString("guid", ""))
             val errorMessage = data.optString("error", data.optString("message", "Send failed"))
 
+            // Parse error code from the event data
+            // Server may send errorCode, error_code, or we can parse it from the message
+            val errorCode = when {
+                data.has("errorCode") -> data.optInt("errorCode", MessageErrorCode.GENERIC_ERROR)
+                data.has("error_code") -> data.optInt("error_code", MessageErrorCode.GENERIC_ERROR)
+                data.has("code") -> data.optInt("code", MessageErrorCode.GENERIC_ERROR)
+                else -> MessageErrorCode.parseFromMessage(errorMessage) ?: MessageErrorCode.GENERIC_ERROR
+            }
+
             if (tempGuid.isNotBlank()) {
-                Timber.e("Message send error: $tempGuid - $errorMessage")
-                events.tryEmit(SocketEvent.MessageSendError(tempGuid, errorMessage))
-                developerEventLog.get().logSocketEvent("message-send-error", "guid: ${tempGuid.take(20)}..., error: $errorMessage")
+                Timber.e("Message send error: $tempGuid - $errorMessage (code: $errorCode)")
+                events.tryEmit(SocketEvent.MessageSendError(tempGuid, errorMessage, errorCode))
+                developerEventLog.get().logSocketEvent("message-send-error", "guid: ${tempGuid.take(20)}..., error: $errorMessage, code: $errorCode")
             }
         } catch (e: Exception) {
             Timber.e(e, "Error parsing message send error")

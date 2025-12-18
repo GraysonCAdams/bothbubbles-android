@@ -10,9 +10,13 @@ import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.ReactionClassifier
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.nameinference.NameInferenceService
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -34,7 +38,9 @@ class IncomingMessageHandler @Inject constructor(
     private val chatDao: ChatDao,
     private val attachmentDao: AttachmentDao,
     private val settingsDataStore: SettingsDataStore,
-    private val nameInferenceService: NameInferenceService
+    private val nameInferenceService: NameInferenceService,
+    private val api: BothBubblesApi,
+    @ApplicationScope private val applicationScope: CoroutineScope
 ) : IncomingMessageProcessor {
     /**
      * Handle a new message from server (via Socket.IO or push)
@@ -95,6 +101,7 @@ class IncomingMessageHandler @Inject constructor(
     /**
      * Sync attachments for an incoming message to local database.
      * Incoming attachments are marked as PENDING for auto-download.
+     * Blurhash is fetched asynchronously to not block message processing.
      */
     override suspend fun syncIncomingAttachments(messageDto: MessageDto, tempMessageGuid: String?) {
         // Delete any temp attachments that were created for immediate display
@@ -106,18 +113,68 @@ class IncomingMessageHandler @Inject constructor(
         if (attachments.isNullOrEmpty()) return
 
         val serverAddress = settingsDataStore.serverAddress.first()
+        val attachmentGuidsForBlurhash = mutableListOf<String>()
 
         attachments.forEach { attachmentDto ->
             // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 
+            // Check if this attachment already exists (e.g., from IMessageSenderStrategy)
+            val existingAttachment = attachmentDao.getAttachmentByGuid(attachmentDto.guid)
+
+            Timber.d("[AttachmentSync] syncIncomingAttachments: guid=${attachmentDto.guid}, " +
+                "existing=${existingAttachment != null}, existingMessageGuid=${existingAttachment?.messageGuid}, " +
+                "incomingMessageGuid=${messageDto.guid}, existingLocalPath=${existingAttachment?.localPath}")
+
+            if (existingAttachment != null) {
+                // Attachment already exists - check if it's for the same message (duplicate) or different (self-message)
+                if (existingAttachment.messageGuid == messageDto.guid) {
+                    // Same message - true duplicate, skip
+                    Timber.d("[AttachmentSync] syncIncomingAttachments: duplicate for same message, skipping")
+                    return@forEach
+                }
+
+                // Different message (self-message case) - create a copy for this message
+                // Use a modified GUID since attachment.guid must be unique
+                Timber.d("[AttachmentSync] syncIncomingAttachments: self-message detected, creating copy for inbound")
+                val inboundGuid = "${attachmentDto.guid}-inbound"
+
+                // Check if we already created the inbound copy
+                val existingInboundCopy = attachmentDao.getAttachmentByGuid(inboundGuid)
+                if (existingInboundCopy != null) {
+                    Timber.d("[AttachmentSync] syncIncomingAttachments: inbound copy already exists, skipping")
+                    return@forEach
+                }
+
+                val inboundAttachment = AttachmentEntity(
+                    guid = inboundGuid,
+                    messageGuid = messageDto.guid,
+                    originalRowId = attachmentDto.originalRowId,
+                    uti = attachmentDto.uti,
+                    mimeType = attachmentDto.mimeType,
+                    transferName = attachmentDto.transferName,
+                    totalBytes = attachmentDto.totalBytes,
+                    isOutgoing = false,  // This is the received copy
+                    hideAttachment = attachmentDto.hideAttachment,
+                    width = attachmentDto.width,
+                    height = attachmentDto.height,
+                    hasLivePhoto = attachmentDto.hasLivePhoto,
+                    isSticker = attachmentDto.isSticker,
+                    webUrl = webUrl,
+                    localPath = existingAttachment.localPath,  // Reuse existing local file!
+                    transferState = if (existingAttachment.localPath != null) TransferState.DOWNLOADED.name else TransferState.PENDING.name,
+                    transferProgress = if (existingAttachment.localPath != null) 1f else 0f
+                )
+                attachmentDao.insertAttachment(inboundAttachment)
+                return@forEach
+            }
+
             // Determine transfer state based on direction:
             // - Outbound (isOutgoing=true): Already uploaded, mark as UPLOADED
             // - Inbound: Needs download, mark as PENDING for auto-download
-            val transferState = if (attachmentDto.isOutgoing) {
-                TransferState.UPLOADED.name
-            } else {
-                TransferState.PENDING.name
+            val transferState = when {
+                attachmentDto.isOutgoing -> TransferState.UPLOADED.name
+                else -> TransferState.PENDING.name
             }
 
             val attachment = AttachmentEntity(
@@ -135,10 +192,47 @@ class IncomingMessageHandler @Inject constructor(
                 hasLivePhoto = attachmentDto.hasLivePhoto,
                 isSticker = attachmentDto.isSticker,
                 webUrl = webUrl,
+                localPath = null,  // New inbound attachment - will be downloaded
                 transferState = transferState,
                 transferProgress = if (attachmentDto.isOutgoing) 1f else 0f
             )
             attachmentDao.insertAttachment(attachment)
+
+            // Collect image/video attachments for blurhash fetching
+            val mimeType = attachmentDto.mimeType ?: ""
+            if (!attachmentDto.isOutgoing && (mimeType.startsWith("image/") || mimeType.startsWith("video/"))) {
+                attachmentGuidsForBlurhash.add(attachmentDto.guid)
+            }
+        }
+
+        // Fetch blurhash asynchronously for inbound media attachments
+        // This doesn't block message processing but provides colorful placeholders
+        if (attachmentGuidsForBlurhash.isNotEmpty()) {
+            applicationScope.launch {
+                fetchBlurhashesForAttachments(attachmentGuidsForBlurhash)
+            }
+        }
+    }
+
+    /**
+     * Fetch blurhash from server for the given attachments and update the database.
+     * Called asynchronously to not block message processing.
+     */
+    private suspend fun fetchBlurhashesForAttachments(guids: List<String>) {
+        for (guid in guids) {
+            try {
+                val response = api.getAttachmentBlurhash(guid)
+                if (response.isSuccessful) {
+                    val blurhash = response.body()?.data
+                    if (!blurhash.isNullOrBlank()) {
+                        attachmentDao.updateBlurhash(guid, blurhash)
+                        Timber.d("Updated blurhash for attachment $guid")
+                    }
+                }
+            } catch (e: Exception) {
+                // Blurhash is optional - don't fail on errors
+                Timber.w(e, "Failed to fetch blurhash for attachment $guid")
+            }
         }
     }
 

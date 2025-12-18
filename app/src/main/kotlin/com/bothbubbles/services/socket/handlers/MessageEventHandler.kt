@@ -240,13 +240,13 @@ class MessageEventHandler @Inject constructor(
         event: SocketEvent.MessageSendError,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Timber.e("Message send error: ${event.tempGuid} - ${event.errorMessage}")
+        Timber.e("Message send error: ${event.tempGuid} - ${event.errorMessage} (code: ${event.errorCode})")
 
-        // Update the message in database to mark as failed
-        messageRepository.markMessageAsFailed(event.tempGuid, event.errorMessage)
+        // Update the message in database to mark as failed with the specific error code
+        messageRepository.markMessageAsFailed(event.tempGuid, event.errorMessage, event.errorCode)
 
         // Emit UI refresh event so ChatViewModel can update the message state
-        uiRefreshEvents.tryEmit(UiRefreshEvent.MessageSendFailed(event.tempGuid, event.errorMessage))
+        uiRefreshEvents.tryEmit(UiRefreshEvent.MessageSendFailed(event.tempGuid, event.errorMessage, event.errorCode))
     }
 
     // ===== Private Helper Methods =====

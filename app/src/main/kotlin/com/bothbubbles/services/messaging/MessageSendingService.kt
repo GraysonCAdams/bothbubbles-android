@@ -451,6 +451,20 @@ class MessageSendingService @Inject constructor(
     }
 
     /**
+     * Delete a failed message from the local database.
+     * Only deletes messages with error status > 0.
+     */
+    override suspend fun deleteFailedMessage(messageGuid: String) {
+        val message = messageDao.getMessageByGuid(messageGuid)
+        if (message != null && message.error > 0) {
+            messageDao.softDeleteMessage(messageGuid)
+            Timber.d("Deleted failed message: $messageGuid")
+        } else {
+            Timber.w("Cannot delete message $messageGuid - not a failed message")
+        }
+    }
+
+    /**
      * Forward a message to another conversation.
      * Copies the message text and attachments to the target chat.
      */

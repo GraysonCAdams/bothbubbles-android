@@ -149,13 +149,71 @@ class AttachmentRepository @Inject constructor(
             // webUrl is base download URL - AuthInterceptor adds guid param, AttachmentRepository adds original=true for stickers
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
 
+            // Check if this attachment already exists (e.g., from IMessageSenderStrategy.syncOutboundAttachments)
+            val existingAttachment = attachmentDao.getAttachmentByGuid(attachmentDto.guid)
+
+            Timber.d("[AttachmentSync] syncAttachmentsFromDto: guid=${attachmentDto.guid}, " +
+                "existing=${existingAttachment != null}, existingMessageGuid=${existingAttachment?.messageGuid}, " +
+                "incomingMessageGuid=${messageDto.guid}, existingLocalPath=${existingAttachment?.localPath}")
+
+            if (existingAttachment != null) {
+                // Attachment already exists - check if it's for the same message (duplicate) or different (self-message)
+                if (existingAttachment.messageGuid == messageDto.guid) {
+                    // Same message - true duplicate, skip
+                    Timber.d("[AttachmentSync] syncAttachmentsFromDto: duplicate for same message, skipping")
+                    return@forEach
+                }
+
+                // Different message (self-message case) - create a copy for this message
+                // Use a modified GUID since attachment.guid must be unique
+                Timber.d("[AttachmentSync] syncAttachmentsFromDto: self-message detected, creating copy for inbound")
+                val inboundGuid = "${attachmentDto.guid}-inbound"
+
+                // Check if we already created the inbound copy
+                val existingInboundCopy = attachmentDao.getAttachmentByGuid(inboundGuid)
+                if (existingInboundCopy != null) {
+                    // Inbound copy exists - but check if it needs localPath update
+                    // This handles the race condition where inbound copy was created before
+                    // the outbound attachment got its permanent localPath
+                    if (existingInboundCopy.localPath == null && existingAttachment.localPath != null) {
+                        Timber.d("[AttachmentSync] syncAttachmentsFromDto: updating inbound copy localPath from original: ${existingAttachment.localPath}")
+                        attachmentDao.updateLocalPath(inboundGuid, existingAttachment.localPath)
+                        attachmentDao.updateTransferState(inboundGuid, TransferState.DOWNLOADED.name)
+                    } else {
+                        Timber.d("[AttachmentSync] syncAttachmentsFromDto: inbound copy already exists (localPath=${existingInboundCopy.localPath}), skipping")
+                    }
+                    return@forEach
+                }
+
+                val inboundAttachment = AttachmentEntity(
+                    guid = inboundGuid,
+                    messageGuid = messageDto.guid,
+                    originalRowId = attachmentDto.originalRowId,
+                    uti = attachmentDto.uti,
+                    mimeType = attachmentDto.mimeType,
+                    transferName = attachmentDto.transferName,
+                    totalBytes = attachmentDto.totalBytes,
+                    isOutgoing = false,  // This is the received copy
+                    hideAttachment = attachmentDto.hideAttachment,
+                    width = attachmentDto.width,
+                    height = attachmentDto.height,
+                    hasLivePhoto = attachmentDto.hasLivePhoto,
+                    isSticker = attachmentDto.isSticker,
+                    webUrl = webUrl,
+                    localPath = existingAttachment.localPath,  // Reuse existing local file!
+                    transferState = if (existingAttachment.localPath != null) TransferState.DOWNLOADED.name else TransferState.PENDING.name,
+                    transferProgress = if (existingAttachment.localPath != null) 1f else 0f
+                )
+                attachmentDao.insertAttachment(inboundAttachment)
+                return@forEach
+            }
+
             // Determine transfer state based on direction:
             // - Outbound (isOutgoing=true): Already uploaded, mark as UPLOADED
             // - Inbound: Needs download, mark as PENDING for auto-download
-            val transferState = if (attachmentDto.isOutgoing) {
-                TransferState.UPLOADED.name
-            } else {
-                TransferState.PENDING.name
+            val transferState = when {
+                attachmentDto.isOutgoing -> TransferState.UPLOADED.name
+                else -> TransferState.PENDING.name
             }
 
             val attachment = AttachmentEntity(
@@ -173,6 +231,7 @@ class AttachmentRepository @Inject constructor(
                 hasLivePhoto = attachmentDto.hasLivePhoto,
                 isSticker = attachmentDto.isSticker,
                 webUrl = webUrl,
+                localPath = null,  // New attachment - will be downloaded if inbound
                 transferState = transferState,
                 transferProgress = if (attachmentDto.isOutgoing) 1f else 0f
             )
@@ -211,10 +270,24 @@ class AttachmentRepository @Inject constructor(
         val attachment = attachmentDao.getAttachmentByGuid(attachmentGuid)
             ?: throw Exception("Attachment not found")
 
-        // Check if already downloaded
+        // Check if already downloaded - short-circuit to avoid redundant downloads
+        // This handles the case where outbound attachments were relocated to permanent storage
         attachment.localPath?.let { path ->
-            val existingFile = File(path)
+            // Handle both raw paths and file:// URIs
+            val filePath = if (path.startsWith("file://")) {
+                Uri.parse(path).path ?: path
+            } else {
+                path
+            }
+            val existingFile = File(filePath)
             if (existingFile.exists()) {
+                Timber.d("Attachment $attachmentGuid already exists at $filePath, skipping download")
+                // Ensure transfer state is marked as DOWNLOADED
+                if (attachment.transferState != TransferState.DOWNLOADED.name &&
+                    attachment.transferState != TransferState.UPLOADED.name) {
+                    attachmentDao.updateTransferState(attachmentGuid, TransferState.DOWNLOADED.name)
+                }
+                onProgress?.invoke(1f)
                 return existingFile
             }
         }

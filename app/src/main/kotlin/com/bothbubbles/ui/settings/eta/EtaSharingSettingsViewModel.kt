@@ -47,6 +47,11 @@ class EtaSharingSettingsViewModel @Inject constructor(
     private val contactsService: AndroidContactsService
 ) : ViewModel() {
 
+    companion object {
+        private const val NOTIFICATION_ACCESS_CHECK_DEBOUNCE_MS = 2000L
+    }
+
+    private var lastNotificationAccessCheck = 0L
     private val _hasNotificationAccess = MutableStateFlow(checkNotificationAccess())
 
     // Available contacts for auto-share selection
@@ -106,6 +111,12 @@ class EtaSharingSettingsViewModel @Inject constructor(
     }
 
     fun refreshNotificationAccess() {
+        val now = System.currentTimeMillis()
+        if (now - lastNotificationAccessCheck < NOTIFICATION_ACCESS_CHECK_DEBOUNCE_MS) {
+            Timber.tag("EtaSettings").d("refreshNotificationAccess() debounced")
+            return
+        }
+        lastNotificationAccessCheck = now
         Timber.tag("EtaSettings").d("refreshNotificationAccess() called")
         _hasNotificationAccess.value = checkNotificationAccess()
     }

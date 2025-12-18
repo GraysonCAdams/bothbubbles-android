@@ -43,7 +43,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -67,13 +66,7 @@ fun EtaSharingSettingsScreen(
     onNavigateBack: () -> Unit,
     viewModel: EtaSharingSettingsViewModel = hiltViewModel()
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-
-    // Refresh notification access state when screen is shown
-    LaunchedEffect(Unit) {
-        viewModel.refreshNotificationAccess()
-    }
 
     Scaffold(
         topBar = {
@@ -92,10 +85,7 @@ fun EtaSharingSettingsScreen(
     ) { paddingValues ->
         EtaSharingSettingsContent(
             modifier = Modifier.padding(paddingValues),
-            uiState = uiState,
-            onEnableChanged = viewModel::setEnabled,
-            onChangeNotificationsEnabledChanged = viewModel::setChangeNotificationsEnabled,
-            onMinimumEtaChanged = viewModel::setMinimumEtaMinutes,
+            viewModel = viewModel,
             onOpenNotificationSettings = {
                 context.startActivity(viewModel.getNotificationAccessSettingsIntent())
             }
@@ -107,12 +97,12 @@ fun EtaSharingSettingsScreen(
 fun EtaSharingSettingsContent(
     modifier: Modifier = Modifier,
     viewModel: EtaSharingSettingsViewModel = hiltViewModel(),
-    uiState: EtaSharingSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value,
     onEnableChanged: (Boolean) -> Unit = viewModel::setEnabled,
     onChangeNotificationsEnabledChanged: (Boolean) -> Unit = viewModel::setChangeNotificationsEnabled,
     onMinimumEtaChanged: (Int) -> Unit = viewModel::setMinimumEtaMinutes,
     onOpenNotificationSettings: (() -> Unit)? = null
 ) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val resolvedOnOpenNotificationSettings = onOpenNotificationSettings ?: {
         context.startActivity(viewModel.getNotificationAccessSettingsIntent())

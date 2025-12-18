@@ -196,6 +196,13 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
     private val _socketNewMessage = MutableSharedFlow<String>(extraBufferCapacity = 16)
     val socketNewMessage: SharedFlow<String> = _socketNewMessage.asSharedFlow()
 
+    /**
+     * Trigger to force message list refresh when attachments are updated.
+     * Incremented when downloads complete to cause the combine to re-emit,
+     * which re-fetches attachments from the database with updated localPath.
+     */
+    private val _attachmentRefreshTrigger = MutableStateFlow(0)
+
     /** Count of new messages since entering Archive mode */
     private val _newMessagesSinceArchive = MutableStateFlow(0)
     val newMessagesSinceArchive: StateFlow<Int> = _newMessagesSinceArchive.asStateFlow()
@@ -281,6 +288,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
         startMessageCollection()
         observeNewMessages()
         observeMessageUpdates()
+        observeDownloadCompletions()
         startAdaptivePolling()
         observeForegroundResume()
         observeNewMessagesInArchiveMode()
@@ -294,8 +302,9 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
     private fun startMessageCollection() {
         scope.launch {
-            // Combine viewMode and queryLimit to determine the Room query
-            combine(_viewMode, _queryLimit) { mode, limit ->
+            // Combine viewMode, queryLimit, and refresh trigger to determine the Room query
+            // The refresh trigger forces re-transformation when attachments are updated
+            combine(_viewMode, _queryLimit, _attachmentRefreshTrigger) { mode, limit, _ ->
                 mode to limit
             }.flatMapLatest { (mode, limit) ->
                 when (mode) {
@@ -735,7 +744,8 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 isSticker = attachmentDto.isSticker,
                 transferState = TransferState.PENDING.name,
                 transferProgress = 0f,
-                isOutgoing = false
+                // Use message.isFromMe for UI purposes - if I sent this message, treat attachment as "mine"
+                isOutgoing = message.isFromMe
             )
         }?.toStable() ?: emptyList<AttachmentUiModel>().toStable()
 
@@ -894,6 +904,23 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                     Timber.tag(TAG).d("Socket: Message updated ${event.message.guid}")
                     // Room Flow will automatically emit the update
                 }
+        }
+    }
+
+    /**
+     * Observe download completions and trigger message list refresh.
+     * When an attachment download completes, the localPath in the attachments table is updated,
+     * but the messages table doesn't change. We increment the refresh trigger to force
+     * the message list to re-transform with the updated attachment data.
+     */
+    private fun observeDownloadCompletions() {
+        scope.launch {
+            attachmentDownloadQueue.downloadCompletions.collect { attachmentGuid ->
+                Timber.tag(TAG).d("Download completed: $attachmentGuid, triggering refresh")
+                // Invalidate cache entry for messages that have this attachment
+                // so the next transform will re-fetch and show the updated localPath
+                _attachmentRefreshTrigger.update { it + 1 }
+            }
         }
     }
 
@@ -1147,12 +1174,12 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
     /**
      * Trigger a refresh when attachment state changes (download complete, etc.).
-     * The Room flow will automatically emit new data when attachments change in DB.
-     * This is a no-op for cursor pagination since Room flow handles updates.
+     * This forces the message list to re-transform with updated attachment data,
+     * since the Room messages flow doesn't emit when attachments table changes.
      */
     fun triggerAttachmentRefresh() {
-        // Room flow automatically emits when attachments change
-        // No manual refresh needed for cursor-based pagination
+        Timber.tag(TAG).d("triggerAttachmentRefresh called")
+        _attachmentRefreshTrigger.update { it + 1 }
     }
 
     fun clearActiveChat() {

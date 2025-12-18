@@ -204,11 +204,11 @@ class MessageSendWorker @AssistedInject constructor(
                 Timber.i("[SEND_TRACE] Marking as sent in DB +${System.currentTimeMillis() - workerStartTime}ms")
                 pendingMessageDao.markAsSent(pendingMessageId, sentMessage.guid)
 
-                // Clean up persisted attachments
-                if (attachments.isNotEmpty()) {
-                    Timber.i("[SEND_TRACE] Cleaning up ${attachments.size} attachment files")
-                    attachmentPersistenceManager.cleanupAttachments(attachments.map { it.persistedPath })
-                }
+                // Note: Attachment files are now relocated (not deleted) by IMessageSenderStrategy
+                // during the GUID replacement process. This preserves local previews and prevents
+                // the need to re-download already-uploaded files. The relocation moves files from
+                // pending_attachments/ to attachments/ and updates the database with the new path.
+                Timber.i("[SEND_TRACE] Attachments relocated to permanent storage by IMessageSenderStrategy")
 
                 Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                 Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE: ${System.currentTimeMillis() - workerStartTime}ms total")

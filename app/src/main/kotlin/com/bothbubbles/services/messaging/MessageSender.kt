@@ -116,6 +116,11 @@ interface MessageSender {
     suspend fun canRetryAsSms(messageGuid: String): Boolean
 
     /**
+     * Delete a failed message from the local database.
+     */
+    suspend fun deleteFailedMessage(messageGuid: String)
+
+    /**
      * Forward a message to another conversation.
      */
     suspend fun forwardMessage(

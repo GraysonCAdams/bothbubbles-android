@@ -98,6 +98,8 @@ fun MessageEntity.toUiModel(
         isDelivered = dateDelivered != null,
         isRead = dateRead != null,
         hasError = error != 0,
+        errorCode = error,
+        errorMessage = smsErrorMessage,
         isReaction = associatedMessageType?.contains("reaction") == true,
         attachments = attachmentUiModels.toStable(),
         // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup

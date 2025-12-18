@@ -104,8 +104,8 @@ fun AttachmentPlaceholder(
             // Download button or progress overlay with crossfade animation
             Surface(
                 shape = CircleShape,
-                color = Color.Black.copy(alpha = 0.6f),
-                modifier = Modifier.size(56.dp)
+                color = Color.Black.copy(alpha = 0.7f),
+                modifier = Modifier.size(64.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     // Download icon - fade out when downloading
@@ -118,7 +118,7 @@ fun AttachmentPlaceholder(
                             Icons.Default.Download,
                             contentDescription = "Download attachment",
                             tint = Color.White,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.size(32.dp)
                         )
                     }
                     // Progress indicator - fade in when downloading
@@ -127,23 +127,32 @@ fun AttachmentPlaceholder(
                         enter = fadeIn(tween(100)) + scaleIn(initialScale = 0.8f, animationSpec = tween(100)),
                         exit = fadeOut(tween(100)) + scaleOut(targetScale = 0.8f, animationSpec = tween(100))
                     ) {
-                        if (downloadProgress > 0f) {
-                            // Determinate progress when we have actual progress
-                            CircularProgressIndicator(
-                                progress = { downloadProgress },
-                                modifier = Modifier.size(40.dp),
-                                strokeWidth = 3.dp,
-                                color = Color.White,
-                                trackColor = Color.White.copy(alpha = 0.3f)
-                            )
-                        } else {
-                            // Indeterminate spinner when downloading but no progress yet
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(40.dp),
-                                strokeWidth = 3.dp,
-                                color = Color.White,
-                                trackColor = Color.White.copy(alpha = 0.3f)
-                            )
+                        Box(contentAlignment = Alignment.Center) {
+                            if (downloadProgress > 0f) {
+                                // Determinate progress with colored indicator
+                                CircularProgressIndicator(
+                                    progress = { downloadProgress },
+                                    modifier = Modifier.size(48.dp),
+                                    strokeWidth = 4.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = Color.White.copy(alpha = 0.3f)
+                                )
+                                // Percentage text for clear progress indication
+                                Text(
+                                    text = "${(downloadProgress * 100).toInt()}%",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White,
+                                    modifier = Modifier.padding(top = 2.dp)
+                                )
+                            } else {
+                                // Indeterminate spinner when downloading but no progress yet
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(48.dp),
+                                    strokeWidth = 4.dp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    trackColor = Color.White.copy(alpha = 0.3f)
+                                )
+                            }
                         }
                     }
                 }
@@ -334,35 +343,44 @@ fun BorderlessAttachmentPlaceholder(
         // Download button or progress overlay
         Surface(
             shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.6f),
-            modifier = Modifier.size(56.dp)
+            color = Color.Black.copy(alpha = 0.7f),
+            modifier = Modifier.size(64.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 if (isDownloading) {
-                    if (downloadProgress > 0f) {
-                        // Determinate progress when we have actual progress
-                        CircularProgressIndicator(
-                            progress = { downloadProgress },
-                            modifier = Modifier.size(40.dp),
-                            strokeWidth = 3.dp,
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f)
-                        )
-                    } else {
-                        // Indeterminate spinner when downloading but no progress yet
-                        CircularProgressIndicator(
-                            modifier = Modifier.size(40.dp),
-                            strokeWidth = 3.dp,
-                            color = Color.White,
-                            trackColor = Color.White.copy(alpha = 0.3f)
-                        )
+                    Box(contentAlignment = Alignment.Center) {
+                        if (downloadProgress > 0f) {
+                            // Determinate progress with colored indicator
+                            CircularProgressIndicator(
+                                progress = { downloadProgress },
+                                modifier = Modifier.size(48.dp),
+                                strokeWidth = 4.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                            // Percentage text for clear progress indication
+                            Text(
+                                text = "${(downloadProgress * 100).toInt()}%",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier.padding(top = 2.dp)
+                            )
+                        } else {
+                            // Indeterminate spinner when downloading but no progress yet
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                                strokeWidth = 4.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                                trackColor = Color.White.copy(alpha = 0.3f)
+                            )
+                        }
                     }
                 } else {
                     Icon(
                         Icons.Default.Download,
                         contentDescription = "Download attachment",
                         tint = Color.White,
-                        modifier = Modifier.size(28.dp)
+                        modifier = Modifier.size(32.dp)
                     )
                 }
             }

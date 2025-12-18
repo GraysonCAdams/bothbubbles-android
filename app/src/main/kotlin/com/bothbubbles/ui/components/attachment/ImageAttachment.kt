@@ -63,7 +63,17 @@ fun ImageAttachment(
 
     // Use full-resolution image for crisp display in chat (thumbnails are only 300px)
     // Coil handles memory-efficient loading via size() constraint
-    val imageUrl = attachment.localPath ?: attachment.webUrl
+    // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
+    val imageUrl = if (attachment.localPath != null) {
+        attachment.localPath
+    } else if (attachment.isOutgoing) {
+        attachment.webUrl  // Outgoing can try webUrl (server may allow)
+    } else {
+        null  // Inbound must wait for auto-download - can't auth to server from Coil
+    }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -118,14 +128,17 @@ fun ImageAttachment(
                     }
                 }
             )
+        } else if (isAwaitingDownload) {
+            // No URL available yet - waiting for auto-download to complete
+            Timber.tag("AttachmentDebug").d("🖼️ ImageAttachment AWAITING DOWNLOAD: guid=${attachment.guid}")
         } else {
             isError = true
             Timber.tag("AttachmentDebug").e("🖼️ ImageAttachment NO URL: guid=${attachment.guid}")
         }
 
-        // Loading indicator with fade animation - minimal for transparent images
+        // Loading indicator with fade animation - show when Coil loading OR awaiting download
         AnimatedVisibility(
-            visible = isLoading,
+            visible = isLoading || isAwaitingDownload,
             enter = fadeIn(tween(MotionTokens.Duration.QUICK, easing = MotionTokens.Easing.Standard)),
             exit = fadeOut(tween(MotionTokens.Duration.FAST, easing = MotionTokens.Easing.Standard))
         ) {
@@ -244,7 +257,17 @@ fun GifAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    val imageUrl = attachment.localPath ?: attachment.webUrl
+    // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
+    val imageUrl = if (attachment.localPath != null) {
+        attachment.localPath
+    } else if (attachment.isOutgoing) {
+        attachment.webUrl
+    } else {
+        null  // Inbound must wait for auto-download
+    }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -286,12 +309,14 @@ fun GifAttachment(
                     isError = state is AsyncImagePainter.State.Error
                 }
             )
+        } else if (isAwaitingDownload) {
+            // No URL available yet - waiting for auto-download
         } else {
             isError = true
         }
 
-        // Loading indicator - minimal for transparent GIFs
-        if (isLoading) {
+        // Loading indicator - show when Coil loading OR awaiting download
+        if (isLoading || isAwaitingDownload) {
             if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
@@ -435,42 +460,64 @@ fun BorderlessImageAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
-    // Force download first to trigger HEIC->PNG conversion
-    // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
-    val imageUrl = if (attachment.isSticker) {
-        Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: isSticker=true, using localPath only")
-        attachment.localPath  // null if not downloaded, will show error/placeholder
-    } else {
-        val path = attachment.localPath
-        if (path != null) {
-            // Check if file exists (if it's a file path or file URI)
-            // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
-            val file = try {
-                if (path.startsWith("file://")) {
-                    File(Uri.parse(path).path ?: "")
-                } else if (path.startsWith("/")) {
-                    File(path)
-                } else {
+    // Memoize file resolution to avoid File allocations and exists() checks on every recomposition
+    // Key on localPath and webUrl to recalculate only when attachment data changes
+    // IMPORTANT: Don't fall back to webUrl - Coil doesn't have auth headers and will get 401
+    // Instead, return null and show loading state while auto-download completes
+    val imageUrl = remember(attachment.localPath, attachment.webUrl, attachment.isSticker, attachment.isOutgoing) {
+        // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
+        // Force download first to trigger HEIC->PNG conversion
+        // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
+        if (attachment.isSticker) {
+            Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: isSticker=true, using localPath only")
+            attachment.localPath  // null if not downloaded, will show loading/placeholder
+        } else {
+            val path = attachment.localPath
+            if (path != null) {
+                // Check if file exists (if it's a file path or file URI)
+                // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
+                val file = try {
+                    if (path.startsWith("file://")) {
+                        File(Uri.parse(path).path ?: "")
+                    } else if (path.startsWith("/")) {
+                        File(path)
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
+                    Timber.tag("AttachmentDebug").e(e, "🖼️ BorderlessImage: Exception checking file: $path")
                     null
                 }
-            } catch (e: Exception) {
-                Timber.tag("AttachmentDebug").e(e, "🖼️ BorderlessImage: Exception checking file: $path")
-                null
-            }
 
-            if (file != null && !file.exists()) {
-                Timber.tag("AttachmentDebug").w("🖼️ BorderlessImage: Local file MISSING, falling back to webUrl: $path")
-                attachment.webUrl // Fallback if file missing
+                if (file != null && !file.exists()) {
+                    // File was deleted - for outgoing, try webUrl; for inbound, return null (await re-download)
+                    if (attachment.isOutgoing) {
+                        Timber.tag("AttachmentDebug").w("🖼️ BorderlessImage: Outgoing local file MISSING, falling back to webUrl: $path")
+                        attachment.webUrl
+                    } else {
+                        Timber.tag("AttachmentDebug").w("🖼️ BorderlessImage: Inbound local file MISSING, awaiting download: $path")
+                        null  // Will trigger auto-download, show loading
+                    }
+                } else {
+                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Using localPath: $path (exists=${file?.exists()})")
+                    path // Use local path (it exists or is a content URI we can't easily check)
+                }
             } else {
-                Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Using localPath: $path (exists=${file?.exists()})")
-                path // Use local path (it exists or is a content URI we can't easily check)
+                // No localPath - for outgoing attachments we can try webUrl, but for inbound we must wait for download
+                // because Coil doesn't have auth headers for the server API
+                if (attachment.isOutgoing) {
+                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Outgoing no localPath, using webUrl: ${attachment.webUrl}")
+                    attachment.webUrl
+                } else {
+                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Inbound no localPath, awaiting download (webUrl=${attachment.webUrl})")
+                    null  // Don't try webUrl - Coil can't auth. Show loading state instead.
+                }
             }
-        } else {
-            Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: No localPath, using webUrl: ${attachment.webUrl}")
-            attachment.webUrl
         }
     }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -546,13 +593,18 @@ fun BorderlessImageAttachment(
                     }
                 }
             )
+        } else if (isAwaitingDownload) {
+            // No URL available yet - waiting for auto-download to complete
+            // Don't set isError, show loading state instead
+            Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage AWAITING DOWNLOAD: guid=${attachment.guid}")
         } else {
+            // Truly no URL (shouldn't happen for valid attachments)
             isError = true
             Timber.tag("AttachmentDebug").e("🖼️ BorderlessImage NO URL: guid=${attachment.guid}")
         }
 
-        // Loading indicator - minimal for transparent images
-        if (isLoading) {
+        // Loading indicator - show when Coil is loading OR when awaiting download
+        if (isLoading || isAwaitingDownload) {
             if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),
@@ -627,37 +679,46 @@ fun BorderlessGifAttachment(
     var isLoading by remember { mutableStateOf(true) }
     var isError by remember { mutableStateOf(false) }
 
-    // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
-    // Force download first to trigger HEIC->PNG conversion
-    // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
-    val imageUrl = if (attachment.isSticker) {
-        attachment.localPath  // null if not downloaded, will show error/placeholder
-    } else {
-        val path = attachment.localPath
-        if (path != null) {
-            // Check if file exists (if it's a file path or file URI)
-            // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
-            val file = try {
-                if (path.startsWith("file://")) {
-                    File(Uri.parse(path).path ?: "")
-                } else if (path.startsWith("/")) {
-                    File(path)
-                } else {
+    // Memoize file resolution to avoid File allocations and exists() checks on every recomposition
+    // IMPORTANT: Don't fall back to webUrl for inbound - Coil doesn't have auth headers
+    val imageUrl = remember(attachment.localPath, attachment.webUrl, attachment.isSticker, attachment.isOutgoing) {
+        // For stickers, don't fall back to webUrl (HEIC doesn't work, needs PNG conversion)
+        // Force download first to trigger HEIC->PNG conversion
+        // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
+        if (attachment.isSticker) {
+            attachment.localPath  // null if not downloaded, will show loading/placeholder
+        } else {
+            val path = attachment.localPath
+            if (path != null) {
+                // Check if file exists (if it's a file path or file URI)
+                // This prevents broken thumbnails if the local file was deleted (e.g. pending attachment cleanup)
+                val file = try {
+                    if (path.startsWith("file://")) {
+                        File(Uri.parse(path).path ?: "")
+                    } else if (path.startsWith("/")) {
+                        File(path)
+                    } else {
+                        null
+                    }
+                } catch (e: Exception) {
                     null
                 }
-            } catch (e: Exception) {
-                null
-            }
 
-            if (file != null && !file.exists()) {
-                attachment.webUrl // Fallback if file missing
+                if (file != null && !file.exists()) {
+                    // File was deleted - for outgoing, try webUrl; for inbound, return null
+                    if (attachment.isOutgoing) attachment.webUrl else null
+                } else {
+                    path // Use local path (it exists or is a content URI we can't easily check)
+                }
             } else {
-                path // Use local path (it exists or is a content URI we can't easily check)
+                // No localPath - for outgoing we can try webUrl, for inbound we must wait for download
+                if (attachment.isOutgoing) attachment.webUrl else null
             }
-        } else {
-            attachment.webUrl
         }
     }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = imageUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio for proper sizing
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
@@ -716,12 +777,15 @@ fun BorderlessGifAttachment(
                     isError = state is AsyncImagePainter.State.Error
                 }
             )
+        } else if (isAwaitingDownload) {
+            // No URL available yet - waiting for auto-download to complete
+            // Don't set isError, show loading state instead
         } else {
             isError = true
         }
 
-        // Loading indicator - minimal for transparent GIFs
-        if (isLoading) {
+        // Loading indicator - show when Coil is loading OR when awaiting download
+        if (isLoading || isAwaitingDownload) {
             if (isTransparent) {
                 CircularProgressIndicator(
                     modifier = Modifier.size(32.dp),

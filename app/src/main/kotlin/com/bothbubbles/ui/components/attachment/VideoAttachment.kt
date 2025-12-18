@@ -70,7 +70,18 @@ fun VideoAttachment(
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val videoUrl = attachment.localPath ?: attachment.webUrl
+    // IMPORTANT: Don't fall back to webUrl for inbound - ExoPlayer OkHttp doesn't have auth headers
+    // The auth interceptor is only on the Retrofit client, not the ExoPlayer data source
+    val videoUrl = if (attachment.localPath != null) {
+        attachment.localPath
+    } else if (attachment.isOutgoing) {
+        attachment.webUrl  // Outgoing can try webUrl (server may allow)
+    } else {
+        null  // Inbound must wait for auto-download - can't auth to server from ExoPlayer
+    }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = videoUrl == null && !attachment.isOutgoing
 
     // DEBUG LOGGING
     Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -78,6 +89,7 @@ fun VideoAttachment(
     Timber.tag("AttachmentDebug").d("   RESOLVED videoUrl=$videoUrl")
     Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}")
     Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
+    Timber.tag("AttachmentDebug").d("   isOutgoing=${attachment.isOutgoing}, isAwaitingDownload=$isAwaitingDownload")
     Timber.tag("AttachmentDebug").d("   mimeType=${attachment.mimeType}")
     Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 

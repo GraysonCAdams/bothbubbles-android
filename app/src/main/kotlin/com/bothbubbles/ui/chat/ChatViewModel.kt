@@ -285,7 +285,7 @@ class ChatViewModel @Inject constructor(
                         participantAvatarPaths = infoState.participantAvatarPaths,
                         participantPhone = infoState.participantPhone,
                         isLocalSmsChat = infoState.isLocalSmsChat,
-                        smsInputBlocked = infoState.smsInputBlocked,
+                        // smsInputBlocked is combined from both info and connection states below
                         isIMessageChat = infoState.isIMessageChat,
                         showSaveContactBanner = infoState.showSaveContactBanner,
                         unsavedSenderAddress = infoState.unsavedSenderAddress,
@@ -294,6 +294,20 @@ class ChatViewModel @Inject constructor(
                         snoozeUntil = infoState.snoozeUntil
                     )
                 }
+            }
+        }
+
+        // Combine smsInputBlocked from both sources:
+        // - ChatInfoDelegate: blocked due to SMS permissions (not default SMS app)
+        // - ChatConnectionDelegate: blocked due to server fallback unavailable
+        viewModelScope.launch {
+            combine(
+                chatInfo.state,
+                connection.state
+            ) { infoState, connState ->
+                infoState.smsInputBlocked || connState.serverFallbackBlocked
+            }.collect { blocked ->
+                _uiState.update { it.copy(smsInputBlocked = blocked) }
             }
         }
 
@@ -366,15 +380,16 @@ class ChatViewModel @Inject constructor(
                 isIMessageChat = currentState.isIMessageChat,
                 isLocalSmsChat = currentState.isLocalSmsChat,
                 participantPhone = currentState.participantPhone
-            ) { available, isChecking, mode, canToggle, showReveal, smsBlocked ->
+            ) { available, isChecking, mode, canToggle, showReveal ->
                 _uiState.update { state ->
                     state.copy(
                         contactIMessageAvailable = available,
                         isCheckingIMessageAvailability = isChecking,
                         currentSendMode = mode,
                         canToggleSendMode = canToggle,
-                        showSendModeRevealAnimation = showReveal,
-                        smsInputBlocked = smsBlocked
+                        showSendModeRevealAnimation = showReveal
+                        // Note: smsInputBlocked is now solely controlled by ChatInfoDelegate (permissions)
+                        // and combined with ChatConnectionDelegate.serverFallbackBlocked
                     )
                 }
                 // Initialize tutorial if toggle just became available

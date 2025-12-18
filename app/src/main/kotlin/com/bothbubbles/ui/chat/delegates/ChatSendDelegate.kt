@@ -443,6 +443,15 @@ class ChatSendDelegate @AssistedInject constructor(
     }
 
     /**
+     * Delete a failed message from the local database.
+     */
+    fun deleteFailedMessage(messageGuid: String) {
+        scope.launch {
+            messageSender.deleteFailedMessage(messageGuid)
+        }
+    }
+
+    /**
      * Clear the forward success flag.
      */
     fun clearForwardSuccess() {

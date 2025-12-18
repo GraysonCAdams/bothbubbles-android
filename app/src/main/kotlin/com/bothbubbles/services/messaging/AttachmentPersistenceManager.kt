@@ -31,10 +31,15 @@ class AttachmentPersistenceManager @Inject constructor(
     companion object {
         private const val TAG = "AttachmentPersistence"
         private const val PENDING_DIR = "pending_attachments"
+        private const val ATTACHMENTS_DIR = "attachments"
     }
 
     private val pendingDir: File by lazy {
         File(context.filesDir, PENDING_DIR).also { it.mkdirs() }
+    }
+
+    private val attachmentsDir: File by lazy {
+        File(context.filesDir, ATTACHMENTS_DIR).also { it.mkdirs() }
     }
 
     /**
@@ -98,6 +103,79 @@ class AttachmentPersistenceManager @Inject constructor(
             } catch (e: Exception) {
                 Timber.w(e, "Failed to delete $path")
             }
+        }
+    }
+
+    /**
+     * Relocate an attachment from pending_attachments to permanent attachments directory.
+     * This preserves the local file through the GUID replacement process, preventing
+     * the need to re-download already-uploaded files.
+     *
+     * @param pendingPath The path in pending_attachments directory
+     * @param serverGuid The server-assigned GUID for the attachment
+     * @return The new permanent path, or null if relocation failed
+     */
+    suspend fun relocateAttachment(pendingPath: String, serverGuid: String): String? = withContext(Dispatchers.IO) {
+        try {
+            val sourceFile = File(pendingPath)
+            if (!sourceFile.exists()) {
+                Timber.w("Cannot relocate: source file doesn't exist: $pendingPath")
+                return@withContext null
+            }
+
+            // Only relocate files from pending_attachments directory
+            if (!pendingPath.contains(PENDING_DIR)) {
+                Timber.d("File not in pending directory, no relocation needed: $pendingPath")
+                return@withContext pendingPath
+            }
+
+            // Determine extension from source file
+            val extension = sourceFile.extension.takeIf { it.isNotEmpty() }?.let { ".$it" } ?: ""
+            val destFileName = "${serverGuid}$extension"
+            val destFile = File(attachmentsDir, destFileName)
+
+            // Copy file to permanent location (use copy instead of rename for cross-filesystem safety)
+            sourceFile.copyTo(destFile, overwrite = true)
+
+            // Verify copy succeeded
+            if (!destFile.exists() || destFile.length() != sourceFile.length()) {
+                Timber.e("Relocation copy failed: source=${sourceFile.length()}, dest=${destFile.length()}")
+                destFile.delete()
+                return@withContext null
+            }
+
+            // Delete the original pending file
+            if (sourceFile.delete()) {
+                Timber.d("Relocated attachment: $pendingPath -> ${destFile.absolutePath}")
+            } else {
+                Timber.w("Could not delete source after relocation: $pendingPath")
+            }
+
+            destFile.absolutePath
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to relocate attachment: $pendingPath")
+            null
+        }
+    }
+
+    /**
+     * Relocate multiple attachments in a batch.
+     *
+     * @param pendingPaths List of paths in pending_attachments directory
+     * @param serverGuids List of server-assigned GUIDs (must match pendingPaths order)
+     * @return List of new permanent paths (null entries for failed relocations)
+     */
+    suspend fun relocateAttachments(
+        pendingPaths: List<String>,
+        serverGuids: List<String>
+    ): List<String?> = withContext(Dispatchers.IO) {
+        if (pendingPaths.size != serverGuids.size) {
+            Timber.e("Mismatched paths/guids: ${pendingPaths.size} vs ${serverGuids.size}")
+            return@withContext pendingPaths.map { null }
+        }
+
+        pendingPaths.zip(serverGuids).map { (path, guid) ->
+            relocateAttachment(path, guid)
         }
     }
 

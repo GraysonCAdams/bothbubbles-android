@@ -184,6 +184,7 @@ class PendingMessageRepository @Inject constructor(
             messageDao.insertMessage(localEcho)
 
             // 4. Create attachment entities for immediate display
+            // Store raw absolute paths (not file:// URIs) so downstream code works consistently
             persistedAttachments.forEach { data ->
                 val attachmentEntity = AttachmentEntity(
                     guid = data.localId,
@@ -192,7 +193,7 @@ class PendingMessageRepository @Inject constructor(
                     transferName = data.fileName,
                     totalBytes = data.fileSize,
                     isOutgoing = true,
-                    localPath = Uri.fromFile(File(data.persistedPath)).toString(),
+                    localPath = data.persistedPath,  // Raw path, not file:// URI
                     transferState = TransferState.UPLOADING.name,
                     transferProgress = 0f
                 )

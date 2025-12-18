@@ -24,9 +24,11 @@ import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.core.network.api.dto.SendMessageRequest
 import com.bothbubbles.services.media.ImageCompressor
 import com.bothbubbles.services.media.VideoCompressor
+import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.util.error.AttachmentErrorState
 import com.bothbubbles.util.error.MessageError
+import com.bothbubbles.util.error.MessageErrorCode
 import com.bothbubbles.util.error.NetworkError
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -59,7 +61,8 @@ class IMessageSenderStrategy @Inject constructor(
     private val api: BothBubblesApi,
     private val settingsDataStore: SettingsDataStore,
     private val videoCompressor: VideoCompressor,
-    private val imageCompressor: ImageCompressor
+    private val imageCompressor: ImageCompressor,
+    private val attachmentPersistenceManager: AttachmentPersistenceManager
 ) : MessageSenderStrategy {
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
@@ -135,9 +138,14 @@ class IMessageSenderStrategy @Inject constructor(
             val body = response.body()
             if (!response.isSuccessful || body == null || body.status != 200) {
                 Timber.e("[SEND_TRACE] API FAILED: code=${response.code()}, message=${body?.message}")
-                messageDao.updateErrorStatus(tempGuid, 1)
+                // Parse error code from response - check for specific error codes like 22
+                val errorCode = MessageErrorCode.parseFromMessage(body?.message)
+                    ?: MessageErrorCode.parseFromMessage(body?.error?.message)
+                    ?: if (response.code() >= 500) MessageErrorCode.SERVER_ERROR
+                    else MessageErrorCode.GENERIC_ERROR
+                messageDao.updateMessageError(tempGuid, errorCode, body?.message)
                 return SendResult.Failure(
-                    MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message"),
+                    MessageError.SendFailed(tempGuid, body?.message ?: MessageErrorCode.getUserMessage(errorCode)),
                     tempGuid
                 )
             }
@@ -165,7 +173,8 @@ class IMessageSenderStrategy @Inject constructor(
             }
         } catch (e: Exception) {
             Timber.e("[SEND_TRACE] sendTextOnly EXCEPTION: ${e.message}")
-            messageDao.updateErrorStatus(tempGuid, 1)
+            val errorCode = MessageErrorCode.fromException(e)
+            messageDao.updateMessageError(tempGuid, errorCode, e.message)
             return SendResult.Failure(e, tempGuid)
         }
     }
@@ -249,7 +258,8 @@ class IMessageSenderStrategy @Inject constructor(
                 if (attachmentResult.isFailure) {
                     val error = attachmentResult.exceptionOrNull() ?: Exception("Upload failed")
                     val errorState = AttachmentErrorState.fromException(error)
-                    messageDao.updateErrorStatus(tempGuid, 1)
+                    val errorCode = MessageErrorCode.fromException(error)
+                    messageDao.updateMessageError(tempGuid, errorCode, error.message)
                     attachmentDao.markTransferFailedWithError(tempAttGuid, errorState.type, errorState.userMessage)
                     _uploadProgress.value = null
                     return SendResult.Failure(error, tempGuid)
@@ -282,9 +292,13 @@ class IMessageSenderStrategy @Inject constructor(
 
                 val body = response.body()
                 if (!response.isSuccessful || body == null || body.status != 200) {
-                    messageDao.updateErrorStatus(tempGuid, 1)
+                    val errorCode = MessageErrorCode.parseFromMessage(body?.message)
+                        ?: MessageErrorCode.parseFromMessage(body?.error?.message)
+                        ?: if (response.code() >= 500) MessageErrorCode.SERVER_ERROR
+                        else MessageErrorCode.GENERIC_ERROR
+                    messageDao.updateMessageError(tempGuid, errorCode, body?.message)
                     return SendResult.Failure(
-                        MessageError.SendFailed(tempGuid, body?.message ?: "Failed to send message"),
+                        MessageError.SendFailed(tempGuid, body?.message ?: MessageErrorCode.getUserMessage(errorCode)),
                         tempGuid
                     )
                 }
@@ -294,11 +308,22 @@ class IMessageSenderStrategy @Inject constructor(
             lastResponse?.let { serverMessage ->
                 // 1. Capture local paths BEFORE any DB operations
                 val tempAttachments = attachmentDao.getAttachmentsForMessage(tempGuid)
-                val preservedLocalPaths = tempAttachments.mapNotNull { att ->
-                    att.localPath?.takeUnless { it.contains("/pending_attachments/") }
+                val pendingLocalPaths = tempAttachments.mapNotNull { it.localPath }
+
+                // 2. Relocate files from pending_attachments to permanent attachments directory
+                // This preserves local files through GUID replacement, preventing re-download
+                val serverAttachmentGuids = serverMessage.attachments?.map { it.guid } ?: emptyList()
+                val relocatedPaths = if (pendingLocalPaths.isNotEmpty() && serverAttachmentGuids.isNotEmpty()) {
+                    attachmentPersistenceManager.relocateAttachments(pendingLocalPaths, serverAttachmentGuids)
+                } else {
+                    pendingLocalPaths.map { null }
                 }
 
-                // 2. Perform the replacement (safe with DAO race handling)
+                // 3. Delete temp attachments BEFORE replacing message GUID
+                // They reference tempGuid which will become orphaned after replaceGuid
+                attachmentDao.deleteAttachmentsForMessage(tempGuid)
+
+                // 4. Perform the replacement (safe with DAO race handling)
                 try {
                     messageDao.replaceGuid(tempGuid, serverMessage.guid)
                 } catch (e: Exception) {
@@ -307,9 +332,9 @@ class IMessageSenderStrategy @Inject constructor(
                     runCatching { messageDao.deleteMessage(tempGuid) }
                 }
 
-                // 3. ALWAYS sync attachments, linking the local file to the server message
-                // This prevents the "DOWNLOADING" state and re-download of already-uploaded files
-                syncOutboundAttachments(serverMessage, preservedLocalPaths)
+                // 5. Sync attachments with server GUIDs and relocated paths (permanent location)
+                // This creates new attachment entries with server GUIDs linked to the server message
+                syncOutboundAttachments(serverMessage, relocatedPaths.filterNotNull())
 
                 return SendResult.Success(serverMessage.toEntity(options.chatGuid))
             }
@@ -323,7 +348,8 @@ class IMessageSenderStrategy @Inject constructor(
             return SendResult.Success(message)
 
         } catch (e: Exception) {
-            messageDao.updateErrorStatus(tempGuid, 1)
+            val errorCode = MessageErrorCode.fromException(e)
+            messageDao.updateMessageError(tempGuid, errorCode, e.message)
             _uploadProgress.value = null
             return SendResult.Failure(e, tempGuid)
         }
@@ -422,7 +448,13 @@ class IMessageSenderStrategy @Inject constructor(
         if (attachments.isNullOrEmpty()) return
         val serverAddress = settingsDataStore.serverAddress.first()
 
+        Timber.d("[AttachmentSync] syncOutboundAttachments: messageGuid=${messageDto.guid}, " +
+            "attachmentCount=${attachments.size}, preservedLocalPaths=$preservedLocalPaths")
+
         attachments.forEachIndexed { index, attachmentDto ->
+            val localPath = preservedLocalPaths.getOrNull(index)
+            Timber.d("[AttachmentSync] syncOutboundAttachments: guid=${attachmentDto.guid}, localPath=$localPath")
+
             val webUrl = "$serverAddress/api/v1/attachment/${attachmentDto.guid}/download"
             val attachment = AttachmentEntity(
                 guid = attachmentDto.guid,
@@ -439,7 +471,7 @@ class IMessageSenderStrategy @Inject constructor(
                 hasLivePhoto = attachmentDto.hasLivePhoto,
                 isSticker = attachmentDto.isSticker,
                 webUrl = webUrl,
-                localPath = preservedLocalPaths.getOrNull(index),
+                localPath = localPath,
                 transferState = TransferState.UPLOADED.name,
                 transferProgress = 1f
             )

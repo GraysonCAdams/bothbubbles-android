@@ -1,13 +1,9 @@
 package com.bothbubbles.services.eta
 
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import timber.log.Timber
-import androidx.core.app.NotificationCompat
-import com.bothbubbles.MainActivity
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.di.ApplicationScope
 import dagger.hilt.android.AndroidEntryPoint
@@ -100,79 +96,11 @@ class EtaSharingReceiver : BroadcastReceiver() {
         cancelSharingNotification(context)
     }
 
-    /**
-     * Show the "sharing active" notification
-     */
     private fun showSharingNotification(context: Context, recipientName: String, etaMinutes: Int) {
-        val stopIntent = Intent(ACTION_STOP_SHARING).apply {
-            setPackage(context.packageName)
-        }
-        val stopPendingIntent = PendingIntent.getBroadcast(
-            context,
-            0,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val openIntent = Intent(context, MainActivity::class.java)
-        val openPendingIntent = PendingIntent.getActivity(
-            context,
-            0,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val etaText = if (etaMinutes > 0) " (${formatEtaMinutes(etaMinutes)})" else ""
-        val contentTitle = "Sharing ETA with $recipientName"
-        val contentText = "You're sharing your arrival time$etaText"
-
-        val notification = NotificationCompat.Builder(context, NavigationListenerService.CHANNEL_ETA_SHARING)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(contentTitle)
-            .setContentText(contentText)
-            .setOngoing(true)
-            .setContentIntent(openPendingIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop Sharing",
-                stopPendingIntent
-            )
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            // Android Auto support
-            .extend(
-                NotificationCompat.CarExtender()
-                    .setUnreadConversation(
-                        NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
-                            .addMessage(contentText)
-                            .setLatestTimestamp(System.currentTimeMillis())
-                            .setReplyAction(stopPendingIntent, null)
-                            .build()
-                    )
-            )
-            .build()
-
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.notify(NavigationListenerService.NOTIFICATION_ID_ETA_SHARING, notification)
-
-        // Cancel the prompt notification when sharing starts
-        notificationManager.cancel(NavigationListenerService.NOTIFICATION_ID_ETA_PROMPT)
+        EtaNotificationHelper.showSharingNotification(context, recipientName, etaMinutes)
     }
 
     private fun cancelSharingNotification(context: Context) {
-        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        notificationManager.cancel(NavigationListenerService.NOTIFICATION_ID_ETA_SHARING)
-    }
-
-    private fun formatEtaMinutes(minutes: Int): String {
-        return when {
-            minutes < 1 -> "Arriving"
-            minutes < 60 -> "$minutes min"
-            else -> {
-                val hours = minutes / 60
-                val mins = minutes % 60
-                if (mins > 0) "${hours}h ${mins}m" else "${hours}h"
-            }
-        }
+        EtaNotificationHelper.cancelSharingNotification(context)
     }
 }

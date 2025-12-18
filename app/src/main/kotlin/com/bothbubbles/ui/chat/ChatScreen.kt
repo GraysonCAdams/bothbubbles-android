@@ -377,6 +377,8 @@ fun ChatScreen(
                 onClearReply = viewModel.send::clearReply,
                 onLoadThread = viewModel.thread::loadThread,
                 onRetryMessage = viewModel.send::retryMessage,
+                onRetryAsSms = viewModel.send::retryMessageAsSms,
+                onDeleteMessage = viewModel.send::deleteFailedMessage,
                 onCanRetryAsSms = viewModel.send::canRetryAsSms,
                 onForwardRequest = { message ->
                     currentState.messageToForward = message

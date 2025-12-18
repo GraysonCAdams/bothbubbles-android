@@ -82,6 +82,8 @@ import com.bothbubbles.util.parsing.DateParsingUtils
 import com.bothbubbles.util.parsing.DetectedPhoneNumber
 import com.bothbubbles.util.parsing.DetectedUrl
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
+import com.bothbubbles.ui.components.dialogs.FailedMessageDialog
+import com.bothbubbles.util.error.MessageErrorCode
 import kotlinx.coroutines.launch
 import kotlin.math.absoluteValue
 import kotlin.math.roundToInt
@@ -105,6 +107,9 @@ internal fun SimpleBubbleContent(
     onReply: ((String) -> Unit)? = null,
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
     onRetry: ((String) -> Unit)? = null,
+    onRetryAsSms: ((String) -> Unit)? = null,
+    onDeleteMessage: ((String) -> Unit)? = null,
+    canRetryAsSms: Boolean = false,
     onBoundsChanged: ((Rect) -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
@@ -169,6 +174,9 @@ internal fun SimpleBubbleContent(
 
     // Delivery status legend dialog state
     var showStatusLegend by remember { mutableStateOf(false) }
+
+    // Failed message dialog state
+    var showFailedMessageDialog by remember { mutableStateOf(false) }
 
     // Detect dates in message text for underlining
     val detectedDates = remember(message.text) {
@@ -731,8 +739,11 @@ internal fun SimpleBubbleContent(
                 }
             }
 
-            // Retry button for failed outbound messages
-            if (message.hasError && message.isFromMe && onRetry != null) {
+            // Error indicator and actions for failed outbound messages
+            if (message.hasError && message.isFromMe) {
+                val errorTitle = MessageErrorCode.getErrorTitle(message.errorCode)
+                val suggestsSms = MessageErrorCode.suggestsSmsRetry(message.errorCode)
+
                 Row(
                     modifier = Modifier
                         .align(Alignment.End)
@@ -740,13 +751,15 @@ internal fun SimpleBubbleContent(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Show specific error title for error 22, otherwise generic "Not Delivered"
                     Text(
-                        text = "Not Delivered",
+                        text = if (suggestsSms) errorTitle else "Not Delivered",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.error
                     )
+                    // Tap to see details button
                     Surface(
-                        onClick = { onRetry(message.guid) },
+                        onClick = { showFailedMessageDialog = true },
                         color = MaterialTheme.colorScheme.errorContainer,
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.height(24.dp)
@@ -758,12 +771,12 @@ internal fun SimpleBubbleContent(
                         ) {
                             Icon(
                                 Icons.Default.Refresh,
-                                contentDescription = "Retry",
+                                contentDescription = "Retry options",
                                 tint = MaterialTheme.colorScheme.error,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = "Retry",
+                                text = if (suggestsSms && canRetryAsSms) "Try SMS" else "Retry",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.error
                             )
@@ -778,6 +791,18 @@ internal fun SimpleBubbleContent(
                     onDismiss = { showStatusLegend = false }
                 )
             }
+
+            // Failed message dialog with detailed error info and retry options
+            FailedMessageDialog(
+                visible = showFailedMessageDialog,
+                errorCode = message.errorCode,
+                errorMessage = message.errorMessage,
+                canRetryAsSms = canRetryAsSms,
+                onRetry = { onRetry?.invoke(message.guid) },
+                onRetryAsSms = { onRetryAsSms?.invoke(message.guid) },
+                onDelete = { onDeleteMessage?.invoke(message.guid) },
+                onDismiss = { showFailedMessageDialog = false }
+            )
         }
 
     }

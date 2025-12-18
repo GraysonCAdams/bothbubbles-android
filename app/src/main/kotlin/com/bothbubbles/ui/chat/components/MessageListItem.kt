@@ -12,8 +12,10 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Alignment
@@ -49,6 +51,9 @@ data class MessageItemCallbacks(
     val onSetReplyTo: (guid: String) -> Unit,
     val onLoadThread: (originGuid: String) -> Unit,
     val onCanRetryAsSms: suspend (guid: String) -> Boolean,
+    val onRetryMessage: (guid: String) -> Unit,
+    val onRetryAsSms: (guid: String) -> Unit,
+    val onDeleteMessage: (guid: String) -> Unit,
     val onBubbleEffectCompleted: (messageGuid: String) -> Unit,
     val onClearHighlight: () -> Unit,
     val onDownloadAttachment: ((guid: String) -> Unit)?,
@@ -230,18 +235,21 @@ fun MessageListItem(
                 hasMedia = hasMedia,
                 onMediaClickBlocked = {}
             ) {
+                // Check if this message can be retried as SMS (async, so we compute upfront)
+                var canRetryAsSmsState by remember { mutableStateOf(false) }
+                LaunchedEffect(message.guid, message.hasError) {
+                    if (message.hasError && message.isFromMe) {
+                        canRetryAsSmsState = callbacks.onCanRetryAsSms(message.guid)
+                    }
+                }
+
                 MessageBubble(
                     message = message,
                     onLongPress = {
                         if (message.isPlacedSticker) return@MessageBubble
 
-                        if (message.hasError && message.isFromMe) {
-                            onSelectMessageForRetry(message)
-                            retryMenuScope.launch {
-                                val canRetry = callbacks.onCanRetryAsSms(message.guid)
-                                onCanRetrySmsUpdate(canRetry)
-                            }
-                        } else if (canTapback) {
+                        // Long press opens tapback menu for non-error messages
+                        if (!message.hasError && canTapback) {
                             onSelectMessageForTapback(message)
                         }
                     },
@@ -265,13 +273,10 @@ fun MessageListItem(
                     onSwipeStateChanged = { isSwiping ->
                         onSwipingMessageChange(if (isSwiping) message.guid else null)
                     },
-                    onRetry = { guid ->
-                        onSelectMessageForRetry(message)
-                        retryMenuScope.launch {
-                            val canRetry = callbacks.onCanRetryAsSms(guid)
-                            onCanRetrySmsUpdate(canRetry)
-                        }
-                    },
+                    onRetry = callbacks.onRetryMessage,
+                    onRetryAsSms = callbacks.onRetryAsSms,
+                    onDeleteMessage = callbacks.onDeleteMessage,
+                    canRetryAsSms = canRetryAsSmsState,
                     isGroupChat = chatInfoState.isGroup,
                     showAvatar = showAvatar,
                     onBoundsChanged = if (selectedMessageForTapback?.guid == message.guid) { bounds ->

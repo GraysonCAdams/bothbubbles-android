@@ -29,8 +29,17 @@ sealed class SocketEvent {
     data class NewMessage(val message: MessageDto, val chatGuid: String) : SocketEvent()
     data class MessageUpdated(val message: MessageDto, val chatGuid: String) : SocketEvent()
     data class MessageDeleted(val messageGuid: String, val chatGuid: String) : SocketEvent()
-    /** Server-side message send failure (faster than waiting for REST response) */
-    data class MessageSendError(val tempGuid: String, val errorMessage: String) : SocketEvent()
+    /**
+     * Server-side message send failure (faster than waiting for REST response).
+     * @param tempGuid The temporary GUID of the failed message
+     * @param errorMessage Human-readable error message from server
+     * @param errorCode Numeric error code (e.g., 22 = not registered with iMessage)
+     */
+    data class MessageSendError(
+        val tempGuid: String,
+        val errorMessage: String,
+        val errorCode: Int = 1
+    ) : SocketEvent()
     data class TypingIndicator(val chatGuid: String, val isTyping: Boolean) : SocketEvent()
     data class ChatRead(val chatGuid: String) : SocketEvent()
     data class ParticipantAdded(val chatGuid: String, val handleAddress: String) : SocketEvent()

@@ -159,6 +159,10 @@ data class MessageUiModel(
     val isDelivered: Boolean,
     val isRead: Boolean,
     val hasError: Boolean,
+    /** Numeric error code for failed messages (e.g., 22 = not registered with iMessage) */
+    val errorCode: Int = 0,
+    /** Raw error message from server for additional context */
+    val errorMessage: String? = null,
     val isReaction: Boolean,
     val attachments: StableList<AttachmentUiModel>,
     val senderName: String?,
@@ -214,9 +218,13 @@ data class AttachmentUiModel(
     // Caption text displayed below the attachment
     val caption: String? = null
 ) {
-    /** True if the attachment needs to be downloaded (inbound, no local file available) */
+    /**
+     * True if the attachment needs to be downloaded (inbound, no local file available).
+     * Note: We don't check transferState because legacy data may have DOWNLOADED state
+     * without an actual local file (before transfer state tracking was implemented).
+     */
     val needsDownload: Boolean
-        get() = !isOutgoing && localPath == null && transferState != "DOWNLOADED"
+        get() = !isOutgoing && localPath == null
 
     /** True if this attachment is currently uploading */
     val isUploading: Boolean

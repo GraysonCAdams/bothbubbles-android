@@ -84,6 +84,12 @@ fun MessageBubble(
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
     // Callback for retrying a failed message. Pass message GUID when triggered.
     onRetry: ((String) -> Unit)? = null,
+    // Callback to retry as SMS (for error 22 - not registered with iMessage)
+    onRetryAsSms: ((String) -> Unit)? = null,
+    // Callback to delete a failed message
+    onDeleteMessage: ((String) -> Unit)? = null,
+    // Whether SMS retry is available for this message (requires phone number recipient)
+    canRetryAsSms: Boolean = false,
     // Group chat avatar support
     isGroupChat: Boolean = false,
     // Show avatar only on last message in a consecutive group from same sender
@@ -166,6 +172,9 @@ fun MessageBubble(
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
                     onRetry = onRetry,
+                    onRetryAsSms = onRetryAsSms,
+                    onDeleteMessage = onDeleteMessage,
+                    canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
                     modifier = Modifier.weight(1f)
                 )
@@ -185,6 +194,9 @@ fun MessageBubble(
                     onReply = onReply,
                     onSwipeStateChanged = onSwipeStateChanged,
                     onRetry = onRetry,
+                    onRetryAsSms = onRetryAsSms,
+                    onDeleteMessage = onDeleteMessage,
+                    canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
                     modifier = Modifier.weight(1f)
                 )

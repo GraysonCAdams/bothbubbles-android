@@ -172,9 +172,11 @@ data class AttachmentEntity(
 
     /**
      * Whether this attachment needs to be downloaded (inbound, not yet downloaded).
+     * Note: We don't strictly check transferState because legacy data may have DOWNLOADED state
+     * without an actual local file (before transfer state tracking was implemented).
      */
     val needsDownload: Boolean
-        get() = !isOutgoing && transferState == TransferState.PENDING.name && localPath == null
+        get() = !isOutgoing && localPath == null
 
     /**
      * Parsed transfer state enum.

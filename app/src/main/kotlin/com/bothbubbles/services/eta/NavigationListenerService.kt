@@ -233,7 +233,7 @@ class NavigationListenerService : NotificationListenerService() {
             }
 
             val contentTitle = "Navigation Detected"
-            val contentText = "ETA: ${formatEtaMinutes(etaData.etaMinutes)}"
+            val contentText = "ETA: ${EtaNotificationHelper.formatEtaMinutes(etaData.etaMinutes)}"
 
             // Create start sharing intent
             val startIntent = Intent(EtaSharingReceiver.ACTION_START_SHARING).apply {
@@ -322,59 +322,7 @@ class NavigationListenerService : NotificationListenerService() {
      * Show or update the "sharing active" notification with Android Auto support
      */
     fun showSharingNotification(recipientName: String, etaMinutes: Int) {
-        val stopIntent = Intent(EtaSharingReceiver.ACTION_STOP_SHARING).apply {
-            setPackage(packageName)
-        }
-        val stopPendingIntent = PendingIntent.getBroadcast(
-            this,
-            0,
-            stopIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val openIntent = Intent(this, MainActivity::class.java)
-        val openPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            openIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val etaText = if (etaMinutes > 0) " (${formatEtaMinutes(etaMinutes)})" else ""
-        val contentTitle = "Sharing ETA with $recipientName"
-        val contentText = "You're sharing your arrival time$etaText"
-
-        val notification = NotificationCompat.Builder(this, CHANNEL_ETA_SHARING)
-            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
-            .setContentTitle(contentTitle)
-            .setContentText(contentText)
-            .setOngoing(true)
-            .setContentIntent(openPendingIntent)
-            .addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                "Stop Sharing",
-                stopPendingIntent
-            )
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_STATUS)
-            // Android Auto support
-            .extend(
-                NotificationCompat.CarExtender()
-                    .setUnreadConversation(
-                        NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
-                            .addMessage(contentText)
-                            .setLatestTimestamp(System.currentTimeMillis())
-                            .setReplyAction(stopPendingIntent, null)
-                            .build()
-                    )
-            )
-            .build()
-
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(NOTIFICATION_ID_ETA_SHARING, notification)
-
-        // Cancel the prompt notification when sharing starts
-        cancelPromptNotification()
+        EtaNotificationHelper.showSharingNotification(this, recipientName, etaMinutes)
     }
 
     /**
@@ -389,8 +337,7 @@ class NavigationListenerService : NotificationListenerService() {
      * Cancel the sharing notification
      */
     fun cancelSharingNotification() {
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.cancel(NOTIFICATION_ID_ETA_SHARING)
+        EtaNotificationHelper.cancelSharingNotification(this)
     }
 
     /**
@@ -399,17 +346,5 @@ class NavigationListenerService : NotificationListenerService() {
     private fun cancelPromptNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.cancel(NOTIFICATION_ID_ETA_PROMPT)
-    }
-
-    private fun formatEtaMinutes(minutes: Int): String {
-        return when {
-            minutes < 1 -> "Arriving"
-            minutes < 60 -> "$minutes min"
-            else -> {
-                val hours = minutes / 60
-                val mins = minutes % 60
-                if (mins > 0) "${hours}h ${mins}m" else "${hours}h"
-            }
-        }
     }
 }

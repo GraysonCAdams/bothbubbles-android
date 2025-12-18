@@ -83,7 +83,9 @@ object MessageTransformationUtils {
                     thumbnailPath = attachment.thumbnailPath,
                     transferState = attachment.transferState,
                     transferProgress = attachment.transferProgress,
-                    isOutgoing = attachment.isOutgoing
+                    // Use message.isFromMe for UI purposes - if I sent this message, treat attachment as "mine"
+                    // This handles Mac-to-self messages where server reports isOutgoing=false for both copies
+                    isOutgoing = isFromMe
                 )
             }
 
@@ -98,6 +100,8 @@ object MessageTransformationUtils {
             isDelivered = dateDelivered != null,
             isRead = dateRead != null,
             hasError = error != 0,
+            errorCode = error,
+            errorMessage = smsErrorMessage,
             isReaction = associatedMessageType?.contains("reaction") == true,
             attachments = attachmentUiModels.toStable(),
             // Resolve sender name: try senderAddress first (most accurate), then fall back to handleId lookup

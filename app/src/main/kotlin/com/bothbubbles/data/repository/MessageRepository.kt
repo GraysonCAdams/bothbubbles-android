@@ -432,13 +432,17 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Mark a message as failed with an error message.
+     * Mark a message as failed with an error message and error code.
      * Called when server sends a message-send-error event.
+     *
+     * @param messageGuid The GUID of the failed message
+     * @param errorMessage Human-readable error message
+     * @param errorCode Numeric error code (e.g., 22 = not registered with iMessage). Default is 1 (generic error).
      */
-    suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String) {
+    suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String, errorCode: Int = 1) {
         // Update the message error code and error message
-        messageDao.updateMessageError(messageGuid, 1, errorMessage)
-        Timber.d("Marked message $messageGuid as failed: $errorMessage")
+        messageDao.updateMessageError(messageGuid, errorCode, errorMessage)
+        Timber.d("Marked message $messageGuid as failed (code $errorCode): $errorMessage")
     }
 
     /**

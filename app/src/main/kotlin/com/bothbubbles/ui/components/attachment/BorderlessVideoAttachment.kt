@@ -72,7 +72,18 @@ fun BorderlessInlineVideoAttachment(
     val lifecycleOwner = LocalLifecycleOwner.current
     val exoPlayerPool = LocalExoPlayerPool.current
 
-    val videoUrl = attachment.localPath ?: attachment.webUrl
+    // IMPORTANT: Don't fall back to webUrl for inbound - ExoPlayer OkHttp doesn't have auth headers
+    // The auth interceptor is only on the Retrofit client, not the ExoPlayer data source
+    val videoUrl = if (attachment.localPath != null) {
+        attachment.localPath
+    } else if (attachment.isOutgoing) {
+        attachment.webUrl  // Outgoing can try webUrl (server may allow)
+    } else {
+        null  // Inbound must wait for auto-download - can't auth to server from ExoPlayer
+    }
+
+    // Determine if we should show downloading state (inbound attachment without local file)
+    val isAwaitingDownload = videoUrl == null && !attachment.isOutgoing
 
     // Calculate aspect ratio
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
