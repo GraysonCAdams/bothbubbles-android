@@ -190,29 +190,33 @@ class NotificationService @Inject constructor(
             }
         }
 
-        // Try Samsung badge API
-        try {
-            val intent = Intent("android.intent.action.BADGE_COUNT_UPDATE")
-            intent.putExtra("badge_count", count)
-            intent.putExtra("badge_count_package_name", context.packageName)
-            intent.putExtra("badge_count_class_name", "com.bothbubbles.MainActivity")
-            context.sendBroadcast(intent)
-        } catch (e: Exception) {
-            // Samsung badge API not available
+        // Try Samsung badge API (only on Samsung devices)
+        if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
+            try {
+                val intent = Intent("android.intent.action.BADGE_COUNT_UPDATE")
+                intent.putExtra("badge_count", count)
+                intent.putExtra("badge_count_package_name", context.packageName)
+                intent.putExtra("badge_count_class_name", "com.bothbubbles.MainActivity")
+                context.sendBroadcast(intent)
+            } catch (e: Exception) {
+                // Samsung badge API not available
+            }
         }
 
-        // Try Sony badge API
-        try {
-            val contentValues = android.content.ContentValues()
-            contentValues.put("badge_count", count)
-            contentValues.put("package_name", context.packageName)
-            contentValues.put("activity_name", "com.bothbubbles.MainActivity")
-            context.contentResolver.insert(
-                android.net.Uri.parse("content://com.sonymobile.home.resourceprovider/badge"),
-                contentValues
-            )
-        } catch (e: Exception) {
-            // Sony badge API not available
+        // Try Sony badge API (only on Sony devices)
+        if (Build.MANUFACTURER.equals("sony", ignoreCase = true)) {
+            try {
+                val contentValues = android.content.ContentValues()
+                contentValues.put("badge_count", count)
+                contentValues.put("package_name", context.packageName)
+                contentValues.put("activity_name", "com.bothbubbles.MainActivity")
+                context.contentResolver.insert(
+                    android.net.Uri.parse("content://com.sonymobile.home.resourceprovider/badge"),
+                    contentValues
+                )
+            } catch (e: Exception) {
+                // Sony badge API not available
+            }
         }
     }
 }

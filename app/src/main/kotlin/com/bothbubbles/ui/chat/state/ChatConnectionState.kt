@@ -17,5 +17,7 @@ data class ChatConnectionState(
     val showSendModeRevealAnimation: Boolean = false,
     val sendModeManuallySet: Boolean = false,
     val tutorialState: TutorialState = TutorialState.NOT_SHOWN,
-    val counterpartSynced: Boolean = true
+    val counterpartSynced: Boolean = true,
+    /** True when server disconnected and SMS fallback isn't available */
+    val serverFallbackBlocked: Boolean = false
 )

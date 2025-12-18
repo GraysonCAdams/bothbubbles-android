@@ -359,7 +359,7 @@ internal fun SegmentedMessageBubble(
             Column(
                 horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
                 modifier = Modifier
-                    .widthIn(max = 300.dp)
+                    .widthIn(max = 240.dp)
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Render segments with reactions on first segment
@@ -383,7 +383,7 @@ internal fun SegmentedMessageBubble(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
-                                        maxWidth = 300.dp,
+                                        maxWidth = 240.dp,
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
                                         downloadProgress = progress ?: 0f,
@@ -420,7 +420,7 @@ internal fun SegmentedMessageBubble(
                                     BorderlessLinkPreview(
                                         url = segment.url,
                                         isFromMe = message.isFromMe,
-                                        maxWidth = 300.dp,
+                                        maxWidth = 240.dp,
                                         modifier = Modifier
                                             .pointerInput(message.guid) {
                                                 detectTapGestures(

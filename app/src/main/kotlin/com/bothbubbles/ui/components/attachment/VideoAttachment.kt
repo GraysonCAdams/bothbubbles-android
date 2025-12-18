@@ -48,6 +48,7 @@ import coil.request.ImageRequest
 import coil.size.Precision
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import timber.log.Timber
 
 /**
  * Inline video attachment that shows thumbnail until user taps play.
@@ -70,6 +71,15 @@ fun VideoAttachment(
     val lifecycleOwner = LocalLifecycleOwner.current
 
     val videoUrl = attachment.localPath ?: attachment.webUrl
+
+    // DEBUG LOGGING
+    Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    Timber.tag("AttachmentDebug").d("🎬 VideoAttachment RENDER: guid=${attachment.guid}")
+    Timber.tag("AttachmentDebug").d("   RESOLVED videoUrl=$videoUrl")
+    Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}")
+    Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
+    Timber.tag("AttachmentDebug").d("   mimeType=${attachment.mimeType}")
+    Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
     // Calculate aspect ratio
     val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {

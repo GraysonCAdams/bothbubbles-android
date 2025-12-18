@@ -415,15 +415,12 @@ class PendingMessageRepository @Inject constructor(
      * Called at app startup.
      */
     override suspend fun cleanupOrphanedTempMessages() {
-        Timber.d("cleanupOrphanedTempMessages: Starting cleanup")
         // Find temp messages older than 5 minutes (legitimate temps should be replaced within seconds)
         val staleThreshold = System.currentTimeMillis() - (5 * 60 * 1000)
         val orphanedTemps = messageDao.getOrphanedTempMessages(staleThreshold)
-        Timber.d("cleanupOrphanedTempMessages: Found ${orphanedTemps.size} stale temp messages")
 
         var cleanedCount = 0
         for (tempMessage in orphanedTemps) {
-            Timber.d("cleanupOrphanedTempMessages: Checking temp message ${tempMessage.guid}")
             // Check if a "real" message exists with same chat + similar timestamp
             val possibleDuplicate = messageDao.findMatchingMessage(
                 chatGuid = tempMessage.chatGuid,
@@ -433,7 +430,6 @@ class PendingMessageRepository @Inject constructor(
                 toleranceMs = 30_000,  // 30 second window
                 excludeGuid = tempMessage.guid  // Exclude self
             )
-            Timber.d("cleanupOrphanedTempMessages: possibleDuplicate=${possibleDuplicate?.guid}")
 
             if (possibleDuplicate != null && !possibleDuplicate.guid.startsWith("temp-")) {
                 // Found the real message - safe to delete temp

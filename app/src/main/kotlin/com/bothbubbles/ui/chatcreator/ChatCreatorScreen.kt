@@ -247,11 +247,18 @@ fun ChatCreatorScreen(
             val listState = rememberLazyListState()
             val coroutineScope = rememberCoroutineScope()
 
-            // Hide keyboard when scrolling starts
-            LaunchedEffect(listState.isScrollInProgress) {
-                if (listState.isScrollInProgress) {
-                    keyboardController?.hide()
-                }
+            // Hide keyboard when scrolling starts (debounced to avoid spam)
+            LaunchedEffect(listState) {
+                var keyboardHidden = false
+                snapshotFlow { listState.isScrollInProgress }
+                    .collect { isScrolling ->
+                        if (isScrolling && !keyboardHidden) {
+                            keyboardController?.hide()
+                            keyboardHidden = true
+                        } else if (!isScrolling) {
+                            keyboardHidden = false
+                        }
+                    }
             }
 
             // Build section index map for fast scrolling

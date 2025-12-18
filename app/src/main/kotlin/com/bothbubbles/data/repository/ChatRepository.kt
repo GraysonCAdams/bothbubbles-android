@@ -264,6 +264,11 @@ class ChatRepository @Inject constructor(
             if (!response.isSuccessful) {
                 Timber.w("Failed to mark chat as read on server: ${response.code()}")
             }
+        } catch (e: IllegalArgumentException) {
+            // Known issue: Moshi can't deserialize ApiResponse<Unit> because Unit is not a data class
+            // TODO: Fix by changing API return type to Response<Unit> or adding UnitJsonAdapter to Moshi
+            // See: core/network/src/main/kotlin/com/bothbubbles/core/network/api/BothBubblesApi.kt
+            Timber.w("Moshi converter issue for markChatRead (ApiResponse<Unit>): ${e.message}")
         } catch (e: Exception) {
             Timber.w(e, "Failed to sync read status to server for chat: $guid")
         }
@@ -285,6 +290,10 @@ class ChatRepository @Inject constructor(
             if (!response.isSuccessful) {
                 Timber.w("Failed to mark chat as unread on server: ${response.code()}")
             }
+        } catch (e: IllegalArgumentException) {
+            // Known issue: Moshi can't deserialize ApiResponse<Unit> because Unit is not a data class
+            // TODO: Fix by changing API return type to Response<Unit> or adding UnitJsonAdapter to Moshi
+            Timber.w("Moshi converter issue for markChatUnread (ApiResponse<Unit>): ${e.message}")
         } catch (e: Exception) {
             Timber.w(e, "Failed to sync unread status to server for chat: $guid")
         }

@@ -103,8 +103,8 @@ class ChatSendModeManager @AssistedInject constructor(
     private val _sendModeManuallySet = MutableStateFlow(false)
     val sendModeManuallySet: StateFlow<Boolean> = _sendModeManuallySet.asStateFlow()
 
-    private val _smsInputBlocked = MutableStateFlow(false)
-    val smsInputBlocked: StateFlow<Boolean> = _smsInputBlocked.asStateFlow()
+    private val _serverFallbackBlocked = MutableStateFlow(false)
+    val serverFallbackBlocked: StateFlow<Boolean> = _serverFallbackBlocked.asStateFlow()
 
     private val _tutorialState = MutableStateFlow(TutorialState.NOT_SHOWN)
     val tutorialState: StateFlow<TutorialState> = _tutorialState.asStateFlow()
@@ -138,8 +138,7 @@ class ChatSendModeManager @AssistedInject constructor(
             isChecking: Boolean,
             sendMode: ChatSendMode,
             canToggle: Boolean,
-            showReveal: Boolean,
-            smsBlocked: Boolean
+            showReveal: Boolean
         ) -> Unit
     ) {
         // Skip for ALL group chats
@@ -160,7 +159,7 @@ class ChatSendModeManager @AssistedInject constructor(
             _contactIMessageAvailable.value = true
             _canToggleSendMode.value = true
             _showSendModeRevealAnimation.value = !_sendModeManuallySet.value
-            onUpdateState(true, false, _currentSendMode.value, true, _showSendModeRevealAnimation.value, false)
+            onUpdateState(true, false, _currentSendMode.value, true, _showSendModeRevealAnimation.value)
             initTutorialIfNeeded()
             return
         }
@@ -193,19 +192,13 @@ class ChatSendModeManager @AssistedInject constructor(
 
                         val canToggle = available && !isEmailAddress && !isGroup
 
-                        // Check if SMS should be blocked
-                        val isDefaultSmsApp = smsPermissionHelper.isDefaultSmsApp()
-                        val smsEnabled = settingsDataStore.smsEnabled.first()
-                        val shouldBlockSms = !available && !isEmailAddress && (!isDefaultSmsApp || !smsEnabled)
-
                         _contactIMessageAvailable.value = available
                         _isCheckingIMessageAvailability.value = false
                         _currentSendMode.value = newMode
                         _canToggleSendMode.value = canToggle
                         _showSendModeRevealAnimation.value = canToggle && !_sendModeManuallySet.value
-                        _smsInputBlocked.value = shouldBlockSms
 
-                        onUpdateState(available, false, newMode, canToggle, _showSendModeRevealAnimation.value, shouldBlockSms)
+                        onUpdateState(available, false, newMode, canToggle, _showSendModeRevealAnimation.value)
 
                         if (canToggle) {
                             initTutorialIfNeeded()
@@ -217,13 +210,13 @@ class ChatSendModeManager @AssistedInject constructor(
                         _contactIMessageAvailable.value = if (isEmailAddress) true else null
                         _isCheckingIMessageAvailability.value = false
                         _currentSendMode.value = newMode
-                        onUpdateState(if (isEmailAddress) true else null, false, newMode, false, false, false)
+                        onUpdateState(if (isEmailAddress) true else null, false, newMode, false, false)
                     }
                 )
             } catch (e: Exception) {
                 Timber.e(e, "Unexpected error checking iMessage availability: ${e.message}")
                 _isCheckingIMessageAvailability.value = false
-                onUpdateState(null, false, _currentSendMode.value, false, false, false)
+                onUpdateState(null, false, _currentSendMode.value, false, false)
             }
         }
     }
@@ -441,7 +434,7 @@ class ChatSendModeManager @AssistedInject constructor(
                     }
 
                     // Clear input blocked state now that server is connected
-                    _smsInputBlocked.value = false
+                    _serverFallbackBlocked.value = false
 
                     // Restore iMessage mode if appropriate
                     val shouldBeIMessage = _contactIMessageAvailable.value == true
@@ -472,11 +465,11 @@ class ChatSendModeManager @AssistedInject constructor(
                             if (smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity) {
                                 // SMS is available - switch to SMS mode
                                 _currentSendMode.value = ChatSendMode.SMS
-                                _smsInputBlocked.value = false
+                                _serverFallbackBlocked.value = false
                             } else {
                                 // SMS not available - block input and stay in iMessage mode
                                 // User needs to either wait for server or set up SMS
-                                _smsInputBlocked.value = true
+                                _serverFallbackBlocked.value = true
                                 Timber.i("Server disconnected but SMS not available (functional=${smsCapability.isFullyFunctional}, cellular=${smsCapability.hasCellularConnectivity}) - blocking input")
                             }
                         }
@@ -537,7 +530,7 @@ class ChatSendModeManager @AssistedInject constructor(
                 if (!chatFallbackTracker.isInFallbackMode(chatGuid)) {
                     if (_contactIMessageAvailable.value == true && !_sendModeManuallySet.value) {
                         _currentSendMode.value = ChatSendMode.IMESSAGE
-                        _smsInputBlocked.value = false
+                        _serverFallbackBlocked.value = false
                         Timber.i("Periodic check: exited fallback mode, restored iMessage send mode")
                     }
                 }

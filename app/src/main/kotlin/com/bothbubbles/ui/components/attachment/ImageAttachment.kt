@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,7 @@ import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import timber.log.Timber
 
 /**
  * Renders an image attachment within a message bubble.
@@ -78,6 +80,15 @@ fun ImageAttachment(
     val maxWidthPx = with(density) { 250.dp.toPx().toInt() }
     val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
 
+    // DEBUG LOGGING
+    SideEffect {
+        Timber.tag("AttachmentDebug").d("🖼️ ImageAttachment RENDER: guid=${attachment.guid}")
+        Timber.tag("AttachmentDebug").d("   RESOLVED imageUrl=$imageUrl")
+        Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}, webUrl=${attachment.webUrl}")
+        Timber.tag("AttachmentDebug").d("   isLoading=$isLoading, isError=$isError")
+        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, size=${maxWidthPx}x$targetHeightPx")
+    }
+
     Box(
         modifier = modifier
             .widthIn(max = 250.dp)
@@ -101,10 +112,15 @@ fun ImageAttachment(
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
+                    Timber.tag("AttachmentDebug").d("🖼️ ImageAttachment STATE: guid=${attachment.guid}, state=${state::class.simpleName}")
+                    if (state is AsyncImagePainter.State.Error) {
+                        Timber.tag("AttachmentDebug").e(state.result.throwable, "🖼️ ImageAttachment ERROR: guid=${attachment.guid}")
+                    }
                 }
             )
         } else {
             isError = true
+            Timber.tag("AttachmentDebug").e("🖼️ ImageAttachment NO URL: guid=${attachment.guid}")
         }
 
         // Loading indicator with fade animation - minimal for transparent images
@@ -411,7 +427,7 @@ fun GifAttachment(
 fun BorderlessImageAttachment(
     attachment: AttachmentUiModel,
     interactions: AttachmentInteractions,
-    maxWidth: Dp = 300.dp,
+    maxWidth: Dp = 240.dp,
     modifier: Modifier = Modifier,
     isPlacedSticker: Boolean = false,
     messageGuid: String = ""
@@ -423,6 +439,7 @@ fun BorderlessImageAttachment(
     // Force download first to trigger HEIC->PNG conversion
     // For regular images, use full-resolution for crisp display (thumbnails are only 300px)
     val imageUrl = if (attachment.isSticker) {
+        Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: isSticker=true, using localPath only")
         attachment.localPath  // null if not downloaded, will show error/placeholder
     } else {
         val path = attachment.localPath
@@ -438,15 +455,19 @@ fun BorderlessImageAttachment(
                     null
                 }
             } catch (e: Exception) {
+                Timber.tag("AttachmentDebug").e(e, "🖼️ BorderlessImage: Exception checking file: $path")
                 null
             }
 
             if (file != null && !file.exists()) {
+                Timber.tag("AttachmentDebug").w("🖼️ BorderlessImage: Local file MISSING, falling back to webUrl: $path")
                 attachment.webUrl // Fallback if file missing
             } else {
+                Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: Using localPath: $path (exists=${file?.exists()})")
                 path // Use local path (it exists or is a content URI we can't easily check)
             }
         } else {
+            Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage: No localPath, using webUrl: ${attachment.webUrl}")
             attachment.webUrl
         }
     }
@@ -477,6 +498,19 @@ fun BorderlessImageAttachment(
     val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
     val targetHeightPx = (maxWidthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
 
+    // DEBUG LOGGING
+    SideEffect {
+        Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        Timber.tag("AttachmentDebug").d("🖼️ BorderlessImageAttachment RENDER: guid=${attachment.guid}")
+        Timber.tag("AttachmentDebug").d("   FINAL imageUrl=$imageUrl")
+        Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}")
+        Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
+        Timber.tag("AttachmentDebug").d("   isSticker=${attachment.isSticker}, isPlacedSticker=$isPlacedSticker")
+        Timber.tag("AttachmentDebug").d("   isLoading=$isLoading, isError=$isError")
+        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, maxWidth=$effectiveMaxWidth")
+        Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    }
+
     Box(
         modifier = modifier
             .widthIn(max = effectiveMaxWidth)
@@ -504,10 +538,17 @@ fun BorderlessImageAttachment(
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
+                    Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage STATE: guid=${attachment.guid}, state=${state::class.simpleName}")
+                    if (state is AsyncImagePainter.State.Error) {
+                        Timber.tag("AttachmentDebug").e(state.result.throwable, "🖼️ BorderlessImage ERROR: guid=${attachment.guid}, url=$imageUrl")
+                    } else if (state is AsyncImagePainter.State.Success) {
+                        Timber.tag("AttachmentDebug").d("🖼️ BorderlessImage SUCCESS: guid=${attachment.guid}")
+                    }
                 }
             )
         } else {
             isError = true
+            Timber.tag("AttachmentDebug").e("🖼️ BorderlessImage NO URL: guid=${attachment.guid}")
         }
 
         // Loading indicator - minimal for transparent images
@@ -578,7 +619,7 @@ fun BorderlessImageAttachment(
 fun BorderlessGifAttachment(
     attachment: AttachmentUiModel,
     interactions: AttachmentInteractions,
-    maxWidth: Dp = 300.dp,
+    maxWidth: Dp = 240.dp,
     modifier: Modifier = Modifier,
     isPlacedSticker: Boolean = false,
     messageGuid: String = ""

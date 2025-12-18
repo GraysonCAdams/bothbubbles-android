@@ -53,7 +53,7 @@ fun BorderlessLinkPreviewCard(
     preview: LinkPreviewEntity,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
-    maxWidth: androidx.compose.ui.unit.Dp = 300.dp,
+    maxWidth: androidx.compose.ui.unit.Dp = 240.dp,
     onClick: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
@@ -211,7 +211,7 @@ fun BorderlessLinkPreviewMinimal(
     url: String,
     domain: String,
     modifier: Modifier = Modifier,
-    maxWidth: androidx.compose.ui.unit.Dp = 300.dp
+    maxWidth: androidx.compose.ui.unit.Dp = 240.dp
 ) {
     val context = LocalContext.current
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant

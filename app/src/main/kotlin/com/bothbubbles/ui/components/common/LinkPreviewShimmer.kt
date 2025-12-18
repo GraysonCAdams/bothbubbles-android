@@ -123,7 +123,7 @@ fun LinkPreviewShimmer(
 fun BorderlessLinkPreviewShimmer(
     showImage: Boolean = true,
     modifier: Modifier = Modifier,
-    maxWidth: androidx.compose.ui.unit.Dp = 300.dp
+    maxWidth: androidx.compose.ui.unit.Dp = 240.dp
 ) {
     val transition = rememberInfiniteTransition(label = "shimmer")
     val translateAnim by transition.animateFloat(

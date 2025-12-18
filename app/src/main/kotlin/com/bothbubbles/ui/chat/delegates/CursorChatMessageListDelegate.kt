@@ -1,8 +1,11 @@
 package com.bothbubbles.ui.chat.delegates
 
 import androidx.lifecycle.SavedStateHandle
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.AttachmentRepository
@@ -686,6 +689,92 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
     }
 
     /**
+     * Insert an incoming message optimistically for instant display.
+     * Called immediately when socket event arrives to bypass Room Flow latency.
+     * The message will be deduplicated when Room Flow catches up.
+     */
+    fun insertOptimisticIncomingMessage(message: MessageDto, chatGuid: String) {
+        val guid = message.guid
+
+        // Skip if already in Room messages
+        if (_messagesState.value.any { it.guid == guid }) {
+            Timber.tag(TAG).d("Skipping optimistic incoming: $guid already in Room")
+            return
+        }
+
+        // Skip if already in optimistic list
+        if (_optimisticMessages.value.any { it.model.guid == guid }) {
+            Timber.tag(TAG).d("Skipping optimistic incoming: $guid already optimistic")
+            return
+        }
+
+        // Skip reactions - they're handled differently
+        if (message.associatedMessageGuid != null && message.associatedMessageType != null) {
+            return
+        }
+
+        val dateCreated = message.dateCreated ?: System.currentTimeMillis()
+        val senderAddress = message.handle?.address
+        val senderName = resolveSenderName(senderAddress, message.handleId)
+        val senderAvatarPath = senderAddress?.let { addr ->
+            val normalized = normalizeAddress(addr)
+            addressToAvatarPath[normalized]
+        }
+
+        // Create placeholder attachments with PENDING state for loading indicator
+        val placeholderAttachments = message.attachments?.map { attachmentDto ->
+            AttachmentUiModel(
+                guid = attachmentDto.guid,
+                mimeType = attachmentDto.mimeType,
+                localPath = null, // Not downloaded yet
+                webUrl = null, // Will be set when Room syncs
+                width = attachmentDto.width,
+                height = attachmentDto.height,
+                transferName = attachmentDto.transferName,
+                totalBytes = attachmentDto.totalBytes,
+                isSticker = attachmentDto.isSticker,
+                transferState = TransferState.PENDING.name,
+                transferProgress = 0f,
+                isOutgoing = false
+            )
+        }?.toStable() ?: emptyList<AttachmentUiModel>().toStable()
+
+        // Determine message source
+        val messageSource = when {
+            message.handle?.service?.equals("SMS", ignoreCase = true) == true -> MessageSource.SERVER_SMS.name
+            chatGuid.startsWith("sms;-;", ignoreCase = true) -> MessageSource.SERVER_SMS.name
+            else -> MessageSource.IMESSAGE.name
+        }
+
+        val optimisticModel = MessageUiModel(
+            guid = guid,
+            text = message.text,
+            subject = message.subject,
+            dateCreated = dateCreated,
+            formattedTime = formatMessageTime(dateCreated),
+            isFromMe = false,
+            isSent = true, // Incoming messages are already "sent"
+            isDelivered = true,
+            isRead = false,
+            hasError = false,
+            isReaction = false,
+            attachments = placeholderAttachments,
+            senderName = senderName,
+            senderAvatarPath = senderAvatarPath,
+            messageSource = messageSource,
+            reactions = emptyList<ReactionUiModel>().toStable(),
+            expressiveSendStyleId = message.expressiveSendStyleId,
+            threadOriginatorGuid = message.threadOriginatorGuid
+        )
+
+        _optimisticMessages.update { current ->
+            current + OptimisticMessage(optimisticModel)
+        }
+
+        Timber.tag(TAG).d("Inserted optimistic INCOMING message: $guid")
+    }
+
+    /**
      * Remove an optimistic message (e.g., if send failed and user cancelled).
      */
     fun removeOptimisticMessage(guid: String) {
@@ -785,6 +874,12 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 .collect { event ->
                     Timber.tag(TAG).d("Socket: New message ${event.message.guid}")
                     lastSocketMessageTime = System.currentTimeMillis()
+
+                    // Insert optimistically for instant display (bypasses Room Flow latency)
+                    if (!event.message.isFromMe) {
+                        insertOptimisticIncomingMessage(event.message, event.chatGuid)
+                    }
+
                     _socketNewMessage.tryEmit(event.message.guid)
                 }
         }

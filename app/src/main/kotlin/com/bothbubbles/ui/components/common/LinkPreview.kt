@@ -172,7 +172,7 @@ fun BorderlessLinkPreview(
     url: String,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
-    maxWidth: Dp = 300.dp,
+    maxWidth: Dp = 240.dp,
     viewModel: LinkPreviewViewModel = hiltViewModel()
 ) {
     val previewState by viewModel.getPreviewState(url).collectAsStateWithLifecycle()

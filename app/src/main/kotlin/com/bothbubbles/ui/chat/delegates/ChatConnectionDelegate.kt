@@ -91,9 +91,10 @@ class ChatConnectionDelegate @AssistedInject constructor(
         combine(
             sendModeManager.sendModeManuallySet,
             sendModeManager.tutorialState,
-            _counterpartSynced
-        ) { manuallySet, tutorial, counterpart ->
-            CombinedState2(manuallySet, tutorial, counterpart)
+            _counterpartSynced,
+            sendModeManager.serverFallbackBlocked
+        ) { manuallySet, tutorial, counterpart, serverBlocked ->
+            CombinedState2(manuallySet, tutorial, counterpart, serverBlocked)
         }
     ) { state1, state2 ->
         ChatConnectionState(
@@ -104,7 +105,8 @@ class ChatConnectionDelegate @AssistedInject constructor(
             showSendModeRevealAnimation = state1.showReveal,
             sendModeManuallySet = state2.manuallySet,
             tutorialState = state2.tutorial,
-            counterpartSynced = state2.counterpart
+            counterpartSynced = state2.counterpart,
+            serverFallbackBlocked = state2.serverBlocked
         )
     }.stateIn(
         scope = scope,
@@ -129,7 +131,8 @@ class ChatConnectionDelegate @AssistedInject constructor(
     private data class CombinedState2(
         val manuallySet: Boolean,
         val tutorial: TutorialState,
-        val counterpart: Boolean
+        val counterpart: Boolean,
+        val serverBlocked: Boolean
     )
 
     // ============================================================================
@@ -279,8 +282,7 @@ class ChatConnectionDelegate @AssistedInject constructor(
             isChecking: Boolean,
             sendMode: ChatSendMode,
             canToggle: Boolean,
-            showReveal: Boolean,
-            smsBlocked: Boolean
+            showReveal: Boolean
         ) -> Unit
     ) {
         sendModeManager.checkIMessageAvailability(

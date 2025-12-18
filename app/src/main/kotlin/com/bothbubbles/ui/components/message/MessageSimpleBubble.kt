@@ -376,7 +376,7 @@ internal fun SimpleBubbleContent(
             Column(
                 horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
                 modifier = Modifier
-                    .widthIn(max = 300.dp)
+                    .widthIn(max = 240.dp)
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Check for large emoji messages (1-3 emojis only) - need to compute before Surface

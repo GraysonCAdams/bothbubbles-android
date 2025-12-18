@@ -130,6 +130,13 @@ class ChatSendDelegate @AssistedInject constructor(
         Timber.i("[SEND_TRACE] Text: \"${trimmedText.take(50)}${if (trimmedText.length > 50) "..." else ""}\"")
         Timber.i("[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
 
+        // Log each attachment in detail
+        attachments.forEachIndexed { index, att ->
+            Timber.tag("AttachmentDebug").i("📤 SEND Attachment[$index]: uri=${att.uri}")
+            Timber.tag("AttachmentDebug").i("   mimeType=${att.mimeType}, name=${att.name}, size=${att.size}")
+            Timber.tag("AttachmentDebug").i("   caption=${att.caption}")
+        }
+
         val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
         val replyToGuid = _state.value.replyingToGuid
 

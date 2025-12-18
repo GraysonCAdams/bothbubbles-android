@@ -15,7 +15,7 @@ The following READMEs define **mandatory patterns** for each layer. You MUST rea
 | `app/src/main/kotlin/com/bothbubbles/di/README.md` | DI | Module or injection changes |
 | `app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/README.md` | Delegates | ViewModel delegate pattern |
 | `app/schemas/README.md` | Database | Schema migrations |
-| `docs/COMPOSE_BEST_PRACTICES.md` | Compose | **ANY** Compose UI code |
+| `docs/guides/COMPOSE_BEST_PRACTICES.md` | Compose | **ANY** Compose UI code |
 
 **RULE**: When modifying code in a layer, you MUST first read that layer's README and follow its patterns exactly.
 
@@ -25,7 +25,7 @@ BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that co
 
 ## Compose Rules (MANDATORY)
 
-**RULE**: You MUST follow the rules in `docs/COMPOSE_BEST_PRACTICES.md`. Violations will break performance.
+**RULE**: You MUST follow the rules in `docs/guides/COMPOSE_BEST_PRACTICES.md`. Violations will break performance.
 
 1.  **Leaf-Node State**: NEVER collect state in a parent just to pass it down. Push state collection to the lowest possible child.
 2.  **Immutable Collections**: ALWAYS use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.

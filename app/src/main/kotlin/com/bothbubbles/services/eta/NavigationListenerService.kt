@@ -20,6 +20,7 @@ import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -80,6 +81,7 @@ class NavigationListenerService : NotificationListenerService() {
     override fun onDestroy() {
         super.onDestroy()
         Timber.d("NavigationListenerService destroyed")
+        scope.cancel()
         pendingPromptRunnable?.let { handler.removeCallbacks(it) }
     }
 
