@@ -54,9 +54,6 @@ class Life360SettingsViewModel @Inject constructor(
     val isPaused: StateFlow<Boolean> = featurePreferences.life360PauseSyncing
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
-    val pollInterval: StateFlow<Int> = featurePreferences.life360PollIntervalMinutes
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 10)
-
     val defaultCircleId: StateFlow<String?> = featurePreferences.life360DefaultCircleId
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -77,13 +74,23 @@ class Life360SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentMapOf())
 
     init {
-        checkAuthStatus()
+        checkAuthStatusAndSync()
     }
 
-    private fun checkAuthStatus() {
-        _uiState.value = _uiState.value.copy(
-            isAuthenticated = tokenStorage.isAuthenticated
-        )
+    /**
+     * Check auth status and sync circles/members if authenticated.
+     * Called when settings screen opens - uses CIRCLES endpoint rate limit (10 min).
+     */
+    private fun checkAuthStatusAndSync() {
+        val isAuth = tokenStorage.isAuthenticated
+        _uiState.value = _uiState.value.copy(isAuthenticated = isAuth)
+
+        // Auto-sync when opening settings if authenticated
+        if (isAuth) {
+            Timber.d("Life360 settings opened, syncing circles and members")
+            refreshCircles()
+            syncMembers()
+        }
     }
 
     fun storeToken(token: String) {
@@ -161,12 +168,6 @@ class Life360SettingsViewModel @Inject constructor(
     fun setPaused(paused: Boolean) {
         viewModelScope.launch {
             featurePreferences.setLife360PauseSyncing(paused)
-        }
-    }
-
-    fun setPollInterval(minutes: Int) {
-        viewModelScope.launch {
-            featurePreferences.setLife360PollInterval(minutes)
         }
     }
 

@@ -258,6 +258,11 @@ class ChatRepository @Inject constructor(
         chatDao.updateUnreadStatus(guid, false)
         chatDao.updateUnreadCount(guid, 0)
 
+        // Also update the unified group's unread count for badge sync
+        unifiedChatGroupDao.getGroupForChat(guid)?.let { group ->
+            unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+        }
+
         // Sync to server (fire-and-forget, don't block local update)
         try {
             val response = api.markChatRead(guid)
@@ -284,6 +289,11 @@ class ChatRepository @Inject constructor(
         // Set unread count to 1 to indicate there are unread messages
         chatDao.updateUnreadCount(guid, 1)
 
+        // Also update the unified group's unread count for badge sync
+        unifiedChatGroupDao.getGroupForChat(guid)?.let { group ->
+            unifiedChatGroupDao.updateUnreadCount(group.id, 1)
+        }
+
         // Sync to server (fire-and-forget, don't block local update)
         try {
             val response = api.markChatUnread(guid)
@@ -303,7 +313,10 @@ class ChatRepository @Inject constructor(
      * Mark all chats as read locally (batch operation)
      */
     suspend fun markAllChatsAsRead(): Result<Int> = runCatching {
-        chatDao.markAllChatsAsRead()
+        val count = chatDao.markAllChatsAsRead()
+        // Also update all unified groups for badge sync
+        unifiedChatGroupDao.markAllGroupsAsRead()
+        count
     }
 
     /**

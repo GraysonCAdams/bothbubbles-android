@@ -161,6 +161,13 @@ class UnifiedChatGroupRepository @Inject constructor(
     }
 
     /**
+     * Atomically increment the unread count for a group.
+     */
+    suspend fun incrementUnreadCount(groupId: Long) {
+        unifiedChatGroupDao.incrementUnreadCount(groupId)
+    }
+
+    /**
      * Update all cached message fields for a group.
      */
     suspend fun updateLatestMessageFull(

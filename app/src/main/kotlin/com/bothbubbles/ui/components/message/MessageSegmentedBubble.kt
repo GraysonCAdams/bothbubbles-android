@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.sp
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.ui.components.attachment.AttachmentContent
 import com.bothbubbles.ui.components.attachment.BorderlessMediaContent
+import com.bothbubbles.ui.components.attachment.YouTubeAttachment
 import com.bothbubbles.ui.components.common.BorderlessLinkPreview
 import com.bothbubbles.ui.components.common.buildAnnotatedStringWithClickables
 import com.bothbubbles.ui.components.common.buildSearchHighlightedText
@@ -452,6 +453,26 @@ internal fun SegmentedMessageBubble(
                                                         }
                                                         // Normal mode: link tap is handled by BorderlessLinkPreview internally
                                                     },
+                                                    onLongPress = {
+                                                        HapticUtils.onLongPress(hapticFeedback)
+                                                        onLongPress()
+                                                    }
+                                                )
+                                            }
+                                    )
+                                }
+
+                                is MessageSegment.YouTubeVideoSegment -> {
+                                    YouTubeAttachment(
+                                        videoId = segment.videoId,
+                                        originalUrl = segment.originalUrl,
+                                        thumbnailUrl = segment.thumbnailUrl,
+                                        startTimeSeconds = segment.startTimeSeconds,
+                                        isShort = segment.isShort,
+                                        maxWidth = 240.dp,
+                                        modifier = Modifier
+                                            .pointerInput(message.guid, isSelectionMode) {
+                                                detectTapGestures(
                                                     onLongPress = {
                                                         HapticUtils.onLongPress(hapticFeedback)
                                                         onLongPress()

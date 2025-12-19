@@ -55,6 +55,12 @@ interface Life360Service {
     suspend fun requestLocationUpdate(circleId: String, memberId: String): Result<Unit>
 
     /**
+     * Sync a single member's data.
+     * More efficient than syncing all circles when you only need one member.
+     */
+    suspend fun syncMember(circleId: String, memberId: String): Result<Unit>
+
+    /**
      * Get time until rate limit allows next circles API call (ms).
      * Returns 0 if allowed now.
      */

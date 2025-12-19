@@ -63,6 +63,7 @@ fun ChatScreen(
     onDetailsClick: () -> Unit,
     onMediaClick: (String) -> Unit,
     onEditAttachmentClick: (Uri) -> Unit = {},
+    onLife360MapClick: (participantAddress: String) -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
     editedAttachmentUri: Uri? = null,
@@ -382,6 +383,7 @@ fun ChatScreen(
                         },
                         onDetailsClick = onDetailsClick,
                         onVideoCallClick = { state.showVideoCallDialog = true },
+                        onLife360MapClick = onLife360MapClick,
                         isBubbleMode = isBubbleMode,
                         onMenuAction = { action ->
                             when (action) {

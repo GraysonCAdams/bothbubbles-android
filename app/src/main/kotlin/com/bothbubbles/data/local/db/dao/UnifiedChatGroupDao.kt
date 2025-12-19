@@ -200,6 +200,12 @@ interface UnifiedChatGroupDao {
     @Query("UPDATE unified_chat_groups SET unread_count = :count WHERE id = :groupId")
     suspend fun updateUnreadCount(groupId: Long, count: Int)
 
+    @Query("UPDATE unified_chat_groups SET unread_count = unread_count + 1 WHERE id = :groupId")
+    suspend fun incrementUnreadCount(groupId: Long)
+
+    @Query("UPDATE unified_chat_groups SET unread_count = 0 WHERE unread_count > 0")
+    suspend fun markAllGroupsAsRead(): Int
+
     @Query("UPDATE unified_chat_groups SET display_name = :displayName WHERE id = :groupId")
     suspend fun updateDisplayName(groupId: Long, displayName: String?)
 

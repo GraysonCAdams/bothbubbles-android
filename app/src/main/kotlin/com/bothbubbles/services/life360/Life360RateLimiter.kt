@@ -37,15 +37,22 @@ class Life360RateLimiter @Inject constructor() {
 
         // Check if globally rate limited
         if (now < rateLimitedUntil) {
-            return rateLimitedUntil - now
+            val delay = rateLimitedUntil - now
+            Timber.d("Life360 rate limiter: $endpoint globally rate limited, waiting ${delay}ms")
+            return delay
         }
 
         // Check endpoint-specific delay
         val lastCall = endpointTimestamps[endpoint] ?: 0
         val minInterval = endpoint.minIntervalMs
         val nextAllowed = lastCall + minInterval
+        val delay = max(0, nextAllowed - now)
 
-        return max(0, nextAllowed - now)
+        if (delay > 0) {
+            Timber.d("Life360 rate limiter: $endpoint needs ${delay}ms delay (min interval: ${minInterval}ms)")
+        }
+
+        return delay
     }
 
     /**
@@ -94,8 +101,8 @@ class Life360RateLimiter @Inject constructor() {
         /** Get individual member update */
         MEMBER(10_000),         // 10 seconds
 
-        /** Request location update */
-        REQUEST_LOCATION(60_000) // 1 minute
+        /** Request location update - conservative to avoid bans */
+        REQUEST_LOCATION(300_000) // 5 minutes
     }
 
     companion object {

@@ -3,6 +3,7 @@ package com.bothbubbles.ui.components.message
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.util.parsing.DetectedUrl
+import com.bothbubbles.util.parsing.YouTubeUrlParser
 
 /**
  * Represents a distinct renderable segment of a message.
@@ -19,6 +20,15 @@ sealed class MessageSegment {
     /** Link preview - rendered outside bubble, borderless */
     data class LinkPreviewSegment(val url: String, val detectedUrl: DetectedUrl) : MessageSegment()
 
+    /** YouTube video - rendered with inline player, borderless */
+    data class YouTubeVideoSegment(
+        val videoId: String,
+        val originalUrl: String,
+        val thumbnailUrl: String,
+        val startTimeSeconds: Int? = null,
+        val isShort: Boolean = false
+    ) : MessageSegment()
+
     /** Non-media attachment (audio, docs, vCards) - rendered in compact container */
     data class FileSegment(val attachment: AttachmentUiModel) : MessageSegment()
 }
@@ -32,7 +42,7 @@ object MessageSegmentParser {
     /**
      * Parses a MessageUiModel into an ordered list of segments.
      *
-     * Order: media first → text bubble → link preview → file attachments
+     * Order: media first → text bubble → YouTube/link preview → file attachments
      *
      * This matches typical messaging app behavior where media leads.
      */
@@ -59,9 +69,23 @@ object MessageSegmentParser {
             segments.add(MessageSegment.TextSegment(displayText))
         }
 
-        // 3. Link preview segment (rendered borderless)
+        // 3. YouTube video or link preview segment (rendered borderless)
         detectedUrl?.let { url ->
-            segments.add(MessageSegment.LinkPreviewSegment(url.url, url))
+            // Check if this is a YouTube URL
+            val youtubeVideo = YouTubeUrlParser.parseUrl(url.url)
+            if (youtubeVideo != null) {
+                segments.add(
+                    MessageSegment.YouTubeVideoSegment(
+                        videoId = youtubeVideo.videoId,
+                        originalUrl = youtubeVideo.originalUrl,
+                        thumbnailUrl = youtubeVideo.thumbnailUrl,
+                        startTimeSeconds = youtubeVideo.startTimeSeconds,
+                        isShort = youtubeVideo.isShort
+                    )
+                )
+            } else {
+                segments.add(MessageSegment.LinkPreviewSegment(url.url, url))
+            }
         }
 
         // 4. File attachments (audio, docs, vCards - keep in containers)

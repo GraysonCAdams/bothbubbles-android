@@ -13,6 +13,7 @@ import androidx.core.content.ContextCompat
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
@@ -59,6 +60,9 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var messageDao: MessageDao
+
+    @Inject
+    lateinit var unifiedChatGroupDao: UnifiedChatGroupDao
 
     @Inject
     lateinit var notificationService: NotificationService
@@ -182,6 +186,11 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                 // Update existing chat
                 chatDao.updateLastMessage(chatGuid, timestamp, fullBody)
                 chatDao.updateUnreadCount(chatGuid, chat.unreadCount + 1)
+            }
+
+            // Also increment the unified group's unread count for badge sync
+            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
+                unifiedChatGroupDao.incrementUnreadCount(group.id)
             }
 
             // Use raw address for system provider compatibility

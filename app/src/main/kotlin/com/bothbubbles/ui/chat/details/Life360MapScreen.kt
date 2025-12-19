@@ -7,6 +7,8 @@ import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
 import android.graphics.drawable.BitmapDrawable
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,13 +20,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -44,6 +50,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -61,10 +68,12 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.core.model.Life360Member
+import com.bothbubbles.util.AvatarGenerator
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -89,10 +98,12 @@ fun Life360MapScreen(
     viewModel: Life360MapViewModel = hiltViewModel()
 ) {
     val life360Member by viewModel.life360Member.collectAsStateWithLifecycle()
+    val avatarPath by viewModel.avatarPath.collectAsStateWithLifecycle()
 
     life360Member?.let { member ->
         Life360MapContent(
             life360Member = member,
+            avatarPath = avatarPath,
             onBack = onBack
         )
     } ?: run {
@@ -110,6 +121,7 @@ fun Life360MapScreen(
 @Composable
 private fun Life360MapContent(
     life360Member: Life360Member,
+    avatarPath: String?,
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
@@ -125,6 +137,9 @@ private fun Life360MapContent(
     var distanceMiles by remember { mutableStateOf<Double?>(null) }
     var durationMinutes by remember { mutableStateOf<Int?>(null) }
     var isLoadingRoute by remember { mutableStateOf(false) }
+
+    // Pulse animation frame for user location marker
+    var pulseFrame by remember { mutableIntStateOf(0) }
 
     // Permission state
     var hasLocationPermission by remember {
@@ -179,9 +194,18 @@ private fun Life360MapContent(
         }
     }
 
+    // Pulse animation for user location
+    LaunchedEffect(hasUserLocation) {
+        if (hasUserLocation) {
+            while (true) {
+                delay(50)
+                pulseFrame = (pulseFrame + 1) % 60 // 60 frames = ~3 second cycle
+            }
+        }
+    }
+
     // MD3 colors for markers
     val primaryColor = MaterialTheme.colorScheme.primary
-    val secondaryColor = MaterialTheme.colorScheme.secondary
 
     Scaffold(
         topBar = {
@@ -258,11 +282,116 @@ private fun Life360MapContent(
                     targetLat = location.latitude,
                     targetLon = location.longitude,
                     targetName = life360Member.displayName,
+                    avatarPath = avatarPath,
                     userLat = userLat,
                     userLon = userLon,
                     hasUserLocation = hasUserLocation,
-                    primaryColor = primaryColor,
-                    secondaryColor = secondaryColor
+                    pulseFrame = pulseFrame,
+                    primaryColor = primaryColor
+                )
+
+                // Status overlay in top right corner
+                Life360StatusOverlay(
+                    battery = life360Member.battery,
+                    isCharging = life360Member.isCharging,
+                    isDriving = location.isDriving,
+                    locationTimestamp = location.timestamp,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(12.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Status overlay showing battery, activity, and last updated time.
+ * Displayed in the top right corner of the full-screen map.
+ */
+@Composable
+private fun Life360StatusOverlay(
+    battery: Int?,
+    isCharging: Boolean?,
+    isDriving: Boolean?,
+    locationTimestamp: Long,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.95f),
+        tonalElevation = 2.dp,
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            // Battery (if available)
+            battery?.let { batteryLevel ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.BatteryFull,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = when {
+                            batteryLevel <= 20 -> MaterialTheme.colorScheme.error
+                            batteryLevel <= 50 -> MaterialTheme.colorScheme.tertiary
+                            else -> MaterialTheme.colorScheme.primary
+                        }
+                    )
+                    Text(
+                        text = buildString {
+                            append("$batteryLevel%")
+                            if (isCharging == true) append(" ⚡")
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            // Activity (Driving)
+            if (isDriving == true) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.DirectionsCar,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.primary
+                    )
+                    Text(
+                        text = "Driving",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+
+            // Last updated
+            val formattedTime = remember(locationTimestamp) {
+                formatLocationTime(locationTimestamp)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Schedule,
+                    contentDescription = null,
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = formattedTime,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -359,15 +488,22 @@ private fun Life360FullMapView(
     targetLat: Double,
     targetLon: Double,
     targetName: String,
+    avatarPath: String?,
     userLat: Double,
     userLon: Double,
     hasUserLocation: Boolean,
-    primaryColor: Color,
-    secondaryColor: Color
+    pulseFrame: Int,
+    primaryColor: Color
 ) {
     val context = LocalContext.current
 
     var mapView by remember { mutableStateOf<MapView?>(null) }
+    var hasZoomedToBounds by remember { mutableStateOf(false) }
+
+    // Create avatar bitmap once
+    val avatarBitmap = remember(avatarPath, targetName) {
+        createAvatarPinDrawable(context, targetName, avatarPath, primaryColor.toArgb())
+    }
 
     DisposableEffect(Unit) {
         onDispose {
@@ -388,12 +524,12 @@ private fun Life360FullMapView(
                 controller.setZoom(15.0)
                 controller.setCenter(targetPoint)
 
-                // Add target marker with MD3 style
+                // Add target marker with avatar pin
                 val targetMarker = Marker(this).apply {
                     position = targetPoint
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
                     title = targetName
-                    icon = createMD3MarkerDrawable(ctx, primaryColor.toArgb())
+                    icon = avatarBitmap
                 }
                 overlays.add(targetMarker)
 
@@ -408,20 +544,27 @@ private fun Life360FullMapView(
                     (overlay as? Marker)?.id == "user_location"
                 }
 
+                // Calculate pulse scale (0.8 to 1.2) from frame
+                val pulseProgress = pulseFrame / 60f
+                val pulseScale = 0.8f + 0.4f * kotlin.math.sin(pulseProgress * 2 * Math.PI).toFloat()
+
                 val userMarker = Marker(view).apply {
                     id = "user_location"
                     position = GeoPoint(userLat, userLon)
                     setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     title = "You"
-                    icon = createUserLocationDrawable(context, secondaryColor.toArgb())
+                    icon = createPulsingBlueCircleDrawable(context, pulseScale)
                 }
                 view.overlays.add(userMarker)
 
-                // Zoom to show both markers
-                val targetPoint = GeoPoint(targetLat, targetLon)
-                val userPoint = GeoPoint(userLat, userLon)
-                val boundingBox = org.osmdroid.util.BoundingBox.fromGeoPoints(listOf(targetPoint, userPoint))
-                view.zoomToBoundingBox(boundingBox.increaseByScale(1.5f), true)
+                // Zoom to show both markers (only once)
+                if (!hasZoomedToBounds) {
+                    val targetPoint = GeoPoint(targetLat, targetLon)
+                    val userPoint = GeoPoint(userLat, userLon)
+                    val boundingBox = org.osmdroid.util.BoundingBox.fromGeoPoints(listOf(targetPoint, userPoint))
+                    view.zoomToBoundingBox(boundingBox.increaseByScale(1.5f), true)
+                    hasZoomedToBounds = true
+                }
 
                 view.invalidate()
             }
@@ -431,62 +574,107 @@ private fun Life360FullMapView(
 }
 
 /**
- * Create an MD3-styled location pin marker.
+ * Create an avatar-based map pin marker.
+ * Shows the contact's photo in a teardrop-shaped pin.
  */
-private fun createMD3MarkerDrawable(context: Context, color: Int): BitmapDrawable {
-    val size = 72
+private fun createAvatarPinDrawable(
+    context: Context,
+    name: String,
+    avatarPath: String?,
+    accentColor: Int
+): BitmapDrawable {
+    val size = 96
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val cx = size / 2f
+    val avatarCenterY = size * 0.35f
+    val avatarRadius = size * 0.32f
 
     // Shadow
     paint.color = 0x40000000
-    canvas.drawCircle(size / 2f, size / 2f + 4, size / 3f, paint)
+    canvas.drawCircle(cx, avatarCenterY + 6, avatarRadius + 4, paint)
 
-    // Pin body (teardrop shape)
-    paint.color = color
+    // White border/background for avatar
+    paint.color = 0xFFFFFFFF.toInt()
     paint.style = Paint.Style.FILL
+    canvas.drawCircle(cx, avatarCenterY, avatarRadius + 4, paint)
+
+    // Draw the pointed bottom (teardrop tail)
     val path = android.graphics.Path()
-    val cx = size / 2f
-    val cy = size * 0.35f
-    val radius = size / 3f
-    path.addCircle(cx, cy, radius, android.graphics.Path.Direction.CW)
-    // Add the pointed bottom
-    path.moveTo(cx - radius * 0.6f, cy + radius * 0.7f)
-    path.quadTo(cx, size * 0.9f, cx + radius * 0.6f, cy + radius * 0.7f)
+    path.moveTo(cx - avatarRadius * 0.5f, avatarCenterY + avatarRadius * 0.7f)
+    path.quadTo(cx, size * 0.92f, cx + avatarRadius * 0.5f, avatarCenterY + avatarRadius * 0.7f)
     path.close()
     canvas.drawPath(path, paint)
 
-    // Inner circle (white)
-    paint.color = 0xFFFFFFFF.toInt()
-    canvas.drawCircle(cx, cy, radius * 0.4f, paint)
+    // Draw avatar image
+    val avatarBitmap = if (avatarPath != null) {
+        AvatarGenerator.loadContactPhotoBitmap(context, avatarPath, (avatarRadius * 2).toInt())
+    } else {
+        null
+    } ?: AvatarGenerator.generateBitmap(context, name, (avatarRadius * 2).toInt())
+
+    // Clip avatar to circle
+    val avatarLeft = cx - avatarRadius
+    val avatarTop = avatarCenterY - avatarRadius
+
+    // Create circular clip for avatar
+    canvas.save()
+    val clipPath = android.graphics.Path()
+    clipPath.addCircle(cx, avatarCenterY, avatarRadius, android.graphics.Path.Direction.CW)
+    canvas.clipPath(clipPath)
+    canvas.drawBitmap(
+        avatarBitmap,
+        null,
+        android.graphics.RectF(avatarLeft, avatarTop, avatarLeft + avatarRadius * 2, avatarTop + avatarRadius * 2),
+        paint
+    )
+    canvas.restore()
+
+    // Accent color ring around avatar
+    paint.color = accentColor
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 3f
+    canvas.drawCircle(cx, avatarCenterY, avatarRadius + 2, paint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
 
 /**
- * Create a small circle for user's current location.
+ * Create a pulsing blue circle for user's current location.
+ * @param pulseScale Scale factor for the outer ring (0.8 to 1.2 for pulsing effect)
  */
-private fun createUserLocationDrawable(context: Context, color: Int): BitmapDrawable {
-    val size = 48
+private fun createPulsingBlueCircleDrawable(context: Context, pulseScale: Float): BitmapDrawable {
+    val baseSize = 64
+    val size = (baseSize * 1.3f).toInt() // Extra space for pulse
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val cx = size / 2f
+    val cy = size / 2f
+    val blueColor = 0xFF2196F3.toInt() // Material Blue 500
 
-    // Outer ring
-    paint.color = color
-    paint.alpha = 60
-    canvas.drawCircle(size / 2f, size / 2f, size / 2f - 2, paint)
+    // Outer pulsing ring (fades based on scale)
+    val outerRadius = baseSize / 2f * pulseScale
+    val outerAlpha = ((1f - (pulseScale - 0.8f) / 0.4f) * 80).toInt().coerceIn(0, 80)
+    paint.color = blueColor
+    paint.alpha = outerAlpha
+    paint.style = Paint.Style.FILL
+    canvas.drawCircle(cx, cy, outerRadius, paint)
+
+    // Middle ring
+    paint.alpha = 100
+    canvas.drawCircle(cx, cy, baseSize / 3.5f, paint)
 
     // Inner filled circle
     paint.alpha = 255
-    canvas.drawCircle(size / 2f, size / 2f, size / 4f, paint)
+    canvas.drawCircle(cx, cy, baseSize / 5f, paint)
 
     // White center dot
     paint.color = 0xFFFFFFFF.toInt()
-    canvas.drawCircle(size / 2f, size / 2f, size / 8f, paint)
+    canvas.drawCircle(cx, cy, baseSize / 10f, paint)
 
     return BitmapDrawable(context.resources, bitmap)
 }
@@ -542,6 +730,23 @@ private fun formatDuration(minutes: Int): String {
             val hours = minutes / 60
             val mins = minutes % 60
             if (mins == 0) "${hours}h" else "${hours}h ${mins}m"
+        }
+    }
+}
+
+private fun formatLocationTime(timestamp: Long): String {
+    if (timestamp == 0L) return "Unknown"
+
+    val now = System.currentTimeMillis()
+    val diff = now - timestamp
+
+    return when {
+        diff < 60_000 -> "just now"
+        diff < 3600_000 -> "${diff / 60_000} min ago"
+        diff < 86400_000 -> "${diff / 3600_000} hours ago"
+        else -> {
+            val formatter = java.text.SimpleDateFormat("MMM d, h:mm a", java.util.Locale.getDefault())
+            formatter.format(java.util.Date(timestamp))
         }
     }
 }

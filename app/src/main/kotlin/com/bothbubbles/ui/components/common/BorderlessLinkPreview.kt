@@ -215,29 +215,47 @@ fun BorderlessLinkPreviewMinimal(
 ) {
     val context = LocalContext.current
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val placeholderColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
-    Row(
+    Column(
         modifier = modifier
             .widthIn(max = maxWidth)
             .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.surfaceContainerLow)
             .clickable {
                 openUrl(context, url)
             }
-            .padding(horizontal = 12.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Icon(
-            Icons.Default.Link,
-            contentDescription = null,
-            modifier = Modifier.size(16.dp),
-            tint = textColor
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = domain,
-            style = MaterialTheme.typography.bodySmall,
-            color = textColor
-        )
+        // Placeholder image area
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(100.dp)
+                .background(placeholderColor)
+                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Link,
+                contentDescription = null,
+                modifier = Modifier.size(32.dp),
+                tint = textColor.copy(alpha = 0.5f)
+            )
+        }
+
+        // Domain
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                .clip(RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp))
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = domain,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor
+            )
+        }
     }
 }

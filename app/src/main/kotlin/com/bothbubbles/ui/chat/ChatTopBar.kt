@@ -45,6 +45,7 @@ fun ChatTopBar(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onLife360MapClick: (participantAddress: String) -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
     isBubbleMode: Boolean = false
@@ -55,6 +56,9 @@ fun ChatTopBar(
     val currentSendMode by sendModeManager?.currentSendMode?.collectAsStateWithLifecycle()
         ?: androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ChatSendMode.IMESSAGE) }
     val showSendModeSwitch = sendModeManager?.canShowSendModeSwitch() ?: false
+
+    // Get first participant address for Life360 map navigation
+    val firstParticipantAddress = infoState.participantAddresses.firstOrNull() ?: ""
 
     ChatTopBarContent(
         chatTitle = infoState.chatTitle,
@@ -73,7 +77,10 @@ fun ChatTopBar(
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
-        onLocationClick = onDetailsClick, // Navigate to details for now (will be full-screen map later)
+        onLocationClick = {
+            // Navigate to contact details page
+            onDetailsClick()
+        },
         onMenuAction = onMenuAction,
         modifier = modifier,
         isBubbleMode = isBubbleMode

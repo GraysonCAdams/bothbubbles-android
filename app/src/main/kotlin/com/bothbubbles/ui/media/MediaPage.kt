@@ -10,13 +10,15 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 
 @Composable
 internal fun MediaPage(
     attachment: AttachmentEntity,
-    onTap: () -> Unit
+    onTap: () -> Unit,
+    bottomPadding: Dp = 0.dp
 ) {
     val mediaUrl = attachment.localPath ?: attachment.webUrl
 
@@ -43,7 +45,8 @@ internal fun MediaPage(
             attachment.isVideo -> {
                 VideoPlayer(
                     videoUrl = mediaUrl,
-                    onTap = onTap
+                    onTap = onTap,
+                    bottomPadding = bottomPadding
                 )
             }
             else -> {

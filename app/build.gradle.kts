@@ -158,6 +158,9 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.session)
 
+    // YouTube Player (IFrame API wrapper with native UI overlay)
+    implementation(libs.youtube.player)
+
     // ML Kit
     implementation(libs.mlkit.barcode.scanning)
     implementation(libs.mlkit.smart.reply)

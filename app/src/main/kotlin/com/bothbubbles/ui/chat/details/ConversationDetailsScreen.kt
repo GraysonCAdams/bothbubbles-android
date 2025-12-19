@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
@@ -14,8 +15,8 @@ import androidx.compose.ui.Alignment
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -68,23 +69,35 @@ fun ConversationDetailsScreen(
         }
     }
 
-    // Collapsing toolbar scroll behavior
-    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Track scroll state to determine when header is scrolled out of view
+    val listState = rememberLazyListState()
 
-    // Calculate collapse progress (0 = fully expanded, 1 = fully collapsed)
-    val collapseProgress = scrollBehavior.state.collapsedFraction
+    // Calculate how much of the header is visible (0 = fully visible, 1 = scrolled away)
+    val headerHeightPx = with(LocalDensity.current) { 180.dp.toPx() }
+    val headerScrollProgress by remember {
+        derivedStateOf {
+            val firstVisibleItem = listState.firstVisibleItemIndex
+            val firstVisibleOffset = listState.firstVisibleItemScrollOffset
+
+            if (firstVisibleItem > 0) {
+                // Header completely scrolled away
+                1f
+            } else {
+                // Calculate progress based on scroll offset
+                (firstVisibleOffset / headerHeightPx).coerceIn(0f, 1f)
+            }
+        }
+    }
 
     Scaffold(
-        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            LargeTopAppBar(
+            TopAppBar(
                 title = {
-                    // Animated title that fades in when collapsed
+                    // Avatar + name fade in as header scrolls out of view
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.alpha(collapseProgress)
+                        modifier = Modifier.alpha(headerScrollProgress)
                     ) {
-                        // Small avatar in collapsed state - use participant avatar for 1:1 chats
                         val avatarPath = if (uiState.chat?.isGroup == true) {
                             uiState.chat?.customAvatarPath
                         } else {
@@ -126,8 +139,7 @@ fun ConversationDetailsScreen(
                         }
                     }
                 },
-                scrollBehavior = scrollBehavior,
-                colors = TopAppBarDefaults.largeTopAppBarColors(
+                colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.surface,
                     scrolledContainerColor = MaterialTheme.colorScheme.surface
                 )
@@ -145,27 +157,29 @@ fun ConversationDetailsScreen(
             }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(paddingValues),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Expanded header with large avatar (fades out when collapsing)
+                // Large centered header (fades out as it scrolls, app bar title fades in)
                 item {
-                    // Use participant avatar for 1:1 chats, custom avatar for groups
                     val headerAvatarPath = if (uiState.chat?.isGroup == true) {
                         uiState.chat?.customAvatarPath
                     } else {
                         uiState.participants.firstOrNull()?.cachedAvatarPath
                     }
-                    CollapsingConversationHeader(
+                    // Fade out as we scroll
+                    val headerAlpha = 1f - headerScrollProgress
+                    ConversationHeader(
                         displayName = uiState.displayName,
                         subtitle = uiState.subtitle,
                         isGroup = uiState.chat?.isGroup == true,
                         participantNames = uiState.participants.map { it.displayName },
                         participantAvatars = uiState.participants.map { it.cachedAvatarPath },
                         avatarPath = headerAvatarPath,
-                        collapseProgress = collapseProgress
+                        modifier = Modifier.alpha(headerAlpha)
                     )
                 }
 
@@ -192,17 +206,54 @@ fun ConversationDetailsScreen(
                     )
                 }
 
-                // Life360 location section (only for 1:1 chats with linked Life360 member)
-                val life360Member = uiState.life360Member
-                if (uiState.chat?.isGroup != true && life360Member != null) {
+                // Life360 location section
+                val life360Members = uiState.life360Members
+                val isGroup = uiState.chat?.isGroup == true
+
+                if (life360Members.isNotEmpty()) {
                     item {
-                        Life360LocationSection(
-                            life360Member = life360Member,
-                            onMapClick = {
-                                // Navigate to full-screen map
-                                onLife360MapClick(uiState.firstParticipantAddress)
+                        val isRefreshingLife360 by viewModel.isRefreshingLife360.collectAsStateWithLifecycle()
+
+                        if (isGroup || life360Members.size > 1) {
+                            // Group chat or multiple members: show multi-member locations section
+                            // Build member-to-avatar mapping
+                            val membersWithAvatars = remember(life360Members, uiState.participants) {
+                                life360Members.map { member ->
+                                    // Find the participant matching this member's phone number
+                                    val matchingParticipant = uiState.participants.find { participant ->
+                                        participant.address == member.phoneNumber
+                                    }
+                                    Life360MemberWithAvatar(
+                                        member = member,
+                                        avatarPath = matchingParticipant?.cachedAvatarPath
+                                    )
+                                }
                             }
-                        )
+
+                            Life360LocationsSection(
+                                members = membersWithAvatars,
+                                isRefreshing = isRefreshingLife360,
+                                onMapClick = {
+                                    // Navigate to full-screen map showing all members
+                                    // For group chats, pass the chat guid or first participant
+                                    onLife360MapClick(uiState.firstParticipantAddress)
+                                },
+                                onMemberRefreshClick = viewModel::refreshLife360LocationFor
+                            )
+                        } else {
+                            // 1:1 chat with single member: show original single-member section
+                            val life360Member = life360Members.first()
+                            Life360LocationSection(
+                                life360Member = life360Member,
+                                avatarPath = uiState.participants.firstOrNull()?.cachedAvatarPath,
+                                isRefreshing = isRefreshingLife360,
+                                onMapClick = {
+                                    // Navigate to full-screen map
+                                    onLife360MapClick(uiState.firstParticipantAddress)
+                                },
+                                onRefreshClick = viewModel::refreshLife360Location
+                            )
+                        }
                     }
                 }
 

@@ -383,20 +383,14 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     /**
      * Schedule Life360 sync worker to periodically update family member locations.
      * Only runs if Life360 is authenticated and enabled.
+     *
+     * DISABLED: Life360 data is now only fetched while viewing a conversation with a
+     * Life360-linked contact. This avoids unnecessary background API calls and reduces
+     * risk of rate limiting/bans. See ConversationDetailsViewModel.startLife360Polling().
      */
     private fun initializeLife360Sync() {
-        applicationScope.launch(ioDispatcher) {
-            try {
-                if (!life360TokenStorage.isAuthenticated) {
-                    Timber.d("Life360 not authenticated, skipping sync worker")
-                    return@launch
-                }
-
-                Life360SyncWorker.schedule(this@BothBubblesApp)
-            } catch (e: Exception) {
-                Timber.w(e, "Error scheduling Life360 sync")
-            }
-        }
+        // Background sync disabled - Life360 data is fetched on-demand when viewing contacts
+        Timber.d("Life360 background sync disabled, using foreground-only polling")
     }
 
     /**

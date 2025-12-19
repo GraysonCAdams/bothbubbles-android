@@ -129,6 +129,12 @@ fun MediaViewerScreen(
                 }
             }
             else -> {
+                // Calculate bottom padding for video controls when action bar is visible
+                // Action bar height: ~8dp padding + 48dp icon + 16dp text + 8dp padding + page indicator if present
+                val videoBottomPadding = if (showControls) {
+                    if (uiState.hasMultipleMedia) 120.dp else 90.dp
+                } else 0.dp
+
                 HorizontalPager(
                     state = pagerState,
                     modifier = Modifier.fillMaxSize(),
@@ -138,7 +144,8 @@ fun MediaViewerScreen(
                     if (media != null) {
                         MediaPage(
                             attachment = media.attachment,
-                            onTap = { showControls = !showControls }
+                            onTap = { showControls = !showControls },
+                            bottomPadding = videoBottomPadding
                         )
                     }
                 }

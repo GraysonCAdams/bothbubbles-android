@@ -5,6 +5,7 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -39,6 +40,7 @@ class IncomingMessageHandler @Inject constructor(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val attachmentDao: AttachmentDao,
+    private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
     private val api: BothBubblesApi,
@@ -77,6 +79,11 @@ class IncomingMessageHandler @Inject constructor(
             chatDao.updateLastMessage(chatGuid, message.dateCreated, message.text)
             // Use atomic increment instead of read-modify-write to prevent race conditions
             chatDao.incrementUnreadCount(chatGuid)
+
+            // Also increment the unified group's unread count for badge sync
+            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
+                unifiedChatGroupDao.incrementUnreadCount(group.id)
+            }
 
             // Try to infer sender name from self-introduction patterns (e.g., "Hey it's John")
             message.handleId?.let { handleId ->

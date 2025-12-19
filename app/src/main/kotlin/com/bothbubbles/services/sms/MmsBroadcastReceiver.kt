@@ -10,6 +10,7 @@ import android.telephony.SmsManager
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
@@ -89,6 +90,9 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
 
     @Inject
     lateinit var handleDao: HandleDao
+
+    @Inject
+    lateinit var unifiedChatGroupDao: UnifiedChatGroupDao
 
     @Inject
     lateinit var notificationService: NotificationService
@@ -388,6 +392,11 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
             chatDao.insertChat(chat)
         } else {
             chatDao.updateUnreadCount(chatGuid, existingChat.unreadCount + 1)
+        }
+
+        // Also increment the unified group's unread count for badge sync
+        unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
+            unifiedChatGroupDao.incrementUnreadCount(group.id)
         }
     }
 

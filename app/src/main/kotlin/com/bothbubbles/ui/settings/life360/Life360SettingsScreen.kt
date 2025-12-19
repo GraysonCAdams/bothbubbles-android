@@ -44,7 +44,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBar
 import androidx.compose.material3.SearchBarDefaults
-import androidx.compose.material3.Slider
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -73,7 +72,6 @@ import kotlinx.collections.immutable.ImmutableMap
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -86,7 +84,6 @@ fun Life360SettingsScreen(
     val members by viewModel.members.collectAsState()
     val isEnabled by viewModel.isEnabled.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
-    val pollInterval by viewModel.pollInterval.collectAsState()
     val defaultCircleId by viewModel.defaultCircleId.collectAsState()
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
@@ -132,13 +129,11 @@ fun Life360SettingsScreen(
                     members = members,
                     isEnabled = isEnabled,
                     isPaused = isPaused,
-                    pollInterval = pollInterval,
                     defaultCircleId = defaultCircleId,
                     availableHandles = availableHandles,
                     handleDisplayNames = handleDisplayNames,
                     onSetEnabled = viewModel::setEnabled,
                     onSetPaused = viewModel::setPaused,
-                    onSetPollInterval = viewModel::setPollInterval,
                     onSetDefaultCircle = viewModel::setDefaultCircle,
                     onMapMember = viewModel::mapMemberToContact,
                     onUnmapMember = viewModel::unmapMember,
@@ -165,7 +160,6 @@ fun Life360SettingsContent(
     val members by viewModel.members.collectAsState()
     val isEnabled by viewModel.isEnabled.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
-    val pollInterval by viewModel.pollInterval.collectAsState()
     val defaultCircleId by viewModel.defaultCircleId.collectAsState()
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
@@ -182,13 +176,11 @@ fun Life360SettingsContent(
                 members = members,
                 isEnabled = isEnabled,
                 isPaused = isPaused,
-                pollInterval = pollInterval,
                 defaultCircleId = defaultCircleId,
                 availableHandles = availableHandles,
                 handleDisplayNames = handleDisplayNames,
                 onSetEnabled = viewModel::setEnabled,
                 onSetPaused = viewModel::setPaused,
-                onSetPollInterval = viewModel::setPollInterval,
                 onSetDefaultCircle = viewModel::setDefaultCircle,
                 onMapMember = viewModel::mapMemberToContact,
                 onUnmapMember = viewModel::unmapMember,
@@ -335,13 +327,11 @@ private fun Life360SettingsContentInternal(
     members: ImmutableList<Life360Member>,
     isEnabled: Boolean,
     isPaused: Boolean,
-    pollInterval: Int,
     defaultCircleId: String?,
     availableHandles: ImmutableList<HandleEntity>,
     handleDisplayNames: ImmutableMap<Long, String>,
     onSetEnabled: (Boolean) -> Unit,
     onSetPaused: (Boolean) -> Unit,
-    onSetPollInterval: (Int) -> Unit,
     onSetDefaultCircle: (String) -> Unit,
     onMapMember: (String, Long) -> Unit,
     onUnmapMember: (String) -> Unit,
@@ -445,22 +435,6 @@ private fun Life360SettingsContentInternal(
                         }
                     }
                 }
-            }
-        }
-
-        // Poll interval slider
-        item {
-            Column {
-                Text(
-                    text = "Sync Interval: $pollInterval minutes",
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Slider(
-                    value = pollInterval.toFloat(),
-                    onValueChange = { onSetPollInterval(it.roundToInt()) },
-                    valueRange = 5f..30f,
-                    steps = 4
-                )
             }
         }
 

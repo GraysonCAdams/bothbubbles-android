@@ -11,18 +11,25 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.Life360Repository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.DiscordContactService
+import com.bothbubbles.services.life360.Life360Service
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
@@ -37,10 +44,16 @@ data class ConversationDetailsUiState(
     val recentImages: List<AttachmentEntity> = emptyList(),
     val isContactStarred: Boolean = false,
     val discordChannelId: String? = null,
-    val life360Member: Life360Member? = null,
+    val life360Members: List<Life360Member> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
 ) {
+    /**
+     * For 1:1 chats, get the single Life360 member (if any).
+     */
+    val life360Member: Life360Member?
+        get() = life360Members.firstOrNull()
+
     val displayName: String
         get() = chat?.displayName
             ?: participants.firstOrNull()?.displayName
@@ -97,7 +110,9 @@ class ConversationDetailsViewModel @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val androidContactsService: AndroidContactsService,
     private val discordContactService: DiscordContactService,
-    private val life360Repository: Life360Repository
+    private val life360Repository: Life360Repository,
+    private val life360Service: Life360Service,
+    private val featurePreferences: FeaturePreferences
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -109,20 +124,28 @@ class ConversationDetailsViewModel @Inject constructor(
     private val _isContactStarred = MutableStateFlow(false)
     private val _discordChannelId = MutableStateFlow<String?>(null)
 
-    // Observe Life360 member linked to first participant (by address, not handle ID)
+    // Life360 refresh state
+    private val _isRefreshingLife360 = MutableStateFlow(false)
+    val isRefreshingLife360: StateFlow<Boolean> = _isRefreshingLife360.asStateFlow()
+
+    // Life360 automatic polling job (foreground-only)
+    private var life360PollingJob: Job? = null
+
+    // Observe Life360 members linked to ALL participants (by address, not handle ID)
     // Using address is more reliable because the same phone number can have multiple handle IDs
     // (one for iMessage, one for SMS, etc.)
-    private val life360MemberFlow = chatRepository.observeParticipantsForChat(chatGuid)
-        .flatMapLatest { participants ->
-            val participant = participants.firstOrNull()
-            val address = participant?.address
-            timber.log.Timber.d("Life360 lookup: chatGuid=$chatGuid, participant=$address")
-            if (address != null) {
-                life360Repository.observeMemberByAddress(address)
-            } else {
-                flowOf(null)
-            }
+    // For group chats, this returns all members linked to any participant.
+    private val life360MembersFlow = combine(
+        chatRepository.observeParticipantsForChat(chatGuid),
+        life360Repository.observeAllMembers()
+    ) { participants, allMembers ->
+        val participantAddresses = participants.map { it.address }.toSet()
+        val linkedMembers = allMembers.filter { member ->
+            member.phoneNumber?.let { it in participantAddresses } == true
         }
+        timber.log.Timber.d("Life360 lookup: chatGuid=$chatGuid, participants=${participantAddresses.size}, linked=${linkedMembers.size}")
+        linkedMembers
+    }
 
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
@@ -132,7 +155,7 @@ class ConversationDetailsViewModel @Inject constructor(
         attachmentRepository.observeRecentImagesForChat(chatGuid, 5),
         _isContactStarred,
         _discordChannelId,
-        life360MemberFlow
+        life360MembersFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val chat = values[0] as? ChatEntity
@@ -142,7 +165,7 @@ class ConversationDetailsViewModel @Inject constructor(
         val recentImages = values[4] as? List<AttachmentEntity> ?: emptyList()
         val isStarred = values[5] as? Boolean ?: false
         val discordChannelId = values[6] as? String
-        val life360Member = values[7] as? Life360Member
+        val life360Members = values[7] as? List<Life360Member> ?: emptyList()
 
         ConversationDetailsUiState(
             chat = chat,
@@ -152,7 +175,7 @@ class ConversationDetailsViewModel @Inject constructor(
             recentImages = recentImages,
             isContactStarred = isStarred,
             discordChannelId = discordChannelId,
-            life360Member = life360Member,
+            life360Members = life360Members,
             isLoading = false
         )
     }.stateIn(
@@ -173,6 +196,9 @@ class ConversationDetailsViewModel @Inject constructor(
                 }
             }
         }
+
+        // Start Life360 polling when a member is linked to this chat
+        startLife360Polling()
     }
 
     fun toggleStarred() {
@@ -265,6 +291,115 @@ class ConversationDetailsViewModel @Inject constructor(
                 chatRepository.updateHandleCachedContactInfo(address, displayName, photoUri)
             }
         }
+    }
+
+    // ============================================================================
+    // LIFE360 LOCATION REFRESH
+    // ============================================================================
+
+    /**
+     * Manually refresh Life360 location for the current contact (1:1 chat).
+     * For group chats, use refreshLife360LocationFor(memberId).
+     *
+     * If 5+ minutes have passed since the last location request:
+     * - Pings the contact's phone to request fresh location
+     * - Waits briefly for their phone to respond
+     * - Fetches just this member's data
+     *
+     * Otherwise (rate limited):
+     * - Just fetches the member's cached data from Life360's servers
+     *
+     * The UI will auto-update since it observes the Life360 member flow.
+     */
+    fun refreshLife360Location() {
+        val member = uiState.value.life360Member ?: return
+        refreshLife360LocationFor(member.memberId)
+    }
+
+    /**
+     * Manually refresh Life360 location for a specific member.
+     * Used in group chats where multiple members may have Life360 linked.
+     */
+    fun refreshLife360LocationFor(memberId: String) {
+        if (_isRefreshingLife360.value) return
+
+        viewModelScope.launch {
+            val member = uiState.value.life360Members.find { it.memberId == memberId } ?: return@launch
+
+            _isRefreshingLife360.value = true
+            val startTime = System.currentTimeMillis()
+            timber.log.Timber.d("Life360 manual refresh started for ${member.displayName}")
+            try {
+
+                // Try to request location update (fails immediately if rate limited)
+                val requestResult = life360Service.requestLocationUpdate(member.circleId, member.memberId)
+                requestResult.fold(
+                    onSuccess = {
+                        timber.log.Timber.d("Location update requested for ${member.displayName}")
+                        // Give the contact's phone a moment to respond before fetching
+                        kotlinx.coroutines.delay(2000)
+                    },
+                    onFailure = {
+                        timber.log.Timber.d("Skipping location ping (rate limited), will fetch cached data")
+                    }
+                )
+
+                // Fetch just this member's data (not all circles)
+                val result = life360Service.syncMember(member.circleId, member.memberId)
+                val elapsed = System.currentTimeMillis() - startTime
+                result.fold(
+                    onSuccess = {
+                        timber.log.Timber.d("Life360 refresh completed for ${member.displayName} in ${elapsed}ms")
+                    },
+                    onFailure = { error ->
+                        timber.log.Timber.w(error, "Life360 refresh failed for ${member.displayName} after ${elapsed}ms")
+                    }
+                )
+            } finally {
+                _isRefreshingLife360.value = false
+            }
+        }
+    }
+
+    /**
+     * Start automatic Life360 location polling for this conversation's members.
+     *
+     * This runs continuously while the conversation details screen is visible.
+     * Uses the MEMBER endpoint (10-second rate limit) for efficient single-member fetches.
+     * For group chats with multiple Life360 members, polls all of them.
+     * Cancels automatically when ViewModel is cleared (user navigates away).
+     */
+    private fun startLife360Polling() {
+        life360PollingJob?.cancel()
+        life360PollingJob = viewModelScope.launch {
+            // Wait for at least one Life360 member to be linked to this chat
+            val members = life360MembersFlow.first { it.isNotEmpty() }
+            timber.log.Timber.d("Life360 polling started for ${members.size} member(s): ${members.map { it.displayName }}")
+
+            // Poll at MEMBER rate limit (10 seconds) - the service handles rate limiting
+            while (true) {
+                // Skip if manual refresh is in progress
+                if (!_isRefreshingLife360.value) {
+                    // Get current members (may change if participants change)
+                    val currentMembers = life360MembersFlow.first()
+                    for (member in currentMembers) {
+                        try {
+                            life360Service.syncMember(member.circleId, member.memberId)
+                            timber.log.Timber.d("Life360 poll sync completed for ${member.displayName}")
+                        } catch (e: Exception) {
+                            timber.log.Timber.w(e, "Life360 poll sync failed for ${member.displayName}")
+                        }
+                    }
+                }
+                // Wait before next poll (service rate limiter will also enforce minimum interval)
+                delay(LIFE360_POLL_INTERVAL_MS)
+            }
+        }
+    }
+
+    companion object {
+        // Poll every 15 seconds - service rate limiter enforces 10s minimum
+        private const val LIFE360_POLL_INTERVAL_MS = 15_000L
     }
 
     // ============================================================================

@@ -82,6 +82,9 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                 backStackEntry.savedStateHandle["original_attachment_uri"] = uri.toString()
                 navController.navigate(Screen.AttachmentEdit(uri.toString()))
             },
+            onLife360MapClick = { participantAddress ->
+                navController.navigate(Screen.Life360Map(participantAddress))
+            },
             capturedPhotoUri = capturedPhotoUri.value?.toUri(),
             onCapturedPhotoHandled = {
                 backStackEntry.savedStateHandle.remove<String>("captured_photo_uri")

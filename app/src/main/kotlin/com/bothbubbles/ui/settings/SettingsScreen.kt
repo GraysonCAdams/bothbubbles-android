@@ -598,7 +598,7 @@ fun SettingsContent(
                 SettingsMenuItem(
                     icon = Icons.Outlined.LocationOn,
                     title = "Life360",
-                    subtitle = "Show family member locations",
+                    subtitle = "Show friends and family members locations",
                     onClick = onLife360Click
                 )
 

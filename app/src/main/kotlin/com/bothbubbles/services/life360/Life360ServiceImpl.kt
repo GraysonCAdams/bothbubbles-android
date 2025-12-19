@@ -126,11 +126,11 @@ class Life360ServiceImpl @Inject constructor(
         val authHeader = tokenStorage.buildAuthHeader()
             ?: return Result.failure(Life360Error.AuthenticationFailed("Not authenticated"))
 
-        // Check rate limit
+        // Check rate limit - fail immediately if rate limited (don't wait)
         val delay = rateLimiter.getDelayUntilAllowed(Life360RateLimiter.Endpoint.REQUEST_LOCATION)
         if (delay > 0) {
-            Timber.d("Waiting ${delay}ms before location request")
-            delay(delay)
+            Timber.d("Location request rate limited, ${delay}ms until allowed")
+            return Result.failure(Life360Error.RateLimited(delay / 1000))
         }
 
         return try {
@@ -138,6 +138,30 @@ class Life360ServiceImpl @Inject constructor(
             handleResponse(response, Life360RateLimiter.Endpoint.REQUEST_LOCATION) { }
         } catch (e: Exception) {
             Timber.e(e, "Failed to request location update")
+            Result.failure(Life360Error.NetworkFailure(cause = e))
+        }
+    }
+
+    override suspend fun syncMember(circleId: String, memberId: String): Result<Unit> {
+        val authHeader = tokenStorage.buildAuthHeader()
+            ?: return Result.failure(Life360Error.AuthenticationFailed("Not authenticated"))
+
+        // Check rate limit for individual member fetch
+        val delay = rateLimiter.getDelayUntilAllowed(Life360RateLimiter.Endpoint.MEMBER)
+        if (delay > 0) {
+            Timber.d("Waiting ${delay}ms before member fetch")
+            delay(delay)
+        }
+
+        return try {
+            val response = api.getCircleMember(authHeader, circleId, memberId)
+            handleResponse(response, Life360RateLimiter.Endpoint.MEMBER) { dto ->
+                val entity = dtoToEntity(dto, circleId)
+                repository.saveMembers(circleId, listOf(entity))
+                Timber.d("Synced single member: ${entity.firstName} ${entity.lastName}")
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to sync member")
             Result.failure(Life360Error.NetworkFailure(cause = e))
         }
     }

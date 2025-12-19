@@ -1,9 +1,13 @@
 package com.bothbubbles.ui.components.common
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -79,6 +83,7 @@ fun LinkPreviewError(
     val context = LocalContext.current
     val cardColors = linkPreviewCardColors(LinkPreviewSurfaceLevel.Low)
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val placeholderColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
     Card(
         modifier = modifier
@@ -90,33 +95,45 @@ fun LinkPreviewError(
         colors = cardColors,
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Link,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = textColor
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = domain,
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor,
-                modifier = Modifier.weight(1f)
-            )
-            IconButton(
-                onClick = onRetry,
-                modifier = Modifier.size(24.dp)
+        Column {
+            // Placeholder image area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .background(placeholderColor),
+                contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "Retry",
-                    modifier = Modifier.size(16.dp),
-                    tint = textColor
+                    Icons.Default.Link,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = textColor.copy(alpha = 0.5f)
                 )
+            }
+
+            // Domain and retry button
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = domain,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textColor,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(
+                    onClick = onRetry,
+                    modifier = Modifier.size(24.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Refresh,
+                        contentDescription = "Retry",
+                        modifier = Modifier.size(16.dp),
+                        tint = textColor
+                    )
+                }
             }
         }
     }
@@ -135,6 +152,7 @@ fun LinkPreviewMinimal(
     val context = LocalContext.current
     val cardColors = linkPreviewCardColors(LinkPreviewSurfaceLevel.Low)
     val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val placeholderColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
     Card(
         modifier = modifier
@@ -146,22 +164,34 @@ fun LinkPreviewMinimal(
         colors = cardColors,
         shape = RoundedCornerShape(12.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                Icons.Default.Link,
-                contentDescription = null,
-                modifier = Modifier.size(16.dp),
-                tint = textColor
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = domain,
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor
-            )
+        Column {
+            // Placeholder image area
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(100.dp)
+                    .background(placeholderColor),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.Link,
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                    tint = textColor.copy(alpha = 0.5f)
+                )
+            }
+
+            // Domain
+            Row(
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = domain,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = textColor
+                )
+            }
         }
     }
 }
