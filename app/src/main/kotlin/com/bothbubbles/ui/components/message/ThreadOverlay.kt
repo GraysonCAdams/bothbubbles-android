@@ -195,6 +195,7 @@ private fun ThreadMessageItem(
             groupPosition = MessageGroupPosition.SINGLE,
             showDeliveryIndicator = message.isFromMe,
             onReply = null,
+            onScrollToOriginal = null,
             onReplyIndicatorClick = null
         )
 

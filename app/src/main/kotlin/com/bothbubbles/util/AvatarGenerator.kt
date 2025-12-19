@@ -10,8 +10,10 @@ import android.graphics.PorterDuffXfermode
 import android.graphics.Typeface
 import android.net.Uri
 import android.provider.ContactsContract
-import timber.log.Timber
+import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.graphics.drawable.IconCompat
+import com.bothbubbles.R
+import timber.log.Timber
 import kotlin.math.abs
 import kotlin.math.min
 
@@ -77,7 +79,11 @@ object AvatarGenerator {
      * When true, avatar should show a Building icon.
      */
     fun isShortCodeOrAlphanumericSender(name: String): Boolean {
-        val normalized = name.replace(Regex("[^0-9a-zA-Z]"), "")
+        val trimmed = name.trim()
+        // Real names have spaces (e.g., "Anne Chodzko"), sender IDs don't (e.g., "GOOGLE")
+        if (trimmed.contains(' ')) return false
+
+        val normalized = trimmed.replace(Regex("[^0-9a-zA-Z]"), "")
         // Short codes: exactly 5-6 digits
         val isShortCode = Regex("""^\d{5,6}$""").matches(normalized)
         // Alphanumeric sender IDs: 3-11 letters only (e.g., "GOOGLE", "AMZN")
@@ -89,17 +95,21 @@ object AvatarGenerator {
      * Generate a bitmap avatar with colored circle and initials (or icon).
      * Used for notifications where Compose components aren't available.
      *
+     * @param context Application context for loading resources
      * @param name The contact name to generate avatar for
      * @param sizePx The size of the bitmap in pixels (typically 128 for notifications)
      * @param isBusiness If true, shows building icon (for business contacts without personal name)
      * @param hasContactInfo If true, skips business heuristic (contact has saved info)
-     * @return A circular bitmap with colored background and white initials/icon
+     * @param circleCrop If true, crops to a circle. If false, fills the square (for adaptive icons).
+     * @return A bitmap with colored background and white initials/icon
      */
     fun generateBitmap(
+        context: Context,
         name: String,
         sizePx: Int,
         isBusiness: Boolean = false,
-        hasContactInfo: Boolean = false
+        hasContactInfo: Boolean = false,
+        circleCrop: Boolean = true
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
@@ -107,16 +117,18 @@ object AvatarGenerator {
         // Get consistent color based on name hash
         val backgroundColor = getAvatarColorInt(name)
 
-        // Draw circular background with 5% inset padding to prevent double-mask
-        // artifacts when Android's Bubble system applies its own circular clipping
-        val circlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        // Draw background (circle or square)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = backgroundColor
             style = Paint.Style.FILL
         }
+
         val center = sizePx / 2f
-        val padding = sizePx * 0.05f
-        val radius = center - padding
-        canvas.drawCircle(center, center, radius, circlePaint)
+        if (circleCrop) {
+            canvas.drawCircle(center, center, center, paint)
+        } else {
+            canvas.drawRect(0f, 0f, sizePx.toFloat(), sizePx.toFloat(), paint)
+        }
 
         // Determine icon type based on name and contact info
         // Only apply business heuristic if we don't have contact info (prevents "ALICE" being shown as business)
@@ -130,7 +142,7 @@ object AvatarGenerator {
         when {
             // Business contacts get building icon
             showBuildingIcon -> {
-                drawBuildingIcon(canvas, sizePx)
+                drawBuildingIcon(context, canvas, sizePx)
             }
             // Phone numbers without contact info get person icon
             showPersonIcon -> {
@@ -161,27 +173,29 @@ object AvatarGenerator {
     /**
      * Generate an IconCompat for use in notifications.
      *
+     * @param context Application context
      * @param name The contact name to generate avatar for
      * @param sizePx The size of the bitmap in pixels
      * @param hasContactInfo If true, skips business heuristic (contact has saved info)
      * @return An IconCompat that can be used with Person.Builder.setIcon()
      */
-    fun generateIconCompat(name: String, sizePx: Int, hasContactInfo: Boolean = false): IconCompat {
-        val bitmap = generateBitmap(name, sizePx, hasContactInfo = hasContactInfo)
+    fun generateIconCompat(context: Context, name: String, sizePx: Int, hasContactInfo: Boolean = false): IconCompat {
+        val bitmap = generateBitmap(context, name, sizePx, hasContactInfo = hasContactInfo)
         return IconCompat.createWithBitmap(bitmap)
     }
 
     /**
-     * Load a contact photo from a content:// URI and convert it to a circular bitmap.
+     * Load a contact photo from a content:// URI and convert it to a bitmap.
      * Used for notifications where content URIs can't be passed directly (the notification
      * system doesn't have permission to read contact photos).
      *
      * @param context Application context for ContentResolver access
      * @param photoUri The content:// URI for the contact photo
      * @param sizePx Target size for the output bitmap
-     * @return A circular bitmap of the contact photo, or null if loading fails
+     * @param circleCrop If true, crops to a circle. If false, returns square bitmap (for adaptive icons).
+     * @return A bitmap of the contact photo, or null if loading fails
      */
-    fun loadContactPhotoBitmap(context: Context, photoUri: String, sizePx: Int): Bitmap? {
+    fun loadContactPhotoBitmap(context: Context, photoUri: String, sizePx: Int, circleCrop: Boolean = true): Bitmap? {
         return try {
             val uri = Uri.parse(photoUri)
             Timber.d("Loading contact photo: $photoUri")
@@ -191,7 +205,7 @@ object AvatarGenerator {
             if (inputStream == null) {
                 Timber.w("openInputStream returned null for: $photoUri, trying alternative method")
                 // Try alternative: use openContactPhotoInputStream which may handle permissions better
-                return loadContactPhotoAlternative(context, uri, sizePx)
+                return loadContactPhotoAlternative(context, uri, sizePx, circleCrop)
             }
 
             inputStream.use { stream ->
@@ -202,19 +216,28 @@ object AvatarGenerator {
                     return null
                 }
 
-                // Scale to target size
-                val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
-                if (scaledBitmap != sourceBitmap) {
+                // Center-crop to square first (like ContentScale.Crop in Compose)
+                val croppedBitmap = centerCropToSquare(sourceBitmap)
+                if (croppedBitmap != sourceBitmap) {
                     sourceBitmap.recycle()
                 }
 
-                // Make it circular to match generated avatars
-                val circularBitmap = createCircularBitmap(scaledBitmap)
-                if (circularBitmap != scaledBitmap) {
-                    scaledBitmap.recycle()
+                // Scale to target size
+                val scaledBitmap = Bitmap.createScaledBitmap(croppedBitmap, sizePx, sizePx, true)
+                if (scaledBitmap != croppedBitmap) {
+                    croppedBitmap.recycle()
                 }
 
-                circularBitmap
+                if (circleCrop) {
+                    // Make it circular to match generated avatars
+                    val circularBitmap = createCircularBitmap(scaledBitmap)
+                    if (circularBitmap != scaledBitmap) {
+                        scaledBitmap.recycle()
+                    }
+                    circularBitmap
+                } else {
+                    scaledBitmap
+                }
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to load contact photo: $photoUri")
@@ -230,7 +253,7 @@ object AvatarGenerator {
      * - content://com.android.contacts/display_photo/{id} (hi-res photo file - NOT a contact ID!)
      * - content://com.android.contacts/data/{id}
      */
-    private fun loadContactPhotoAlternative(context: Context, photoUri: Uri, sizePx: Int): Bitmap? {
+    private fun loadContactPhotoAlternative(context: Context, photoUri: Uri, sizePx: Int, circleCrop: Boolean): Bitmap? {
         return try {
             val segments = photoUri.pathSegments
 
@@ -242,12 +265,21 @@ object AvatarGenerator {
                     context.contentResolver.openInputStream(photoUri)?.use { stream ->
                         val sourceBitmap = BitmapFactory.decodeStream(stream)
                         if (sourceBitmap != null) {
-                            val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
-                            if (scaledBitmap != sourceBitmap) sourceBitmap.recycle()
-                            val circularBitmap = createCircularBitmap(scaledBitmap)
-                            if (circularBitmap != scaledBitmap) scaledBitmap.recycle()
-                            Timber.d("Successfully loaded display_photo via direct stream")
-                            circularBitmap
+                            // Center-crop to square first (like ContentScale.Crop in Compose)
+                            val croppedBitmap = centerCropToSquare(sourceBitmap)
+                            if (croppedBitmap != sourceBitmap) sourceBitmap.recycle()
+                            val scaledBitmap = Bitmap.createScaledBitmap(croppedBitmap, sizePx, sizePx, true)
+                            if (scaledBitmap != croppedBitmap) croppedBitmap.recycle()
+                            
+                            if (circleCrop) {
+                                val circularBitmap = createCircularBitmap(scaledBitmap)
+                                if (circularBitmap != scaledBitmap) scaledBitmap.recycle()
+                                Timber.d("Successfully loaded display_photo via direct stream")
+                                circularBitmap
+                            } else {
+                                Timber.d("Successfully loaded display_photo via direct stream")
+                                scaledBitmap
+                            }
                         } else {
                             Timber.w("Failed to decode display_photo stream")
                             null
@@ -308,18 +340,28 @@ object AvatarGenerator {
                     return null
                 }
 
-                val scaledBitmap = Bitmap.createScaledBitmap(sourceBitmap, sizePx, sizePx, true)
-                if (scaledBitmap != sourceBitmap) {
+                // Center-crop to square first (like ContentScale.Crop in Compose)
+                val croppedBitmap = centerCropToSquare(sourceBitmap)
+                if (croppedBitmap != sourceBitmap) {
                     sourceBitmap.recycle()
                 }
 
-                val circularBitmap = createCircularBitmap(scaledBitmap)
-                if (circularBitmap != scaledBitmap) {
-                    scaledBitmap.recycle()
+                val scaledBitmap = Bitmap.createScaledBitmap(croppedBitmap, sizePx, sizePx, true)
+                if (scaledBitmap != croppedBitmap) {
+                    croppedBitmap.recycle()
                 }
 
-                Timber.d("Successfully loaded photo via openContactPhotoInputStream for contact: $contactId")
-                circularBitmap
+                if (circleCrop) {
+                    val circularBitmap = createCircularBitmap(scaledBitmap)
+                    if (circularBitmap != scaledBitmap) {
+                        scaledBitmap.recycle()
+                    }
+                    Timber.d("Successfully loaded photo via openContactPhotoInputStream for contact: $contactId")
+                    circularBitmap
+                } else {
+                    Timber.d("Successfully loaded photo via openContactPhotoInputStream for contact: $contactId")
+                    scaledBitmap
+                }
             }
         } catch (e: Exception) {
             Timber.w(e, "Alternative photo load failed for: $photoUri")
@@ -328,10 +370,25 @@ object AvatarGenerator {
     }
 
     /**
+     * Center-crop a bitmap to make it square, like ContentScale.Crop in Compose.
+     * If already square, returns the same bitmap (no copy).
+     */
+    private fun centerCropToSquare(source: Bitmap): Bitmap {
+        if (source.width == source.height) {
+            return source
+        }
+
+        val size = min(source.width, source.height)
+        val xOffset = (source.width - size) / 2
+        val yOffset = (source.height - size) / 2
+
+        return Bitmap.createBitmap(source, xOffset, yOffset, size, size)
+    }
+
+    /**
      * Create a circular bitmap from a square bitmap.
      * Clips the source bitmap into a circle to match the app's avatar style.
-     * Includes 5% inset padding to prevent double-mask artifacts when Android's
-     * Bubble system applies its own circular clipping.
+     * No padding - fills the entire bitmap for clean display in Android bubbles.
      */
     private fun createCircularBitmap(source: Bitmap): Bitmap {
         val size = min(source.width, source.height)
@@ -340,20 +397,14 @@ object AvatarGenerator {
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG)
         val center = size / 2f
-        val padding = size * 0.05f
-        val radius = center - padding
+        val radius = center
 
-        // Draw the circular mask with padding
+        // Draw the circular mask (full size, no padding)
         canvas.drawCircle(center, center, radius, paint)
 
-        // Scale source to fit within the padded circle and draw using SRC_IN to clip
+        // Draw source using SRC_IN to clip to the circle
         paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
-        val scaledSize = (radius * 2).toInt()
-        val scaledSource = Bitmap.createScaledBitmap(source, scaledSize, scaledSize, true)
-        canvas.drawBitmap(scaledSource, padding, padding, paint)
-        if (scaledSource != source) {
-            scaledSource.recycle()
-        }
+        canvas.drawBitmap(source, 0f, 0f, paint)
 
         return output
     }
@@ -363,20 +414,26 @@ object AvatarGenerator {
      * Creates a composite image with 2-4 participant avatars arranged in a grid/layout.
      * Uses TRANSPARENT background so avatars composite cleanly in notifications.
      *
+     * @param context Application context
      * @param names List of participant names (up to 4 will be shown)
      * @param sizePx The size of the output bitmap in pixels
-     * @return A bitmap with multiple avatars on a transparent background
+     * @param circleCrop If true, leaves background transparent. If false, fills background (for adaptive icons).
+     * @return A bitmap with multiple avatars
      */
-    fun generateGroupCollageBitmap(names: List<String>, sizePx: Int): Bitmap {
+    fun generateGroupCollageBitmap(context: Context, names: List<String>, sizePx: Int, circleCrop: Boolean = true): Bitmap {
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
-        // Canvas starts fully transparent - we don't fill any background
+        
+        if (!circleCrop) {
+            // Fill background for adaptive icons (prevent black background on some launchers)
+            canvas.drawColor(0xFFF5F5F5.toInt()) // Light gray
+        }
 
         val displayCount = minOf(names.size, 4)
 
         when (displayCount) {
             0, 1 -> {
-                // Single or no participants - draw a group icon on transparent background
+                // Single or no participants - draw a group icon
                 drawGroupIcon(canvas, sizePx)
             }
             2 -> {
@@ -385,12 +442,12 @@ object AvatarGenerator {
                 val offset = sizePx - smallSize
 
                 // First avatar at top-left
-                val avatar1 = generateBitmap(names[0], smallSize)
+                val avatar1 = generateBitmap(context, names[0], smallSize)
                 canvas.drawBitmap(avatar1, 0f, 0f, null)
                 avatar1.recycle()
 
                 // Second avatar at bottom-right
-                val avatar2 = generateBitmap(names[1], smallSize)
+                val avatar2 = generateBitmap(context, names[1], smallSize)
                 canvas.drawBitmap(avatar2, offset.toFloat(), offset.toFloat(), null)
                 avatar2.recycle()
             }
@@ -400,17 +457,17 @@ object AvatarGenerator {
                 val centerX = (sizePx - smallSize) / 2f
 
                 // First avatar at top-center
-                val avatar1 = generateBitmap(names[0], smallSize)
+                val avatar1 = generateBitmap(context, names[0], smallSize)
                 canvas.drawBitmap(avatar1, centerX, 0f, null)
                 avatar1.recycle()
 
                 // Second avatar at bottom-left
-                val avatar2 = generateBitmap(names[1], smallSize)
+                val avatar2 = generateBitmap(context, names[1], smallSize)
                 canvas.drawBitmap(avatar2, 0f, (sizePx - smallSize).toFloat(), null)
                 avatar2.recycle()
 
                 // Third avatar at bottom-right
-                val avatar3 = generateBitmap(names[2], smallSize)
+                val avatar3 = generateBitmap(context, names[2], smallSize)
                 canvas.drawBitmap(avatar3, (sizePx - smallSize).toFloat(), (sizePx - smallSize).toFloat(), null)
                 avatar3.recycle()
             }
@@ -427,7 +484,7 @@ object AvatarGenerator {
                 )
 
                 for (i in 0 until 4) {
-                    val avatar = generateBitmap(names[i], smallSize)
+                    val avatar = generateBitmap(context, names[i], smallSize)
                     canvas.drawBitmap(avatar, positions[i].first, positions[i].second, null)
                     avatar.recycle()
                 }
@@ -445,13 +502,15 @@ object AvatarGenerator {
      * @param names List of participant names (up to 4 will be shown)
      * @param avatarPaths List of avatar paths (corresponding to names, can contain nulls)
      * @param sizePx The size of the output bitmap in pixels
-     * @return A bitmap with multiple avatars on a transparent background
+     * @param circleCrop If true, leaves background transparent. If false, fills background (for adaptive icons).
+     * @return A bitmap with multiple avatars
      */
     fun generateGroupCollageBitmapWithPhotos(
         context: Context,
         names: List<String>,
         avatarPaths: List<String?>,
-        sizePx: Int
+        sizePx: Int,
+        circleCrop: Boolean = true
     ): Bitmap {
         // Sort participants to prioritize those with photos
         val sortedIndices = names.indices.sortedByDescending { index ->
@@ -462,6 +521,11 @@ object AvatarGenerator {
 
         val bitmap = Bitmap.createBitmap(sizePx, sizePx, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+
+        if (!circleCrop) {
+            // Fill background for adaptive icons
+            canvas.drawColor(0xFFF5F5F5.toInt()) // Light gray
+        }
 
         val displayCount = minOf(sortedNames.size, 4)
 
@@ -479,7 +543,7 @@ object AvatarGenerator {
             }
 
             // Fall back to generated avatar (hasContactInfo = true if they had a path)
-            return generateBitmap(name, size, hasContactInfo = avatarPath != null)
+            return generateBitmap(context, name, size, hasContactInfo = avatarPath != null)
         }
 
         when (displayCount) {
@@ -558,13 +622,37 @@ object AvatarGenerator {
     /**
      * Generate an IconCompat for group notifications.
      *
+     * @param context Application context
      * @param names List of participant names
      * @param sizePx The size of the bitmap in pixels
      * @return An IconCompat with the group collage
      */
-    fun generateGroupIconCompat(names: List<String>, sizePx: Int): IconCompat {
-        val bitmap = generateGroupCollageBitmap(names, sizePx)
+    fun generateGroupIconCompat(context: Context, names: List<String>, sizePx: Int): IconCompat {
+        val bitmap = generateGroupCollageBitmap(context, names, sizePx)
         return IconCompat.createWithBitmap(bitmap)
+    }
+
+    /**
+     * Generate an adaptive IconCompat for use in notifications/bubbles.
+     * Uses a full-bleed square bitmap that the system will mask.
+     */
+    fun generateAdaptiveIconCompat(context: Context, name: String, sizePx: Int, hasContactInfo: Boolean = false): IconCompat {
+        val bitmap = generateBitmap(context, name, sizePx, hasContactInfo = hasContactInfo, circleCrop = false)
+        return IconCompat.createWithAdaptiveBitmap(bitmap)
+    }
+
+    /**
+     * Generate an adaptive IconCompat for group notifications/bubbles.
+     * Uses a full-bleed square bitmap that the system will mask.
+     */
+    fun generateGroupAdaptiveIconCompatWithPhotos(
+        context: Context,
+        names: List<String>,
+        avatarPaths: List<String?>,
+        sizePx: Int
+    ): IconCompat {
+        val bitmap = generateGroupCollageBitmapWithPhotos(context, names, avatarPaths, sizePx, circleCrop = false)
+        return IconCompat.createWithAdaptiveBitmap(bitmap)
     }
 
     /**
@@ -653,70 +741,18 @@ object AvatarGenerator {
     }
 
     /**
-     * Draw a simple building icon on the canvas.
+     * Draw the Material business icon on the canvas.
      * Used for shortcodes and business contacts without personal names.
      */
-    private fun drawBuildingIcon(canvas: Canvas, size: Int) {
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.WHITE
-            style = Paint.Style.FILL
+    private fun drawBuildingIcon(context: Context, canvas: Canvas, size: Int) {
+        val drawable = AppCompatResources.getDrawable(context, R.drawable.ic_business)
+        drawable?.let {
+            it.setTint(android.graphics.Color.WHITE)
+            
+            // Scale it down to fit nicely (approx 50% of size, centered)
+            val padding = (size * 0.25f).toInt()
+            it.setBounds(padding, padding, size - padding, size - padding)
+            it.draw(canvas)
         }
-
-        val centerX = size / 2f
-
-        // Building dimensions
-        val buildingWidth = size * 0.45f
-        val buildingHeight = size * 0.55f
-        val buildingLeft = centerX - buildingWidth / 2f
-        val buildingTop = size * 0.22f
-        val buildingBottom = buildingTop + buildingHeight
-
-        // Draw main building rectangle
-        canvas.drawRect(
-            buildingLeft,
-            buildingTop,
-            buildingLeft + buildingWidth,
-            buildingBottom,
-            paint
-        )
-
-        // Draw windows (3 rows x 2 columns) using the background color
-        val windowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = android.graphics.Color.TRANSPARENT
-            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-        }
-
-        val windowWidth = buildingWidth * 0.22f
-        val windowHeight = buildingHeight * 0.12f
-        val windowHGap = (buildingWidth - 2 * windowWidth) / 3f
-        val windowVGap = buildingHeight * 0.08f
-        val windowStartY = buildingTop + windowVGap
-
-        // Draw 3 rows of 2 windows
-        for (row in 0 until 3) {
-            for (col in 0 until 2) {
-                val windowLeft = buildingLeft + windowHGap + col * (windowWidth + windowHGap)
-                val windowTop = windowStartY + row * (windowHeight + windowVGap)
-                canvas.drawRect(
-                    windowLeft,
-                    windowTop,
-                    windowLeft + windowWidth,
-                    windowTop + windowHeight,
-                    windowPaint
-                )
-            }
-        }
-
-        // Draw door at bottom center
-        val doorWidth = buildingWidth * 0.25f
-        val doorHeight = buildingHeight * 0.18f
-        val doorLeft = centerX - doorWidth / 2f
-        canvas.drawRect(
-            doorLeft,
-            buildingBottom - doorHeight,
-            doorLeft + doorWidth,
-            buildingBottom,
-            windowPaint
-        )
     }
 }

@@ -251,10 +251,12 @@ class MainActivity : ComponentActivity() {
 
         val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return null
         val messageGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_MESSAGE_GUID)
+        val mergedGuids = intent.getStringExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS)
 
         return NotificationDeepLinkData(
             chatGuid = chatGuid,
-            messageGuid = messageGuid
+            messageGuid = messageGuid,
+            mergedGuids = mergedGuids
         )
     }
 }

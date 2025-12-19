@@ -56,6 +56,9 @@ sealed class SettingsPanelPage {
     /** ETA sharing settings */
     data object EtaSharing : SettingsPanelPage()
 
+    /** Life360 integration settings */
+    data object Life360 : SettingsPanelPage()
+
     /** About screen */
     data object About : SettingsPanelPage()
 

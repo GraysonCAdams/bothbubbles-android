@@ -13,6 +13,8 @@ import com.bothbubbles.services.contacts.VCardExporter
 import com.bothbubbles.services.contacts.VCardService
 import com.bothbubbles.services.export.SmsRestoreService
 import com.bothbubbles.services.export.SmsRestorer
+import com.bothbubbles.services.life360.Life360Service
+import com.bothbubbles.services.life360.Life360ServiceImpl
 import com.bothbubbles.services.messaging.IncomingMessageHandler
 import com.bothbubbles.services.messaging.IncomingMessageProcessor
 import com.bothbubbles.services.messaging.MessageSender
@@ -168,4 +170,14 @@ abstract class ServiceModule {
     abstract fun bindDeveloperModeTracker(
         developerEventLog: DeveloperEventLog
     ): DeveloperModeTracker
+
+    /**
+     * Binds [Life360ServiceImpl] to the [Life360Service] interface.
+     * Use Life360Service in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindLife360Service(
+        life360ServiceImpl: Life360ServiceImpl
+    ): Life360Service
 }

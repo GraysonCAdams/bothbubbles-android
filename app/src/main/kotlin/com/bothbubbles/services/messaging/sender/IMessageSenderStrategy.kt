@@ -199,6 +199,7 @@ class IMessageSenderStrategy @Inject constructor(
                 } catch (e: Exception) {
                     Timber.w("[SEND_TRACE] Non-critical error replacing GUID: ${e.message}")
                 }
+
                 Timber.i("[SEND_TRACE] sendTextOnly SUCCESS: ${System.currentTimeMillis() - sendStart}ms total")
                 SendResult.Success(serverMessage.toEntity(options.chatGuid))
             } else {

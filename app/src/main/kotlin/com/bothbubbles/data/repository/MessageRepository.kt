@@ -37,13 +37,45 @@ class MessageRepository @Inject constructor(
     private val api: BothBubblesApi,
     private val syncRangeTracker: SyncRangeTracker,
     private val attachmentRepository: AttachmentRepository,
-    private val chatSyncOperations: ChatSyncOperations
+    private val chatSyncOperations: ChatSyncOperations,
+    private val unifiedChatGroupRepository: UnifiedChatGroupRepository
 ) {
 
     // ===== Local Query Operations =====
 
     fun observeMessagesForChat(chatGuid: String, limit: Int, offset: Int): Flow<List<MessageEntity>> =
         messageDao.observeMessagesForChat(chatGuid, limit, offset)
+
+    /**
+     * Observe messages for a chat, automatically resolving unified groups.
+     *
+     * If the chat is part of a unified group (merged iMessage + SMS), this returns
+     * messages from ALL chats in the group. Otherwise, returns messages from just
+     * the specified chat.
+     *
+     * This is the preferred method for UI components that need blended conversations.
+     *
+     * @param chatGuid Any chat GUID that may be part of a unified group
+     * @param limit Maximum number of messages to return
+     */
+    suspend fun observeMessagesForUnifiedChat(chatGuid: String, limit: Int): Flow<List<MessageEntity>> {
+        val mergedGuids = resolveUnifiedChatGuids(chatGuid)
+        return observeRecentMessages(mergedGuids, limit)
+    }
+
+    /**
+     * Resolve all chat GUIDs for a unified group containing the given chat.
+     *
+     * @return List of all chat GUIDs in the unified group, or just [chatGuid] if not in a group
+     */
+    suspend fun resolveUnifiedChatGuids(chatGuid: String): List<String> {
+        val group = unifiedChatGroupRepository.getGroupForChat(chatGuid)
+        return if (group != null) {
+            unifiedChatGroupRepository.getChatGuidsForGroup(group.id)
+        } else {
+            listOf(chatGuid)
+        }
+    }
 
     /**
      * Observe messages from multiple chats (for merged iMessage + SMS conversations).
@@ -130,6 +162,35 @@ class MessageRepository @Inject constructor(
 
     fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>> =
         messageDao.searchMessages(query, limit)
+
+    /**
+     * Search messages by text content with optional date range filtering.
+     * @param query The search query (matched against text and subject)
+     * @param startDate Start of date range in milliseconds (null = no lower bound)
+     * @param endDate End of date range in milliseconds (null = no upper bound)
+     * @param limit Maximum number of results to return
+     */
+    fun searchMessagesInDateRange(
+        query: String,
+        startDate: Long?,
+        endDate: Long?,
+        limit: Int = 100
+    ): Flow<List<MessageEntity>> =
+        messageDao.searchMessagesInDateRange(query, startDate, endDate, limit)
+
+    /**
+     * Get messages within a date range (no text query required).
+     * Use this for date-only browsing of messages.
+     * @param startDate Start of date range in milliseconds
+     * @param endDate End of date range in milliseconds
+     * @param limit Maximum number of results to return
+     */
+    fun getMessagesInDateRange(
+        startDate: Long,
+        endDate: Long,
+        limit: Int = 100
+    ): Flow<List<MessageEntity>> =
+        messageDao.getMessagesInDateRange(startDate, endDate, limit)
 
     /**
      * Get messages containing URLs for link gallery.
@@ -429,6 +490,22 @@ class MessageRepository @Inject constructor(
     suspend fun deleteMessageLocally(messageGuid: String) {
         tombstoneDao.recordDeletedMessage(messageGuid)
         messageDao.deleteMessage(messageGuid)
+    }
+
+    /**
+     * Soft delete multiple messages locally.
+     * Sets date_deleted on each message and records tombstones to prevent resurrection during sync.
+     *
+     * @param guids List of message GUIDs to delete
+     */
+    suspend fun softDeleteMessages(guids: List<String>) {
+        if (guids.isEmpty()) return
+        // Record tombstones to prevent resurrection during sync
+        guids.forEach { guid ->
+            tombstoneDao.recordDeletedMessage(guid)
+        }
+        // Soft delete by setting date_deleted
+        messageDao.softDeleteMessages(guids)
     }
 
     /**

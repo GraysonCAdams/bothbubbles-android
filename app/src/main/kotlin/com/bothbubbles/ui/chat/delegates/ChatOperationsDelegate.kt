@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.ContactsContract
 import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.contacts.ContactBlocker
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.messaging.MessageSender
@@ -38,6 +39,7 @@ import kotlinx.coroutines.launch
  */
 class ChatOperationsDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
+    private val messageRepository: MessageRepository,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
     private val messageSender: MessageSender,
@@ -387,6 +389,31 @@ class ChatOperationsDelegate @AssistedInject constructor(
                 reaction = tapback.apiName,
                 selectedMessageText = messageText
             ).map { }
+        }
+    }
+
+    // ============================================================================
+    // MESSAGE DELETION
+    // ============================================================================
+
+    /**
+     * Delete multiple messages locally (soft delete).
+     * Sets date_deleted on each message and records tombstones to prevent resurrection during sync.
+     *
+     * @param guids List of message GUIDs to delete
+     */
+    fun deleteMessages(guids: List<String>) {
+        if (guids.isEmpty()) return
+        scope.launch {
+            try {
+                messageRepository.softDeleteMessages(guids)
+                Timber.d("Deleted ${guids.size} messages")
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to delete messages")
+                _state.update { it.copy(
+                    operationError = ValidationError.InvalidInput("delete", "Failed to delete messages")
+                )}
+            }
         }
     }
 }

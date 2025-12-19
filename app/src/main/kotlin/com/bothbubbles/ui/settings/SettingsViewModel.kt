@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.dto.FindMyDeviceDto
+import com.bothbubbles.core.network.api.dto.FindMyFriendDto
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sound.SoundPlayer
 import com.bothbubbles.services.sound.SoundTheme
@@ -29,7 +32,8 @@ class SettingsViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val soundPlayer: SoundPlayer,
     private val smsPermissionHelper: SmsPermissionHelper,
-    private val permissionStateMonitor: PermissionStateMonitor
+    private val permissionStateMonitor: PermissionStateMonitor,
+    private val api: BothBubblesApi
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SettingsUiState())
@@ -293,6 +297,62 @@ class SettingsViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    /**
+     * Fetch Find My data (devices and friends) for debug display
+     */
+    fun fetchFindMyData() {
+        viewModelScope.launch {
+            _uiState.update { it.copy(findMyLoading = true) }
+
+            try {
+                // Fetch devices
+                val devicesResponse = api.getFindMyDevices()
+                val devices = if (devicesResponse.isSuccessful) {
+                    devicesResponse.body()?.data ?: emptyList()
+                } else {
+                    emptyList()
+                }
+
+                // Fetch friends
+                val friendsResponse = api.getFindMyFriends()
+                val friends = if (friendsResponse.isSuccessful) {
+                    friendsResponse.body()?.data ?: emptyList()
+                } else {
+                    emptyList()
+                }
+
+                _uiState.update {
+                    it.copy(
+                        findMyDevices = devices,
+                        findMyFriends = friends,
+                        findMyLoading = false,
+                        findMyError = null
+                    )
+                }
+            } catch (e: Exception) {
+                _uiState.update {
+                    it.copy(
+                        findMyLoading = false,
+                        findMyError = e.message ?: "Failed to fetch Find My data"
+                    )
+                }
+            }
+        }
+    }
+
+    /**
+     * Clear Find My data
+     */
+    fun clearFindMyData() {
+        _uiState.update {
+            it.copy(
+                findMyDevices = emptyList(),
+                findMyFriends = emptyList(),
+                findMyError = null
+            )
+        }
+    }
+
     private fun formatLastSyncTime(timestamp: Long): String {
         if (timestamp == 0L) return "Never"
 
@@ -342,5 +402,10 @@ data class SettingsUiState(
     // Link previews
     val linkPreviewsEnabled: Boolean = false,
     // Contacts permission
-    val hasContactsPermission: Boolean = false
+    val hasContactsPermission: Boolean = false,
+    // Find My debug data
+    val findMyDevices: List<FindMyDeviceDto> = emptyList(),
+    val findMyFriends: List<FindMyFriendDto> = emptyList(),
+    val findMyLoading: Boolean = false,
+    val findMyError: String? = null
 )

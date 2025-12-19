@@ -32,6 +32,8 @@ import com.bothbubbles.ui.conversations.delegates.ConversationLoadingDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationObserverDelegate
 import com.bothbubbles.ui.conversations.delegates.SmsImportState
 import com.bothbubbles.ui.util.toStable
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.FlowPreview
@@ -104,6 +106,8 @@ class ConversationsViewModel @Inject constructor(
         const val KEY_SCROLL_INDEX = "scroll_index"
         const val KEY_SCROLL_OFFSET = "scroll_offset"
         const val KEY_SEARCH_ACTIVE = "search_active"
+        // Default start date: January 1, 1960 (covers all reasonable message history)
+        const val DEFAULT_START_DATE = -315619200000L // 1960-01-01 00:00:00 UTC
     }
 
     /** Saved scroll position index - survives process death */
@@ -150,7 +154,6 @@ class ConversationsViewModel @Inject constructor(
         observeAppTitleSetting()
         observeCategorizationEnabled()
         observeFilters()
-        observeFilteredUnreadCount()
         observeDelegateStates()
 
         // Lifecycle tasks
@@ -339,19 +342,6 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             val filterValue = category?.let { "category:$it" } ?: "all"
             settingsDataStore.setConversationFilter(filterValue)
-        }
-    }
-
-    /**
-     * Observe changes to the filtered unread count and update the app badge.
-     */
-    private fun observeFilteredUnreadCount() {
-        viewModelScope.launch {
-            _uiState.map { it.filteredUnreadCount }
-                .distinctUntilChanged()
-                .collect { filteredUnreadCount ->
-                    notificationService.updateAppBadge(filteredUnreadCount)
-                }
         }
     }
 
@@ -725,28 +715,71 @@ class ConversationsViewModel @Inject constructor(
 
     private fun observeMessageSearch() {
         viewModelScope.launch {
-            _searchQuery
-                .debounce(300)
-                .distinctUntilChanged()
-                .collect { query ->
-                    if (query.length >= 2) {
-                        val textMatchMessages = messageRepository.searchMessages(query, 50).first()
-                        val linkTitleMatches = linkPreviewRepository.searchByTitle(query, 20)
-                        val matchedUrls = linkTitleMatches.map { it.url }.toSet()
-                        val matchedPreviewsByUrl = linkTitleMatches.associateBy { it.url }
-                        val linkMatchMessages = mutableListOf<com.bothbubbles.data.local.db.entity.MessageEntity>()
-                        for (url in matchedUrls) {
-                            linkMatchMessages.addAll(messageRepository.searchMessages(url, 10).first())
-                        }
-                        val allMessages = (textMatchMessages + linkMatchMessages)
-                            .distinctBy { it.guid }
-                            .take(50)
+            // Combine search query with date range state for reactive search
+            combine(
+                _searchQuery.debounce(300).distinctUntilChanged(),
+                _uiState.map { it.searchStartDate }.distinctUntilChanged(),
+                _uiState.map { it.searchEndDate }.distinctUntilChanged()
+            ) { query, startDate, endDate -> Triple(query, startDate, endDate) }
+                .collect { (query, startDate, endDate) ->
+                    val hasDateFilter = startDate != null || endDate != null
+                    val hasTextQuery = query.length >= 2
 
-                        // Build search results (implementation same as original)
-                        val results = buildMessageSearchResults(allMessages, matchedPreviewsByUrl)
-                        _uiState.update { it.copy(messageSearchResults = results.toStable()) }
-                    } else {
-                        _uiState.update { it.copy(messageSearchResults = emptyList<MessageSearchResult>().toStable()) }
+                    when {
+                        // Text search with optional date range
+                        hasTextQuery -> {
+                            // Apply default bounds: start = 1960, end = today
+                            val effectiveStart = startDate ?: DEFAULT_START_DATE
+                            val effectiveEnd = endDate ?: System.currentTimeMillis()
+
+                            val textMatchMessages = messageRepository.searchMessagesInDateRange(
+                                query = query,
+                                startDate = effectiveStart,
+                                endDate = effectiveEnd,
+                                limit = 50
+                            ).first()
+
+                            val linkTitleMatches = linkPreviewRepository.searchByTitle(query, 20)
+                            val matchedUrls = linkTitleMatches.map { it.url }.toSet()
+                            val matchedPreviewsByUrl = linkTitleMatches.associateBy { it.url }
+                            val linkMatchMessages = mutableListOf<com.bothbubbles.data.local.db.entity.MessageEntity>()
+                            for (url in matchedUrls) {
+                                val urlMatches = messageRepository.searchMessagesInDateRange(
+                                    query = url,
+                                    startDate = effectiveStart,
+                                    endDate = effectiveEnd,
+                                    limit = 10
+                                ).first()
+                                linkMatchMessages.addAll(urlMatches)
+                            }
+                            val allMessages = (textMatchMessages + linkMatchMessages)
+                                .distinctBy { it.guid }
+                                .take(50)
+
+                            val results = buildMessageSearchResults(allMessages, emptyMap())
+                            _uiState.update { it.copy(messageSearchResults = results.toStable()) }
+                        }
+
+                        // Date-only search (no text query required)
+                        hasDateFilter -> {
+                            // Apply default bounds: start = 1960, end = today
+                            val effectiveStart = startDate ?: DEFAULT_START_DATE
+                            val effectiveEnd = endDate ?: System.currentTimeMillis()
+
+                            val messages = messageRepository.getMessagesInDateRange(
+                                startDate = effectiveStart,
+                                endDate = effectiveEnd,
+                                limit = 50
+                            ).first()
+
+                            val results = buildMessageSearchResults(messages, emptyMap())
+                            _uiState.update { it.copy(messageSearchResults = results.toStable()) }
+                        }
+
+                        // No search criteria
+                        else -> {
+                            _uiState.update { it.copy(messageSearchResults = emptyList<MessageSearchResult>().toStable()) }
+                        }
                     }
                 }
         }
@@ -758,18 +791,35 @@ class ConversationsViewModel @Inject constructor(
     ): List<MessageSearchResult> {
         return messages.map { message ->
             val chat = chatRepository.getChatByGuid(message.chatGuid)
-            val handle = message.handleId?.let { handleRepository.getHandleById(it) }
             // Extract URL from message text to look up link preview
             val messageUrl = message.text?.let { text ->
                 Regex("""https?://[^\s]+""").find(text)?.value
             }
             val linkPreview = messageUrl?.let { previewsByUrl[it] }
 
-            // Determine display name
-            val displayName = chat?.displayName?.takeIf { it.isNotBlank() }
-                ?: handle?.formattedAddress
-                ?: handle?.address
-                ?: "Unknown"
+            // Get participants for proper display name resolution (matches ConversationMappers logic)
+            val participants = chat?.let { chatRepository.getParticipantsForChat(it.guid) } ?: emptyList()
+            val primaryParticipant = participants.firstOrNull()
+            val participantNames = participants.map { it.displayName }
+            val isGroup = chat?.isGroup ?: false
+
+            // Determine display name using same logic as ConversationMappers.toUiModel()
+            val resolvedDisplayName = if (!isGroup && primaryParticipant != null) {
+                // For 1:1 chats: use participant's displayName (includes "Maybe:" prefix for inferred)
+                primaryParticipant.displayName.takeIf { it.isNotBlank() }
+                    ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                    ?: primaryParticipant.address.let { PhoneNumberFormatter.format(it) }
+            } else if (isGroup) {
+                // For group chats: explicit name > joined participant names > "Group Chat"
+                chat?.displayName?.let { PhoneNumberFormatter.stripServiceSuffix(it) }?.takeIf { it.isNotBlank() }
+                    ?: participantNames.filter { it.isNotBlank() }.takeIf { it.isNotEmpty() }?.joinToString(", ")
+                    ?: "Group Chat"
+            } else {
+                // Fallback for edge cases
+                chat?.displayName?.let { PhoneNumberFormatter.stripServiceSuffix(it) }?.takeIf { it.isNotBlank() }
+                    ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                    ?: "Unknown"
+            }
 
             // Determine message type
             val messageType = if (message.text?.isNotEmpty() == true) MessageType.TEXT else MessageType.ATTACHMENT
@@ -777,13 +827,13 @@ class ConversationsViewModel @Inject constructor(
             MessageSearchResult(
                 messageGuid = message.guid,
                 chatGuid = message.chatGuid,
-                chatDisplayName = displayName,
+                chatDisplayName = resolvedDisplayName,
                 messageText = message.text ?: "",
                 timestamp = message.dateCreated,
                 formattedTime = formatRelativeTime(message.dateCreated, application),
                 isFromMe = message.isFromMe,
-                avatarPath = chat?.customAvatarPath,
-                isGroup = chat?.isGroup ?: false,
+                avatarPath = primaryParticipant?.cachedAvatarPath ?: chat?.customAvatarPath,
+                isGroup = isGroup,
                 messageType = messageType,
                 linkTitle = linkPreview?.title,
                 linkDomain = linkPreview?.domain
@@ -810,6 +860,14 @@ class ConversationsViewModel @Inject constructor(
     fun updateSearchQuery(query: String) {
         _searchQuery.value = query
         _uiState.update { it.copy(searchQuery = query) }
+    }
+
+    fun updateSearchStartDate(date: Long?) {
+        _uiState.update { it.copy(searchStartDate = date) }
+    }
+
+    fun updateSearchEndDate(date: Long?) {
+        _uiState.update { it.copy(searchEndDate = date) }
     }
 
     fun refresh() {

@@ -3,6 +3,7 @@ package com.bothbubbles.core.network.di
 import com.bothbubbles.core.network.AuthCredentialsProvider
 import com.bothbubbles.core.network.api.AuthInterceptor
 import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.core.network.api.Life360Api
 import com.bothbubbles.core.network.api.TenorApi
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
@@ -141,5 +142,32 @@ object CoreNetworkModule {
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(TenorApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    @Named("life360")
+    fun provideLife360OkHttpClient(
+        loggingInterceptor: HttpLoggingInterceptor
+    ): OkHttpClient {
+        return OkHttpClient.Builder()
+            .addInterceptor(loggingInterceptor)
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLife360Api(
+        @Named("life360") okHttpClient: OkHttpClient,
+        moshi: Moshi
+    ): Life360Api {
+        return Retrofit.Builder()
+            .baseUrl(Life360Api.BASE_URL)
+            .client(okHttpClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(Life360Api::class.java)
     }
 }

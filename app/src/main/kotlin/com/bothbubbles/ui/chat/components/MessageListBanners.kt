@@ -37,6 +37,8 @@ data class MessageListBannerCallbacks(
  * - SMS fallback mode banner
  * - Save contact banner
  * - ETA sharing banner
+ *
+ * @param isBubbleMode When true, hides search, save contact, and ETA banners
  */
 @Composable
 fun MessageListBanners(
@@ -46,7 +48,8 @@ fun MessageListBanners(
     etaSharingDelegate: ChatEtaSharingDelegate,
     chatInfoState: ChatInfoState,
     callbacks: MessageListBannerCallbacks,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isBubbleMode: Boolean = false
 ) {
     val searchState by searchDelegate.state.collectAsStateWithLifecycle()
     val sendState by sendDelegate.state.collectAsStateWithLifecycle()
@@ -54,23 +57,25 @@ fun MessageListBanners(
     val etaSharingState by etaSharingDelegate.etaSharingState.collectAsStateWithLifecycle()
 
     Column(modifier = modifier) {
-        // Inline search bar
-        InlineSearchBar(
-            visible = searchState.isActive,
-            query = searchState.query,
-            onQueryChange = callbacks.onSearchQueryChange,
-            onClose = callbacks.onCloseSearch,
-            onNavigateUp = callbacks.onNavigateSearchUp,
-            onNavigateDown = callbacks.onNavigateSearchDown,
-            currentMatch = if (searchState.matchIndices.isNotEmpty())
-                searchState.currentMatchIndex + 1 else 0,
-            totalMatches = searchState.matchIndices.size,
-            isSearchingDatabase = searchState.isSearchingDatabase,
-            databaseResultCount = searchState.databaseResults.size,
-            onViewAllClick = callbacks.onViewAllSearchResults
-        )
+        // Inline search bar (hidden in bubble mode)
+        if (!isBubbleMode) {
+            InlineSearchBar(
+                visible = searchState.isActive,
+                query = searchState.query,
+                onQueryChange = callbacks.onSearchQueryChange,
+                onClose = callbacks.onCloseSearch,
+                onNavigateUp = callbacks.onNavigateSearchUp,
+                onNavigateDown = callbacks.onNavigateSearchDown,
+                currentMatch = if (searchState.matchIndices.isNotEmpty())
+                    searchState.currentMatchIndex + 1 else 0,
+                totalMatches = searchState.matchIndices.size,
+                isSearchingDatabase = searchState.isSearchingDatabase,
+                databaseResultCount = searchState.databaseResults.size,
+                onViewAllClick = callbacks.onViewAllSearchResults
+            )
+        }
 
-        // Sending indicator bar
+        // Sending indicator bar (kept in bubble mode - important feedback)
         SendingIndicatorBar(
             isVisible = sendState.isSending,
             isLocalSmsChat = chatInfoState.isLocalSmsChat || syncState.isInSmsFallbackMode,
@@ -79,7 +84,7 @@ fun MessageListBanners(
             pendingMessages = sendState.pendingMessages
         )
 
-        // SMS fallback mode banner
+        // SMS fallback mode banner (kept in bubble mode - important context)
         SendModeHelperText(
             visible = syncState.isInSmsFallbackMode && !chatInfoState.isLocalSmsChat,
             fallbackReason = syncState.fallbackReason,
@@ -88,21 +93,25 @@ fun MessageListBanners(
             onExitFallback = callbacks.onExitSmsFallback
         )
 
-        // Save contact banner
-        SaveContactBanner(
-            visible = chatInfoState.showSaveContactBanner,
-            senderAddress = chatInfoState.unsavedSenderAddress ?: "",
-            inferredName = chatInfoState.inferredSenderName,
-            onAddContact = callbacks.onAddContact,
-            onReportSpam = callbacks.onReportSpam,
-            onDismiss = callbacks.onDismissSaveContactBanner
-        )
+        // Save contact banner (hidden in bubble mode)
+        if (!isBubbleMode) {
+            SaveContactBanner(
+                visible = chatInfoState.showSaveContactBanner,
+                senderAddress = chatInfoState.unsavedSenderAddress ?: "",
+                inferredName = chatInfoState.inferredSenderName,
+                onAddContact = callbacks.onAddContact,
+                onReportSpam = callbacks.onReportSpam,
+                onDismiss = callbacks.onDismissSaveContactBanner
+            )
+        }
 
-        // ETA sharing banner
-        EtaSharingBanner(
-            etaState = etaSharingState,
-            onStartSharing = callbacks.onStartSharingEta,
-            onDismiss = callbacks.onDismissEtaBanner
-        )
+        // ETA sharing banner (hidden in bubble mode)
+        if (!isBubbleMode) {
+            EtaSharingBanner(
+                etaState = etaSharingState,
+                onStartSharing = callbacks.onStartSharingEta,
+                onDismiss = callbacks.onDismissEtaBanner
+            )
+        }
     }
 }

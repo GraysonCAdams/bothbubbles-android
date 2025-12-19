@@ -45,7 +45,8 @@ data class StateRestorationData(
  */
 data class NotificationDeepLinkData(
     val chatGuid: String,
-    val messageGuid: String?
+    val messageGuid: String?,
+    val mergedGuids: String? = null
 )
 
 @Composable
@@ -73,9 +74,11 @@ fun BothBubblesNavHost(
     LaunchedEffect(notificationDeepLinkData) {
         if (notificationDeepLinkData != null && isSetupComplete && shareIntentData == null) {
             // Navigate to the chat with target message for deep-link scrolling
+            // Include mergedGuids for unified chat support (iMessage + SMS combined view)
             navController.navigate(
                 Screen.Chat(
                     chatGuid = notificationDeepLinkData.chatGuid,
+                    mergedGuids = notificationDeepLinkData.mergedGuids,
                     targetMessageGuid = notificationDeepLinkData.messageGuid
                 )
             ) {

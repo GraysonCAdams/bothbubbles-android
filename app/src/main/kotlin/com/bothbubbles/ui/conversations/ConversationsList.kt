@@ -19,7 +19,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.components.common.staggeredEntrance
 import com.bothbubbles.ui.components.conversation.SwipeActionType
@@ -44,7 +43,6 @@ internal fun ConversationsList(
     selectedConversations: Set<String>,
     isSelectionMode: Boolean,
     isLoadingMore: Boolean,
-    bottomPadding: Dp,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
     onConversationLongClick: (String) -> Unit,
     onAvatarClick: (ContactInfo) -> Unit,
@@ -61,7 +59,7 @@ internal fun ConversationsList(
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         state = listState,
-        contentPadding = PaddingValues(bottom = 88.dp + bottomPadding)
+        contentPadding = PaddingValues(bottom = 88.dp) // FAB clearance only
     ) {
         // Pinned section (iOS-style horizontal row)
         // Always show pinned at top - in selection mode they are view-only (not selectable)

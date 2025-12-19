@@ -16,6 +16,20 @@ data class AttachmentWithDate(
     @androidx.room.ColumnInfo(name = "dateCreated") val dateCreated: Long
 )
 
+/**
+ * Data class for media attachment with sender information, used in media viewer.
+ */
+data class MediaWithSender(
+    @androidx.room.Embedded val attachment: AttachmentEntity,
+    @androidx.room.ColumnInfo(name = "is_from_me") val isFromMe: Boolean,
+    @androidx.room.ColumnInfo(name = "sender_address") val senderAddress: String?,
+    @androidx.room.ColumnInfo(name = "date_created") val dateCreated: Long,
+    // Handle info (nullable for "from me" messages or if handle not found)
+    @androidx.room.ColumnInfo(name = "cached_display_name") val displayName: String?,
+    @androidx.room.ColumnInfo(name = "cached_avatar_path") val avatarPath: String?,
+    @androidx.room.ColumnInfo(name = "formatted_address") val formattedAddress: String?
+)
+
 @Dao
 interface AttachmentDao {
 
@@ -92,6 +106,30 @@ interface AttachmentDao {
         ORDER BY m.date_created DESC
     """)
     suspend fun getCachedMediaForChat(chatGuid: String): List<AttachmentEntity>
+
+    /**
+     * Get all media attachments for a chat with sender information.
+     * Used by MediaViewer to show sender avatar/name and allow swiping through all media.
+     * Includes media regardless of download status (unlike getCachedMediaForChat).
+     */
+    @Query("""
+        SELECT
+            a.*,
+            m.is_from_me,
+            m.sender_address,
+            m.date_created,
+            h.cached_display_name,
+            h.cached_avatar_path,
+            h.formatted_address
+        FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        LEFT JOIN handles h ON m.handle_id = h.id
+        WHERE m.chat_guid = :chatGuid
+          AND (a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%')
+          AND a.hide_attachment = 0
+        ORDER BY m.date_created DESC
+    """)
+    suspend fun getMediaWithSenderForChat(chatGuid: String): List<MediaWithSender>
 
     @Query("""
         SELECT COUNT(*) FROM attachments a

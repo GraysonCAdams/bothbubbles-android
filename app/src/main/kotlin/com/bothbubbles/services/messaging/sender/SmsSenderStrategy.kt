@@ -61,13 +61,14 @@ class SmsSenderStrategy @Inject constructor(
                 SmsError.PermissionDenied(Exception("Invalid chat GUID for SMS: ${options.chatGuid}"))
             )
 
-        Timber.d("Sending SMS to $address")
+        Timber.d("Sending SMS to $address (tempGuid=${options.tempGuid})")
 
         val result = smsSendService.sendSms(
             address = address,
             text = options.text,
             chatGuid = options.chatGuid,
-            subscriptionId = options.subscriptionId
+            subscriptionId = options.subscriptionId,
+            tempGuid = options.tempGuid
         )
 
         return SendResult.fromResult(result)
@@ -98,7 +99,7 @@ class SmsSenderStrategy @Inject constructor(
             messageText += captions.joinToString("\n")
         }
 
-        Timber.d("Sending MMS to ${addresses.size} recipient(s) with ${options.attachments.size} attachment(s)")
+        Timber.d("Sending MMS to ${addresses.size} recipient(s) with ${options.attachments.size} attachment(s) (tempGuid=${options.tempGuid})")
 
         val result = mmsSendService.sendMms(
             recipients = addresses,
@@ -106,7 +107,8 @@ class SmsSenderStrategy @Inject constructor(
             attachments = options.attachments.map { it.uri },
             chatGuid = options.chatGuid,
             subject = options.subject,
-            subscriptionId = options.subscriptionId
+            subscriptionId = options.subscriptionId,
+            tempGuid = options.tempGuid
         )
 
         return SendResult.fromResult(result)

@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.outlined.CheckBox
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.ForwardToInbox
 import androidx.compose.material.icons.outlined.Quickreply
@@ -85,6 +86,7 @@ fun FocusMenuCard(
     onReply: () -> Unit,
     onCopy: () -> Unit,
     onForward: () -> Unit,
+    onSelect: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val haptics = LocalHapticFeedback.current
@@ -201,6 +203,13 @@ fun FocusMenuCard(
                         onClick = onForward
                     )
                 }
+
+                // Always show Select action to enter multi-select mode
+                ActionItem(
+                    icon = Icons.Outlined.CheckBox,
+                    label = "Select",
+                    onClick = onSelect
+                )
             }
         }
     }

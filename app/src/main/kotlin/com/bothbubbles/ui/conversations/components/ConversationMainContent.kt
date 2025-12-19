@@ -26,7 +26,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.bothbubbles.services.categorization.MessageCategory
@@ -65,7 +64,6 @@ fun ConversationMainContent(
     selectedConversations: Set<String>,
     isSelectionMode: Boolean,
     listState: LazyListState,
-    bannerPadding: Dp,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
     onConversationLongClick: (guid: String) -> Unit,
     onAvatarClick: (contactInfo: ContactInfo) -> Unit,
@@ -184,7 +182,6 @@ fun ConversationMainContent(
                                     selectedConversations = selectedConversations,
                                     isSelectionMode = isSelectionMode,
                                     isLoadingMore = isLoadingMore,
-                                    bottomPadding = bannerPadding,
                                     onConversationClick = onConversationClick,
                                     onConversationLongClick = onConversationLongClick,
                                     onAvatarClick = onAvatarClick,

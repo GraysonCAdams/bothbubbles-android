@@ -6,20 +6,25 @@ import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
 import android.content.Intent
 import android.net.Uri
+import com.bothbubbles.core.model.Life360Member
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.Life360Repository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.ui.navigation.Screen
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -32,6 +37,7 @@ data class ConversationDetailsUiState(
     val recentImages: List<AttachmentEntity> = emptyList(),
     val isContactStarred: Boolean = false,
     val discordChannelId: String? = null,
+    val life360Member: Life360Member? = null,
     val isLoading: Boolean = true,
     val error: String? = null
 ) {
@@ -83,13 +89,15 @@ data class ConversationDetailsUiState(
         get() = participants.firstOrNull()?.address ?: ""
 }
 
+@OptIn(ExperimentalCoroutinesApi::class)
 @HiltViewModel
 class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
     private val attachmentRepository: AttachmentRepository,
     private val androidContactsService: AndroidContactsService,
-    private val discordContactService: DiscordContactService
+    private val discordContactService: DiscordContactService,
+    private val life360Repository: Life360Repository
 ) : ViewModel() {
 
     private val route: Screen.ChatDetails = savedStateHandle.toRoute()
@@ -101,6 +109,21 @@ class ConversationDetailsViewModel @Inject constructor(
     private val _isContactStarred = MutableStateFlow(false)
     private val _discordChannelId = MutableStateFlow<String?>(null)
 
+    // Observe Life360 member linked to first participant (by address, not handle ID)
+    // Using address is more reliable because the same phone number can have multiple handle IDs
+    // (one for iMessage, one for SMS, etc.)
+    private val life360MemberFlow = chatRepository.observeParticipantsForChat(chatGuid)
+        .flatMapLatest { participants ->
+            val participant = participants.firstOrNull()
+            val address = participant?.address
+            timber.log.Timber.d("Life360 lookup: chatGuid=$chatGuid, participant=$address")
+            if (address != null) {
+                life360Repository.observeMemberByAddress(address)
+            } else {
+                flowOf(null)
+            }
+        }
+
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
         chatRepository.observeParticipantsForChat(chatGuid),
@@ -108,7 +131,8 @@ class ConversationDetailsViewModel @Inject constructor(
         attachmentRepository.observeOtherMediaCountForChat(chatGuid),
         attachmentRepository.observeRecentImagesForChat(chatGuid, 5),
         _isContactStarred,
-        _discordChannelId
+        _discordChannelId,
+        life360MemberFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val chat = values[0] as? ChatEntity
@@ -118,6 +142,7 @@ class ConversationDetailsViewModel @Inject constructor(
         val recentImages = values[4] as? List<AttachmentEntity> ?: emptyList()
         val isStarred = values[5] as? Boolean ?: false
         val discordChannelId = values[6] as? String
+        val life360Member = values[7] as? Life360Member
 
         ConversationDetailsUiState(
             chat = chat,
@@ -127,6 +152,7 @@ class ConversationDetailsViewModel @Inject constructor(
             recentImages = recentImages,
             isContactStarred = isStarred,
             discordChannelId = discordChannelId,
+            life360Member = life360Member,
             isLoading = false
         )
     }.stateIn(

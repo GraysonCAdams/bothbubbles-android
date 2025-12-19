@@ -28,7 +28,8 @@ import kotlinx.coroutines.launch
 data class MessageListOverlayCallbacks(
     val onToggleReaction: (messageGuid: String, tapback: Tapback) -> Unit,
     val onSetReplyTo: (guid: String) -> Unit,
-    val onForwardRequest: (message: MessageUiModel) -> Unit
+    val onForwardRequest: (message: MessageUiModel) -> Unit,
+    val onEnterSelectionMode: (messageGuid: String) -> Unit
 )
 
 /**
@@ -118,6 +119,11 @@ fun MessageListOverlays(
             onForward = {
                 selectedMessageForTapback?.let { message ->
                     callbacks.onForwardRequest(message)
+                }
+            },
+            onSelect = {
+                selectedMessageForTapback?.let { message ->
+                    callbacks.onEnterSelectionMode(message.guid)
                 }
             }
         ) {

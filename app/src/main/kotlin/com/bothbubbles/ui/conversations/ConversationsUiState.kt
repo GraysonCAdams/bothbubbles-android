@@ -30,6 +30,9 @@ data class ConversationsUiState(
     val isSmsFullyFunctional: Boolean = false,
     val conversations: StableList<ConversationUiModel> = emptyList<ConversationUiModel>().toStable(),
     val searchQuery: String = "",
+    // Date range filtering for message search (timestamps in milliseconds)
+    val searchStartDate: Long? = null,
+    val searchEndDate: Long? = null,
     val error: String? = null,
     val swipeConfig: SwipeConfig = SwipeConfig(),
     val messageSearchResults: StableList<MessageSearchResult> = emptyList<MessageSearchResult>().toStable(),

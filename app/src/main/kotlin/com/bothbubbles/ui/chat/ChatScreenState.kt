@@ -47,6 +47,9 @@ class ChatScreenState(
     var showEffectPicker by mutableStateOf(false)
     var showQualitySheet by mutableStateOf(false)
     var showForwardDialog by mutableStateOf(false)
+    var showCaptureTypeSheet by mutableStateOf(false)
+    /** Show confirmation dialog for deleting selected messages */
+    var showDeleteMessagesDialog by mutableStateOf(false)
 
     // ===== Selection / Data =====
     var pendingContactData by mutableStateOf<ContactData?>(null)
@@ -55,9 +58,20 @@ class ChatScreenState(
     var selectedMessageForRetry by mutableStateOf<MessageUiModel?>(null)
     var canRetrySmsForMessage by mutableStateOf(false)
     var messageToForward by mutableStateOf<MessageUiModel?>(null)
+    /** List of message GUIDs to forward (for multi-select forward) */
+    var messagesToForward by mutableStateOf<List<String>>(emptyList())
     var swipingMessageGuid by mutableStateOf<String?>(null)
     /** Message selected for viewing sender contact details (group chat avatar click) */
     var selectedSenderMessage by mutableStateOf<MessageUiModel?>(null)
+
+    // ===== Multi-Message Selection =====
+    /** Set of message GUIDs currently selected for bulk operations */
+    var selectedMessageGuids by mutableStateOf(setOf<String>())
+        private set
+
+    /** True when one or more messages are selected (selection mode is active) */
+    val isMessageSelectionMode: Boolean
+        get() = selectedMessageGuids.isNotEmpty()
 
     // ===== Layout =====
     /** Height of the top bar in pixels */
@@ -132,6 +146,35 @@ class ChatScreenState(
     fun clearPendingContact() {
         pendingContactData = null
         showVCardOptionsDialog = false
+    }
+
+    // ===== Multi-Message Selection Methods =====
+
+    /** Enters selection mode with the specified message initially selected */
+    fun enterMessageSelectionMode(initialGuid: String) {
+        // Clear any tapback/retry selection when entering selection mode
+        clearTapbackSelection()
+        clearRetrySelection()
+        selectedMessageGuids = setOf(initialGuid)
+    }
+
+    /** Toggles selection state for a message */
+    fun toggleMessageSelection(guid: String) {
+        selectedMessageGuids = if (guid in selectedMessageGuids) {
+            selectedMessageGuids - guid
+        } else {
+            selectedMessageGuids + guid
+        }
+    }
+
+    /** Clears all message selection and exits selection mode */
+    fun clearMessageSelection() {
+        selectedMessageGuids = emptySet()
+    }
+
+    /** Selects all provided message GUIDs */
+    fun selectAllMessages(guids: List<String>) {
+        selectedMessageGuids = guids.toSet()
     }
 }
 

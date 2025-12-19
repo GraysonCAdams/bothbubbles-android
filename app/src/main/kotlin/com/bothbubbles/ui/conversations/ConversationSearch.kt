@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.conversations
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,21 +19,35 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.SearchOff
+import androidx.compose.material3.DatePicker
+import androidx.compose.material3.DatePickerDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 internal fun SearchOverlay(
@@ -41,6 +56,10 @@ internal fun SearchOverlay(
     selectedFilter: SearchFilter?,
     onFilterSelected: (SearchFilter) -> Unit,
     onFilterCleared: () -> Unit,
+    startDate: Long?,
+    endDate: Long?,
+    onStartDateChange: (Long?) -> Unit,
+    onEndDateChange: (Long?) -> Unit,
     onClose: () -> Unit,
     conversations: List<ConversationUiModel>,
     messageSearchResults: List<MessageSearchResult>,
@@ -136,21 +155,45 @@ internal fun SearchOverlay(
                 }
             }
 
-            // Filter chips grid (shown when no query and no filter selected)
-            if (query.isEmpty() && selectedFilter == null) {
+            // Date range selector (always shown above filter grid)
+            DateRangeSelector(
+                startDate = startDate,
+                endDate = endDate,
+                onStartDateChange = onStartDateChange,
+                onEndDateChange = onEndDateChange,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+
+            // Check if there's any search criteria active
+            val hasDateFilter = startDate != null || endDate != null
+            val hasQuery = query.isNotEmpty()
+            val hasFilter = selectedFilter != null
+            val hasSearchCriteria = hasDateFilter || hasQuery || hasFilter
+
+            // Filter chips grid (shown when no active search criteria)
+            if (!hasSearchCriteria) {
                 SearchFilterGrid(
                     selectedFilter = selectedFilter,
                     onFilterSelected = onFilterSelected,
                     modifier = Modifier.padding(16.dp)
                 )
             } else {
-                // Search results (filtered by both query and filter type)
+                // Apply date range defaults: 1960 for start, now for end
+                val effectiveStartDate = startDate ?: -315619200000L // 1960-01-01
+                val effectiveEndDate = endDate ?: System.currentTimeMillis()
+
+                // Search results (filtered by query, filter type, AND date range)
                 val filteredConversations = conversations.filter { conv ->
                     val matchesQuery = query.isEmpty() ||
                         conv.displayName.contains(query, ignoreCase = true) ||
                         conv.address.contains(query, ignoreCase = true) ||
                         // Also search link preview titles for conversations with links
                         (conv.lastMessageLinkTitle?.contains(query, ignoreCase = true) == true)
+
+                    // Date range filter applies to conversation's last message timestamp
+                    val matchesDateRange = if (hasDateFilter) {
+                        conv.lastMessageTimestamp in effectiveStartDate..effectiveEndDate
+                    } else true
 
                     val matchesFilter = when (selectedFilter) {
                         SearchFilter.UNREAD -> conv.unreadCount > 0
@@ -174,16 +217,12 @@ internal fun SearchOverlay(
                         null -> true
                     }
 
-                    matchesQuery && matchesFilter
+                    matchesQuery && matchesFilter && matchesDateRange
                 }
 
-                // Filter message results to exclude conversations already shown
+                // Filter message search results (from ViewModel) - these are already date-filtered
                 val conversationGuids = filteredConversations.map { it.guid }.toSet()
-                val filteredMessageResults = if (selectedFilter == null) {
-                    messageSearchResults.filter { it.chatGuid !in conversationGuids }
-                } else {
-                    emptyList() // Don't show message results when a filter is selected
-                }
+                val filteredMessageResults = messageSearchResults.filter { it.chatGuid !in conversationGuids }
 
                 val hasResults = filteredConversations.isNotEmpty() || filteredMessageResults.isNotEmpty()
 
@@ -394,5 +433,167 @@ internal fun SearchFilterChip(
                 }
             )
         }
+    }
+}
+
+/**
+ * Date range selector for filtering message search by date.
+ * Uses Material Design 3 DatePickerDialog for date selection.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun DateRangeSelector(
+    startDate: Long?,
+    endDate: Long?,
+    onStartDateChange: (Long?) -> Unit,
+    onEndDateChange: (Long?) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var showStartDatePicker by remember { mutableStateOf(false) }
+    var showEndDatePicker by remember { mutableStateOf(false) }
+
+    val dateFormatter = remember { SimpleDateFormat("MMM d, yyyy", Locale.getDefault()) }
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // From date field
+        DateField(
+            label = "From",
+            date = startDate,
+            dateFormatter = dateFormatter,
+            onClick = { showStartDatePicker = true },
+            onClear = { onStartDateChange(null) },
+            modifier = Modifier.weight(1f)
+        )
+
+        // To date field
+        DateField(
+            label = "To",
+            date = endDate,
+            dateFormatter = dateFormatter,
+            onClick = { showEndDatePicker = true },
+            onClear = { onEndDateChange(null) },
+            modifier = Modifier.weight(1f)
+        )
+    }
+
+    // Start date picker dialog
+    if (showStartDatePicker) {
+        DatePickerDialogWrapper(
+            initialDate = startDate,
+            onDismiss = { showStartDatePicker = false },
+            onConfirm = { selectedDate ->
+                onStartDateChange(selectedDate)
+                showStartDatePicker = false
+            }
+        )
+    }
+
+    // End date picker dialog
+    if (showEndDatePicker) {
+        DatePickerDialogWrapper(
+            initialDate = endDate,
+            onDismiss = { showEndDatePicker = false },
+            onConfirm = { selectedDate ->
+                // Set to end of day for "to" date (23:59:59.999)
+                val endOfDay = selectedDate?.let { it + (24 * 60 * 60 * 1000) - 1 }
+                onEndDateChange(endOfDay)
+                showEndDatePicker = false
+            }
+        )
+    }
+}
+
+@Composable
+private fun DateField(
+    label: String,
+    date: Long?,
+    dateFormatter: SimpleDateFormat,
+    onClick: () -> Unit,
+    onClear: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = modifier.height(48.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.DateRange,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = if (date != null) {
+                        dateFormatter.format(Date(date))
+                    } else {
+                        label
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (date != null) {
+                        MaterialTheme.colorScheme.onSurface
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (date != null) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Clear date",
+                    modifier = Modifier
+                        .size(18.dp)
+                        .clickable { onClear() },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DatePickerDialogWrapper(
+    initialDate: Long?,
+    onDismiss: () -> Unit,
+    onConfirm: (Long?) -> Unit
+) {
+    val datePickerState = rememberDatePickerState(
+        initialSelectedDateMillis = initialDate
+    )
+
+    DatePickerDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            TextButton(onClick = { onConfirm(datePickerState.selectedDateMillis) }) {
+                Text("OK")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    ) {
+        DatePicker(state = datePickerState)
     }
 }

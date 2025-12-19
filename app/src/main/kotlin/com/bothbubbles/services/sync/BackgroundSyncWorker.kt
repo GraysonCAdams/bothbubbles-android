@@ -15,6 +15,7 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -42,6 +43,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
     @Assisted context: Context,
     @Assisted workerParams: WorkerParameters,
     private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
@@ -213,28 +215,17 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
         val isGroup = chat.isGroup
 
-        // For group chats, get participant names and avatar paths for avatar collage
-        val participants = if (isGroup) {
-            chatDao.getParticipantsForChat(chat.guid)
-        } else {
-            emptyList()
-        }
+        // Fetch participants for chat title resolution and group avatar collage
+        val participants = chatRepository.getParticipantsForChat(chat.guid)
         val participantNames = participants.map { it.rawDisplayName }
         val participantAvatarPaths = participants.map { it.cachedAvatarPath }
+
+        // Use centralized chat title logic (same as conversation list)
+        val chatTitle = chatRepository.resolveChatTitle(chat, participants)
 
         for (message in messagesFromOthers) {
             // Resolve sender info
             val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(message.handleId)
-
-            // Determine chat title
-            val chatTitle = if (isGroup) {
-                chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
-            } else {
-                senderName
-                    ?: chat.displayName
-                    ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
-                    ?: ""
-            }
 
             // For group chats, use first name only
             val displaySenderName = if (isGroup && senderName != null) {

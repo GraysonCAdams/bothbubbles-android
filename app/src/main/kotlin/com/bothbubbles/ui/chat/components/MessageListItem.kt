@@ -50,6 +50,7 @@ import kotlinx.coroutines.launch
 data class MessageItemCallbacks(
     val onMediaClick: (String) -> Unit,
     val onSetReplyTo: (guid: String) -> Unit,
+    val onScrollToOriginal: (originGuid: String) -> Unit,
     val onLoadThread: (originGuid: String) -> Unit,
     val onCanRetryAsSms: suspend (guid: String) -> Boolean,
     val onRetryMessage: (guid: String) -> Unit,
@@ -103,6 +104,11 @@ fun MessageListItem(
     onCanRetrySmsUpdate: (Boolean) -> Unit,
     onSwipingMessageChange: (String?) -> Unit,
     onSelectedBoundsChange: (androidx.compose.ui.geometry.Rect?) -> Unit,
+    // Multi-message selection support
+    isSelectionMode: Boolean,
+    isSelected: Boolean,
+    onEnterSelectionMode: (String) -> Unit,
+    onToggleSelection: (String) -> Unit,
     callbacks: MessageItemCallbacks
 ) {
     val retryMenuScope = rememberCoroutineScope()
@@ -258,11 +264,19 @@ fun MessageListItem(
                     onLongPress = {
                         if (message.isPlacedSticker) return@MessageBubble
 
-                        // Long press opens tapback menu for non-error messages
-                        if (!message.hasError && canTapback) {
-                            onSelectMessageForTapback(message)
+                        // In selection mode, long-press toggles selection
+                        if (isSelectionMode) {
+                            onToggleSelection(message.guid)
+                            return@MessageBubble
                         }
+
+                        // Not in selection mode: open tapback/reactions menu (includes "Select" option)
+                        onSelectMessageForTapback(message)
                     },
+                    // Selection mode state
+                    isSelectionMode = isSelectionMode,
+                    isSelected = isSelected,
+                    onSelectionToggle = { onToggleSelection(message.guid) },
                     onMediaClick = if (isInvisibleInk && hasMedia && !isInvisibleInkRevealed) {
                         { _ -> }
                     } else {
@@ -276,6 +290,9 @@ fun MessageListItem(
                     showDeliveryIndicator = showDeliveryIndicator,
                     onReply = if (message.isPlacedSticker) null else { guid ->
                         callbacks.onSetReplyTo(guid)
+                    },
+                    onScrollToOriginal = { originGuid ->
+                        callbacks.onScrollToOriginal(originGuid)
                     },
                     onReplyIndicatorClick = { originGuid ->
                         callbacks.onLoadThread(originGuid)

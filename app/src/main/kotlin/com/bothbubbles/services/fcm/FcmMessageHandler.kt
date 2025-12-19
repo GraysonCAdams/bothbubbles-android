@@ -3,6 +3,7 @@ package com.bothbubbles.services.fcm
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
@@ -43,6 +44,7 @@ class FcmMessageHandler @Inject constructor(
     private val socketService: SocketService,
     private val notificationService: NotificationService,
     private val messageRepository: MessageRepository,
+    private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val androidContactsService: AndroidContactsService,
@@ -207,15 +209,19 @@ class FcmMessageHandler @Inject constructor(
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
         Timber.d("FCM_DEBUG: Resolved sender - name='$senderName', avatarUri='$senderAvatarUri', address='$senderAddress'")
 
-        // For 1:1 chats, use sender's contact name as title; for groups, use group name
         val isGroup = chat?.isGroup ?: false
-        val chatTitle = if (isGroup) {
-            chat?.displayName ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+
+        // Fetch participants for chat title resolution and group avatar collage
+        val participants = chatRepository.getParticipantsForChat(chatGuid)
+        val participantNames = participants.map { it.rawDisplayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
+
+        // Use centralized chat title logic (same as conversation list)
+        val chatTitle = if (chat != null) {
+            chatRepository.resolveChatTitle(chat, participants)
         } else {
-            senderName
-                ?: chat?.displayName
-                ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
-                ?: ""
+            // Fallback when chat not yet in database
+            senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
         }
 
         // Check for invisible ink effect (expressiveSendStyleId and hasAttachments already extracted above)
@@ -234,15 +240,6 @@ class FcmMessageHandler @Inject constructor(
         } else {
             senderName
         }
-
-        // For group chats, fetch participant names and avatar paths for the group avatar collage
-        val participants = if (isGroup) {
-            chatDao.getParticipantsForChat(chatGuid)
-        } else {
-            emptyList()
-        }
-        val participantNames = participants.map { it.rawDisplayName }
-        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
 
         // Show notification
         Timber.d("DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")

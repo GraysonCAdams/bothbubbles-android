@@ -187,6 +187,12 @@ dependencies {
     // Phone Number Formatting
     implementation(libs.libphonenumber)
 
+    // OSMDroid (OpenStreetMap for Life360)
+    implementation(libs.osmdroid.android)
+
+    // Security (EncryptedSharedPreferences for Life360 tokens)
+    implementation(libs.androidx.security.crypto)
+
     // Logging
     implementation("com.jakewharton.timber:timber:5.0.1")
 

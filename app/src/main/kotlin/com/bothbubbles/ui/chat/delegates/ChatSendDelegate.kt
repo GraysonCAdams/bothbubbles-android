@@ -494,6 +494,40 @@ class ChatSendDelegate @AssistedInject constructor(
     }
 
     /**
+     * Forward multiple messages to another conversation.
+     * Messages are forwarded in chronological order (oldest first).
+     *
+     * @param messageGuids List of message GUIDs to forward
+     * @param targetChatGuid The target chat GUID to forward to
+     */
+    fun forwardMessages(messageGuids: List<String>, targetChatGuid: String) {
+        if (messageGuids.isEmpty()) return
+        scope.launch {
+            _state.update { it.copy(isForwarding = true) }
+            var failedCount = 0
+
+            // Forward each message in order
+            for (guid in messageGuids) {
+                messageSender.forwardMessage(guid, targetChatGuid).fold(
+                    onSuccess = { /* Continue to next */ },
+                    onFailure = { failedCount++ }
+                )
+            }
+
+            if (failedCount == 0) {
+                _state.update { it.copy(isForwarding = false, forwardSuccess = true) }
+                soundPlayer.playSendSound()
+            } else if (failedCount == messageGuids.size) {
+                _state.update { it.copy(isForwarding = false, sendError = "Failed to forward messages") }
+            } else {
+                // Partial success - some messages failed
+                _state.update { it.copy(isForwarding = false, forwardSuccess = true) }
+                soundPlayer.playSendSound()
+            }
+        }
+    }
+
+    /**
      * Check if a failed message can be retried as SMS.
      */
     suspend fun canRetryAsSms(messageGuid: String): Boolean {

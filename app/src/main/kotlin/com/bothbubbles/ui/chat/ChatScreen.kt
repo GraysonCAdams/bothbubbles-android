@@ -4,13 +4,25 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.FileProvider
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -30,13 +42,18 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.components.CaptureTypeSheet
 import com.bothbubbles.ui.chat.components.ChatBackground
+import com.bothbubbles.ui.chat.components.MessageSelectionHeader
+import com.bothbubbles.ui.components.common.copyToClipboard
+import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -45,7 +62,6 @@ fun ChatScreen(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onMediaClick: (String) -> Unit,
-    onCameraClick: () -> Unit = {},
     onEditAttachmentClick: (Uri) -> Unit = {},
     capturedPhotoUri: Uri? = null,
     onCapturedPhotoHandled: () -> Unit = {},
@@ -62,6 +78,8 @@ fun ChatScreen(
     initialScrollOffset: Int = 0,
     onScrollPositionRestored: () -> Unit = {},
     targetMessageGuid: String? = null,
+    // Bubble mode - simplified UI for Android conversation bubbles
+    isBubbleMode: Boolean = false,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -149,6 +167,11 @@ fun ChatScreen(
     // threadOverlayState, forwardableChats, isWhatsAppAvailable are now collected internally
     // by their respective child components
 
+    // Handle back press to exit message selection mode (higher priority than tapback)
+    BackHandler(enabled = state.isMessageSelectionMode) {
+        state.clearMessageSelection()
+    }
+
     // Handle back press to dismiss tapback menu (uses state from ChatScreenState)
     BackHandler(enabled = state.selectedMessageForTapback != null) {
         state.clearTapbackSelection()
@@ -208,6 +231,30 @@ fun ChatScreen(
         }
     }
 
+    // Stock camera - Photo capture
+    var takePhotoUri by remember { mutableStateOf<Uri?>(null) }
+    val takePhotoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.TakePicture()
+    ) { success ->
+        if (success) {
+            takePhotoUri?.let { uri ->
+                viewModel.composer.addAttachment(uri)
+            }
+        }
+    }
+
+    // Stock camera - Video capture
+    var takeVideoUri by remember { mutableStateOf<Uri?>(null) }
+    val takeVideoLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CaptureVideo()
+    ) { success ->
+        if (success) {
+            takeVideoUri?.let { uri ->
+                viewModel.composer.addAttachment(uri)
+            }
+        }
+    }
+
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
     // Wave 2: gifPickerState and gifSearchQuery now collected internally by ChatInputUI
@@ -241,7 +288,7 @@ fun ChatScreen(
         // Scaffold's SubcomposeLayout has O(N) overhead when comparing lambda closures
         // that capture the messages list. This Box approach avoids SubcomposeLayout entirely.
 
-        // TopBar overlay at top
+        // TopBar overlay at top - switches between normal and selection mode
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
@@ -249,38 +296,126 @@ fun ChatScreen(
                 .onSizeChanged { state.topBarHeightPx = it.height.toFloat() }
                 .zIndex(1f)
         ) {
-            // Wave 2: ChatTopBar uses delegates for internal state collection
-            ChatTopBar(
-                operationsDelegate = viewModel.operations,
-                chatInfoDelegate = viewModel.chatInfo,
-                onBackClick = {
-                    // Clear saved state when user explicitly navigates back
-                    viewModel.onNavigateBack()
-                    onBackClick()
-                },
-                onDetailsClick = onDetailsClick,
-                onVideoCallClick = { state.showVideoCallDialog = true },
-                onMenuAction = { action ->
-                    when (action) {
-                        ChatMenuAction.ADD_PEOPLE -> {
-                            context.startActivity(viewModel.operations.getAddToContactsIntent(
-                                chatInfoState.participantPhone,
-                                chatInfoState.inferredSenderName
-                            ))
+            AnimatedContent(
+                targetState = state.isMessageSelectionMode,
+                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                label = "TopBarModeSwitch"
+            ) { isSelectionMode ->
+                if (isSelectionMode) {
+                    MessageSelectionHeader(
+                        selectedCount = state.selectedMessageGuids.size,
+                        onClose = { state.clearMessageSelection() },
+                        onCopy = {
+                            val selectedMessages = messages.filter { it.guid in state.selectedMessageGuids }
+                            val hasAnyText = selectedMessages.any { !it.text.isNullOrBlank() }
+
+                            if (hasAnyText) {
+                                val formattedText = formatSelectedMessagesForCopy(
+                                    selectedGuids = state.selectedMessageGuids,
+                                    messages = messages
+                                )
+                                copyToClipboard(
+                                    context = context,
+                                    text = formattedText,
+                                    toastMessage = "Copied ${state.selectedMessageGuids.size} message(s)"
+                                )
+                            } else {
+                                // No text to copy - only attachments selected
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Selected messages contain no text to copy",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            state.clearMessageSelection()
+                        },
+                        onShare = {
+                            // Use Android system share sheet
+                            val formattedText = formatSelectedMessagesForCopy(
+                                selectedGuids = state.selectedMessageGuids,
+                                messages = messages
+                            )
+                            if (formattedText.isNotBlank()) {
+                                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_TEXT, formattedText)
+                                }
+                                context.startActivity(
+                                    android.content.Intent.createChooser(shareIntent, "Share messages")
+                                )
+                            } else {
+                                android.widget.Toast.makeText(
+                                    context,
+                                    "Selected messages contain no text to share",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                            state.clearMessageSelection()
+                        },
+                        onForward = {
+                            // Store selected messages sorted by date (oldest first) and show forward dialog
+                            state.messagesToForward = messages
+                                .filter { it.guid in state.selectedMessageGuids }
+                                .sortedBy { it.dateCreated }
+                                .map { it.guid }
+                            state.showForwardDialog = true
+                            // Don't clear selection yet - will be cleared after forward success
+                        },
+                        onDelete = {
+                            // Show confirmation dialog before deleting
+                            state.showDeleteMessagesDialog = true
+                        },
+                        onSelectAll = {
+                            state.selectAllMessages(messages.map { it.guid })
                         }
-                        ChatMenuAction.DETAILS -> onDetailsClick()
-                        ChatMenuAction.STARRED -> viewModel.operations.toggleStarred()
-                        ChatMenuAction.SEARCH -> viewModel.search.activateSearch()
-                        ChatMenuAction.ARCHIVE -> viewModel.operations.archiveChat()
-                        ChatMenuAction.UNARCHIVE -> viewModel.operations.unarchiveChat()
-                        ChatMenuAction.DELETE -> state.showDeleteDialog = true
-                        ChatMenuAction.BLOCK_AND_REPORT -> state.showBlockDialog = true
-                        ChatMenuAction.HELP_AND_FEEDBACK -> {
-                            context.startActivity(viewModel.operations.getHelpIntent())
+                    )
+                } else {
+                    // Wave 2: ChatTopBar uses delegates for internal state collection
+                    ChatTopBar(
+                        operationsDelegate = viewModel.operations,
+                        chatInfoDelegate = viewModel.chatInfo,
+                        sendModeManager = viewModel.sendMode,
+                        onBackClick = {
+                            // Clear saved state when user explicitly navigates back
+                            viewModel.onNavigateBack()
+                            onBackClick()
+                        },
+                        onDetailsClick = onDetailsClick,
+                        onVideoCallClick = { state.showVideoCallDialog = true },
+                        isBubbleMode = isBubbleMode,
+                        onMenuAction = { action ->
+                            when (action) {
+                                ChatMenuAction.ADD_PEOPLE -> {
+                                    context.startActivity(viewModel.operations.getAddToContactsIntent(
+                                        chatInfoState.participantPhone,
+                                        chatInfoState.inferredSenderName
+                                    ))
+                                }
+                                ChatMenuAction.DETAILS -> onDetailsClick()
+                                ChatMenuAction.SWITCH_SEND_MODE -> {
+                                    // Toggle send mode between iMessage and SMS
+                                    viewModel.sendMode.tryToggleSendMode()
+                                }
+                                ChatMenuAction.STARRED -> viewModel.operations.toggleStarred()
+                                ChatMenuAction.SEARCH -> viewModel.search.activateSearch()
+                                ChatMenuAction.SELECT_MESSAGES -> {
+                                    // Enter selection mode with first message selected (if any)
+                                    messages.firstOrNull()?.let { firstMessage ->
+                                        state.enterMessageSelectionMode(firstMessage.guid)
+                                    }
+                                }
+                                ChatMenuAction.ARCHIVE -> viewModel.operations.archiveChat()
+                                ChatMenuAction.UNARCHIVE -> viewModel.operations.unarchiveChat()
+                                ChatMenuAction.DELETE -> state.showDeleteDialog = true
+                                ChatMenuAction.BLOCK_AND_REPORT -> state.showBlockDialog = true
+                                ChatMenuAction.HELP_AND_FEEDBACK -> {
+                                    context.startActivity(viewModel.operations.getHelpIntent())
+                                }
+                            }
                         }
-                    }
+                    )
                 }
-            )
+            }
         }
 
         // BottomBar overlay at bottom
@@ -304,7 +439,7 @@ fun ChatScreen(
                 isLocalSmsChat = chatInfoState.isLocalSmsChat,
                 // Wave 2: Deprecated params removed (sendState, smartReplySuggestions,
                 // replyingToMessage, gifPickerState, gifSearchQuery) - now collected internally
-                onCameraClick = onCameraClick,
+                onCameraClick = { state.showCaptureTypeSheet = true },
                 onSmartReplyClick = { suggestion ->
                     viewModel.updateDraft(suggestion.text)
                 },
@@ -324,7 +459,8 @@ fun ChatScreen(
                     viewModel.sendMessage()
                 },
                 onSendButtonBoundsChanged = { bounds -> state.sendButtonBounds = bounds },
-                onSizeChanged = { height -> state.composerHeightPx = height.toFloat() }
+                onSizeChanged = { height -> state.composerHeightPx = height.toFloat() },
+                isBubbleMode = isBubbleMode
             )
         }
 
@@ -366,6 +502,7 @@ fun ChatScreen(
         val currentContext by rememberUpdatedState(context)
         val currentAddContactLauncher by rememberUpdatedState(addContactLauncher)
         val currentChatGuid by rememberUpdatedState(chatGuid)
+        val currentMessages by rememberUpdatedState(messages)
 
         // Wave 3G: Stable MessageListCallbacks wrapped in remember(viewModel)
         // Callbacks are stable because:
@@ -377,6 +514,22 @@ fun ChatScreen(
                 onToggleReaction = viewModel::toggleReaction,
                 onSetReplyTo = viewModel.send::setReplyTo,
                 onClearReply = viewModel.send::clearReply,
+                onScrollToOriginal = { originGuid ->
+                    // Find the message in the list and scroll to it with highlight
+                    val index = currentMessages.indexOfFirst { it.guid == originGuid }
+                    if (index >= 0) {
+                        // Highlight the message and scroll to it
+                        viewModel.highlightMessage(originGuid)
+                        currentState.coroutineScope.launch {
+                            val viewportHeight = currentState.listState.layoutInfo.viewportSize.height
+                            val centerOffset = -(viewportHeight / 3)
+                            currentState.listState.animateScrollToItem(index, scrollOffset = centerOffset)
+                        }
+                    } else {
+                        // Message not in view - fall back to loading thread overlay
+                        viewModel.thread.loadThread(originGuid)
+                    }
+                },
                 onLoadThread = viewModel.thread::loadThread,
                 onRetryMessage = viewModel.send::retryMessage,
                 onRetryAsSms = viewModel.send::retryMessageAsSms,
@@ -484,7 +637,10 @@ fun ChatScreen(
             composerHeightPxProvider = { state.composerHeightPx },
 
             // Wave 2: Server connection collected locally for tapback availability
-            isServerConnected = viewModel.sync.state.collectAsStateWithLifecycle().value.isServerConnected
+            isServerConnected = viewModel.sync.state.collectAsStateWithLifecycle().value.isServerConnected,
+
+            // Bubble mode
+            isBubbleMode = isBubbleMode
         )
 
     } // End of content Box
@@ -543,6 +699,7 @@ fun ChatScreen(
         selectedMessageForRetry = state.selectedMessageForRetry,
         canRetrySmsForMessage = state.canRetrySmsForMessage,
         messageToForward = state.messageToForward,
+        messagesToForward = state.messagesToForward,
         pendingContactData = state.pendingContactData,
         pendingAttachments = pendingAttachments,
         attachmentQuality = uiState.attachmentQuality,
@@ -569,7 +726,10 @@ fun ChatScreen(
         onShowDiscordSetup = { state.showDiscordSetupDialog = true },
         onShowDiscordHelp = { state.showDiscordHelpOverlay = true },
         onClearPendingContactData = { state.pendingContactData = null },
-        onClearMessageToForward = { state.messageToForward = null }
+        onClearMessageToForward = { state.messageToForward = null },
+        onClearMessagesToForward = { state.messagesToForward = emptyList() },
+        onClearMessageSelection = { state.clearMessageSelection() },
+        isBubbleMode = isBubbleMode
     )
 
     // Contact quick actions popup for group chat avatar clicks
@@ -591,6 +751,90 @@ fun ChatScreen(
             )
         }
     }
+
+    // Delete messages confirmation dialog
+    if (state.showDeleteMessagesDialog) {
+        val count = state.selectedMessageGuids.size
+        AlertDialog(
+            onDismissRequest = { state.showDeleteMessagesDialog = false },
+            title = { Text("Delete $count message${if (count != 1) "s" else ""}?") },
+            text = { Text("This action cannot be undone.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.operations.deleteMessages(state.selectedMessageGuids.toList())
+                        state.showDeleteMessagesDialog = false
+                        state.clearMessageSelection()
+                    }
+                ) {
+                    Text("Delete")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { state.showDeleteMessagesDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Capture type sheet (photo/video) for stock camera
+    CaptureTypeSheet(
+        visible = state.showCaptureTypeSheet,
+        onTakePhoto = {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val file = File(context.cacheDir, "IMG_$timestamp.jpg")
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            takePhotoUri = uri
+            takePhotoLauncher.launch(uri)
+            state.showCaptureTypeSheet = false
+        },
+        onRecordVideo = {
+            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val file = File(context.cacheDir, "VID_$timestamp.mp4")
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            takeVideoUri = uri
+            takeVideoLauncher.launch(uri)
+            state.showCaptureTypeSheet = false
+        },
+        onDismiss = { state.showCaptureTypeSheet = false }
+    )
 }
 
+/**
+ * Formats selected messages for clipboard copy.
+ *
+ * Format rules:
+ * - Single line break between each message (no blank lines)
+ * - If all messages are from the same sender, no names are included
+ * - If messages are from different senders, include "[sender]: " prefix
+ *
+ * Messages are sorted by timestamp (oldest first) for natural reading order.
+ */
+private fun formatSelectedMessagesForCopy(
+    selectedGuids: Set<String>,
+    messages: List<MessageUiModel>
+): String {
+    val selectedMessages = messages
+        .filter { it.guid in selectedGuids }
+        .sortedBy { it.dateCreated } // Oldest first for natural reading order
 
+    if (selectedMessages.isEmpty()) return ""
+
+    // Determine sender identities for each message
+    val senderIdentities = selectedMessages.map { message ->
+        if (message.isFromMe) "Me" else (message.senderName ?: "Unknown")
+    }
+
+    // Check if all messages are from the same sender
+    val allFromSameSender = senderIdentities.distinct().size == 1
+
+    return selectedMessages.mapIndexed { index, message ->
+        val senderPrefix = if (!allFromSameSender) {
+            "${senderIdentities[index]}: "
+        } else {
+            ""
+        }
+        senderPrefix + (message.text ?: "[Attachment]")
+    }.joinToString("\n")
+}

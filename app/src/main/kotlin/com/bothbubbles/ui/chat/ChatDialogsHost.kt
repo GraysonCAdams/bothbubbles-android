@@ -59,6 +59,8 @@ import kotlinx.coroutines.flow.flowOf
  * - VCardOptionsDialog
  * - ForwardMessageDialog
  * - ComposerTutorial
+ *
+ * @param isBubbleMode When true, most dialogs are skipped (only RetryMessageBottomSheet is kept)
  */
 @Composable
 fun ChatDialogsHost(
@@ -92,6 +94,7 @@ fun ChatDialogsHost(
     selectedMessageForRetry: MessageUiModel?,
     canRetrySmsForMessage: Boolean,
     messageToForward: MessageUiModel?,
+    messagesToForward: List<String>,
     pendingContactData: ContactData?,
     pendingAttachments: List<PendingAttachmentInput>,
     attachmentQuality: AttachmentQuality,
@@ -119,6 +122,11 @@ fun ChatDialogsHost(
     onShowDiscordHelp: () -> Unit,
     onClearPendingContactData: () -> Unit,
     onClearMessageToForward: () -> Unit,
+    onClearMessagesToForward: () -> Unit,
+    onClearMessageSelection: () -> Unit,
+
+    // Bubble mode - simplified UI for Android conversation bubbles
+    isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
     val connectionState by connectionDelegate.state.collectAsStateWithLifecycle()
@@ -144,6 +152,29 @@ fun ChatDialogsHost(
     // PERF FIX: Collect draftText here to avoid ChatScreen recomposition on every keystroke
     val draftText by viewModel.composer.draftText.collectAsStateWithLifecycle()
 
+    // In bubble mode, skip most dialogs - only show RetryMessageBottomSheet
+    if (isBubbleMode) {
+        // Retry bottom sheet for failed messages (kept in bubble mode)
+        selectedMessageForRetry?.let { failedMessage ->
+            RetryMessageBottomSheet(
+                messageGuid = failedMessage.guid,
+                canRetryAsSms = canRetrySmsForMessage,
+                contactIMessageAvailable = connectionState.contactIMessageAvailable == true,
+                onRetryAsIMessage = {
+                    viewModel.send.retryMessage(failedMessage.guid)
+                    onDismissRetrySheet()
+                },
+                onRetryAsSms = {
+                    viewModel.send.retryMessageAsSms(failedMessage.guid)
+                    onDismissRetrySheet()
+                },
+                onDismiss = onDismissRetrySheet
+            )
+        }
+        return
+    }
+
+    // Full dialog set for non-bubble mode
     // Effect picker bottom sheet
     if (showEffectPicker) {
         EffectPickerSheet(
@@ -255,7 +286,11 @@ fun ChatDialogsHost(
     if (showVideoCallDialog) {
         VideoCallMethodDialog(
             onGoogleMeet = {
-                context.startActivity(viewModel.operations.getGoogleMeetIntent())
+                try {
+                    context.startActivity(viewModel.operations.getGoogleMeetIntent())
+                } catch (e: android.content.ActivityNotFoundException) {
+                    // Google Meet not installed or can't handle intent
+                }
                 onDismissVideoCallDialog()
             },
             onWhatsApp = {
@@ -266,7 +301,11 @@ fun ChatDialogsHost(
             },
             onDiscord = {
                 chatInfoState.discordChannelId?.let { channelId ->
-                    context.startActivity(viewModel.operations.getDiscordCallIntent(channelId))
+                    try {
+                        context.startActivity(viewModel.operations.getDiscordCallIntent(channelId))
+                    } catch (e: android.content.ActivityNotFoundException) {
+                        // Discord app may be installed but doesn't handle this deep link
+                    }
                 }
                 onDismissVideoCallDialog()
             },
@@ -352,16 +391,22 @@ fun ChatDialogsHost(
         }
     )
 
-    // Forward message dialog
+    // Forward message dialog - handles both single and multiple message forwarding
     ForwardMessageDialog(
         visible = showForwardDialog,
         onDismiss = {
             onDismissForwardDialog()
             onClearMessageToForward()
+            onClearMessagesToForward()
         },
         onChatSelected = { targetChatGuid ->
-            messageToForward?.let { message ->
-                viewModel.send.forwardMessage(message.guid, targetChatGuid)
+            // Multi-message forward takes priority
+            if (messagesToForward.isNotEmpty()) {
+                viewModel.send.forwardMessages(messagesToForward, targetChatGuid)
+            } else {
+                messageToForward?.let { message ->
+                    viewModel.send.forwardMessage(message.guid, targetChatGuid)
+                }
             }
         },
         chats = forwardableChats.map { chat ->
@@ -377,9 +422,13 @@ fun ChatDialogsHost(
     // Handle forward success
     LaunchedEffect(sendState.forwardSuccess) {
         if (sendState.forwardSuccess) {
-            Toast.makeText(context, "Message forwarded", Toast.LENGTH_SHORT).show()
+            val count = messagesToForward.size.takeIf { it > 0 } ?: 1
+            val message = if (count == 1) "Message forwarded" else "$count messages forwarded"
+            Toast.makeText(context, message, Toast.LENGTH_SHORT).show()
             onDismissForwardDialog()
             onClearMessageToForward()
+            onClearMessagesToForward()
+            onClearMessageSelection() // Clear selection after successful forward
             viewModel.send.clearForwardSuccess()
         }
     }

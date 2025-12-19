@@ -47,15 +47,26 @@ class SmsSettingsViewModel @Inject constructor(
             combine(
                 settingsDataStore.smsEnabled,
                 settingsDataStore.preferSmsOverIMessage,
-                settingsDataStore.selectedSimSlot
-            ) { enabled, preferSms, simSlot ->
-                Triple(enabled, preferSms, simSlot)
-            }.collect { (enabled, preferSms, simSlot) ->
+                settingsDataStore.selectedSimSlot,
+                settingsDataStore.autoSwitchSendMode
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                val enabled = values[0] as? Boolean ?: false
+                val preferSms = values[1] as? Boolean ?: false
+                val simSlot = values[2] as? Int ?: -1
+                val autoSwitch = values[3] as? Boolean ?: true
+                arrayOf(enabled, preferSms, simSlot, autoSwitch)
+            }.collect { values ->
+                val enabled = values[0] as Boolean
+                val preferSms = values[1] as Boolean
+                val simSlot = values[2] as Int
+                val autoSwitch = values[3] as Boolean
                 _uiState.update {
                     it.copy(
                         smsEnabled = enabled,
                         preferSmsOverIMessage = preferSms,
-                        selectedSimSlot = simSlot
+                        selectedSimSlot = simSlot,
+                        autoSwitchSendMode = autoSwitch
                     )
                 }
             }
@@ -76,6 +87,12 @@ class SmsSettingsViewModel @Inject constructor(
     fun setPreferSmsOverIMessage(prefer: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setPreferSmsOverIMessage(prefer)
+        }
+    }
+
+    fun setAutoSwitchSendMode(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setAutoSwitchSendMode(enabled)
         }
     }
 
@@ -174,6 +191,7 @@ data class SmsSettingsUiState(
     val defaultSimId: Int = -1,
     val smsEnabled: Boolean = false,
     val preferSmsOverIMessage: Boolean = false,
+    val autoSwitchSendMode: Boolean = true,
     val selectedSimSlot: Int = -1,
     val error: String? = null,
     val isResyncing: Boolean = false,

@@ -19,7 +19,8 @@ import javax.inject.Singleton
 @Singleton
 class NotificationService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val notificationBuilder: NotificationBuilder
+    private val notificationBuilder: NotificationBuilder,
+    private val badgeManager: BadgeManager
 ) : Notifier {
     private val notificationManager = NotificationManagerCompat.from(context)
 
@@ -61,7 +62,8 @@ class NotificationService @Inject constructor(
             linkPreviewDomain = linkPreviewDomain,
             participantNames = participantNames,
             participantAvatarPaths = participantAvatarPaths,
-            subject = subject
+            subject = subject,
+            totalUnreadCount = badgeManager.totalUnread.value
         )
 
         notificationManager.notify(chatGuid.hashCode(), notification)

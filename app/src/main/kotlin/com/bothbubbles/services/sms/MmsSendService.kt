@@ -54,6 +54,7 @@ class MmsSendService @Inject constructor(
      * @param chatGuid The chat GUID for tracking
      * @param subject Optional MMS subject
      * @param subscriptionId Optional SIM slot ID
+     * @param tempGuid Optional temp GUID from optimistic insertion - if provided, updates existing message
      */
     suspend fun sendMms(
         recipients: List<String>,
@@ -61,7 +62,8 @@ class MmsSendService @Inject constructor(
         attachments: List<Uri>,
         chatGuid: String,
         subject: String? = null,
-        subscriptionId: Int = -1
+        subscriptionId: Int = -1,
+        tempGuid: String? = null
     ): Result<MessageEntity> = withContext(ioDispatcher) {
         runCatching {
             val timestamp = System.currentTimeMillis()
@@ -69,22 +71,59 @@ class MmsSendService @Inject constructor(
             val messageGuid = providerMessage?.let { "mms-${it.id}" }
                 ?: "mms-outgoing-$timestamp"
 
-            // Create message entity first (optimistic insert)
-            val message = MessageEntity(
-                guid = messageGuid,
-                chatGuid = chatGuid,
-                text = text,
-                subject = subject,
-                dateCreated = timestamp,
-                isFromMe = true,
-                hasAttachments = attachments.isNotEmpty(),
-                messageSource = MessageSource.LOCAL_MMS.name,
-                smsStatus = "pending",
-                simSlot = if (subscriptionId >= 0) subscriptionId else null,
-                smsId = providerMessage?.id,
-                smsThreadId = providerMessage?.threadId
-            )
-            messageDao.insertMessage(message)
+            val message: MessageEntity
+            if (tempGuid != null) {
+                // Update existing temp message with the real MMS GUID
+                Timber.d("Replacing temp message $tempGuid with MMS GUID $messageGuid")
+                messageDao.replaceGuid(tempGuid, messageGuid)
+
+                // Update the message with MMS-specific fields
+                val existingMessage = messageDao.getMessageByGuid(messageGuid)
+                if (existingMessage != null) {
+                    message = existingMessage.copy(
+                        smsStatus = "pending",
+                        simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                        smsId = providerMessage?.id,
+                        smsThreadId = providerMessage?.threadId
+                    )
+                    messageDao.updateMessage(message)
+                } else {
+                    // Temp message was deleted (race condition) - create new one
+                    Timber.w("Temp message $tempGuid not found after replaceGuid, creating new message")
+                    message = MessageEntity(
+                        guid = messageGuid,
+                        chatGuid = chatGuid,
+                        text = text,
+                        subject = subject,
+                        dateCreated = timestamp,
+                        isFromMe = true,
+                        hasAttachments = attachments.isNotEmpty(),
+                        messageSource = MessageSource.LOCAL_MMS.name,
+                        smsStatus = "pending",
+                        simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                        smsId = providerMessage?.id,
+                        smsThreadId = providerMessage?.threadId
+                    )
+                    messageDao.insertMessage(message)
+                }
+            } else {
+                // No temp GUID provided - insert new message (standalone send or retry)
+                message = MessageEntity(
+                    guid = messageGuid,
+                    chatGuid = chatGuid,
+                    text = text,
+                    subject = subject,
+                    dateCreated = timestamp,
+                    isFromMe = true,
+                    hasAttachments = attachments.isNotEmpty(),
+                    messageSource = MessageSource.LOCAL_MMS.name,
+                    smsStatus = "pending",
+                    simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                    smsId = providerMessage?.id,
+                    smsThreadId = providerMessage?.threadId
+                )
+                messageDao.insertMessage(message)
+            }
 
             // Convert attachments to AttachmentData for builder
             val attachmentData = attachments.mapNotNull { uri ->

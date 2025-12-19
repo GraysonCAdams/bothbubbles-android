@@ -22,6 +22,9 @@ import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.fcm.FirebaseDatabaseService
+import com.bothbubbles.services.notifications.BadgeManager
+import com.bothbubbles.services.life360.Life360SyncWorker
+import com.bothbubbles.services.life360.Life360TokenStorage
 import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.HapticUtils
@@ -34,11 +37,11 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-import org.acra.ACRA
 import org.acra.config.dialog
 import org.acra.config.mailSender
 import org.acra.data.StringFormat
 import org.acra.ktx.initAcra
+import com.bothbubbles.ui.crash.CrashReportActivity
 import javax.inject.Inject
 
 @HiltAndroidApp
@@ -56,12 +59,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
             buildConfigClass = BuildConfig::class.java
             reportFormat = StringFormat.JSON
 
-            // Show dialog asking user if they want to send crash report
+            // Show custom Compose crash report screen
             dialog {
-                title = getString(R.string.crash_dialog_title)
-                text = getString(R.string.crash_dialog_text)
-                commentPrompt = getString(R.string.crash_dialog_comment)
-                resIcon = R.drawable.ic_launcher_foreground
+                reportDialogClass = CrashReportActivity::class.java
             }
 
             // Use email sender - user manually sends via their email app (no automatic upload)
@@ -101,6 +101,12 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var firebaseDatabaseService: FirebaseDatabaseService
+
+    @Inject
+    lateinit var badgeManager: BadgeManager
+
+    @Inject
+    lateinit var life360TokenStorage: Life360TokenStorage
 
     @Inject
     @ApplicationScope
@@ -181,6 +187,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Schedule background sync worker (catches messages missed by push/socket)
         initializeBackgroundSync()
+
+        // Schedule Life360 sync worker (if authenticated)
+        initializeLife360Sync()
 
         // Self-healing: repair chats with missing messages
         initializeRepairSync()
@@ -367,6 +376,25 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 BackgroundSyncWorker.schedule(this@BothBubblesApp)
             } catch (e: Exception) {
                 Timber.w(e, "Error scheduling background sync")
+            }
+        }
+    }
+
+    /**
+     * Schedule Life360 sync worker to periodically update family member locations.
+     * Only runs if Life360 is authenticated and enabled.
+     */
+    private fun initializeLife360Sync() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                if (!life360TokenStorage.isAuthenticated) {
+                    Timber.d("Life360 not authenticated, skipping sync worker")
+                    return@launch
+                }
+
+                Life360SyncWorker.schedule(this@BothBubblesApp)
+            } catch (e: Exception) {
+                Timber.w(e, "Error scheduling Life360 sync")
             }
         }
     }

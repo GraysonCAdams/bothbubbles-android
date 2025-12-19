@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat.state
 
 import androidx.compose.runtime.Stable
+import com.bothbubbles.core.model.Life360Member
 import com.bothbubbles.ui.util.StableList
 import com.bothbubbles.ui.util.toStable
 
@@ -26,5 +27,9 @@ data class ChatInfoState(
     val inferredSenderName: String? = null,
     val isSnoozed: Boolean = false,
     val snoozeUntil: Long? = null,
-    val discordChannelId: String? = null
+    val discordChannelId: String? = null,
+    /** Life360 location subtext (e.g., "At Home" or "123 Main St"), null if unavailable or stale */
+    val locationSubtext: String? = null,
+    /** Life360 member data for full-screen map navigation, null if not linked or unavailable */
+    val life360Member: Life360Member? = null
 )

@@ -41,6 +41,8 @@ import com.bothbubbles.ui.components.input.SuggestionItem
  * to avoid component duplication.
  *
  * This extraction follows Stage 2 of the refactor plan to declutter ChatScreen.kt
+ *
+ * @param isBubbleMode When true, disables file picker and contact picker
  */
 @Composable
 fun ChatInputUI(
@@ -78,7 +80,9 @@ fun ChatInputUI(
     onSendButtonBoundsChanged: (Rect) -> Unit,
     // Modifier for size tracking
     modifier: Modifier = Modifier,
-    onSizeChanged: (Int) -> Unit = {}
+    onSizeChanged: (Int) -> Unit = {},
+    // Bubble mode - simplified UI for Android conversation bubbles
+    isBubbleMode: Boolean = false
 ) {
     val context = LocalContext.current
     val hapticFeedback = LocalHapticFeedback.current
@@ -163,12 +167,16 @@ fun ChatInputUI(
                 when (event) {
                     is ComposerEvent.OpenCamera -> onCameraClick()
                     is ComposerEvent.SendLongPress -> {
-                        if (!isLocalSmsChat) {
+                        // Effect picker disabled in bubble mode and for SMS
+                        if (!isLocalSmsChat && !isBubbleMode) {
                             hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
                             onShowEffectPicker()
                         }
                     }
-                    is ComposerEvent.OpenQualitySheet -> onShowQualitySheet()
+                    is ComposerEvent.OpenQualitySheet -> {
+                        // Quality sheet disabled in bubble mode
+                        if (!isBubbleMode) onShowQualitySheet()
+                    }
                     is ComposerEvent.EditAttachment -> onEditAttachmentClick(event.attachment.uri)
                     // Voice recording events - delegated to ChatAudioState
                     is ComposerEvent.StartVoiceRecording, is ComposerEvent.VoiceMemoTap -> {
@@ -204,9 +212,10 @@ fun ChatInputUI(
             },
             onMediaSelected = onMediaSelected,
             onCameraClick = onCameraClick,
-            onFileClick = onFileClick,
-            onLocationClick = onLocationClick,
-            onContactClick = onContactClick,
+            // File and contact pickers disabled in bubble mode
+            onFileClick = if (isBubbleMode) ({ }) else onFileClick,
+            onLocationClick = if (isBubbleMode) ({ }) else onLocationClick,
+            onContactClick = if (isBubbleMode) ({ }) else onContactClick,
             // GIF Picker - collected internally from delegate
             gifPickerState = gifPickerState,
             gifSearchQuery = gifSearchQuery,

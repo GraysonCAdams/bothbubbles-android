@@ -246,3 +246,68 @@ data class ICloudAccountInfoDto(
 data class ICloudAliasDto(
     @Json(name = "Alias") val alias: String
 )
+
+// ===== Find My DTOs =====
+
+/**
+ * Find My device DTO - represents an Apple device in Find My
+ */
+@JsonClass(generateAdapter = true)
+data class FindMyDeviceDto(
+    @Json(name = "id") val id: String? = null,
+    @Json(name = "name") val name: String? = null,
+    @Json(name = "deviceModel") val deviceModel: String? = null,
+    @Json(name = "modelDisplayName") val modelDisplayName: String? = null,
+    @Json(name = "deviceDisplayName") val deviceDisplayName: String? = null,
+    @Json(name = "deviceClass") val deviceClass: String? = null,
+    @Json(name = "batteryLevel") val batteryLevel: Double? = null,
+    @Json(name = "batteryStatus") val batteryStatus: String? = null,
+    @Json(name = "location") val location: FindMyLocationDto? = null,
+    @Json(name = "address") val address: FindMyAddressDto? = null
+)
+
+/**
+ * Find My friend DTO - represents a friend's location in Find My
+ */
+@JsonClass(generateAdapter = true)
+data class FindMyFriendDto(
+    @Json(name = "handle") val handle: String? = null,
+    @Json(name = "title") val title: String? = null,
+    @Json(name = "subtitle") val subtitle: String? = null,
+    @Json(name = "coordinates") val coordinates: List<Double>? = null,
+    @Json(name = "long_address") val longAddress: String? = null,
+    @Json(name = "short_address") val shortAddress: String? = null,
+    @Json(name = "last_updated") val lastUpdated: Long? = null,
+    @Json(name = "status") val status: String? = null,
+    @Json(name = "is_locating_in_progress") val isLocatingInProgress: Int? = null
+)
+
+/**
+ * Find My location DTO - location coordinates and accuracy
+ */
+@JsonClass(generateAdapter = true)
+data class FindMyLocationDto(
+    @Json(name = "latitude") val latitude: Double? = null,
+    @Json(name = "longitude") val longitude: Double? = null,
+    @Json(name = "horizontalAccuracy") val horizontalAccuracy: Double? = null,
+    @Json(name = "verticalAccuracy") val verticalAccuracy: Int? = null,
+    @Json(name = "altitude") val altitude: Int? = null,
+    @Json(name = "timeStamp") val timeStamp: Long? = null,
+    @Json(name = "isOld") val isOld: Boolean? = null,
+    @Json(name = "isInaccurate") val isInaccurate: Boolean? = null
+)
+
+/**
+ * Find My address DTO - human-readable address information
+ */
+@JsonClass(generateAdapter = true)
+data class FindMyAddressDto(
+    @Json(name = "mapItemFullAddress") val mapItemFullAddress: String? = null,
+    @Json(name = "streetAddress") val streetAddress: String? = null,
+    @Json(name = "streetName") val streetName: String? = null,
+    @Json(name = "locality") val locality: String? = null,
+    @Json(name = "administrativeArea") val administrativeArea: String? = null,
+    @Json(name = "country") val country: String? = null,
+    @Json(name = "countryCode") val countryCode: String? = null,
+    @Json(name = "formattedAddressLines") val formattedAddressLines: List<String>? = null
+)

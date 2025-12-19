@@ -131,6 +131,8 @@ data class ReplyPreviewData(
     val senderName: String?,         // "You" or contact name
     val isFromMe: Boolean,
     val hasAttachment: Boolean,
+    val thumbnailUri: String? = null, // Thumbnail path for attachment preview
+    val quoteDepth: Int = 1,         // Nesting level (1 = direct reply, 2+ = reply to reply)
     val isNotLoaded: Boolean = false // Original not found within recent messages
 )
 

@@ -82,6 +82,7 @@ fun MessageFocusOverlay(
     onReply: () -> Unit = {},
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
+    onSelect: () -> Unit = {},
     modifier: Modifier = Modifier,
     messageContent: @Composable BoxScope.() -> Unit
 ) {
@@ -257,6 +258,10 @@ fun MessageFocusOverlay(
                 },
                 onForward = {
                     onForward()
+                    onDismiss()
+                },
+                onSelect = {
+                    onSelect()
                     onDismiss()
                 }
             )

@@ -200,4 +200,18 @@ interface BothBubblesApi {
 
     @GET("api/v1/icloud/account")
     suspend fun getICloudAccountInfo(): Response<ApiResponse<ICloudAccountInfoDto>>
+
+    // ===== Find My =====
+
+    @GET("api/v1/icloud/findmy/devices")
+    suspend fun getFindMyDevices(): Response<ApiResponse<List<FindMyDeviceDto>>>
+
+    @POST("api/v1/icloud/findmy/devices/refresh")
+    suspend fun refreshFindMyDevices(): Response<ApiResponse<List<FindMyDeviceDto>>>
+
+    @GET("api/v1/icloud/findmy/friends")
+    suspend fun getFindMyFriends(): Response<ApiResponse<List<FindMyFriendDto>>>
+
+    @POST("api/v1/icloud/findmy/friends/refresh")
+    suspend fun refreshFindMyFriends(): Response<ApiResponse<List<FindMyFriendDto>>>
 }

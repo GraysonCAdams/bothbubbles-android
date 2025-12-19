@@ -25,10 +25,6 @@ class SmsPreferences @Inject constructor(
         prefs[Keys.SMS_ONLY_MODE] ?: false
     }
 
-    val autoRetryAsSms: Flow<Boolean> = dataStore.data.map { prefs ->
-        prefs[Keys.AUTO_RETRY_AS_SMS] ?: true  // Default to auto-retry as SMS when iMessage fails
-    }
-
     val preferSmsOverIMessage: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.PREFER_SMS_OVER_IMESSAGE] ?: false
     }
@@ -57,6 +53,15 @@ class SmsPreferences @Inject constructor(
         prefs[Keys.BLOCK_UNKNOWN_SENDERS] ?: false
     }
 
+    /**
+     * Automatically switch between iMessage and SMS based on availability.
+     * When enabled (default), the app automatically selects the best delivery method.
+     * When disabled, users manually control send mode per-conversation via the chat menu.
+     */
+    val autoSwitchSendMode: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.AUTO_SWITCH_SEND_MODE] ?: true
+    }
+
     // ===== Setters =====
 
     suspend fun setSmsEnabled(enabled: Boolean) {
@@ -68,12 +73,6 @@ class SmsPreferences @Inject constructor(
     suspend fun setSmsOnlyMode(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.SMS_ONLY_MODE] = enabled
-        }
-    }
-
-    suspend fun setAutoRetryAsSms(enabled: Boolean) {
-        dataStore.edit { prefs ->
-            prefs[Keys.AUTO_RETRY_AS_SMS] = enabled
         }
     }
 
@@ -107,14 +106,20 @@ class SmsPreferences @Inject constructor(
         }
     }
 
+    suspend fun setAutoSwitchSendMode(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.AUTO_SWITCH_SEND_MODE] = enabled
+        }
+    }
+
     private object Keys {
         val SMS_ENABLED = booleanPreferencesKey("sms_enabled")
         val SMS_ONLY_MODE = booleanPreferencesKey("sms_only_mode")
-        val AUTO_RETRY_AS_SMS = booleanPreferencesKey("auto_retry_as_sms")
         val PREFER_SMS_OVER_IMESSAGE = booleanPreferencesKey("prefer_sms_over_imessage")
         val SELECTED_SIM_SLOT = intPreferencesKey("selected_sim_slot")
         val HAS_COMPLETED_INITIAL_SMS_IMPORT = booleanPreferencesKey("has_completed_initial_sms_import")
         val BLOCK_UNKNOWN_SENDERS = booleanPreferencesKey("block_unknown_senders")
         val LAST_SMS_RESYNC_VERSION = intPreferencesKey("last_sms_resync_version")
+        val AUTO_SWITCH_SEND_MODE = booleanPreferencesKey("auto_switch_send_mode")
     }
 }

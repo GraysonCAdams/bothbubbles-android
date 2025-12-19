@@ -1,14 +1,18 @@
 package com.bothbubbles.ui.components.message
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,9 +31,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.PersonAdd
@@ -60,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
@@ -115,7 +122,11 @@ internal fun SegmentedMessageBubble(
     canRetryAsSms: Boolean = false,
     onBoundsChanged: ((Rect) -> Unit)? = null,
     // Callback when a mention is clicked (opens contact details)
-    onMentionClick: ((String) -> Unit)? = null
+    onMentionClick: ((String) -> Unit)? = null,
+    // Multi-message selection support
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionToggle: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -195,13 +206,15 @@ internal fun SegmentedMessageBubble(
         else -> "iMessage"
     }
 
+    // Main content container
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer { clip = false }
             .onSizeChanged { size -> containerWidthPx = size.width },
         contentAlignment = Alignment.CenterStart
     ) {
-        // Reply indicator - behind bubble at screen edge (only during reply swipe)
+            // Reply indicator - behind bubble at screen edge (only during reply swipe)
         if (activeSwipe == SwipeType.REPLY && canReply) {
             val progress = (replyDragOffset.value.absoluteValue / replyThresholdPx).coerceIn(0f, 1f)
             val isFullyExposed = replyDragOffset.value.absoluteValue >= replyThresholdPx
@@ -231,6 +244,7 @@ internal fun SegmentedMessageBubble(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer { clip = false }
                 .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
                 .pointerInput(message.guid, canReply, gesturesEnabled) {
                     if (!gesturesEnabled) return@pointerInput
@@ -370,6 +384,7 @@ internal fun SegmentedMessageBubble(
                 horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
                 modifier = Modifier
                     .widthIn(max = 240.dp)
+                    .graphicsLayer { clip = false }
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Render segments with reactions on first segment
@@ -396,7 +411,7 @@ internal fun SegmentedMessageBubble(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
-                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
+                                        onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
                                         maxWidth = 240.dp,
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
@@ -415,9 +430,11 @@ internal fun SegmentedMessageBubble(
                                         searchQuery = searchQuery,
                                         isCurrentSearchMatch = isCurrentSearchMatch && isFirstTextSegment,
                                         onLongPress = onLongPress,
-                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
+                                        onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
                                         showSubject = isFirstTextSegment,
-                                        onMentionClick = onMentionClick
+                                        onMentionClick = onMentionClick,
+                                        isSelectionMode = isSelectionMode,
+                                        onSelectionToggle = onSelectionToggle
                                     )
                                 }
 
@@ -427,8 +444,14 @@ internal fun SegmentedMessageBubble(
                                         isFromMe = message.isFromMe,
                                         maxWidth = 240.dp,
                                         modifier = Modifier
-                                            .pointerInput(message.guid) {
+                                            .pointerInput(message.guid, isSelectionMode) {
                                                 detectTapGestures(
+                                                    onTap = {
+                                                        if (isSelectionMode) {
+                                                            onSelectionToggle?.invoke()
+                                                        }
+                                                        // Normal mode: link tap is handled by BorderlessLinkPreview internally
+                                                    },
                                                     onLongPress = {
                                                         HapticUtils.onLongPress(hapticFeedback)
                                                         onLongPress()
@@ -445,7 +468,7 @@ internal fun SegmentedMessageBubble(
                                         attachment = segment.attachment,
                                         isFromMe = message.isFromMe,
                                         onMediaClick = onMediaClick,
-                                        onTimestampToggle = { if (gesturesEnabled) showTimestamp = !showTimestamp },
+                                        onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
                                         downloadProgress = progress ?: 0f
@@ -573,7 +596,7 @@ internal fun SegmentedMessageBubble(
                 )
             }
         }
-    }
+    } // Close Box (main content container)
 }
 
 /**
@@ -589,7 +612,10 @@ internal fun TextBubbleSegment(
     onLongPress: () -> Unit,
     onTimestampToggle: () -> Unit,
     showSubject: Boolean = false,
-    onMentionClick: ((String) -> Unit)? = null
+    onMentionClick: ((String) -> Unit)? = null,
+    // Multi-message selection support
+    isSelectionMode: Boolean = false,
+    onSelectionToggle: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -636,9 +662,17 @@ internal fun TextBubbleSegment(
                     Modifier
                 }
             )
-            .pointerInput(message.guid) {
+            .pointerInput(message.guid, isSelectionMode) {
                 detectTapGestures(
-                    onTap = { onTimestampToggle() },
+                    onTap = {
+                        if (isSelectionMode) {
+                            // In selection mode, tap toggles selection
+                            onSelectionToggle?.invoke()
+                        } else {
+                            // Normal mode: toggle timestamp visibility
+                            onTimestampToggle()
+                        }
+                    },
                     onLongPress = {
                         HapticUtils.onLongPress(hapticFeedback)
                         onLongPress()
@@ -720,6 +754,9 @@ internal fun TextBubbleSegment(
                     text = annotatedText,
                     style = textStyle.copy(color = textColor),
                     onClick = { offset ->
+                        // Disable all clickable interactions in selection mode
+                        if (isSelectionMode) return@ClickableText
+
                         // Handle date clicks
                         annotatedText.getStringAnnotations("DATE", offset, offset).firstOrNull()?.let { annotation ->
                             val dateIndex = annotation.item.toIntOrNull()

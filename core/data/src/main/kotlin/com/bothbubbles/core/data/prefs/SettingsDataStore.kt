@@ -108,21 +108,21 @@ class SettingsDataStore @Inject constructor(
 
     override val smsEnabled: Flow<Boolean> get() = smsPrefs.smsEnabled
     override val smsOnlyMode: Flow<Boolean> get() = smsPrefs.smsOnlyMode
-    val autoRetryAsSms: Flow<Boolean> get() = smsPrefs.autoRetryAsSms
     val preferSmsOverIMessage: Flow<Boolean> get() = smsPrefs.preferSmsOverIMessage
     val selectedSimSlot: Flow<Int> get() = smsPrefs.selectedSimSlot
     val hasCompletedInitialSmsImport: Flow<Boolean> get() = smsPrefs.hasCompletedInitialSmsImport
     val lastSmsResyncVersion: Flow<Int> get() = smsPrefs.lastSmsResyncVersion
     val blockUnknownSenders: Flow<Boolean> get() = smsPrefs.blockUnknownSenders
+    val autoSwitchSendMode: Flow<Boolean> get() = smsPrefs.autoSwitchSendMode
 
     suspend fun setSmsEnabled(enabled: Boolean) = smsPrefs.setSmsEnabled(enabled)
     suspend fun setSmsOnlyMode(enabled: Boolean) = smsPrefs.setSmsOnlyMode(enabled)
-    suspend fun setAutoRetryAsSms(enabled: Boolean) = smsPrefs.setAutoRetryAsSms(enabled)
     suspend fun setPreferSmsOverIMessage(prefer: Boolean) = smsPrefs.setPreferSmsOverIMessage(prefer)
     suspend fun setSelectedSimSlot(slot: Int) = smsPrefs.setSelectedSimSlot(slot)
     suspend fun setHasCompletedInitialSmsImport(completed: Boolean) = smsPrefs.setHasCompletedInitialSmsImport(completed)
     suspend fun setLastSmsResyncVersion(versionCode: Int) = smsPrefs.setLastSmsResyncVersion(versionCode)
     suspend fun setBlockUnknownSenders(enabled: Boolean) = smsPrefs.setBlockUnknownSenders(enabled)
+    suspend fun setAutoSwitchSendMode(enabled: Boolean) = smsPrefs.setAutoSwitchSendMode(enabled)
 
     // ===== UI Preferences (delegated to UiPreferences) =====
 

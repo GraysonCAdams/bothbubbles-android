@@ -109,11 +109,18 @@ class ChatSendModeManager @AssistedInject constructor(
     private val _tutorialState = MutableStateFlow(TutorialState.NOT_SHOWN)
     val tutorialState: StateFlow<TutorialState> = _tutorialState.asStateFlow()
 
+    // Auto-switch setting state
+    private val _autoSwitchEnabled = MutableStateFlow(true)
+    val autoSwitchEnabled: StateFlow<Boolean> = _autoSwitchEnabled.asStateFlow()
+
     init {
         // Initialize server stability tracking if already connected
         if (socketConnection.connectionState.value == ConnectionState.CONNECTED) {
             serverConnectedSince = System.currentTimeMillis()
         }
+
+        // Start observing auto-switch setting
+        observeAutoSwitchSetting()
 
         // Start observing connection state
         observeConnectionState()
@@ -355,6 +362,33 @@ class ChatSendModeManager @AssistedInject constructor(
     }
 
     /**
+     * Determine if the send mode switch menu item should be shown.
+     * Returns true when:
+     * - Auto-switch is disabled (manual mode)
+     * - Not a group chat
+     * - Not an email-only contact
+     * - Contact supports iMessage OR currently in SMS mode
+     */
+    fun canShowSendModeSwitch(): Boolean {
+        val isEmailContact = participantPhone?.contains("@") == true
+        return !_autoSwitchEnabled.value &&
+               !isGroup &&
+               !isEmailContact &&
+               (_currentSendMode.value == ChatSendMode.SMS || _contactIMessageAvailable.value == true)
+    }
+
+    /**
+     * Observe the auto-switch setting from preferences.
+     */
+    private fun observeAutoSwitchSetting() {
+        scope.launch {
+            settingsDataStore.autoSwitchSendMode.collect { enabled ->
+                _autoSwitchEnabled.value = enabled
+            }
+        }
+    }
+
+    /**
      * Check if server is stable.
      */
     private fun isServerStable(): Boolean {
@@ -450,6 +484,14 @@ class ChatSendModeManager @AssistedInject constructor(
                 } else {
                     serverConnectedSince = null
                     iMessageAvailabilityCheckJob?.cancel()
+
+                    // Skip auto-switch if manual mode is enabled and user has explicitly set mode
+                    // This respects the user's choice - messages will queue until server reconnects
+                    if (!_autoSwitchEnabled.value && _sendModeManuallySet.value) {
+                        Timber.i("Manual mode: keeping ${_currentSendMode.value} despite server disconnect")
+                        previousConnectionState = state
+                        return@collect
+                    }
 
                     // Auto-switch to SMS for non-iMessage-only chats (if SMS is available)
                     val isIMessageGroup = chatGuid.startsWith("iMessage;+;", ignoreCase = true)

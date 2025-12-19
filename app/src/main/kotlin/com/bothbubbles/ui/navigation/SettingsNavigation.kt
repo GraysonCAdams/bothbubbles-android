@@ -29,6 +29,7 @@ fun NavGraphBuilder.settingsNavigation(
             onEffectsSettingsClick = { navController.navigate(Screen.EffectsSettings(returnToSettings = true)) },
             onImageQualityClick = { navController.navigate(Screen.ImageQualitySettings(returnToSettings = true)) },
             onEtaSharingClick = { navController.navigate(Screen.EtaSharingSettings(returnToSettings = true)) },
+            onLife360Click = { navController.navigate(Screen.Life360Settings(returnToSettings = true)) },
             onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
         )
     }
@@ -206,6 +207,16 @@ fun NavGraphBuilder.settingsNavigation(
     composable<Screen.EtaSharingSettings> { backStackEntry ->
         val route: Screen.EtaSharingSettings = backStackEntry.toRoute()
         com.bothbubbles.ui.settings.eta.EtaSharingSettingsScreen(
+            onNavigateBack = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            }
+        )
+    }
+
+    // Life360 Settings
+    composable<Screen.Life360Settings> { backStackEntry ->
+        val route: Screen.Life360Settings = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.life360.Life360SettingsScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
             }

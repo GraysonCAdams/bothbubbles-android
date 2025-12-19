@@ -10,10 +10,10 @@ import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
-import com.bothbubbles.ui.camera.InAppCameraScreen
 import com.bothbubbles.ui.chat.ChatScreen
 import com.bothbubbles.ui.chat.details.ChatNotificationSettingsScreen
 import com.bothbubbles.ui.chat.details.ConversationDetailsScreen
+import com.bothbubbles.ui.chat.details.Life360MapScreen
 import com.bothbubbles.ui.chat.details.LinksScreen
 import com.bothbubbles.ui.chat.details.MediaGalleryScreen
 import com.bothbubbles.ui.chat.details.MediaLinksScreen
@@ -76,9 +76,6 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             },
             onMediaClick = { attachmentGuid ->
                 navController.navigate(Screen.MediaViewer(attachmentGuid, route.chatGuid))
-            },
-            onCameraClick = {
-                navController.navigate(Screen.Camera(route.chatGuid))
             },
             onEditAttachmentClick = { uri ->
                 // Store original URI to update after edit
@@ -180,6 +177,9 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                     preSelectedService = service,
                     preSelectedAvatarPath = avatarPath
                 ))
+            },
+            onLife360MapClick = { participantAddress ->
+                navController.navigate(Screen.Life360Map(participantAddress))
             }
         )
     }
@@ -264,23 +264,6 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         )
     }
 
-    // In-app camera
-    composable<Screen.Camera> { backStackEntry ->
-        val route: Screen.Camera = backStackEntry.toRoute()
-        InAppCameraScreen(
-            chatGuid = route.chatGuid,
-            onClose = { navController.popBackStack() },
-            onPhotoTaken = { uri ->
-                // Navigate back to chat with the photo URI
-                // The URI is passed via saved state handle
-                navController.previousBackStackEntry
-                    ?.savedStateHandle
-                    ?.set("captured_photo_uri", uri.toString())
-                navController.popBackStack()
-            }
-        )
-    }
-
     // Attachment Edit
     composable<Screen.AttachmentEdit> { backStackEntry ->
         val route: Screen.AttachmentEdit = backStackEntry.toRoute()
@@ -298,6 +281,13 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                 navController.popBackStack()
             },
             onCancel = { navController.popBackStack() }
+        )
+    }
+
+    // Life360 full-screen map
+    composable<Screen.Life360Map> {
+        Life360MapScreen(
+            onBack = { navController.popBackStack() }
         )
     }
 }

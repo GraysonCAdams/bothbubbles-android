@@ -24,6 +24,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -114,6 +115,7 @@ data class MessageListCallbacks(
     val onToggleReaction: (messageGuid: String, tapback: Tapback) -> Unit,
     val onSetReplyTo: (guid: String) -> Unit,
     val onClearReply: () -> Unit,
+    val onScrollToOriginal: (originGuid: String) -> Unit,
     val onLoadThread: (originGuid: String) -> Unit,
     val onRetryMessage: (guid: String) -> Unit,
     val onRetryAsSms: (guid: String) -> Unit,
@@ -145,6 +147,11 @@ data class MessageListCallbacks(
  *
  * Contains the LazyColumn with all message rendering logic, banners, indicators,
  * and scroll-related effects.
+ *
+ * @param isBubbleMode When true, disables features not suitable for bubble UI:
+ *   - Message selection mode
+ *   - Save contact banner
+ *   - ETA sharing banner (SMS fallback banner is kept)
  */
 @Composable
 fun ChatMessageList(
@@ -194,7 +201,10 @@ fun ChatMessageList(
     composerHeightPxProvider: () -> Float,
 
     // Server connection for tapback availability
-    isServerConnected: Boolean
+    isServerConnected: Boolean,
+
+    // Bubble mode - simplified UI for Android conversation bubbles
+    isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
     val sendState by sendDelegate.state.collectAsStateWithLifecycle()
@@ -389,6 +399,7 @@ fun ChatMessageList(
             syncDelegate = syncDelegate,
             etaSharingDelegate = etaSharingDelegate,
             chatInfoState = chatInfoState,
+            isBubbleMode = isBubbleMode,
             callbacks = MessageListBannerCallbacks(
                 onSearchQueryChange = callbacks.onSearchQueryChange,
                 onCloseSearch = callbacks.onCloseSearch,
@@ -545,6 +556,11 @@ fun ChatMessageList(
                                 }
                             }
                         ) { index, message ->
+                            // Use derivedStateOf for efficient per-item selection check
+                            val isSelected by remember(message.guid) {
+                                derivedStateOf { message.guid in chatScreenState.selectedMessageGuids }
+                            }
+
                             MessageListItem(
                                 message = message,
                                 index = index,
@@ -571,9 +587,15 @@ fun ChatMessageList(
                                 onCanRetrySmsUpdate = onCanRetrySmsUpdate,
                                 onSwipingMessageChange = onSwipingMessageChange,
                                 onSelectedBoundsChange = onSelectedBoundsChange,
+                                // Multi-message selection (disabled in bubble mode)
+                                isSelectionMode = !isBubbleMode && chatScreenState.isMessageSelectionMode,
+                                isSelected = isSelected,
+                                onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode,
+                                onToggleSelection = if (isBubbleMode) { _ -> } else chatScreenState::toggleMessageSelection,
                                 callbacks = MessageItemCallbacks(
                                     onMediaClick = callbacks.onMediaClick,
                                     onSetReplyTo = callbacks.onSetReplyTo,
+                                    onScrollToOriginal = callbacks.onScrollToOriginal,
                                     onLoadThread = callbacks.onLoadThread,
                                     onCanRetryAsSms = callbacks.onCanRetryAsSms,
                                     onRetryMessage = callbacks.onRetryMessage,
@@ -621,7 +643,8 @@ fun ChatMessageList(
                         callbacks = MessageListOverlayCallbacks(
                             onToggleReaction = callbacks.onToggleReaction,
                             onSetReplyTo = callbacks.onSetReplyTo,
-                            onForwardRequest = callbacks.onForwardRequest
+                            onForwardRequest = if (isBubbleMode) { _ -> } else callbacks.onForwardRequest,
+                            onEnterSelectionMode = if (isBubbleMode) { _ -> } else chatScreenState::enterMessageSelectionMode
                         )
                     )
                 }

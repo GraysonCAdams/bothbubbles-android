@@ -112,6 +112,9 @@ sealed interface Screen {
     data class EtaSharingSettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class Life360Settings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class ImageQualitySettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
@@ -133,9 +136,6 @@ sealed interface Screen {
     data class PlacesGallery(val chatGuid: String) : Screen
 
     @Serializable
-    data class Camera(val chatGuid: String) : Screen
-
-    @Serializable
     data class SharePicker(
         val sharedText: String? = null,
         val sharedUris: List<String> = emptyList()
@@ -146,4 +146,11 @@ sealed interface Screen {
 
     @Serializable
     data object DeveloperEventLog : Screen
+
+    /**
+     * Full-screen Life360 map view showing contact's location with navigation options.
+     * @param participantAddress The phone number/address to look up the Life360 member
+     */
+    @Serializable
+    data class Life360Map(val participantAddress: String) : Screen
 }

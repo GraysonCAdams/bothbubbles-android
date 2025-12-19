@@ -41,6 +41,7 @@ fun ConversationDetailsScreen(
     onMediaGalleryClick: (mediaType: String) -> Unit = {},
     onNotificationSettingsClick: () -> Unit = {},
     onCreateGroupClick: (address: String, displayName: String, service: String, avatarPath: String?) -> Unit = { _, _, _, _ -> },
+    onLife360MapClick: (participantAddress: String) -> Unit = {},
     viewModel: ConversationDetailsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -51,6 +52,7 @@ fun ConversationDetailsScreen(
     var showVideoCallDialog by remember { mutableStateOf(false) }
     var showDiscordSetupDialog by remember { mutableStateOf(false) }
     var showDiscordHelpOverlay by remember { mutableStateOf(false) }
+    var showLife360ActionsSheet by remember { mutableStateOf(false) }
     var selectedParticipant by remember { mutableStateOf<HandleEntity?>(null) }
 
     // Handle action states
@@ -188,6 +190,20 @@ fun ConversationDetailsScreen(
                         },
                         onSearchClick = onSearchClick
                     )
+                }
+
+                // Life360 location section (only for 1:1 chats with linked Life360 member)
+                val life360Member = uiState.life360Member
+                if (uiState.chat?.isGroup != true && life360Member != null) {
+                    item {
+                        Life360LocationSection(
+                            life360Member = life360Member,
+                            onMapClick = {
+                                // Navigate to full-screen map
+                                onLife360MapClick(uiState.firstParticipantAddress)
+                            }
+                        )
+                    }
                 }
 
                 // Media section
@@ -411,6 +427,15 @@ fun ConversationDetailsScreen(
     if (showDiscordHelpOverlay) {
         DiscordChannelHelpOverlay(
             onDismiss = { showDiscordHelpOverlay = false }
+        )
+    }
+
+    // Life360 location actions sheet
+    val life360MemberForSheet = uiState.life360Member
+    if (showLife360ActionsSheet && life360MemberForSheet != null) {
+        Life360LocationActionsSheet(
+            life360Member = life360MemberForSheet,
+            onDismiss = { showLife360ActionsSheet = false }
         )
     }
 }

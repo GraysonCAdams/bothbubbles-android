@@ -12,9 +12,11 @@ import androidx.core.content.LocusIdCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import kotlinx.coroutines.runBlocking
 import com.bothbubbles.ui.call.IncomingCallActivity
 import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -34,6 +36,7 @@ class NotificationBuilder @Inject constructor(
     @ApplicationContext private val context: Context,
     private val bubbleMetadataHelper: BubbleMetadataHelper,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
+    private val unifiedChatGroupDao: UnifiedChatGroupDao,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -75,15 +78,35 @@ class NotificationBuilder @Inject constructor(
         linkPreviewDomain: String?,
         participantNames: List<String>,
         participantAvatarPaths: List<String?> = emptyList(),
-        subject: String? = null
+        subject: String? = null,
+        totalUnreadCount: Int
     ): android.app.Notification {
         val notificationId = chatGuid.hashCode()
+
+        // Look up if this chat is part of a unified group (for merged iMessage/SMS navigation)
+        val mergedGuids: String? = try {
+            runBlocking(ioDispatcher) {
+                val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+                if (group != null) {
+                    val guids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
+                    if (guids.size > 1) guids.joinToString(",") else null
+                } else {
+                    null
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to lookup unified group for notification deep link")
+            null
+        }
 
         // Create intent to open the chat (with message GUID for deep-link scrolling)
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, chatGuid)
             putExtra(NotificationChannelManager.EXTRA_MESSAGE_GUID, messageGuid)
+            if (mergedGuids != null) {
+                putExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS, mergedGuids)
+            }
         }
         val contentPendingIntent = PendingIntent.getActivity(
             context,
@@ -164,14 +187,15 @@ class NotificationBuilder @Inject constructor(
         // load the photo as a bitmap first.
         val avatarIcon: IconCompat? = if (avatarUri != null) {
             // Try to load contact photo as bitmap
-            val photoBitmap = AvatarGenerator.loadContactPhotoBitmap(context, avatarUri, 128)
+            // Use circleCrop=false for adaptive icon support
+            val photoBitmap = AvatarGenerator.loadContactPhotoBitmap(context, avatarUri, 128, circleCrop = false)
             if (photoBitmap != null) {
-                IconCompat.createWithBitmap(photoBitmap)
+                IconCompat.createWithAdaptiveBitmap(photoBitmap)
             } else {
                 // Photo load failed, generate fallback avatar
                 try {
                     val displayName = senderName ?: chatTitle
-                    AvatarGenerator.generateIconCompat(displayName, 128)
+                    AvatarGenerator.generateAdaptiveIconCompat(context, displayName, 128)
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to generate avatar bitmap")
                     null
@@ -181,7 +205,7 @@ class NotificationBuilder @Inject constructor(
             // No contact photo available, generate avatar
             try {
                 val displayName = senderName ?: chatTitle
-                AvatarGenerator.generateIconCompat(displayName, 128)
+                AvatarGenerator.generateAdaptiveIconCompat(context, displayName, 128)
             } catch (e: Exception) {
                 Timber.w(e, "Failed to generate avatar bitmap")
                 null
@@ -225,7 +249,8 @@ class NotificationBuilder @Inject constructor(
                 participantNames = participantNames,
                 chatAvatarPath = null, // No custom chat avatar from notification
                 senderAvatarPath = if (!isGroup) avatarUri else null,
-                participantAvatarPaths = participantAvatarPaths
+                participantAvatarPaths = participantAvatarPaths,
+                mergedGuids = mergedGuids // Pass unified chat guids for proper bubble navigation
             )
         } else {
             null
@@ -243,6 +268,7 @@ class NotificationBuilder @Inject constructor(
 
         val notificationBuilder = NotificationCompat.Builder(context, NotificationChannelManager.CHANNEL_MESSAGES)
             .setSmallIcon(android.R.drawable.sym_action_chat)
+            .setNumber(totalUnreadCount)
             .setContentTitle(chatTitle)
             .setContentText(displayText)
             .setStyle(messagingStyle)

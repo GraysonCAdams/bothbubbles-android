@@ -6,6 +6,7 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.ActiveConversationManager
@@ -40,6 +41,7 @@ import javax.inject.Singleton
 class MessageEventHandler @Inject constructor(
     private val messageRepository: MessageRepository,
     private val incomingMessageHandler: IncomingMessageHandler,
+    private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val notificationService: NotificationService,
@@ -175,24 +177,18 @@ class MessageEventHandler @Inject constructor(
                 senderName
             }
 
-            // For 1:1 chats, use sender's contact name as title; for groups, use group name
-            val chatTitle = if (chat?.isGroup == true) {
-                chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
-            } else {
-                senderName
-                    ?: chat?.displayName
-                    ?: chat?.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
-                    ?: ""
-            }
-
-            // For group chats, fetch participant names and avatar paths for the group avatar collage
-            val participants = if (chat?.isGroup == true) {
-                chatDao.getParticipantsForChat(event.chatGuid)
-            } else {
-                emptyList()
-            }
+            // Fetch participants for chat title resolution and group avatar collage
+            val participants = chatRepository.getParticipantsForChat(event.chatGuid)
             val participantNames = participants.map { it.rawDisplayName }
             val participantAvatarPaths = participants.map { it.cachedAvatarPath }
+
+            // Use centralized chat title logic (same as conversation list)
+            val chatTitle = if (chat != null) {
+                chatRepository.resolveChatTitle(chat, participants)
+            } else {
+                // Fallback when chat not yet in database
+                senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
+            }
 
             notificationService.showMessageNotification(
                 chatGuid = event.chatGuid,

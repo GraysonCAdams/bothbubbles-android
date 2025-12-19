@@ -17,6 +17,7 @@ import com.bothbubbles.core.network.api.dto.SendReactionRequest
 import com.bothbubbles.core.network.api.dto.UnsendMessageRequest
 import com.bothbubbles.services.messaging.sender.MessageSenderStrategy
 import com.bothbubbles.services.messaging.sender.SendOptions
+import com.bothbubbles.services.sms.SmsSendService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
@@ -94,6 +95,7 @@ class MessageSendingService @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val api: BothBubblesApi,
     private val smsPermissionHelper: SmsPermissionHelper,
+    private val smsSendService: SmsSendService,
     private val socketService: SocketService,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
@@ -193,10 +195,8 @@ class MessageSendingService @Inject constructor(
 
     /**
      * Send a new message via iMessage.
-     * If the send fails and autoRetryAsSms is enabled, automatically retries via SMS.
-     *
-     * Delegates to sendUnified with IMESSAGE mode, then handles fallback to SMS
-     * if iMessage fails and auto-retry is enabled.
+     * If the send fails, the message is marked as failed. Users can manually retry as SMS
+     * using the "Retry as SMS" button.
      */
     override suspend fun sendMessage(
         chatGuid: String,
@@ -206,8 +206,7 @@ class MessageSendingService @Inject constructor(
         subject: String?,
         providedTempGuid: String?
     ): Result<MessageEntity> {
-        // First try iMessage via strategy
-        val result = sendUnified(
+        return sendUnified(
             chatGuid = chatGuid,
             text = text,
             replyToGuid = replyToGuid,
@@ -216,41 +215,6 @@ class MessageSendingService @Inject constructor(
             deliveryMode = MessageDeliveryMode.IMESSAGE,
             tempGuid = providedTempGuid
         )
-
-        if (result.isSuccess) {
-            return result
-        }
-
-        // iMessage failed - check if we should auto-retry as SMS
-        val autoRetry = settingsDataStore.autoRetryAsSms.first()
-        val address = extractAddressFromChatGuid(chatGuid)
-        val canFallback = address?.isPhoneNumber() == true
-
-        if (autoRetry && canFallback) {
-            // Check if cellular is available - no point retrying as SMS without it
-            val smsCapability = smsPermissionHelper.getSmsCapabilityStatus()
-            if (!smsCapability.hasCellularConnectivity) {
-                Timber.i("iMessage failed but no cellular connectivity - not falling back to SMS for chat: $chatGuid")
-                return result // Return original iMessage failure
-            }
-
-            ensureCarrierReadyOrThrow()
-            Timber.i("iMessage failed, auto-retrying as SMS for chat: $chatGuid")
-
-            // Enter fallback mode for this chat
-            chatFallbackTracker.enterFallbackMode(chatGuid, FallbackReason.IMESSAGE_FAILED)
-
-            // Retry via local SMS strategy
-            return sendUnified(
-                chatGuid = chatGuid,
-                text = text,
-                subject = subject,
-                deliveryMode = MessageDeliveryMode.LOCAL_SMS
-            )
-        }
-
-        // Return original failure
-        return result
     }
 
     /**
@@ -373,8 +337,8 @@ class MessageSendingService @Inject constructor(
         val message = messageDao.getMessageByGuid(messageGuid)
             ?: throw MessageError.SendFailed(messageGuid, "Message not found")
 
-        // Reset error status
-        messageDao.updateErrorStatus(messageGuid, 0)
+        // Soft delete the original failed message so it doesn't appear alongside the retry
+        messageDao.softDeleteMessage(messageGuid)
 
         // Determine delivery mode from original message source
         val deliveryMode = when (message.messageSource) {

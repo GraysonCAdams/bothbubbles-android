@@ -182,6 +182,50 @@ interface MessageDao {
     fun searchMessages(query: String, limit: Int = 100): Flow<List<MessageEntity>>
 
     /**
+     * Search messages by text content with optional date range filtering.
+     * @param query The search query (matched against text and subject)
+     * @param startDate Start of date range in milliseconds (null = no lower bound)
+     * @param endDate End of date range in milliseconds (null = no upper bound)
+     * @param limit Maximum number of results to return
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND (text LIKE '%' || :query || '%' OR subject LIKE '%' || :query || '%')
+        AND (:startDate IS NULL OR date_created >= :startDate)
+        AND (:endDate IS NULL OR date_created <= :endDate)
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    fun searchMessagesInDateRange(
+        query: String,
+        startDate: Long?,
+        endDate: Long?,
+        limit: Int = 100
+    ): Flow<List<MessageEntity>>
+
+    /**
+     * Get messages within a date range (no text query required).
+     * Use this for date-only browsing of messages.
+     * @param startDate Start of date range in milliseconds
+     * @param endDate End of date range in milliseconds
+     * @param limit Maximum number of results to return
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND date_created >= :startDate
+        AND date_created <= :endDate
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    fun getMessagesInDateRange(
+        startDate: Long,
+        endDate: Long,
+        limit: Int = 100
+    ): Flow<List<MessageEntity>>
+
+    /**
      * Full-text search for messages within specific chats using FTS5 index.
      * Uses FTS5 for O(log n) performance on large conversation histories.
      *
@@ -560,6 +604,9 @@ interface MessageDao {
 
     @Query("UPDATE messages SET date_deleted = :timestamp WHERE guid = :guid")
     suspend fun softDeleteMessage(guid: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("UPDATE messages SET date_deleted = :timestamp WHERE guid IN (:guids)")
+    suspend fun softDeleteMessages(guids: List<String>, timestamp: Long = System.currentTimeMillis())
 
     @Query("DELETE FROM messages WHERE guid = :guid")
     suspend fun deleteMessage(guid: String)

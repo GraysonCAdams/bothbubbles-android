@@ -39,6 +39,13 @@ interface HandleDao {
     @Query("SELECT * FROM handles WHERE address = :address LIMIT 1")
     suspend fun getHandleByAddressAny(address: String): HandleEntity?
 
+    /**
+     * Find a handle by its server-side original_row_id.
+     * Used to map server handleId to local handle ID for incoming messages.
+     */
+    @Query("SELECT * FROM handles WHERE original_row_id = :serverRowId LIMIT 1")
+    suspend fun getHandleByOriginalRowId(serverRowId: Int): HandleEntity?
+
     @Query("""
         SELECT * FROM handles
         WHERE address LIKE '%' || :query || '%'

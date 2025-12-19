@@ -110,6 +110,37 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.ANDROID_AUTO_PRIVACY_MODE] ?: false
     }
 
+    // ===== Life360 Integration =====
+
+    /**
+     * Whether Life360 integration is enabled.
+     */
+    val life360Enabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.LIFE360_ENABLED] ?: false
+    }
+
+    /**
+     * Default circle ID to display (if user has multiple circles).
+     */
+    val life360DefaultCircleId: Flow<String?> = dataStore.data.map { prefs ->
+        prefs[Keys.LIFE360_DEFAULT_CIRCLE_ID]
+    }
+
+    /**
+     * How often to poll for location updates (in minutes).
+     * Default is 10 minutes.
+     */
+    val life360PollIntervalMinutes: Flow<Int> = dataStore.data.map { prefs ->
+        prefs[Keys.LIFE360_POLL_INTERVAL] ?: 10
+    }
+
+    /**
+     * Ghost mode - pause all Life360 syncing without logging out.
+     */
+    val life360PauseSyncing: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.LIFE360_PAUSE_SYNCING] ?: false
+    }
+
     // ===== Auto-Responder =====
 
     val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -240,6 +271,34 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setLife360Enabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LIFE360_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setLife360DefaultCircleId(circleId: String?) {
+        dataStore.edit { prefs ->
+            if (circleId != null) {
+                prefs[Keys.LIFE360_DEFAULT_CIRCLE_ID] = circleId
+            } else {
+                prefs.remove(Keys.LIFE360_DEFAULT_CIRCLE_ID)
+            }
+        }
+    }
+
+    suspend fun setLife360PollInterval(minutes: Int) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LIFE360_POLL_INTERVAL] = minutes.coerceIn(5, 30)
+        }
+    }
+
+    suspend fun setLife360PauseSyncing(paused: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.LIFE360_PAUSE_SYNCING] = paused
+        }
+    }
+
     suspend fun setAutoResponderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
@@ -298,5 +357,11 @@ class FeaturePreferences @Inject constructor(
 
         // Android Auto
         val ANDROID_AUTO_PRIVACY_MODE = booleanPreferencesKey("android_auto_privacy_mode")
+
+        // Life360 Integration
+        val LIFE360_ENABLED = booleanPreferencesKey("life360_enabled")
+        val LIFE360_DEFAULT_CIRCLE_ID = stringPreferencesKey("life360_default_circle_id")
+        val LIFE360_POLL_INTERVAL = intPreferencesKey("life360_poll_interval")
+        val LIFE360_PAUSE_SYNCING = booleanPreferencesKey("life360_pause_syncing")
     }
 }

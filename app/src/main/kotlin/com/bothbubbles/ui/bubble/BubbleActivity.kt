@@ -8,6 +8,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.notifications.NotificationChannelManager
+import com.bothbubbles.ui.chat.ChatScreen
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -18,10 +19,12 @@ import javax.inject.Inject
  * providing a compact chat interface for quick replies.
  *
  * Key features:
- * - Compact message composer
- * - Recent message history
- * - Quick reply functionality
- * - Expand to full app option
+ * - Full chat functionality via ChatScreen with isBubbleMode=true
+ * - Camera and media capture
+ * - Pagination/scrolling through message history
+ * - Tapback reactions and swipe to reply
+ * - Voice memo recording
+ * - GIF picker
  *
  * Note: This activity registers with [ActiveConversationManager] to suppress
  * notifications for the active chat while the bubble is open, following
@@ -36,16 +39,28 @@ class BubbleActivity : ComponentActivity() {
     private var currentChatGuid: String? = null
 
     companion object {
+        // Note: We use EXTRA_CHAT_GUID for notification compatibility
+        // but also set "chatGuid" for SavedStateHandle compatibility with ChatViewModel
         const val EXTRA_CHAT_GUID = NotificationChannelManager.EXTRA_CHAT_GUID
         const val EXTRA_CHAT_TITLE = "chat_title"
+        // Keys matching ChatViewModel's SavedStateHandle expectations
+        private const val SAVED_STATE_CHAT_GUID = "chatGuid"
+        private const val SAVED_STATE_MERGED_GUIDS = "mergedGuids"
 
         /**
          * Create an intent to launch the bubble activity for a specific chat.
+         * @param mergedGuids Comma-separated list of merged chat GUIDs for unified chat support
          */
-        fun createIntent(context: Context, chatGuid: String, chatTitle: String): Intent {
+        fun createIntent(context: Context, chatGuid: String, chatTitle: String, mergedGuids: String? = null): Intent {
             return Intent(context, BubbleActivity::class.java).apply {
                 putExtra(EXTRA_CHAT_GUID, chatGuid)
+                // Also set with the key ChatViewModel expects from SavedStateHandle
+                putExtra(SAVED_STATE_CHAT_GUID, chatGuid)
                 putExtra(EXTRA_CHAT_TITLE, chatTitle)
+                // Pass mergedGuids for unified chat support
+                if (mergedGuids != null) {
+                    putExtra(SAVED_STATE_MERGED_GUIDS, mergedGuids)
+                }
                 // Required flags for bubble activities
                 flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
             }
@@ -60,7 +75,6 @@ class BubbleActivity : ComponentActivity() {
             finish()
             return
         }
-        val chatTitle = intent.getStringExtra(EXTRA_CHAT_TITLE) ?: ""
 
         currentChatGuid = chatGuid
 
@@ -69,11 +83,12 @@ class BubbleActivity : ComponentActivity() {
 
         setContent {
             BothBubblesTheme {
-                BubbleChatScreen(
+                ChatScreen(
                     chatGuid = chatGuid,
-                    chatTitle = chatTitle,
-                    onExpandClick = { openInFullApp(chatGuid) },
-                    onCloseClick = { finish() }
+                    onBackClick = { finish() },
+                    onDetailsClick = { openInFullApp(chatGuid) },
+                    onMediaClick = { /* Media viewing handled by ChatScreen internally */ },
+                    isBubbleMode = true
                 )
             }
         }
@@ -104,11 +119,15 @@ class BubbleActivity : ComponentActivity() {
      * Open the full chat screen in the main app.
      */
     private fun openInFullApp(chatGuid: String) {
-        val intent = Intent(this, com.bothbubbles.MainActivity::class.java).apply {
+        val mergedGuids = intent.getStringExtra(SAVED_STATE_MERGED_GUIDS)
+        val fullAppIntent = Intent(this, com.bothbubbles.MainActivity::class.java).apply {
             putExtra(EXTRA_CHAT_GUID, chatGuid)
+            if (mergedGuids != null) {
+                putExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS, mergedGuids)
+            }
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        startActivity(intent)
+        startActivity(fullAppIntent)
         finish()
     }
 }

@@ -3,6 +3,7 @@ package com.bothbubbles.services.messaging
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -36,6 +37,7 @@ import javax.inject.Singleton
 class IncomingMessageHandler @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
+    private val handleDao: HandleDao,
     private val attachmentDao: AttachmentDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
@@ -49,7 +51,8 @@ class IncomingMessageHandler @Inject constructor(
      * via both FCM and Socket.IO, the unread count will only be incremented once.
      */
     override suspend fun handleIncomingMessage(messageDto: MessageDto, chatGuid: String): MessageEntity {
-        val message = messageDto.toEntity(chatGuid)
+        val localHandleId = resolveLocalHandleId(messageDto)
+        val message = messageDto.toEntity(chatGuid, localHandleId)
 
         // CRITICAL: Check if message already exists BEFORE any side effects
         // This prevents duplicate unread count increments when message arrives via both FCM and Socket.IO
@@ -93,7 +96,8 @@ class IncomingMessageHandler @Inject constructor(
     override suspend fun handleMessageUpdate(messageDto: MessageDto, chatGuid: String) {
         val existingMessage = messageDao.getMessageByGuid(messageDto.guid)
         if (existingMessage != null) {
-            val updated = messageDto.toEntity(chatGuid).copy(id = existingMessage.id)
+            val localHandleId = resolveLocalHandleId(messageDto)
+            val updated = messageDto.toEntity(chatGuid, localHandleId).copy(id = existingMessage.id)
             messageDao.updateMessage(updated)
         }
     }
@@ -237,9 +241,49 @@ class IncomingMessageHandler @Inject constructor(
     }
 
     /**
+     * Resolve the local handle ID from server data.
+     *
+     * The server sends its internal handle row ID (handleId), but our local database
+     * may have a different ID for the same handle. We need to map server ID -> local ID.
+     *
+     * Strategy:
+     * 1. If embedded handle has address+service, look up by those (most reliable)
+     * 2. Otherwise, look up by server's original_row_id
+     * 3. Fall back to null if no match found
+     */
+    private suspend fun resolveLocalHandleId(messageDto: MessageDto): Long? {
+        // First try: embedded handle with address and service (most reliable)
+        messageDto.handle?.let { handleDto ->
+            val localHandle = handleDao.getHandleByAddressAndService(
+                handleDto.address,
+                handleDto.service
+            )
+            if (localHandle != null) {
+                return localHandle.id
+            }
+            // Try any service if exact match not found
+            val anyHandle = handleDao.getHandleByAddressAny(handleDto.address)
+            if (anyHandle != null) {
+                return anyHandle.id
+            }
+        }
+
+        // Second try: look up by server's original_row_id
+        messageDto.handleId?.let { serverHandleId ->
+            val localHandle = handleDao.getHandleByOriginalRowId(serverHandleId.toInt())
+            if (localHandle != null) {
+                return localHandle.id
+            }
+        }
+
+        // No match found - this is okay for sent messages (isFromMe=true)
+        return null
+    }
+
+    /**
      * Convert a MessageDto to a MessageEntity
      */
-    private fun MessageDto.toEntity(chatGuid: String): MessageEntity {
+    private fun MessageDto.toEntity(chatGuid: String, localHandleId: Long?): MessageEntity {
         // Determine message source based on handle's service or chat GUID prefix
         val source = when {
             handle?.service?.equals("SMS", ignoreCase = true) == true -> MessageSource.SERVER_SMS.name
@@ -254,7 +298,7 @@ class IncomingMessageHandler @Inject constructor(
         return MessageEntity(
             guid = guid,
             chatGuid = chatGuid,
-            handleId = handleId,
+            handleId = localHandleId,
             senderAddress = handle?.address,
             text = text,
             subject = subject,

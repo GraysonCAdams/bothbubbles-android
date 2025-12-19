@@ -1,7 +1,10 @@
 package com.bothbubbles.ui.media
 
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,16 +49,33 @@ internal fun ZoomableImage(
         modifier = Modifier
             .fillMaxSize()
             .pointerInput(Unit) {
-                detectTransformGestures { _, pan, zoom, _ ->
-                    scale = (scale * zoom).coerceIn(0.5f, 5f)
-                    if (scale > 1f) {
-                        offset = Offset(
-                            x = offset.x + pan.x,
-                            y = offset.y + pan.y
-                        )
-                    } else {
-                        offset = Offset.Zero
-                    }
+                // Custom gesture detection that only consumes pan when zoomed
+                // This allows HorizontalPager to handle swipes when not zoomed
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    do {
+                        val event = awaitPointerEvent()
+                        val zoom = event.calculateZoom()
+                        val pan = event.calculatePan()
+
+                        // Always handle zoom
+                        if (zoom != 1f) {
+                            scale = (scale * zoom).coerceIn(0.5f, 5f)
+                            if (scale <= 1f) {
+                                offset = Offset.Zero
+                            }
+                            event.changes.forEach { it.consume() }
+                        }
+
+                        // Only consume pan when zoomed in - let pager handle swipes otherwise
+                        if (scale > 1f && (pan.x != 0f || pan.y != 0f)) {
+                            offset = Offset(
+                                x = offset.x + pan.x,
+                                y = offset.y + pan.y
+                            )
+                            event.changes.forEach { it.consume() }
+                        }
+                    } while (event.changes.any { it.pressed })
                 }
             }
             .pointerInput(Unit) {

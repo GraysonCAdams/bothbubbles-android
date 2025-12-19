@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
+import com.bothbubbles.data.local.db.dao.Life360Dao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
@@ -171,5 +172,11 @@ object DatabaseModule {
     @Singleton
     fun provideTombstoneDao(database: BothBubblesDatabase): TombstoneDao {
         return database.tombstoneDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideLife360Dao(database: BothBubblesDatabase): Life360Dao {
+        return database.life360Dao()
     }
 }

@@ -900,6 +900,46 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 39 to 40: Add life360_members table
+     * for caching Life360 circle member location data.
+     *
+     * Features:
+     * - Stores member info and location from Life360 API
+     * - Optional mapping to BothBubbles handles (contacts)
+     * - Foreign key to handles table with SET NULL on delete
+     */
+    val MIGRATION_39_40 = object : Migration(39, 40) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS life360_members (
+                    member_id TEXT PRIMARY KEY NOT NULL,
+                    circle_id TEXT NOT NULL,
+                    first_name TEXT NOT NULL,
+                    last_name TEXT DEFAULT NULL,
+                    avatar_url TEXT DEFAULT NULL,
+                    phone_number TEXT DEFAULT NULL,
+                    latitude REAL DEFAULT NULL,
+                    longitude REAL DEFAULT NULL,
+                    accuracy_meters INTEGER DEFAULT NULL,
+                    address TEXT DEFAULT NULL,
+                    place_name TEXT DEFAULT NULL,
+                    battery INTEGER DEFAULT NULL,
+                    is_driving INTEGER DEFAULT NULL,
+                    is_charging INTEGER DEFAULT NULL,
+                    location_timestamp INTEGER DEFAULT NULL,
+                    last_updated INTEGER NOT NULL,
+                    no_location_reason TEXT DEFAULT NULL,
+                    mapped_handle_id INTEGER DEFAULT NULL,
+                    FOREIGN KEY (mapped_handle_id) REFERENCES handles(id) ON DELETE SET NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_life360_members_mapped_handle_id ON life360_members(mapped_handle_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_life360_members_circle_id ON life360_members(circle_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_life360_members_phone_number ON life360_members(phone_number)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -943,6 +983,7 @@ object DatabaseMigrations {
         MIGRATION_35_36,
         MIGRATION_36_37,
         MIGRATION_37_38,
-        MIGRATION_38_39
+        MIGRATION_38_39,
+        MIGRATION_39_40
     )
 }

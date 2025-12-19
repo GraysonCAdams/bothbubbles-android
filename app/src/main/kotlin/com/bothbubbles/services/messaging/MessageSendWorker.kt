@@ -63,9 +63,6 @@ class MessageSendWorker @AssistedInject constructor(
         const val KEY_PENDING_MESSAGE_ID = "pending_message_id"
         const val UNIQUE_WORK_PREFIX = "send_message_"
 
-        /** Max retries ONLY for network errors (message never reached server) */
-        private const val MAX_RETRY_COUNT = 3
-
         /**
          * Time to wait for BlueBubbles server to confirm message state after successful send.
          * The server may report delivery failure (e.g., error 22 - not registered) via socket event.
@@ -342,20 +339,20 @@ class MessageSendWorker @AssistedInject constructor(
     }
 
     /**
-     * Handle failure when message never reached the server (network error).
+     * Handle failure when message send fails.
      *
-     * ONLY retries for network errors (NO_CONNECTION, TIMEOUT).
-     * For all other errors, marks as FAILED immediately since the server already rejected it.
+     * No automatic retries - marks as FAILED immediately.
+     * Users can manually retry using the Retry button.
      *
      * Special case: If server says message is already in transit (from a previous attempt),
-     * we skip the retry and go straight to waiting for confirmation.
+     * wait for confirmation instead of failing immediately.
      */
     private suspend fun handleFailure(
         pendingMessageId: Long,
         chatGuid: String,
         error: Throwable?
     ): Result {
-        // Special case: Message already in transit - don't retry, just wait for confirmation
+        // Special case: Message already in transit - wait for confirmation
         if (error is MessageAlreadyInTransitException) {
             Timber.i("[SEND_TRACE] Message already in transit, waiting for confirmation...")
             val guidToCheck = error.serverGuid ?: error.tempGuid
@@ -381,28 +378,9 @@ class MessageSendWorker @AssistedInject constructor(
         // Sync attachment errors
         syncAttachmentErrors(pendingMessageId)
 
-        // Only retry if message never reached the server (network error)
-        val isNetworkError = MessageErrorCode.isNetworkError(errorCode)
-
-        return if (isNetworkError && runAttemptCount < MAX_RETRY_COUNT) {
-            // Network error - retry with backoff
-            Timber.w("[SEND_TRACE] Network error, will retry (attempt ${runAttemptCount + 1}/$MAX_RETRY_COUNT): $errorMessage")
-            pendingMessageDao.updateStatusWithError(
-                pendingMessageId,
-                PendingSyncStatus.PENDING.name,
-                errorMessage,
-                System.currentTimeMillis()
-            )
-            Result.retry()
-        } else {
-            // Server responded with error OR max retries exceeded - mark as FAILED
-            if (!isNetworkError) {
-                Timber.e("[SEND_TRACE] Server returned error (no retry): $errorMessage")
-            } else {
-                Timber.e("[SEND_TRACE] Network error after $MAX_RETRY_COUNT attempts: $errorMessage")
-            }
-            markFailedAndTriggerSmsFallback(pendingMessageId, chatGuid, errorMessage, errorCode)
-        }
+        // No automatic retries - fail immediately
+        Timber.e("[SEND_TRACE] Send failed (no retry): $errorMessage")
+        return markFailedAndTriggerSmsFallback(pendingMessageId, chatGuid, errorMessage, errorCode)
     }
 
     /**
@@ -429,7 +407,8 @@ class MessageSendWorker @AssistedInject constructor(
     }
 
     /**
-     * Mark message as FAILED and trigger SMS fallback if enabled.
+     * Mark message as FAILED.
+     * Users can manually retry as SMS using the "Retry as SMS" button.
      */
     private suspend fun markFailedAndTriggerSmsFallback(
         pendingMessageId: Long,
@@ -444,34 +423,6 @@ class MessageSendWorker @AssistedInject constructor(
             errorMessage,
             System.currentTimeMillis()
         )
-
-        // Check if we should auto-retry as SMS
-        val autoRetryAsSms = settingsDataStore.autoRetryAsSms.first()
-        val pendingMessage = pendingMessageDao.getById(pendingMessageId)
-        val tempGuid = pendingMessage?.localId
-
-        if (autoRetryAsSms && tempGuid != null) {
-            // Check if SMS retry is possible for this message
-            val canRetry = messageSendingService.canRetryAsSms(tempGuid)
-
-            if (canRetry) {
-                Timber.i("[SEND_TRACE] Auto-retrying failed iMessage as SMS for chat: $chatGuid")
-                try {
-                    val smsResult = messageSendingService.retryAsSms(tempGuid)
-                    if (smsResult.isSuccess) {
-                        Timber.i("[SEND_TRACE] ✓ SMS fallback successful")
-                        pendingMessageDao.markAsSent(pendingMessageId, smsResult.getOrThrow().guid)
-                        return Result.success()
-                    } else {
-                        Timber.e("[SEND_TRACE] SMS fallback also failed: ${smsResult.exceptionOrNull()?.message}")
-                    }
-                } catch (e: Exception) {
-                    Timber.e(e, "[SEND_TRACE] SMS fallback threw exception")
-                }
-            } else {
-                Timber.i("[SEND_TRACE] SMS fallback not available for this message")
-            }
-        }
 
         return Result.failure()
     }

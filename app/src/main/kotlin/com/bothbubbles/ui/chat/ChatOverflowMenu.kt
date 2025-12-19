@@ -19,8 +19,10 @@ enum class ChatMenuAction(
 ) {
     ADD_PEOPLE("Add people"),
     DETAILS("Details"),
+    SWITCH_SEND_MODE("Switch send mode"), // Dynamic label set at call site
     STARRED("Starred"),
     SEARCH("Search"),
+    SELECT_MESSAGES("Select messages"),
     ARCHIVE("Archive"),
     UNARCHIVE("Unarchive"),
     DELETE("Delete", isDestructive = true),
@@ -36,7 +38,10 @@ data class ChatMenuState(
     val isArchived: Boolean = false,
     val isStarred: Boolean = false,
     val showSubjectField: Boolean = false,
-    val isSmsChat: Boolean = false
+    val isSmsChat: Boolean = false,
+    val showSendModeSwitch: Boolean = false,
+    val currentSendMode: ChatSendMode = ChatSendMode.IMESSAGE,
+    val isBubbleMode: Boolean = false
 )
 
 /**
@@ -58,6 +63,27 @@ fun ChatOverflowMenu(
         shape = RoundedCornerShape(28.dp),
         modifier = modifier
     ) {
+        // In bubble mode, only show send mode switch
+        if (menuState.isBubbleMode) {
+            // Send mode switch - only when available
+            if (menuState.showSendModeSwitch) {
+                val switchLabel = when (menuState.currentSendMode) {
+                    ChatSendMode.IMESSAGE -> "Switch to SMS"
+                    ChatSendMode.SMS -> "Switch to iMessage"
+                }
+                ChatMenuItem(
+                    action = ChatMenuAction.SWITCH_SEND_MODE,
+                    label = switchLabel,
+                    onClick = {
+                        onAction(ChatMenuAction.SWITCH_SEND_MODE)
+                        onDismissRequest()
+                    }
+                )
+            }
+            return@DropdownMenu
+        }
+
+        // Full menu for non-bubble mode
         // Add people - only for group chats
         if (menuState.isGroupChat) {
             ChatMenuItem(
@@ -77,6 +103,22 @@ fun ChatOverflowMenu(
             }
         )
 
+        // Send mode switch - only when auto-switch is disabled and not a group chat
+        if (menuState.showSendModeSwitch) {
+            val switchLabel = when (menuState.currentSendMode) {
+                ChatSendMode.IMESSAGE -> "Switch to SMS"
+                ChatSendMode.SMS -> "Switch to iMessage"
+            }
+            ChatMenuItem(
+                action = ChatMenuAction.SWITCH_SEND_MODE,
+                label = switchLabel,
+                onClick = {
+                    onAction(ChatMenuAction.SWITCH_SEND_MODE)
+                    onDismissRequest()
+                }
+            )
+        }
+
         ChatMenuItem(
             action = ChatMenuAction.STARRED,
             onClick = {
@@ -89,6 +131,14 @@ fun ChatOverflowMenu(
             action = ChatMenuAction.SEARCH,
             onClick = {
                 onAction(ChatMenuAction.SEARCH)
+                onDismissRequest()
+            }
+        )
+
+        ChatMenuItem(
+            action = ChatMenuAction.SELECT_MESSAGES,
+            onClick = {
+                onAction(ChatMenuAction.SELECT_MESSAGES)
                 onDismissRequest()
             }
         )

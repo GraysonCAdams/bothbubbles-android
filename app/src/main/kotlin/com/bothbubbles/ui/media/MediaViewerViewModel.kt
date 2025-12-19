@@ -1,9 +1,11 @@
 package com.bothbubbles.ui.media
 
+import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.navigation.toRoute
+import com.bothbubbles.data.local.db.dao.MediaWithSender
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.ui.navigation.Screen
@@ -37,15 +39,15 @@ class MediaViewerViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true) }
 
-            // Load all cached media for this chat
-            val mediaList = attachmentRepository.getCachedMediaForChat(chatGuid)
+            // Load all media for this chat with sender info (not just cached)
+            val mediaList = attachmentRepository.getMediaWithSenderForChat(chatGuid)
 
             // Find the index of the initially selected attachment
-            val initialIndex = mediaList.indexOfFirst { it.guid == attachmentGuid }.coerceAtLeast(0)
-            val currentAttachment = mediaList.getOrNull(initialIndex)
+            val initialIndex = mediaList.indexOfFirst { it.attachment.guid == attachmentGuid }.coerceAtLeast(0)
+            val currentMedia = mediaList.getOrNull(initialIndex)
 
-            if (currentAttachment == null) {
-                // Fall back to loading just the single attachment if not in cached list
+            if (currentMedia == null) {
+                // Fall back to loading just the single attachment if not in list
                 val attachment = attachmentRepository.getAttachmentByGuid(attachmentGuid)
                 if (attachment == null) {
                     _uiState.update {
@@ -56,18 +58,32 @@ class MediaViewerViewModel @Inject constructor(
                     }
                     return@launch
                 }
+                // Create a MediaWithSender wrapper for single attachment (no sender info available)
+                val singleMedia = MediaWithSender(
+                    attachment = attachment,
+                    isFromMe = false,
+                    senderAddress = null,
+                    dateCreated = System.currentTimeMillis(),
+                    displayName = null,
+                    avatarPath = null,
+                    formattedAddress = null
+                )
                 _uiState.update {
                     it.copy(
                         isLoading = false,
-                        mediaList = listOf(attachment),
+                        mediaList = listOf(singleMedia),
                         currentIndex = 0,
                         attachment = attachment,
-                        title = attachment.transferName ?: "Media"
+                        title = attachment.transferName ?: "Media",
+                        senderName = null,
+                        senderAvatarPath = null,
+                        senderAddress = null,
+                        messageDateMillis = null
                     )
                 }
                 // If attachment isn't downloaded yet, start download
                 if (attachment.localPath == null && attachment.webUrl != null) {
-                    downloadAttachment()
+                    downloadCurrentAttachment()
                 }
             } else {
                 _uiState.update {
@@ -75,9 +91,18 @@ class MediaViewerViewModel @Inject constructor(
                         isLoading = false,
                         mediaList = mediaList,
                         currentIndex = initialIndex,
-                        attachment = currentAttachment,
-                        title = currentAttachment.transferName ?: "Media"
+                        attachment = currentMedia.attachment,
+                        title = currentMedia.attachment.transferName ?: "Media",
+                        senderName = if (currentMedia.isFromMe) "You" else currentMedia.displayName ?: currentMedia.formattedAddress ?: currentMedia.senderAddress,
+                        senderAvatarPath = if (currentMedia.isFromMe) null else currentMedia.avatarPath,
+                        senderAddress = if (currentMedia.isFromMe) null else (currentMedia.formattedAddress ?: currentMedia.senderAddress),
+                        messageDateMillis = currentMedia.dateCreated,
+                        isFromMe = currentMedia.isFromMe
                     )
+                }
+                // If current attachment isn't downloaded yet, start download
+                if (currentMedia.attachment.localPath == null && currentMedia.attachment.webUrl != null) {
+                    downloadCurrentAttachment()
                 }
             }
         }
@@ -85,27 +110,38 @@ class MediaViewerViewModel @Inject constructor(
 
     fun onPageChanged(index: Int) {
         val mediaList = _uiState.value.mediaList
-        val attachment = mediaList.getOrNull(index) ?: return
+        val media = mediaList.getOrNull(index) ?: return
 
         _uiState.update {
             it.copy(
                 currentIndex = index,
-                attachment = attachment,
-                title = attachment.transferName ?: "Media"
+                attachment = media.attachment,
+                title = media.attachment.transferName ?: "Media",
+                senderName = if (media.isFromMe) "You" else media.displayName ?: media.formattedAddress ?: media.senderAddress,
+                senderAvatarPath = if (media.isFromMe) null else media.avatarPath,
+                senderAddress = if (media.isFromMe) null else (media.formattedAddress ?: media.senderAddress),
+                messageDateMillis = media.dateCreated,
+                isFromMe = media.isFromMe
             )
+        }
+
+        // Auto-download if not cached
+        if (media.attachment.localPath == null && media.attachment.webUrl != null) {
+            downloadCurrentAttachment()
         }
     }
 
-    fun downloadAttachment() {
+    fun downloadCurrentAttachment() {
+        val currentGuid = _uiState.value.attachment?.guid ?: return
         viewModelScope.launch {
             _uiState.update { it.copy(isDownloading = true, downloadProgress = 0f) }
 
-            attachmentRepository.downloadAttachment(attachmentGuid) { progress ->
+            attachmentRepository.downloadAttachment(currentGuid) { progress ->
                 _uiState.update { it.copy(downloadProgress = progress) }
             }.fold(
                 onSuccess = { file ->
                     // Refresh attachment from DB to get updated localPath
-                    val updatedAttachment = attachmentRepository.getAttachmentByGuid(attachmentGuid)
+                    val updatedAttachment = attachmentRepository.getAttachmentByGuid(currentGuid)
                     _uiState.update {
                         it.copy(
                             isDownloading = false,
@@ -126,21 +162,80 @@ class MediaViewerViewModel @Inject constructor(
         }
     }
 
+    fun saveToGallery() {
+        val attachment = _uiState.value.attachment ?: return
+        val localPath = attachment.localPath ?: return
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSaving = true) }
+
+            attachmentRepository.saveToGallery(
+                localPath = localPath,
+                mimeType = attachment.mimeType,
+                fileName = attachment.transferName
+            ).fold(
+                onSuccess = { uri ->
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            saveResult = SaveResult.Success(uri)
+                        )
+                    }
+                },
+                onFailure = { e ->
+                    _uiState.update {
+                        it.copy(
+                            isSaving = false,
+                            saveResult = SaveResult.Error(e.message ?: "Failed to save")
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    fun showInfoDialog() {
+        _uiState.update { it.copy(showInfoDialog = true) }
+    }
+
+    fun hideInfoDialog() {
+        _uiState.update { it.copy(showInfoDialog = false) }
+    }
+
+    fun clearSaveResult() {
+        _uiState.update { it.copy(saveResult = null) }
+    }
+
     fun clearError() {
         _uiState.update { it.copy(error = null) }
     }
 }
 
+sealed interface SaveResult {
+    data class Success(val uri: Uri) : SaveResult
+    data class Error(val message: String) : SaveResult
+}
+
 data class MediaViewerUiState(
     val isLoading: Boolean = true,
     val isDownloading: Boolean = false,
+    val isSaving: Boolean = false,
     val downloadProgress: Float = 0f,
-    val mediaList: List<AttachmentEntity> = emptyList(),
+    val mediaList: List<MediaWithSender> = emptyList(),
     val currentIndex: Int = 0,
     val attachment: AttachmentEntity? = null,
     val localFile: File? = null,
     val title: String = "",
-    val error: String? = null
+    val error: String? = null,
+    // Sender info
+    val senderName: String? = null,
+    val senderAvatarPath: String? = null,
+    val senderAddress: String? = null,
+    val messageDateMillis: Long? = null,
+    val isFromMe: Boolean = false,
+    // Dialogs
+    val showInfoDialog: Boolean = false,
+    val saveResult: SaveResult? = null
 ) {
     val mediaCount: Int get() = mediaList.size
     val hasMultipleMedia: Boolean get() = mediaList.size > 1
@@ -158,4 +253,13 @@ data class MediaViewerUiState(
 
     val hasValidMedia: Boolean
         get() = mediaUrl != null
+
+    val needsDownload: Boolean
+        get() = attachment?.localPath == null && attachment?.webUrl != null
+
+    val canSave: Boolean
+        get() = attachment?.localPath != null && !isSaving
+
+    val canShare: Boolean
+        get() = attachment?.localPath != null
 }

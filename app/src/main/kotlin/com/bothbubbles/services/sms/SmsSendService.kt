@@ -42,13 +42,15 @@ class SmsSendService @Inject constructor(
      * @param text The message text
      * @param chatGuid The chat GUID for tracking
      * @param subscriptionId Optional SIM slot ID (-1 for default)
-     * @return The created message entity
+     * @param tempGuid Optional temp GUID from optimistic insertion - if provided, updates existing message
+     * @return The created/updated message entity
      */
     suspend fun sendSms(
         address: String,
         text: String,
         chatGuid: String,
-        subscriptionId: Int = -1
+        subscriptionId: Int = -1,
+        tempGuid: String? = null
     ): Result<MessageEntity> = withContext(Dispatchers.IO) {
         runCatching {
             val timestamp = System.currentTimeMillis()
@@ -56,23 +58,62 @@ class SmsSendService @Inject constructor(
             val messageGuid = providerMessage?.let { "sms-${it.id}" }
                 ?: "sms-outgoing-$timestamp-${address.hashCode()}"
 
-            // Create message entity first (optimistic insert)
             // Store original address in metadata for retry support
             val initialMetadata = SmsRetryMetadata(originalAddress = address)
-            val message = MessageEntity(
-                guid = messageGuid,
-                chatGuid = chatGuid,
-                text = text,
-                dateCreated = timestamp,
-                isFromMe = true,
-                messageSource = MessageSource.LOCAL_SMS.name,
-                smsStatus = "pending",
-                simSlot = if (subscriptionId >= 0) subscriptionId else null,
-                smsId = providerMessage?.id,
-                smsThreadId = providerMessage?.threadId,
-                metadata = initialMetadata.toJson()
-            )
-            messageDao.insertMessage(message)
+
+            val message: MessageEntity
+            if (tempGuid != null) {
+                // Update existing temp message with the real SMS GUID
+                // This handles the optimistic insertion flow where ChatSendDelegate already inserted a temp message
+                Timber.d("Replacing temp message $tempGuid with SMS GUID $messageGuid")
+                messageDao.replaceGuid(tempGuid, messageGuid)
+
+                // Update the message with SMS-specific fields
+                val existingMessage = messageDao.getMessageByGuid(messageGuid)
+                if (existingMessage != null) {
+                    message = existingMessage.copy(
+                        smsStatus = "pending",
+                        simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                        smsId = providerMessage?.id,
+                        smsThreadId = providerMessage?.threadId,
+                        metadata = initialMetadata.toJson()
+                    )
+                    messageDao.updateMessage(message)
+                } else {
+                    // Temp message was deleted (race condition) - create new one
+                    Timber.w("Temp message $tempGuid not found after replaceGuid, creating new message")
+                    message = MessageEntity(
+                        guid = messageGuid,
+                        chatGuid = chatGuid,
+                        text = text,
+                        dateCreated = timestamp,
+                        isFromMe = true,
+                        messageSource = MessageSource.LOCAL_SMS.name,
+                        smsStatus = "pending",
+                        simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                        smsId = providerMessage?.id,
+                        smsThreadId = providerMessage?.threadId,
+                        metadata = initialMetadata.toJson()
+                    )
+                    messageDao.insertMessage(message)
+                }
+            } else {
+                // No temp GUID provided - insert new message (standalone send or retry)
+                message = MessageEntity(
+                    guid = messageGuid,
+                    chatGuid = chatGuid,
+                    text = text,
+                    dateCreated = timestamp,
+                    isFromMe = true,
+                    messageSource = MessageSource.LOCAL_SMS.name,
+                    smsStatus = "pending",
+                    simSlot = if (subscriptionId >= 0) subscriptionId else null,
+                    smsId = providerMessage?.id,
+                    smsThreadId = providerMessage?.threadId,
+                    metadata = initialMetadata.toJson()
+                )
+                messageDao.insertMessage(message)
+            }
 
             // Get appropriate SmsManager
             val smsManager = getSmsManager(subscriptionId)

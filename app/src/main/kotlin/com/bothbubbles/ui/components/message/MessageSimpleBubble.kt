@@ -1,14 +1,18 @@
 package com.bothbubbles.ui.components.message
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -27,9 +31,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.ClickableText
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Message
 import androidx.compose.material.icons.filled.PersonAdd
@@ -60,6 +66,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.DpOffset
@@ -112,7 +119,11 @@ internal fun SimpleBubbleContent(
     canRetryAsSms: Boolean = false,
     onBoundsChanged: ((Rect) -> Unit)? = null,
     // Callback when a mention is clicked (opens contact details)
-    onMentionClick: ((String) -> Unit)? = null
+    onMentionClick: ((String) -> Unit)? = null,
+    // Multi-message selection support
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionToggle: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -211,10 +222,11 @@ internal fun SimpleBubbleContent(
         else -> "iMessage"
     }
 
-    // Swipe container
+    // Main content container
     Box(
         modifier = modifier
             .fillMaxWidth()
+            .graphicsLayer { clip = false }
             .onSizeChanged { size -> containerWidthPx = size.width },
         contentAlignment = Alignment.CenterStart
     ) {
@@ -248,6 +260,7 @@ internal fun SimpleBubbleContent(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .graphicsLayer { clip = false }
                 .offset { IntOffset((replyDragOffset.value + adaptiveBubbleOffsetPx).roundToInt(), 0) }
                 .pointerInput(message.guid, canReply, gesturesEnabled) {
                     if (!gesturesEnabled) return@pointerInput
@@ -387,6 +400,7 @@ internal fun SimpleBubbleContent(
                 horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start,
                 modifier = Modifier
                     .widthIn(max = 240.dp)
+                    .graphicsLayer { clip = false }
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Check for large emoji messages (1-3 emojis only) - need to compute before Surface
@@ -404,7 +418,7 @@ internal fun SimpleBubbleContent(
                         emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
 
                 // Message bubble with floating reactions overlay
-                // graphicsLayer with clip = false allows reactions to extend above the bubble without clipping
+                val hasReactions = message.reactions.isNotEmpty()
                 Box(modifier = Modifier.graphicsLayer { clip = false }) {
                     // Select shape based on group position for visual grouping
                     val bubbleShape = when (groupPosition) {
@@ -437,9 +451,17 @@ internal fun SimpleBubbleContent(
                             .onGloballyPositioned { coordinates ->
                                 onBoundsChanged?.invoke(coordinates.boundsInWindow())
                             }
-                            .pointerInput(message.guid) {
+                            .pointerInput(message.guid, isSelectionMode) {
                                 detectTapGestures(
-                                    onTap = { if (gesturesEnabled) showTimestamp = !showTimestamp },
+                                    onTap = {
+                                        if (isSelectionMode) {
+                                            // In selection mode, tap toggles selection
+                                            onSelectionToggle?.invoke()
+                                        } else if (gesturesEnabled) {
+                                            // Normal mode: toggle timestamp visibility
+                                            showTimestamp = !showTimestamp
+                                        }
+                                    },
                                     onLongPress = {
                                         HapticUtils.onLongPress(hapticFeedback)
                                         onLongPress()
@@ -564,6 +586,9 @@ internal fun SimpleBubbleContent(
                                     text = clickableText,
                                     style = textStyle.copy(color = textColor),
                                     onClick = { offset ->
+                                        // Disable all clickable interactions in selection mode
+                                        if (isSelectionMode) return@ClickableText
+
                                         // Check for date clicks
                                         clickableText.getStringAnnotations(
                                             tag = "DATE",
@@ -615,8 +640,8 @@ internal fun SimpleBubbleContent(
                                             return@ClickableText
                                         }
 
-                                        // Default tap behavior - toggle timestamp (disabled for placed stickers)
-                                        if (gesturesEnabled) showTimestamp = !showTimestamp
+                                        // Default tap behavior - toggle timestamp (disabled for placed stickers and selection mode)
+                                        if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp
                                     }
                                 )
 
@@ -699,7 +724,7 @@ internal fun SimpleBubbleContent(
 
                 // Display reactions floating at top corner outside the bubble
                 // For outbound messages: top-left; for received: top-right
-                if (message.reactions.isNotEmpty()) {
+                if (hasReactions) {
                     ReactionsDisplay(
                         reactions = message.reactions,
                         isFromMe = message.isFromMe,
@@ -819,8 +844,8 @@ internal fun SimpleBubbleContent(
             )
         }
 
-    }
-    } // Close Box
+        } // Close Row (main content)
+    } // Close Box (main content container)
 }
 
 @Composable

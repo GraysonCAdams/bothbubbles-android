@@ -14,6 +14,7 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -110,6 +111,7 @@ fun SettingsPanel(
         SettingsPanelPage.Templates -> "Quick reply templates"
         SettingsPanelPage.AutoResponder -> "Auto-responder"
         SettingsPanelPage.EtaSharing -> "ETA sharing"
+        SettingsPanelPage.Life360 -> "Life360"
         SettingsPanelPage.About -> "About"
         SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
     }
@@ -122,6 +124,8 @@ fun SettingsPanel(
     ) {
         Scaffold(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+            // Exclude bottom insets - progress bar handles nav bar padding
+            contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
                 TopAppBar(
                     title = { Text(title) },
@@ -244,6 +248,7 @@ fun SettingsPanel(
                             onTemplatesClick = { navigator.navigateTo(SettingsPanelPage.Templates) },
                             onAutoResponderClick = { navigator.navigateTo(SettingsPanelPage.AutoResponder) },
                             onEtaSharingClick = { navigator.navigateTo(SettingsPanelPage.EtaSharing) },
+                            onLife360Click = { navigator.navigateTo(SettingsPanelPage.Life360) },
                             onAboutClick = { navigator.navigateTo(SettingsPanelPage.About) },
                             viewModel = viewModel
                         )
@@ -302,6 +307,9 @@ fun SettingsPanel(
                     }
                     SettingsPanelPage.EtaSharing -> {
                         EtaSharingSettingsContent()
+                    }
+                    SettingsPanelPage.Life360 -> {
+                        com.bothbubbles.ui.settings.life360.Life360SettingsContent()
                     }
                     SettingsPanelPage.About -> {
                         AboutContent(

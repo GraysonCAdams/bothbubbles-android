@@ -111,6 +111,14 @@ fun SmsSettingsContent(
                             onCheckedChange = viewModel::setPreferSmsOverIMessage
                         )
 
+                        SwitchSettingCard(
+                            title = "Auto-switch send mode",
+                            subtitle = "Automatically switch between iMessage and SMS based on availability. Disable to manually control per-conversation.",
+                            icon = Icons.Default.SwapHoriz,
+                            checked = uiState.autoSwitchSendMode,
+                            onCheckedChange = viewModel::setAutoSwitchSendMode
+                        )
+
                         // SIM selection (if dual SIM)
                         if (uiState.availableSims.size > 1) {
                             SimSelectionCard(

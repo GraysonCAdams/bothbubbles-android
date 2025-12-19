@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.outlined.Videocam
@@ -17,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
+import com.bothbubbles.ui.chat.delegates.ChatSendModeManager
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.components.common.GroupAvatar
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -30,6 +32,8 @@ import com.bothbubbles.util.PhoneNumberFormatter
  *
  * @param operationsDelegate Delegate for operations state (internal collection)
  * @param chatInfoDelegate Delegate for chat info state (internal collection)
+ * @param sendModeManager Manager for send mode state (for menu visibility)
+ * @param isBubbleMode When true, shows simplified UI for Android conversation bubbles
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,15 +41,20 @@ fun ChatTopBar(
     // NEW: Delegates for internal collection
     operationsDelegate: ChatOperationsDelegate,
     chatInfoDelegate: ChatInfoDelegate,
+    sendModeManager: ChatSendModeManager?,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
     val operationsState by operationsDelegate.state.collectAsStateWithLifecycle()
     val infoState by chatInfoDelegate.state.collectAsStateWithLifecycle()
+    val currentSendMode by sendModeManager?.currentSendMode?.collectAsStateWithLifecycle()
+        ?: androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(ChatSendMode.IMESSAGE) }
+    val showSendModeSwitch = sendModeManager?.canShowSendModeSwitch() ?: false
 
     ChatTopBarContent(
         chatTitle = infoState.chatTitle,
@@ -58,11 +67,16 @@ fun ChatTopBar(
         isStarred = operationsState.isStarred,
         showSubjectField = operationsState.showSubjectField,
         isLocalSmsChat = infoState.isLocalSmsChat,
+        showSendModeSwitch = showSendModeSwitch,
+        currentSendMode = currentSendMode,
+        locationSubtext = infoState.locationSubtext,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
+        onLocationClick = onDetailsClick, // Navigate to details for now (will be full-screen map later)
         onMenuAction = onMenuAction,
-        modifier = modifier
+        modifier = modifier,
+        isBubbleMode = isBubbleMode
     )
 }
 
@@ -82,11 +96,16 @@ private fun ChatTopBarContent(
     isStarred: Boolean,
     showSubjectField: Boolean,
     isLocalSmsChat: Boolean,
+    showSendModeSwitch: Boolean,
+    currentSendMode: ChatSendMode,
+    locationSubtext: String?,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onLocationClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isBubbleMode: Boolean = false
 ) {
     var showOverflowMenu = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
 
@@ -94,15 +113,17 @@ private fun ChatTopBarContent(
         navigationIcon = {
             IconButton(onClick = onBackClick) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back"
+                    // In bubble mode, show X (close) instead of back arrow
+                    if (isBubbleMode) Icons.Default.Close else Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = if (isBubbleMode) "Close" else "Back"
                 )
             }
         },
         title = {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable(onClick = onDetailsClick)
+                // In bubble mode, title is not clickable (no details screen)
+                modifier = if (isBubbleMode) Modifier else Modifier.clickable(onClick = onDetailsClick)
             ) {
                 if (isGroup && participantNames.size > 1) {
                     GroupAvatar(
@@ -142,6 +163,17 @@ private fun ChatTopBarContent(
                             )
                         }
                     }
+                    // Location subtext (only for 1:1 chats with Life360 linked)
+                    if (locationSubtext != null && !isGroup) {
+                        Text(
+                            text = locationSubtext,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.clickable(onClick = onLocationClick)
+                        )
+                    }
                 }
             }
         },
@@ -165,7 +197,10 @@ private fun ChatTopBarContent(
                         isArchived = isArchived,
                         isStarred = isStarred,
                         showSubjectField = showSubjectField,
-                        isSmsChat = isLocalSmsChat
+                        isSmsChat = isLocalSmsChat,
+                        showSendModeSwitch = showSendModeSwitch,
+                        currentSendMode = currentSendMode,
+                        isBubbleMode = isBubbleMode
                     ),
                     onAction = { action ->
                         onMenuAction(action)

@@ -11,18 +11,23 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
@@ -33,6 +38,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.R
 import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.core.network.api.dto.FindMyDeviceDto
+import com.bothbubbles.core.network.api.dto.FindMyFriendDto
 import kotlinx.coroutines.launch
 import com.bothbubbles.services.sound.SoundTheme
 import com.bothbubbles.ui.settings.components.BadgeStatus
@@ -61,12 +68,14 @@ fun SettingsScreen(
     onTemplatesClick: () -> Unit = {},
     onAutoResponderClick: () -> Unit = {},
     onEtaSharingClick: () -> Unit = {},
+    onLife360Click: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
     val context = LocalContext.current
+    val haptic = LocalHapticFeedback.current
 
     // Contacts permission launcher - opens settings if permission was permanently denied
     val contactsPermissionLauncher = rememberLauncherForActivityResult(
@@ -146,6 +155,7 @@ fun SettingsScreen(
             onTemplatesClick = onTemplatesClick,
             onAutoResponderClick = onAutoResponderClick,
             onEtaSharingClick = onEtaSharingClick,
+            onLife360Click = onLife360Click,
             onAboutClick = onAboutClick,
             onRequestContactsPermission = {
                 contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
@@ -182,6 +192,7 @@ fun SettingsContent(
     onTemplatesClick: () -> Unit,
     onAutoResponderClick: () -> Unit,
     onEtaSharingClick: () -> Unit = {},
+    onLife360Click: () -> Unit = {},
     onAboutClick: () -> Unit,
     onRequestContactsPermission: () -> Unit = {},
     viewModel: SettingsViewModel
@@ -189,6 +200,7 @@ fun SettingsContent(
     // Snackbar host state for disabled click feedback
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    val haptic = LocalHapticFeedback.current
 
     // Helper to show snackbar with optional action
     fun showDisabledSnackbar(message: String, actionLabel: String? = null, onAction: (() -> Unit)? = null) {
@@ -498,11 +510,22 @@ fun SettingsContent(
                     icon = Icons.Default.Vibration,
                     title = "Haptic feedback",
                     subtitle = if (uiState.hapticsEnabled) "Vibration feedback enabled" else "Vibration feedback disabled",
-                    onClick = { viewModel.setHapticsEnabled(!uiState.hapticsEnabled) },
+                    onClick = {
+                        val enablingHaptics = !uiState.hapticsEnabled
+                        viewModel.setHapticsEnabled(enablingHaptics)
+                        if (enablingHaptics) {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        }
+                    },
                     trailingContent = {
                         SettingsSwitch(
                             checked = uiState.hapticsEnabled,
-                            onCheckedChange = { viewModel.setHapticsEnabled(it) },
+                            onCheckedChange = { enabled ->
+                                viewModel.setHapticsEnabled(enabled)
+                                if (enabled) {
+                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            },
                             showIcons = false
                         )
                     }
@@ -567,6 +590,16 @@ fun SettingsContent(
                     title = "ETA sharing",
                     subtitle = "Share arrival time while navigating",
                     onClick = onEtaSharingClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Life360 Integration
+                SettingsMenuItem(
+                    icon = Icons.Outlined.LocationOn,
+                    title = "Life360",
+                    subtitle = "Show family member locations",
+                    onClick = onLife360Click
                 )
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
@@ -717,6 +750,49 @@ fun SettingsContent(
                     title = "Export messages",
                     subtitle = "Save conversations as HTML or PDF",
                     onClick = onExportClick
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 7.5: Debug Tools (Temporary)
+        // Focus: Developer debug options
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Debug tools")
+        }
+
+        item {
+            var showFindMyDialog by remember { mutableStateOf(false) }
+
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                SettingsMenuItem(
+                    icon = Icons.Default.LocationOn,
+                    title = "Find My Debug",
+                    subtitle = "View Find My data from server",
+                    onClick = {
+                        viewModel.fetchFindMyData()
+                        showFindMyDialog = true
+                    },
+                    enabled = uiState.isServerConfigured,
+                    onDisabledClick = {
+                        showDisabledSnackbar("Configure server first")
+                    }
+                )
+            }
+
+            if (showFindMyDialog) {
+                FindMyDebugDialog(
+                    devices = uiState.findMyDevices,
+                    friends = uiState.findMyFriends,
+                    isLoading = uiState.findMyLoading,
+                    error = uiState.findMyError,
+                    onDismiss = {
+                        showFindMyDialog = false
+                        viewModel.clearFindMyData()
+                    }
                 )
             }
         }
@@ -932,6 +1008,164 @@ fun PrivateApiHelpSheet(
             }
         }
     }
+}
+
+/**
+ * Dialog to display Find My debug data in plain text.
+ * Shows WHO (device/person name) and WHERE (location) for each entry.
+ */
+@Composable
+private fun FindMyDebugDialog(
+    devices: List<FindMyDeviceDto>,
+    friends: List<FindMyFriendDto>,
+    isLoading: Boolean,
+    error: String?,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Find My Debug") },
+        text = {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 400.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                when {
+                    isLoading -> {
+                        Box(
+                            modifier = Modifier.fillMaxWidth(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator()
+                        }
+                    }
+                    error != null -> {
+                        Text(
+                            text = "Error: $error",
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    devices.isEmpty() && friends.isEmpty() -> {
+                        Text(
+                            text = "No Find My data available.\n\nMake sure Find My is enabled on your Mac and the server has the Private API helper connected.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    else -> {
+                        // Devices section
+                        if (devices.isNotEmpty()) {
+                            Text(
+                                text = "DEVICES (${devices.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            devices.forEach { device ->
+                                val who = device.name ?: device.deviceDisplayName ?: device.modelDisplayName ?: "Unknown Device"
+                                val where = buildString {
+                                    device.address?.mapItemFullAddress?.let { append(it) }
+                                    if (isEmpty()) {
+                                        device.location?.let { loc ->
+                                            if (loc.latitude != null && loc.longitude != null) {
+                                                append("${loc.latitude}, ${loc.longitude}")
+                                            }
+                                        }
+                                    }
+                                    if (isEmpty()) append("Location unavailable")
+                                }
+
+                                Text(
+                                    text = "WHO: $who",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = "WHERE: $where",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                device.batteryLevel?.let { battery ->
+                                    Text(
+                                        text = "BATTERY: ${(battery * 100).toInt()}%",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                        }
+
+                        // Friends section
+                        if (friends.isNotEmpty()) {
+                            if (devices.isNotEmpty()) {
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp))
+                            }
+
+                            Text(
+                                text = "FRIENDS (${friends.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            friends.forEach { friend ->
+                                val who = friend.title ?: friend.handle ?: "Unknown Person"
+                                val where = buildString {
+                                    friend.longAddress?.let { append(it) }
+                                    if (isEmpty()) {
+                                        friend.shortAddress?.let { append(it) }
+                                    }
+                                    if (isEmpty()) {
+                                        friend.coordinates?.let { coords ->
+                                            if (coords.size >= 2) {
+                                                append("${coords[0]}, ${coords[1]}")
+                                            }
+                                        }
+                                    }
+                                    if (isEmpty()) append("Location unavailable")
+                                }
+
+                                Text(
+                                    text = "WHO: $who",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                friend.subtitle?.let { subtitle ->
+                                    Text(
+                                        text = "($subtitle)",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Text(
+                                    text = "WHERE: $where",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                friend.status?.let { status ->
+                                    Text(
+                                        text = "STATUS: $status",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 /**

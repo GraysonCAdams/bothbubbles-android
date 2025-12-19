@@ -80,6 +80,15 @@ libphonenumber = "8.13.50"
 # LeakCanary
 leakcanary = "2.12"
 
+# OSMDroid (OpenStreetMap)
+osmdroid = "6.1.18"
+
+# Google Maps Compose
+mapsCompose = "6.2.1"
+
+# Security (EncryptedSharedPreferences)
+securityCrypto = "1.1.0-alpha06"
+
 # ACRA (local crash reporting)
 acra = "5.11.4"
 
@@ -199,6 +208,12 @@ libphonenumber = { group = "io.michaelrocks", name = "libphonenumber-android", v
 
 # LeakCanary
 leakcanary = { group = "com.squareup.leakcanary", name = "leakcanary-android", version.ref = "leakcanary" }
+
+# OSMDroid (OpenStreetMap)
+osmdroid-android = { group = "org.osmdroid", name = "osmdroid-android", version.ref = "osmdroid" }
+
+# Security (EncryptedSharedPreferences)
+androidx-security-crypto = { group = "androidx.security", name = "security-crypto", version.ref = "securityCrypto" }
 
 # ACRA (local crash reporting with manual sharing - no automatic data collection)
 acra-core = { group = "ch.acra", name = "acra-core", version.ref = "acra" }

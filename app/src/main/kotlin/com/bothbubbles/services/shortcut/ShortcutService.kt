@@ -213,7 +213,7 @@ class ShortcutService @Inject constructor(
         }
 
         // Generate avatar icon
-        val avatarIcon = AvatarGenerator.generateIconCompat(conversation.displayName, 128)
+        val avatarIcon = AvatarGenerator.generateIconCompat(context, conversation.displayName, 128)
 
         // Create Person for the conversation
         val person = Person.Builder()

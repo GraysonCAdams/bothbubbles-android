@@ -352,7 +352,7 @@ class ConversationListScreen(
             val displayName = participant.cachedDisplayName
                 ?: participant.formattedAddress
                 ?: participant.address
-            return AvatarGenerator.generateIconCompat(displayName, avatarSize)
+            return AvatarGenerator.generateIconCompat(carContext, displayName, avatarSize)
         }
 
         // 3. For group chats, generate collage from participants
@@ -362,14 +362,14 @@ class ConversationListScreen(
                     ?: handle.formattedAddress
                     ?: handle.address
             }
-            return AvatarGenerator.generateGroupIconCompat(participantNames, avatarSize)
+            return AvatarGenerator.generateGroupIconCompat(carContext, participantNames, avatarSize)
         }
 
         // 4. Fallback: use chat identifier or display name
         val fallbackName = chat.displayName
             ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
             ?: "?"
-        return AvatarGenerator.generateIconCompat(fallbackName, avatarSize)
+        return AvatarGenerator.generateIconCompat(carContext, fallbackName, avatarSize)
     }
 
     companion object {

@@ -1,26 +1,32 @@
 package com.bothbubbles.ui.chat.delegates
 
+import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.firstName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.Life360Repository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.chat.state.ChatInfoState
 import com.bothbubbles.ui.util.toStable
+import timber.log.Timber
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -36,6 +42,7 @@ import kotlinx.coroutines.launch
  * Uses AssistedInject to receive runtime parameters at construction time,
  * eliminating the need for a separate initialize() call.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 class ChatInfoDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
@@ -43,6 +50,8 @@ class ChatInfoDelegate @AssistedInject constructor(
     private val androidContactsService: AndroidContactsService,
     private val smsPermissionHelper: SmsPermissionHelper,
     private val discordContactService: DiscordContactService,
+    private val life360Repository: Life360Repository,
+    private val featurePreferences: FeaturePreferences,
     @Assisted private val chatGuid: String,
     @Assisted private val scope: CoroutineScope,
     @Assisted private val mergedChatGuids: List<String>
@@ -59,6 +68,8 @@ class ChatInfoDelegate @AssistedInject constructor(
 
     companion object {
         private const val TAG = "ChatInfoDelegate"
+        /** Buffer time added to sync interval for stale threshold */
+        private const val LOCATION_STALE_BUFFER_MINUTES = 5
     }
 
     private val _state = MutableStateFlow(ChatInfoState())
@@ -68,6 +79,7 @@ class ChatInfoDelegate @AssistedInject constructor(
         loadChat()
         determineChatType()
         observeParticipantsForSaveContactBanner()
+        observeLife360Location()
     }
 
     /**
@@ -201,6 +213,57 @@ class ChatInfoDelegate @AssistedInject constructor(
         }
     }
 
+
+    /**
+     * Observe Life360 location for the first participant (1:1 chats only).
+     * Updates locationSubtext with place name, address, or "Location unavailable" if stale.
+     */
+    private fun observeLife360Location() {
+        scope.launch {
+            // Combine participants with poll interval to determine stale threshold
+            chatRepository.observeParticipantsForChat(chatGuid)
+                .flatMapLatest { participants ->
+                    // Only for 1:1 chats
+                    if (_state.value.isGroup) return@flatMapLatest flowOf(null)
+
+                    val address = participants.firstOrNull()?.address
+                    if (address != null) {
+                        life360Repository.observeMemberByAddress(address)
+                    } else {
+                        flowOf(null)
+                    }
+                }
+                .combine(featurePreferences.life360PollIntervalMinutes) { member, pollInterval ->
+                    member to pollInterval
+                }
+                .collect { (member, pollInterval) ->
+                    if (member == null) {
+                        _state.update { it.copy(locationSubtext = null, life360Member = null) }
+                        return@collect
+                    }
+
+                    val location = member.location
+                    val staleThresholdMs = (pollInterval + LOCATION_STALE_BUFFER_MINUTES) * 60 * 1000L
+                    val isStale = location == null ||
+                        (System.currentTimeMillis() - location.timestamp) > staleThresholdMs
+
+                    val placeName = location?.placeName
+                    val address = location?.address
+                    val subtext = when {
+                        isStale -> "Location unavailable"
+                        placeName != null -> placeName
+                        address != null -> {
+                            // Shorten address to just the street if it's too long
+                            if (address.length > 30) address.substringBefore(",") else address
+                        }
+                        else -> null
+                    }
+
+                    Timber.d("$TAG: Life360 subtext for chat $chatGuid: $subtext (stale=$isStale)")
+                    _state.update { it.copy(locationSubtext = subtext, life360Member = member) }
+                }
+        }
+    }
 
     /**
      * Check if a string looks like a phone number or email address (not a contact name)

@@ -43,8 +43,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.ui.components.common.ConnectionBannerState
-import com.bothbubbles.ui.components.common.SmsBannerState
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.services.categorization.MessageCategory
@@ -94,22 +92,6 @@ fun ConversationsScreen(
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
         }
-    }
-
-    // Determine if banners should be visible (for padding calculation)
-    val isConnectionBannerVisible = when (uiState.connectionBannerState) {
-        is ConnectionBannerState.NotConfigured,
-        is ConnectionBannerState.Reconnecting -> true
-        else -> false
-    }
-    val isSmsBannerVisible = uiState.smsBannerState is SmsBannerState.NotDefaultApp
-
-    // Banner height for padding (approximate: 56dp content + 16dp padding per banner + nav bar)
-    val singleBannerHeight = 72.dp
-    val bannerPadding = when {
-        isConnectionBannerVisible && isSmsBannerVisible -> singleBannerHeight * 2
-        isConnectionBannerVisible || isSmsBannerVisible -> singleBannerHeight
-        else -> 0.dp
     }
 
     var isSearchActive by remember { mutableStateOf(false) }
@@ -280,14 +262,17 @@ fun ConversationsScreen(
     val isDarkTheme = androidx.compose.foundation.isSystemInDarkTheme()
     val darkerBackground = if (isDarkTheme) Color(0xFF1A1A1A) else Color(0xFFEDEDED)
 
-    Box(
+    Column(
         modifier = Modifier
             .fillMaxSize()
             .background(darkerBackground)
     ) {
-        // Main content
-        Scaffold(
+        // Main content area - takes remaining space above sync progress bar
+        Box(modifier = Modifier.weight(1f)) {
+            Scaffold(
             containerColor = Color.Transparent,
+            // Exclude bottom insets - progress bar handles nav bar padding
+            contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0, 0, 0, 0),
             topBar = {
                 Surface(
                     color = darkerBackground,
@@ -400,13 +385,17 @@ fun ConversationsScreen(
                 }
             },
             floatingActionButton = {
+                // Add navigation bar padding when sync progress bar is not visible
+                // (the sync bar handles its own nav bar padding when shown)
+                val syncBarVisible = uiState.unifiedSyncProgress != null && !isSearchActive
                 ConversationFab(
                     onClick = onNewMessageClick,
                     isExpanded = isFabExpanded,
-                    unifiedSyncProgress = uiState.unifiedSyncProgress,
-                    isSearchActive = isSearchActive,
-                    isConnectionBannerVisible = isConnectionBannerVisible,
-                    isSmsBannerVisible = isSmsBannerVisible
+                    modifier = if (!syncBarVisible) {
+                        Modifier.navigationBarsPadding()
+                    } else {
+                        Modifier
+                    }
                 )
             }
         ) { padding ->
@@ -421,7 +410,6 @@ fun ConversationsScreen(
                 selectedConversations = selectedConversations,
                 isSelectionMode = isSelectionMode,
                 listState = listState,
-                bannerPadding = bannerPadding,
                 onConversationClick = onConversationClick,
                 onConversationLongClick = { guid ->
                     selectedConversations = if (guid in selectedConversations) {
@@ -454,14 +442,14 @@ fun ConversationsScreen(
         } // End of Scaffold content
 
         // Full-screen search overlay
-        AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = isSearchActive,
             enter = fadeIn(),
             exit = fadeOut()
         ) {
             SearchOverlay(
                 query = uiState.searchQuery,
-                onQueryChange = { viewModel.updateSearchQuery(it) },
+                onQueryChange = viewModel::updateSearchQuery,
                 selectedFilter = selectedFilter,
                 onFilterSelected = { filter ->
                     selectedFilter = filter
@@ -469,19 +457,23 @@ fun ConversationsScreen(
                 onFilterCleared = {
                     selectedFilter = null
                 },
+                startDate = uiState.searchStartDate,
+                endDate = uiState.searchEndDate,
+                onStartDateChange = viewModel::updateSearchStartDate,
+                onEndDateChange = viewModel::updateSearchEndDate,
                 onClose = {
                     isSearchActive = false
                     selectedFilter = null
                     viewModel.updateSearchQuery("")
+                    viewModel.updateSearchStartDate(null)
+                    viewModel.updateSearchEndDate(null)
                     focusManager.clearFocus()
                 },
                 conversations = uiState.conversations,
                 messageSearchResults = uiState.messageSearchResults,
                 onConversationClick = { guid, mergedGuids ->
+                    // Navigate to chat but keep search state - back will return to search
                     onConversationClick(guid, mergedGuids)
-                    isSearchActive = false
-                    selectedFilter = null
-                    viewModel.updateSearchQuery("")
                 },
                 focusRequester = focusRequester
             )
@@ -573,7 +565,7 @@ fun ConversationsScreen(
         }
 
         // Scroll to top button - slides up from bottom when scrolled
-        AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = showScrollToTop && !isSearchActive && !isSelectionMode,
             enter = slideInVertically(
                 initialOffsetY = { it },
@@ -598,7 +590,7 @@ fun ConversationsScreen(
         }
 
         // Sliding settings panel from right
-        AnimatedVisibility(
+        androidx.compose.animation.AnimatedVisibility(
             visible = isSettingsOpen,
             enter = slideInHorizontally(
                 initialOffsetX = { it }, // Start from right (full width)
@@ -614,22 +606,15 @@ fun ConversationsScreen(
                 onNavigate = onSettingsNavigate
             )
         }
+        } // End of main content Box
 
-        // Stacked status banners at the bottom
+        // Sync progress bar at the bottom - stacked layout (content shrinks to accommodate)
         ConversationStatusBanners(
             unifiedSyncProgress = uiState.unifiedSyncProgress,
-            smsBannerState = uiState.smsBannerState,
-            connectionBannerState = uiState.connectionBannerState,
             isSearchActive = isSearchActive,
             onExpandToggle = viewModel::toggleSyncProgressExpanded,
             onRetrySync = viewModel::retrySyncOperation,
-            onDismissSyncError = viewModel::dismissSyncError,
-            onSetAsDefaultClick = { onSettingsNavigate("sms", false) },
-            onDismissSmsBanner = viewModel::dismissSmsBanner,
-            onSetupClick = { onSettingsNavigate("setup", false) },
-            onDismissSetupBanner = viewModel::dismissSetupBanner,
-            onRetryConnection = viewModel::retryConnection,
-            modifier = Modifier.align(Alignment.BottomCenter)
+            onDismissSyncError = viewModel::dismissSyncError
         )
     }
 }

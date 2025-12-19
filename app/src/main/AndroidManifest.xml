@@ -177,6 +177,15 @@
             android:resizeableActivity="true"
             android:theme="@style/Theme.BothBubbles" />
 
+        <!-- Crash Report Activity (ACRA custom dialog replacement) -->
+        <activity
+            android:name=".ui.crash.CrashReportActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:finishOnTaskLaunch="true"
+            android:launchMode="singleInstance"
+            android:theme="@style/Theme.BothBubbles" />
+
         <!-- Notification Receiver -->
         <receiver
             android:name=".services.notifications.NotificationReceiver"

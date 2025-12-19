@@ -76,7 +76,8 @@ internal fun UnifiedSyncProgressBar(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val bottomPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    // Bottom padding for gesture bar - content padding only, Surface extends to edge
+    val navBarPadding = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
 
     // Animate progress smoothly
     val animatedProgress by animateFloatAsState(
@@ -98,7 +99,7 @@ internal fun UnifiedSyncProgressBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .animateContentSize(animationSpec = tween(durationMillis = 200))
-                .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp + bottomPadding)
+                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp + navBarPadding)
         ) {
             AnimatedContent(
                 targetState = progress.hasError,

@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,11 +31,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.bothbubbles.ui.chat.composer.MessagePreview
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
+import java.io.File
 
 /**
  * Reply preview bar for the chat composer.
@@ -99,8 +105,18 @@ private fun ReplyPreviewContent(
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
 
+    // Build accessibility description
+    val senderDescription = if (message.isFromMe) "yourself" else (message.senderName ?: "someone")
+    val contentDescription = buildString {
+        append("Replying to $senderDescription")
+        message.text?.let { append(": $it") }
+        if (message.hasAttachments) append(". Contains attachment")
+    }
+
     Surface(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { this.contentDescription = contentDescription },
         color = inputColors.inputBackground
     ) {
         Row(
@@ -120,6 +136,25 @@ private fun ReplyPreviewContent(
 
             Spacer(modifier = Modifier.width(12.dp))
 
+            // Thumbnail preview for images/videos
+            if (message.thumbnailUri != null) {
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = File(message.thumbnailUri),
+                        contentDescription = "Attachment preview",
+                        modifier = Modifier.size(40.dp),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+
             // Reply content
             Column(modifier = Modifier.weight(1f)) {
                 // "Replying to..." label
@@ -134,8 +169,8 @@ private fun ReplyPreviewContent(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.padding(top = 2.dp)
                 ) {
-                    // Attachment icon if applicable
-                    if (message.hasAttachments && message.text.isNullOrBlank()) {
+                    // Attachment icon if no thumbnail and has attachments with no text
+                    if (message.thumbnailUri == null && message.hasAttachments && message.text.isNullOrBlank()) {
                         Icon(
                             imageVector = Icons.Default.AttachFile,
                             contentDescription = null,

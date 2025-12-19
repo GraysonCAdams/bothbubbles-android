@@ -525,15 +525,37 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
         val allMessagesMap = loadedMessagesMap + fetchedOriginals
 
+        // Load attachments for original messages that have them
+        val originGuidsWithAttachments = allMessagesMap.values
+            .filter { it.hasAttachments }
+            .map { it.guid }
+        val attachmentsByMessage = if (originGuidsWithAttachments.isNotEmpty()) {
+            attachmentRepository.getAttachmentsForMessages(originGuidsWithAttachments)
+                .groupBy { it.messageGuid }
+        } else {
+            emptyMap()
+        }
+
         return replyGuids.mapNotNull { originGuid ->
             val originalMessage = allMessagesMap[originGuid]
             if (originalMessage != null) {
+                // Find thumbnail from first image/video attachment
+                val attachments = attachmentsByMessage[originGuid].orEmpty()
+                val thumbnailUri = attachments
+                    .firstOrNull { it.mimeType?.startsWith("image/") == true || it.mimeType?.startsWith("video/") == true }
+                    ?.let { it.thumbnailPath ?: it.localPath }
+
+                // Calculate quote depth - if the original is also a reply, depth is 2+
+                val quoteDepth = if (originalMessage.threadOriginatorGuid != null) 2 else 1
+
                 originGuid to ReplyPreviewData(
                     originalGuid = originGuid,
                     previewText = originalMessage.text?.take(50),
                     senderName = resolveSenderName(originalMessage.senderAddress, originalMessage.handleId),
                     isFromMe = originalMessage.isFromMe,
                     hasAttachment = originalMessage.hasAttachments,
+                    thumbnailUri = thumbnailUri,
+                    quoteDepth = quoteDepth,
                     isNotLoaded = false
                 )
             } else {

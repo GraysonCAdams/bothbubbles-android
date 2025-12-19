@@ -241,19 +241,28 @@ data class MessagePreview(
     val text: String?,
 
     /** Whether the message has attachments */
-    val hasAttachments: Boolean = false
+    val hasAttachments: Boolean = false,
+
+    /** Thumbnail URI for first attachment (images/videos only) */
+    val thumbnailUri: String? = null
 ) {
     companion object {
         /**
          * Create a MessagePreview from a MessageUiModel.
          */
         fun fromMessageUiModel(message: MessageUiModel): MessagePreview {
+            // Get thumbnail from first visual attachment (image or video)
+            val thumbnailUri = message.attachments
+                .firstOrNull { it.mimeType?.startsWith("image/") == true || it.mimeType?.startsWith("video/") == true }
+                ?.localPath
+
             return MessagePreview(
                 guid = message.guid,
                 isFromMe = message.isFromMe,
                 senderName = message.senderName,
                 text = message.text,
-                hasAttachments = message.attachments.isNotEmpty()
+                hasAttachments = message.attachments.isNotEmpty(),
+                thumbnailUri = thumbnailUri
             )
         }
     }

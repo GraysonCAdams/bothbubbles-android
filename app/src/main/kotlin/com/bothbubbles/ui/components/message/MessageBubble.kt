@@ -1,8 +1,16 @@
 package com.bothbubbles.ui.components.message
 
 import timber.log.Timber
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandHorizontally
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -10,23 +18,40 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.animation.animateContentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.geometry.Rect
+import coil.compose.AsyncImage
 import com.bothbubbles.BuildConfig
+import java.io.File
 import com.bothbubbles.ui.chat.delegates.ChatAttachmentDelegate
 import com.bothbubbles.ui.components.common.Avatar
 import com.bothbubbles.ui.theme.BothBubblesTheme
@@ -79,7 +104,9 @@ fun MessageBubble(
     showDeliveryIndicator: Boolean = true,
     // Callback for swipe-to-reply (iMessage only). Pass message GUID when triggered.
     onReply: ((String) -> Unit)? = null,
-    // Callback when reply indicator is tapped. Pass the threadOriginatorGuid to open thread overlay.
+    // Callback when reply indicator is tapped - scrolls to original message
+    onScrollToOriginal: ((String) -> Unit)? = null,
+    // Callback when reply indicator is long-pressed - opens thread overlay
     onReplyIndicatorClick: ((String) -> Unit)? = null,
     // Callback when swipe gesture starts/ends. Used to hide stickers during swipe.
     onSwipeStateChanged: ((Boolean) -> Unit)? = null,
@@ -100,7 +127,11 @@ fun MessageBubble(
     // Callback when sender avatar is clicked in group chat (for contact details)
     onAvatarClick: (() -> Unit)? = null,
     // Callback when a mention is clicked (opens contact details)
-    onMentionClick: ((String) -> Unit)? = null
+    onMentionClick: ((String) -> Unit)? = null,
+    // Multi-message selection support
+    isSelectionMode: Boolean = false,
+    isSelected: Boolean = false,
+    onSelectionToggle: (() -> Unit)? = null
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -125,7 +156,11 @@ fun MessageBubble(
     val avatarSize = 28.dp
 
     // Wrap content in a column to show reply indicator above the bubble
-    Column(modifier = modifier) {
+    // Align based on whether this message (the reply) is from me
+    Column(
+        modifier = modifier,
+        horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
+    ) {
         // Reply quote indicator (shown above reply messages)
         message.replyPreview?.let { preview ->
             message.threadOriginatorGuid?.let { originGuid ->
@@ -134,16 +169,39 @@ fun MessageBubble(
                 ReplyQuoteIndicator(
                     replyPreview = preview,
                     isFromMe = message.isFromMe,
-                    onClick = { onReplyIndicatorClick?.invoke(originGuid) },
+                    onTap = {
+                        // Tap scrolls to original if callback provided, otherwise fall back to thread
+                        if (onScrollToOriginal != null) {
+                            onScrollToOriginal(originGuid)
+                        } else {
+                            onReplyIndicatorClick?.invoke(originGuid)
+                        }
+                    },
+                    onLongPress = { onReplyIndicatorClick?.invoke(originGuid) },
                     modifier = Modifier.padding(start = replyPadding)
                 )
             }
         }
 
-        // Main content row with optional avatar
+        // Haptic feedback for selection toggle
+        val hapticFeedback = LocalHapticFeedback.current
+        val handleSelectionToggle: () -> Unit = {
+            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+            onSelectionToggle?.invoke()
+        }
+
+        // Main content row with optional avatar and selection indicator
         Row(
             verticalAlignment = Alignment.Bottom,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (isSelectionMode) {
+                        Modifier.clickable(onClick = handleSelectionToggle)
+                    } else {
+                        Modifier
+                    }
+                )
         ) {
             // Avatar space for received messages in group chats
             if (shouldShowAvatarSpace) {
@@ -168,14 +226,16 @@ fun MessageBubble(
                 }
             }
 
-            // Message content
+            // Message content - disable media/link interactions in selection mode
+            val effectiveOnMediaClick: (String) -> Unit = if (isSelectionMode) { _ -> } else onMediaClick
+
             if (needsSegmentation) {
                 // Use segmented rendering for messages with media/links
                 SegmentedMessageBubble(
                     message = message,
                     firstUrl = firstUrl,
                     onLongPress = onLongPress,
-                    onMediaClick = onMediaClick,
+                    onMediaClick = effectiveOnMediaClick,
                     groupPosition = groupPosition,
                     searchQuery = searchQuery,
                     isCurrentSearchMatch = isCurrentSearchMatch,
@@ -190,6 +250,9 @@ fun MessageBubble(
                     canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
                     onMentionClick = onMentionClick,
+                    isSelectionMode = isSelectionMode,
+                    isSelected = isSelected,
+                    onSelectionToggle = onSelectionToggle,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -198,7 +261,7 @@ fun MessageBubble(
                     message = message,
                     firstUrl = firstUrl,
                     onLongPress = onLongPress,
-                    onMediaClick = onMediaClick,
+                    onMediaClick = effectiveOnMediaClick,
                     groupPosition = groupPosition,
                     searchQuery = searchQuery,
                     isCurrentSearchMatch = isCurrentSearchMatch,
@@ -213,8 +276,49 @@ fun MessageBubble(
                     canRetryAsSms = canRetryAsSms,
                     onBoundsChanged = onBoundsChanged,
                     onMentionClick = onMentionClick,
+                    isSelectionMode = isSelectionMode,
+                    isSelected = isSelected,
+                    onSelectionToggle = onSelectionToggle,
                     modifier = Modifier.weight(1f)
                 )
+            }
+
+            // Selection indicator (aligned right of everything)
+            // Note: No click handler here - the entire row is clickable in selection mode
+            AnimatedVisibility(
+                visible = isSelectionMode,
+                enter = expandHorizontally() + fadeIn(),
+                exit = shrinkHorizontally() + fadeOut()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .padding(start = 8.dp, end = 12.dp)
+                        .size(24.dp)
+                        .then(
+                            if (isSelected) {
+                                Modifier.background(
+                                    MaterialTheme.colorScheme.primary,
+                                    CircleShape
+                                )
+                            } else {
+                                Modifier.border(
+                                    2.dp,
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                                    CircleShape
+                                )
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (isSelected) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -223,48 +327,94 @@ fun MessageBubble(
 /**
  * Quote-style indicator shown above a message that is a reply.
  * Displays a preview of the original message being replied to.
- * Tapping opens the thread overlay.
+ *
+ * Interaction model:
+ * - Tap: Scroll to original message in the list (if loaded)
+ * - Long-press: Open thread overlay for full context
+ *
+ * @param replyPreview The preview data for the quoted message
+ * @param isFromMe Whether the current message (not the quoted one) is from the user
+ * @param onTap Called when tapped - should scroll to original message
+ * @param onLongPress Called when long-pressed - should open thread overlay
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun ReplyQuoteIndicator(
     replyPreview: ReplyPreviewData,
     isFromMe: Boolean,
-    onClick: () -> Unit,
+    onTap: () -> Unit,
+    onLongPress: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val hapticFeedback = LocalHapticFeedback.current
+    var isExpanded by remember { mutableStateOf(false) }
+
+    // Build accessibility description
+    val senderDescription = if (replyPreview.isFromMe) "You" else (replyPreview.senderName ?: "Unknown")
+    val textPreview = when {
+        replyPreview.isNotLoaded -> "Message not loaded"
+        replyPreview.previewText.isNullOrBlank() && replyPreview.hasAttachment -> "Attachment"
+        replyPreview.previewText.isNullOrBlank() -> "Message"
+        else -> replyPreview.previewText
+    }
+    val expandedLabel = if (isExpanded) "collapse" else "expand"
+    val semanticDescription = "Quote from $senderDescription: $textPreview. Tap to scroll to original, double-tap to $expandedLabel, hold for thread"
 
     Surface(
-        onClick = {
-            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
-            onClick()
-        },
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         shape = RoundedCornerShape(12.dp),
         modifier = modifier
-            .padding(
-                start = if (isFromMe) 48.dp else 0.dp,
-                end = if (isFromMe) 0.dp else 48.dp,
-                bottom = 4.dp
+            .widthIn(max = 240.dp)
+            .padding(bottom = 4.dp)
+            .animateContentSize()
+            .semantics {
+                contentDescription = semanticDescription
+                onClick(label = "Scroll to original message") { onTap(); true }
+                onLongClick(label = "Open thread view") { onLongPress(); true }
+            }
+            .combinedClickable(
+                onClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    onTap()
+                },
+                onDoubleClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                    isExpanded = !isExpanded
+                },
+                onLongClick = {
+                    hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onLongPress()
+                }
             )
     ) {
         Row(
             modifier = Modifier.padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = if (isExpanded) Alignment.Top else Alignment.CenterVertically
         ) {
-            // Vertical accent bar
-            Box(
-                modifier = Modifier
-                    .width(3.dp)
-                    .height(32.dp)
-                    .clip(RoundedCornerShape(1.5.dp))
-                    .background(
-                        if (replyPreview.isFromMe)
-                            BothBubblesTheme.bubbleColors.iMessageSent
-                        else
-                            MaterialTheme.colorScheme.primary
+            // Vertical accent bars - show multiple when quoteDepth > 1
+            val accentColor = if (replyPreview.isFromMe)
+                BothBubblesTheme.bubbleColors.iMessageSent
+            else
+                MaterialTheme.colorScheme.primary
+
+            Row(horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(2.dp)) {
+                repeat(replyPreview.quoteDepth.coerceIn(1, 3)) { index ->
+                    Box(
+                        modifier = Modifier
+                            .width(3.dp)
+                            .then(
+                                if (isExpanded) Modifier.height(48.dp)
+                                else Modifier.height(32.dp)
+                            )
+                            .clip(RoundedCornerShape(1.5.dp))
+                            .background(
+                                // Slightly lighter for nested bars
+                                if (index == 0) accentColor
+                                else accentColor.copy(alpha = 0.5f)
+                            )
                     )
-            )
+                }
+            }
 
             Spacer(modifier = Modifier.width(8.dp))
 
@@ -294,9 +444,33 @@ fun ReplyQuoteIndicator(
                     text = displayText,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    maxLines = if (isExpanded) Int.MAX_VALUE else 1,
+                    overflow = if (isExpanded)
+                        androidx.compose.ui.text.style.TextOverflow.Visible
+                    else
+                        androidx.compose.ui.text.style.TextOverflow.Ellipsis
                 )
+            }
+
+            // Thumbnail preview for images/videos (on the right)
+            if (replyPreview.thumbnailUri != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = File(replyPreview.thumbnailUri),
+                        contentDescription = "Quoted attachment",
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(RoundedCornerShape(8.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
             }
         }
     }

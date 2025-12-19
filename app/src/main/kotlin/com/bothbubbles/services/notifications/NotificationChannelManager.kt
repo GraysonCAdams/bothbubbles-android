@@ -35,6 +35,7 @@ class NotificationChannelManager @Inject constructor(
         // Intent extras
         const val EXTRA_CHAT_GUID = "chat_guid"
         const val EXTRA_MESSAGE_GUID = "message_guid"
+        const val EXTRA_MERGED_GUIDS = "merged_guids"
         const val EXTRA_REPLY_TEXT = "reply_text"
         const val EXTRA_CODE_TO_COPY = "code_to_copy"
         const val EXTRA_CALL_UUID = "call_uuid"

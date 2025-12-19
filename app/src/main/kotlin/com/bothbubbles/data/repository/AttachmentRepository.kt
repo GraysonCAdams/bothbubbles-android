@@ -1,12 +1,17 @@
 package com.bothbubbles.data.repository
 
+import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import com.bothbubbles.data.local.db.dao.AttachmentDao
-import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.AttachmentWithDate
+import com.bothbubbles.data.local.db.dao.MediaWithSender
+import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
@@ -94,6 +99,81 @@ class AttachmentRepository @Inject constructor(
      */
     suspend fun getCachedMediaForChat(chatGuid: String): List<AttachmentEntity> =
         attachmentDao.getCachedMediaForChat(chatGuid)
+
+    /**
+     * Get all media attachments for a chat with sender information.
+     * Used by MediaViewer to show sender avatar/name and allow swiping through all media.
+     * Includes media regardless of download status.
+     */
+    suspend fun getMediaWithSenderForChat(chatGuid: String): List<MediaWithSender> =
+        attachmentDao.getMediaWithSenderForChat(chatGuid)
+
+    /**
+     * Save an attachment to the device's gallery (images/videos) or Downloads folder.
+     * Uses MediaStore for Android 10+ (scoped storage), falls back to direct file access for older versions.
+     *
+     * @param localPath Path to the local file to save
+     * @param mimeType MIME type of the file
+     * @param fileName Original filename
+     * @return Result containing the saved URI on success
+     */
+    suspend fun saveToGallery(localPath: String, mimeType: String?, fileName: String?): Result<Uri> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val file = File(localPath)
+                if (!file.exists()) {
+                    return@withContext Result.failure(IOException("File not found: $localPath"))
+                }
+
+                val isImage = mimeType?.startsWith("image") == true
+                val isVideo = mimeType?.startsWith("video") == true
+                val displayName = fileName ?: file.name
+
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.MediaColumns.DISPLAY_NAME, displayName)
+                    put(MediaStore.MediaColumns.MIME_TYPE, mimeType ?: "application/octet-stream")
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val relativePath = when {
+                            isImage -> Environment.DIRECTORY_PICTURES + "/BothBubbles"
+                            isVideo -> Environment.DIRECTORY_MOVIES + "/BothBubbles"
+                            else -> Environment.DIRECTORY_DOWNLOADS + "/BothBubbles"
+                        }
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                }
+
+                val collection = when {
+                    isImage -> MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+                    isVideo -> MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+                    Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> MediaStore.Downloads.EXTERNAL_CONTENT_URI
+                    else -> MediaStore.Files.getContentUri("external")
+                }
+
+                val uri = context.contentResolver.insert(collection, contentValues)
+                    ?: return@withContext Result.failure(IOException("Failed to create media entry"))
+
+                context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                    file.inputStream().use { inputStream ->
+                        inputStream.copyTo(outputStream)
+                    }
+                } ?: return@withContext Result.failure(IOException("Failed to open output stream"))
+
+                // Clear pending flag on Android 10+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    contentValues.clear()
+                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    context.contentResolver.update(uri, contentValues, null, null)
+                }
+
+                Timber.d("Saved media to gallery: $uri")
+                Result.success(uri)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to save media to gallery")
+                Result.failure(e)
+            }
+        }
+    }
 
     /**
      * Observe image count for a chat.

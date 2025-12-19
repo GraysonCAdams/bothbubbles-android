@@ -9,6 +9,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
+import com.bothbubbles.data.local.db.dao.Life360Dao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
@@ -39,6 +40,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
+import com.bothbubbles.core.model.entity.Life360MemberEntity
 
 /**
  * Room database for BothBubbles.
@@ -70,9 +72,10 @@ import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
         AutoRespondedSenderEntity::class,
         VerifiedCounterpartCheckEntity::class,
         AutoShareContactEntity::class,
-        TombstoneEntity::class
+        TombstoneEntity::class,
+        Life360MemberEntity::class
     ],
-    version = 39,
+    version = 40,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -95,6 +98,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun chatQueryDao(): ChatQueryDao
     abstract fun autoShareContactDao(): AutoShareContactDao
     abstract fun tombstoneDao(): TombstoneDao
+    abstract fun life360Dao(): Life360Dao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"
