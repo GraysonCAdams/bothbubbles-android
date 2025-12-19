@@ -25,6 +25,7 @@ import androidx.compose.material.icons.outlined.Gif
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.LocationOn
 import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.Navigation
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -92,6 +93,12 @@ enum class MediaPickerOption(
         icon = Icons.Outlined.Contacts,
         contentDescription = "Share a contact",
         backgroundColor = Color(0xFF795548) // Brown
+    ),
+    ETA(
+        label = "ETA",
+        icon = Icons.Outlined.Navigation,
+        contentDescription = "Share ETA",
+        backgroundColor = Color(0xFF009688) // Teal
     )
 }
 
@@ -117,6 +124,8 @@ enum class MediaPickerOption(
  * @param onLocationClick Callback when location option is tapped
  * @param onAudioClick Callback when audio option is tapped
  * @param onContactClick Callback when contact option is tapped
+ * @param onEtaClick Callback when ETA option is tapped (only shown when isEtaSharingAvailable)
+ * @param isEtaSharingAvailable Whether ETA sharing is available (navigation active)
  * @param onDismiss Callback when panel should be dismissed
  * @param modifier Modifier for the panel
  */
@@ -130,6 +139,8 @@ fun MediaPickerPanel(
     onLocationClick: () -> Unit,
     onAudioClick: () -> Unit,
     onContactClick: () -> Unit,
+    onEtaClick: () -> Unit = {},
+    isEtaSharingAvailable: Boolean = false,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -143,16 +154,20 @@ fun MediaPickerPanel(
         }
     }
 
-    val options = remember {
-        listOf(
-            MediaPickerOption.GALLERY,
-            MediaPickerOption.CAMERA,
-            MediaPickerOption.GIF,
-            MediaPickerOption.FILES,
-            MediaPickerOption.LOCATION,
-            MediaPickerOption.AUDIO,
-            MediaPickerOption.CONTACT
-        )
+    // Build options list - conditionally include ETA when navigation is active
+    val options = remember(isEtaSharingAvailable) {
+        buildList {
+            add(MediaPickerOption.GALLERY)
+            add(MediaPickerOption.CAMERA)
+            add(MediaPickerOption.GIF)
+            add(MediaPickerOption.FILES)
+            add(MediaPickerOption.LOCATION)
+            add(MediaPickerOption.AUDIO)
+            add(MediaPickerOption.CONTACT)
+            if (isEtaSharingAvailable) {
+                add(MediaPickerOption.ETA)
+            }
+        }
     }
 
     // Panel content - visibility/animations handled by ComposerPanelHost
@@ -210,6 +225,10 @@ fun MediaPickerPanel(
                                 }
                                 MediaPickerOption.CONTACT -> {
                                     onContactClick()
+                                    onDismiss()
+                                }
+                                MediaPickerOption.ETA -> {
+                                    onEtaClick()
                                     onDismiss()
                                 }
                             }

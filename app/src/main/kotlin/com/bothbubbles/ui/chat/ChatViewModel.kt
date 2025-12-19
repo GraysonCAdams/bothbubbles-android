@@ -8,6 +8,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.media.ExoPlayerPool
+import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.messaging.ChatFallbackTracker
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chat.composer.ComposerEvent
@@ -82,6 +83,7 @@ class ChatViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
     private val activeConversationManager: ActiveConversationManager,
+    private val notifier: Notifier,
     // Delegate factories for AssistedInject pattern
     private val sendFactory: ChatSendDelegate.Factory,
     private val attachmentFactory: ChatAttachmentDelegate.Factory,
@@ -120,6 +122,9 @@ class ChatViewModel @Inject constructor(
 
     // True if this is a merged conversation with multiple underlying chats
     private val isMergedChat: Boolean = mergedChatGuids.size > 1
+
+    // True if running inside a bubble - don't cancel notification (bubble IS the notification)
+    private val isBubbleMode: Boolean = savedStateHandle["isBubbleMode"] ?: false
 
     // Determine initial send mode synchronously from GUID to avoid SMS flash on iMessage chats
     private val initialSendMode: ChatSendMode = if (chatGuid.startsWith("iMessage;", ignoreCase = true)) {
@@ -353,6 +358,14 @@ class ChatViewModel @Inject constructor(
 
         // Track this conversation as active to suppress notifications while viewing
         activeConversationManager.setActiveConversation(chatGuid, mergedChatGuids.toSet())
+
+        // Cancel any existing notifications/bubbles for this chat (and merged chats)
+        // Skip in bubble mode - the bubble IS the notification, cancelling it would dismiss the bubble
+        if (!isBubbleMode) {
+            mergedChatGuids.forEach { guid ->
+                notifier.cancelNotification(guid)
+            }
+        }
 
         // Notify server which chat is open (helps server optimize notification delivery)
         socketConnection.sendOpenChat(chatGuid)

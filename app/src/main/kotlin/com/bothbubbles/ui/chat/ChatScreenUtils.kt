@@ -27,6 +27,7 @@ internal data class AttachmentInfo(
     val formattedSize: String,
     val isVideo: Boolean,
     val isImage: Boolean,
+    val isVLocation: Boolean = false,
     val durationMs: Long? = null,
     val durationFormatted: String? = null
 )
@@ -38,7 +39,9 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
     var sizeBytes = 0L
     var isVideo = false
     var isImage = false
+    var isVLocation = false
     var durationMs: Long? = null
+    var displayName: String? = null
 
     try {
         // Get MIME type
@@ -46,13 +49,36 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
         isVideo = mimeType?.startsWith("video/") == true
         isImage = mimeType?.startsWith("image/") == true
 
-        // Get file size
+        // Check for vLocation by MIME type
+        if (mimeType == "text/x-vlocation") {
+            isVLocation = true
+        }
+
+        // Get file size and display name
         context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
             if (cursor.moveToFirst()) {
                 val sizeIndex = cursor.getColumnIndex(android.provider.OpenableColumns.SIZE)
                 if (sizeIndex >= 0) {
                     sizeBytes = cursor.getLong(sizeIndex)
                 }
+                val nameIndex = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) {
+                    displayName = cursor.getString(nameIndex)
+                }
+            }
+        }
+
+        // Also check for vLocation by file extension (.loc.vcf)
+        // Check display name, URI path, and full URI string
+        if (!isVLocation) {
+            val pathsToCheck = listOfNotNull(
+                displayName,
+                uri.lastPathSegment,
+                uri.path,
+                uri.toString()
+            )
+            if (pathsToCheck.any { it.lowercase().contains(".loc.vcf") }) {
+                isVLocation = true
             }
         }
 
@@ -77,6 +103,7 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
         formattedSize = formatFileSize(sizeBytes),
         isVideo = isVideo,
         isImage = isImage,
+        isVLocation = isVLocation,
         durationMs = durationMs,
         durationFormatted = durationMs?.let { formatDuration(it) }
     )

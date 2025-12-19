@@ -11,6 +11,7 @@ import com.bothbubbles.data.repository.GifRepository
 import com.bothbubbles.services.contacts.ContactData
 import com.bothbubbles.services.contacts.FieldOptions
 import com.bothbubbles.services.contacts.VCardExporter
+import com.bothbubbles.services.location.VLocationService
 import com.bothbubbles.services.media.AttachmentLimitsProvider
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.smartreply.SmartReplyService
@@ -85,6 +86,7 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val attachmentLimitsProvider: AttachmentLimitsProvider,
     private val gifRepository: GifRepository,
     private val vCardExporter: VCardExporter,
+    private val vLocationService: VLocationService,
     private val settingsDataStore: SettingsDataStore,
     private val smartReplyService: SmartReplyService,
     private val socketConnection: SocketConnection,
@@ -155,6 +157,10 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val _activePanel = MutableStateFlow(ComposerPanel.None)
     val activePanel: StateFlow<ComposerPanel> = _activePanel.asStateFlow()
 
+    // Flag to request focus on the text field (e.g., after camera capture)
+    private val _requestTextFieldFocus = MutableStateFlow(false)
+    val requestTextFieldFocus: StateFlow<Boolean> = _requestTextFieldFocus.asStateFlow()
+
     // Remember quality setting
     private val _rememberQuality = MutableStateFlow(false)
 
@@ -175,6 +181,10 @@ class ChatComposerDelegate @AssistedInject constructor(
 
     // Whether this is a group chat (mentions only enabled for groups)
     private val _isGroupChat = MutableStateFlow(false)
+
+    // Location fetching state
+    private val _isFetchingLocation = MutableStateFlow(false)
+    val isFetchingLocation: StateFlow<Boolean> = _isFetchingLocation.asStateFlow()
 
     // ============================================================================
     // MEMOIZATION CACHES
@@ -806,6 +816,32 @@ class ChatComposerDelegate @AssistedInject constructor(
         }
     }
 
+    /**
+     * Creates a vLocation file from coordinates and adds it as an attachment.
+     * This sends location in Apple's native iMessage format (text/x-vlocation).
+     *
+     * @param latitude The latitude coordinate
+     * @param longitude The longitude coordinate
+     * @return true if successful, false otherwise
+     */
+    fun addLocationAsVLocation(latitude: Double, longitude: Double): Boolean {
+        return try {
+            val vlocationUri = vLocationService.createVLocationFile(latitude, longitude)
+            addAttachment(vlocationUri)
+            true
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to create vLocation file")
+            false
+        }
+    }
+
+    /**
+     * Set the location fetching state (shows loading indicator).
+     */
+    fun setFetchingLocation(fetching: Boolean) {
+        _isFetchingLocation.value = fetching
+    }
+
     // ============================================================================
     // PANEL MANAGEMENT
     // ============================================================================
@@ -822,6 +858,21 @@ class ChatComposerDelegate @AssistedInject constructor(
      */
     fun dismissPanel() {
         _activePanel.value = ComposerPanel.None
+    }
+
+    /**
+     * Request focus on the text field.
+     * Used to show the keyboard after actions like camera capture.
+     */
+    fun requestTextFieldFocus() {
+        _requestTextFieldFocus.value = true
+    }
+
+    /**
+     * Clear the text field focus request after it has been handled.
+     */
+    fun clearTextFieldFocusRequest() {
+        _requestTextFieldFocus.value = false
     }
 
     // ============================================================================

@@ -45,6 +45,8 @@ import com.bothbubbles.ui.chat.composer.components.PanelDragHandle
  * @param onLocationClick Callback when location is selected
  * @param onAudioClick Callback when audio recording is requested
  * @param onContactClick Callback when contact sharing is selected
+ * @param onEtaClick Callback when ETA sharing is selected
+ * @param isEtaSharingAvailable Whether ETA sharing is available (navigation active)
  * @param onEmojiSelected Callback when an emoji is selected
  * @param gifPickerState State for the GIF picker
  * @param gifSearchQuery Current GIF search query
@@ -67,6 +69,8 @@ fun ComposerPanelHost(
     onLocationClick: () -> Unit,
     onAudioClick: () -> Unit,
     onContactClick: () -> Unit,
+    onEtaClick: () -> Unit = {},
+    isEtaSharingAvailable: Boolean = false,
     onEmojiSelected: (String) -> Unit,
     gifPickerState: GifPickerState,
     gifSearchQuery: String,
@@ -148,6 +152,8 @@ fun ComposerPanelHost(
                         onLocationClick = onLocationClick,
                         onAudioClick = onAudioClick,
                         onContactClick = onContactClick,
+                        onEtaClick = onEtaClick,
+                        isEtaSharingAvailable = isEtaSharingAvailable,
                         onDismiss = onDismiss
                     )
                 }
@@ -209,6 +215,8 @@ fun ComposerPanelHostSimple(
     onLocationClick: () -> Unit,
     onAudioClick: () -> Unit,
     onContactClick: () -> Unit,
+    onEtaClick: () -> Unit = {},
+    isEtaSharingAvailable: Boolean = false,
     onEmojiSelected: (String) -> Unit,
     onGifPanelRequest: () -> Unit = {},
     onDismiss: () -> Unit,
@@ -226,6 +234,8 @@ fun ComposerPanelHostSimple(
         onLocationClick = onLocationClick,
         onAudioClick = onAudioClick,
         onContactClick = onContactClick,
+        onEtaClick = onEtaClick,
+        isEtaSharingAvailable = isEtaSharingAvailable,
         onEmojiSelected = onEmojiSelected,
         gifPickerState = GifPickerState.Idle,
         gifSearchQuery = "",

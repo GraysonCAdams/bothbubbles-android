@@ -178,7 +178,10 @@ class ConversationsViewModel @Inject constructor(
             observerDelegate.events.collect { event ->
                 when (event) {
                     is ConversationEvent.DataChanged -> refreshAllLoadedPages()
-                    is ConversationEvent.NewMessage -> refreshAllLoadedPages()
+                    is ConversationEvent.NewMessage -> {
+                        refreshAllLoadedPages()
+                        _newMessageEvent.emit(Unit)
+                    }
                     is ConversationEvent.MessageUpdated -> refreshAllLoadedPages()
                     is ConversationEvent.ChatRead -> optimisticallyMarkChatRead(event.chatGuid)
                     // Actions events are not emitted by observer delegate
@@ -217,6 +220,10 @@ class ConversationsViewModel @Inject constructor(
     private val _scrollToIndexEvent = MutableSharedFlow<Int>(extraBufferCapacity = 1)
     val scrollToIndexEvent: SharedFlow<Int> = _scrollToIndexEvent.asSharedFlow()
 
+    // New message event for UI to trigger scroll-to-top when near top
+    private val _newMessageEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val newMessageEvent: SharedFlow<Unit> = _newMessageEvent.asSharedFlow()
+
     /**
      * Observe state from delegates and merge into UI state.
      */
@@ -226,13 +233,15 @@ class ConversationsViewModel @Inject constructor(
             combine(
                 observerDelegate.isConnected,
                 observerDelegate.connectionState,
-                observerDelegate.unifiedSyncProgress
-            ) { isConnected, connectionState, unifiedSyncProgress ->
+                observerDelegate.unifiedSyncProgress,
+                observerDelegate.totalUnreadCount
+            ) { isConnected, connectionState, unifiedSyncProgress, totalUnreadCount ->
                 _uiState.update {
                     it.copy(
                         isConnected = isConnected,
                         connectionState = connectionState,
-                        unifiedSyncProgress = unifiedSyncProgress
+                        unifiedSyncProgress = unifiedSyncProgress,
+                        totalUnreadCount = totalUnreadCount
                     )
                 }
             }.collect()

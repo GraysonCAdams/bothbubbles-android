@@ -89,6 +89,10 @@ class ConversationObserverDelegate @AssistedInject constructor(
     private val _categorizationState = MutableStateFlow<CategorizationState>(CategorizationState.Idle)
     private val _isExpanded = MutableStateFlow(false)
 
+    // Total unread count from database (matches app icon badge)
+    private val _totalUnreadCount = MutableStateFlow(0)
+    val totalUnreadCount: StateFlow<Int> = _totalUnreadCount.asStateFlow()
+
     // ============================================================================
     // Initialization - Phase 8: All setup happens in init block
     // ============================================================================
@@ -102,6 +106,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
         observeNewMessagesFromSocket()
         observeMessageUpdatesFromSocket()
         observeChatReadFromSocket()
+        observeTotalUnreadCount()
     }
 
     /**
@@ -522,6 +527,19 @@ class ConversationObserverDelegate @AssistedInject constructor(
                 .collect { event ->
                     Timber.d("Socket: Chat read ${event.chatGuid}")
                     _events.emit(ConversationEvent.ChatRead(event.chatGuid))
+                }
+        }
+    }
+
+    /**
+     * Observe total unread count from database (chats table).
+     * Uses the same source as conversation list items for consistency.
+     */
+    private fun observeTotalUnreadCount() {
+        scope.launch {
+            chatRepository.observeTotalUnreadMessageCount()
+                .collect { count ->
+                    _totalUnreadCount.value = count
                 }
         }
     }

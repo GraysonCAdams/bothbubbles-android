@@ -56,7 +56,8 @@ class FakePendingMessageRepository : PendingMessageSource {
         effectId: String?,
         attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
-        forcedLocalId: String?
+        forcedLocalId: String?,
+        attributedBodyJson: String?
     ): Result<String> {
         val localId = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         queuedMessages.add(
@@ -101,6 +102,10 @@ class FakePendingMessageRepository : PendingMessageSource {
     }
 
     override suspend fun cleanupSentMessages() {
+        // No-op in fake
+    }
+
+    override suspend fun cleanupOrphanedTempMessages() {
         // No-op in fake
     }
 

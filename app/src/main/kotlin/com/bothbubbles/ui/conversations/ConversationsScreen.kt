@@ -216,6 +216,19 @@ fun ConversationsScreen(
         }
     }
 
+    // Auto-scroll to top on new message if user is near the top (within top 20%)
+    LaunchedEffect(Unit) {
+        viewModel.newMessageEvent.collect {
+            val totalItems = listState.layoutInfo.totalItemsCount
+            val firstVisibleIndex = listState.firstVisibleItemIndex
+            // Scroll if in top 20% of the list (or if list is small, use threshold of 5 items)
+            val threshold = maxOf(5, (totalItems * 0.2).toInt())
+            if (firstVisibleIndex < threshold) {
+                listState.animateScrollToItem(0)
+            }
+        }
+    }
+
     val density = LocalDensity.current
 
     // Selection mode state
@@ -366,6 +379,7 @@ fun ConversationsScreen(
                                 categorizationEnabled = uiState.categorizationEnabled,
                                 enabledCategories = enabledCategories,
                                 hasSettingsWarning = uiState.hasSettingsWarning,
+                                totalUnreadCount = uiState.totalUnreadCount,
                                 onFilterSelected = { filter ->
                                     viewModel.setConversationFilter(filter.name.lowercase())
                                 },

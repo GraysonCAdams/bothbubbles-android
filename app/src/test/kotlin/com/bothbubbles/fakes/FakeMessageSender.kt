@@ -37,6 +37,9 @@ class FakeMessageSender : MessageSender {
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
     override val uploadProgress: StateFlow<UploadProgress?> = _uploadProgress
 
+    private val _guidReplacementEvents = kotlinx.coroutines.flow.MutableSharedFlow<com.bothbubbles.services.messaging.GuidReplacementEvent>()
+    override val guidReplacementEvents: kotlinx.coroutines.flow.SharedFlow<com.bothbubbles.services.messaging.GuidReplacementEvent> = _guidReplacementEvents
+
     // ===== Configurable Results =====
 
     var sendUnifiedResult: Result<MessageEntity> = Result.failure(NotImplementedError("Configure sendUnifiedResult"))
@@ -75,7 +78,8 @@ class FakeMessageSender : MessageSender {
         attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
         subscriptionId: Int,
-        tempGuid: String?
+        tempGuid: String?,
+        attributedBodyJson: String?
     ): Result<MessageEntity> {
         sendUnifiedCalls.add(SendUnifiedCall(chatGuid, text, replyToGuid, effectId, subject, attachments, deliveryMode, subscriptionId, tempGuid))
         return sendUnifiedResult
@@ -147,6 +151,10 @@ class FakeMessageSender : MessageSender {
     override suspend fun canRetryAsSms(messageGuid: String): Boolean {
         canRetryAsSmsCalls.add(messageGuid)
         return canRetryAsSmsResult
+    }
+
+    override suspend fun deleteFailedMessage(messageGuid: String) {
+        // No-op in fake
     }
 
     override suspend fun forwardMessage(

@@ -1,10 +1,14 @@
 package com.bothbubbles.ui.chat
 
+import android.Manifest
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.FileProvider
+import com.google.android.gms.location.LocationServices
+import com.google.android.gms.location.Priority
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -232,6 +236,52 @@ fun ChatScreen(
         }
     }
 
+    // Location permission launcher for sharing current location as native vLocation
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { permissions ->
+        val fineGranted = permissions[Manifest.permission.ACCESS_FINE_LOCATION] == true
+        val coarseGranted = permissions[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (fineGranted || coarseGranted) {
+            // Show loading indicator while fetching GPS location
+            viewModel.composer.setFetchingLocation(true)
+            // Get current location and send as native Apple vLocation format
+            try {
+                val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
+                fusedLocationClient.getCurrentLocation(Priority.PRIORITY_HIGH_ACCURACY, null)
+                    .addOnSuccessListener { location ->
+                        viewModel.composer.setFetchingLocation(false)
+                        location?.let {
+                            // Create vLocation attachment (Apple's native iMessage format)
+                            val success = viewModel.composer.addLocationAsVLocation(
+                                latitude = it.latitude,
+                                longitude = it.longitude
+                            )
+                            if (success) {
+                                // Send immediately
+                                viewModel.sendMessage()
+                                // Dismiss media picker panel
+                                viewModel.composer.dismissPanel()
+                            } else {
+                                Toast.makeText(context, "Failed to create location", Toast.LENGTH_SHORT).show()
+                            }
+                        } ?: run {
+                            Toast.makeText(context, "Unable to get location", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                    .addOnFailureListener {
+                        viewModel.composer.setFetchingLocation(false)
+                        Toast.makeText(context, "Failed to get location", Toast.LENGTH_SHORT).show()
+                    }
+            } catch (e: SecurityException) {
+                viewModel.composer.setFetchingLocation(false)
+                Toast.makeText(context, "Location permission required", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            Toast.makeText(context, "Location permission required", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Stock camera - Photo capture
     var takePhotoUri by remember { mutableStateOf<Uri?>(null) }
     val takePhotoLauncher = rememberLauncherForActivityResult(
@@ -240,6 +290,9 @@ fun ChatScreen(
         if (success) {
             takePhotoUri?.let { uri ->
                 viewModel.composer.addAttachment(uri)
+                // Collapse media picker and show keyboard
+                viewModel.composer.dismissPanel()
+                viewModel.composer.requestTextFieldFocus()
             }
         }
     }
@@ -252,9 +305,15 @@ fun ChatScreen(
         if (success) {
             takeVideoUri?.let { uri ->
                 viewModel.composer.addAttachment(uri)
+                // Collapse media picker and show keyboard
+                viewModel.composer.dismissPanel()
+                viewModel.composer.requestTextFieldFocus()
             }
         }
     }
+
+    // Collect ETA sharing state for media picker (needs to show ETA option when navigation active)
+    val etaSharingState by viewModel.etaSharing.etaSharingState.collectAsStateWithLifecycle()
 
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
@@ -448,8 +507,22 @@ fun ChatScreen(
                 onComposerEvent = { event -> viewModel.onComposerEvent(event) },
                 onMediaSelected = { uris -> viewModel.composer.addAttachments(uris) },
                 onFileClick = { filePickerLauncher.launch(arrayOf("*/*")) },
-                onLocationClick = { /* TODO: Launch location picker */ },
+                onLocationClick = {
+                    locationPermissionLauncher.launch(
+                        arrayOf(
+                            Manifest.permission.ACCESS_FINE_LOCATION,
+                            Manifest.permission.ACCESS_COARSE_LOCATION
+                        )
+                    )
+                },
                 onContactClick = { contactPickerLauncher.launch(null) },
+                onEtaClick = {
+                    viewModel.etaSharing.startSharingEta(chatGuid, chatInfoState.chatTitle)
+                },
+                // Show ETA option when navigation is active, enabled, and not currently sharing
+                isEtaSharingAvailable = etaSharingState.isEnabled &&
+                    etaSharingState.isNavigationActive &&
+                    !etaSharingState.isCurrentlySharing,
                 onGifSearchQueryChange = { viewModel.composer.updateGifSearchQuery(it) },
                 onGifSearch = { viewModel.composer.searchGifs(it) },
                 onGifSelected = { gif -> viewModel.composer.selectGif(gif) },

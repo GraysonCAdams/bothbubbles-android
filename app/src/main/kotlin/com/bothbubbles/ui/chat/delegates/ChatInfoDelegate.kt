@@ -68,8 +68,8 @@ class ChatInfoDelegate @AssistedInject constructor(
 
     companion object {
         private const val TAG = "ChatInfoDelegate"
-        /** Buffer time added to sync interval for stale threshold */
-        private const val LOCATION_STALE_BUFFER_MINUTES = 5
+        /** Threshold for considering location data stale (matches ConversationDetailsLife360) */
+        private const val LOCATION_STALE_THRESHOLD_MS = 30 * 60 * 1000L // 30 minutes
     }
 
     private val _state = MutableStateFlow(ChatInfoState())
@@ -220,7 +220,6 @@ class ChatInfoDelegate @AssistedInject constructor(
      */
     private fun observeLife360Location() {
         scope.launch {
-            // Combine participants with poll interval to determine stale threshold
             chatRepository.observeParticipantsForChat(chatGuid)
                 .flatMapLatest { participants ->
                     // Only for 1:1 chats
@@ -233,19 +232,15 @@ class ChatInfoDelegate @AssistedInject constructor(
                         flowOf(null)
                     }
                 }
-                .combine(featurePreferences.life360PollIntervalMinutes) { member, pollInterval ->
-                    member to pollInterval
-                }
-                .collect { (member, pollInterval) ->
+                .collect { member ->
                     if (member == null) {
                         _state.update { it.copy(locationSubtext = null, life360Member = null) }
                         return@collect
                     }
 
                     val location = member.location
-                    val staleThresholdMs = (pollInterval + LOCATION_STALE_BUFFER_MINUTES) * 60 * 1000L
                     val isStale = location == null ||
-                        (System.currentTimeMillis() - location.timestamp) > staleThresholdMs
+                        (System.currentTimeMillis() - location.timestamp) > LOCATION_STALE_THRESHOLD_MS
 
                     val placeName = location?.placeName
                     val address = location?.address

@@ -6,6 +6,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
@@ -185,35 +186,42 @@ private fun ChatTopBarContent(
             }
         },
         actions = {
-            // Video call button
-            IconButton(onClick = onVideoCallClick) {
-                Icon(Icons.Outlined.Videocam, contentDescription = "Video call")
-            }
-
-            // Overflow menu button
-            Box {
-                IconButton(onClick = { showOverflowMenu.value = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More")
+            if (isBubbleMode) {
+                // In bubble mode, show only expand button to open full app
+                IconButton(onClick = onDetailsClick) {
+                    Icon(Icons.Default.OpenInFull, contentDescription = "Open in app")
+                }
+            } else {
+                // Video call button
+                IconButton(onClick = onVideoCallClick) {
+                    Icon(Icons.Outlined.Videocam, contentDescription = "Video call")
                 }
 
-                ChatOverflowMenu(
-                    expanded = showOverflowMenu.value,
-                    onDismissRequest = { showOverflowMenu.value = false },
-                    menuState = ChatMenuState(
-                        isGroupChat = isGroup,
-                        isArchived = isArchived,
-                        isStarred = isStarred,
-                        showSubjectField = showSubjectField,
-                        isSmsChat = isLocalSmsChat,
-                        showSendModeSwitch = showSendModeSwitch,
-                        currentSendMode = currentSendMode,
-                        isBubbleMode = isBubbleMode
-                    ),
-                    onAction = { action ->
-                        onMenuAction(action)
-                        showOverflowMenu.value = false
+                // Overflow menu button
+                Box {
+                    IconButton(onClick = { showOverflowMenu.value = true }) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "More")
                     }
-                )
+
+                    ChatOverflowMenu(
+                        expanded = showOverflowMenu.value,
+                        onDismissRequest = { showOverflowMenu.value = false },
+                        menuState = ChatMenuState(
+                            isGroupChat = isGroup,
+                            isArchived = isArchived,
+                            isStarred = isStarred,
+                            showSubjectField = showSubjectField,
+                            isSmsChat = isLocalSmsChat,
+                            showSendModeSwitch = showSendModeSwitch,
+                            currentSendMode = currentSendMode,
+                            isBubbleMode = isBubbleMode
+                        ),
+                        onAction = { action ->
+                            onMenuAction(action)
+                            showOverflowMenu.value = false
+                        }
+                    )
+                }
             }
         },
         modifier = modifier

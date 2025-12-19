@@ -93,6 +93,8 @@ fun ChatComposer(
     onFileClick: () -> Unit = { /* TODO: Implement file picker */ },
     onLocationClick: () -> Unit = { /* TODO: Implement location sharing */ },
     onContactClick: () -> Unit = { /* TODO: Implement contact sharing */ },
+    onEtaClick: () -> Unit = {},
+    isEtaSharingAvailable: Boolean = false,
     // GIF Picker callbacks
     gifPickerState: com.bothbubbles.ui.chat.composer.panels.GifPickerState = com.bothbubbles.ui.chat.composer.panels.GifPickerState.Idle,
     gifSearchQuery: String = "",
@@ -100,6 +102,9 @@ fun ChatComposer(
     onGifSearch: (String) -> Unit = {},
     onGifSelected: (com.bothbubbles.ui.chat.composer.panels.GifItem) -> Unit = {},
     onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    // Text field focus request (e.g., after camera capture)
+    shouldRequestFocus: Boolean = false,
+    onFocusRequested: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
@@ -215,6 +220,8 @@ fun ChatComposer(
                     )
                 },
                 onSendButtonBoundsChanged = onSendButtonBoundsChanged,
+                shouldRequestFocus = shouldRequestFocus,
+                onFocusRequested = onFocusRequested,
                 modifier = Modifier.offset(y = currentOffsetDp)
             )
 
@@ -229,6 +236,8 @@ fun ChatComposer(
                 onLocationClick = onLocationClick,
                 onAudioClick = { onEvent(ComposerEvent.StartVoiceRecording) },
                 onContactClick = onContactClick,
+                onEtaClick = onEtaClick,
+                isEtaSharingAvailable = isEtaSharingAvailable,
                 onEmojiSelected = { emoji ->
                     onEvent(ComposerEvent.TextChanged(state.text + emoji))
                 },
@@ -267,6 +276,8 @@ private fun MainInputRow(
     onEvent: (ComposerEvent) -> Unit,
     onGalleryClick: () -> Unit,
     onSendButtonBoundsChanged: (androidx.compose.ui.geometry.Rect) -> Unit = {},
+    shouldRequestFocus: Boolean = false,
+    onFocusRequested: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
@@ -302,7 +313,9 @@ private fun MainInputRow(
                     TextInputContent(
                         state = state,
                         onEvent = onEvent,
-                        onGalleryClick = onGalleryClick
+                        onGalleryClick = onGalleryClick,
+                        shouldRequestFocus = shouldRequestFocus,
+                        onFocusRequested = onFocusRequested
                     )
                 }
                 ComposerInputMode.VOICE_RECORDING -> {
@@ -360,7 +373,9 @@ private fun MainInputRow(
 private fun TextInputContent(
     state: ComposerState,
     onEvent: (ComposerEvent) -> Unit,
-    onGalleryClick: () -> Unit
+    onGalleryClick: () -> Unit,
+    shouldRequestFocus: Boolean = false,
+    onFocusRequested: () -> Unit = {}
 ) {
     // MentionPopup moved to ChatComposer Column to avoid intrinsic measurement crash
     ComposerTextField(
@@ -374,6 +389,8 @@ private fun TextInputContent(
         isEnabled = !state.smsInputBlocked,
         onSmsBlockedClick = { onEvent(ComposerEvent.SmsInputBlockedTapped) },
         onFocusChanged = { onEvent(ComposerEvent.TextFieldFocusChanged(it)) },
+        shouldRequestFocus = shouldRequestFocus,
+        onFocusRequested = onFocusRequested,
         leadingContent = {
             ComposerActionButtons(
                 isExpanded = state.isPickerExpanded,

@@ -283,8 +283,8 @@ fun Life360LocationSection(
                     }
                 }
 
-                // Battery if available
-                if (life360Member.battery != null) {
+                // Battery if available (only show when location is valid, not when outdated)
+                if (life360Member.battery != null && hasValidLocation) {
                     val batteryText = buildString {
                         append("Battery: ${life360Member.battery}%")
                         if (life360Member.isCharging == true) append(" (charging)")
@@ -518,10 +518,7 @@ fun Life360LocationActionsSheet(
                 label = "Open in Life360",
                 subtitle = "View full details in Life360 app",
                 onClick = {
-                    val intent = context.packageManager.getLaunchIntentForPackage("com.life360.android.safetymapd")
-                    if (intent != null) {
-                        context.startActivity(intent)
-                    }
+                    openLife360App(context)
                     onDismiss()
                 }
             )
@@ -600,6 +597,44 @@ private fun LocationActionItem(
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+private const val LIFE360_PACKAGE = "com.life360.android.safetymapd"
+
+/**
+ * Opens the Life360 app, with fallback to Play Store if not installed.
+ */
+private fun openLife360App(context: Context) {
+    // Try launching the app directly with ACTION_VIEW for better intent resolution
+    val launchIntent = Intent(Intent.ACTION_VIEW).apply {
+        `package` = LIFE360_PACKAGE
+        data = Uri.parse("life360://")
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+
+    try {
+        context.startActivity(launchIntent)
+        return
+    } catch (_: Exception) {
+        // Deep link didn't work, try package launch
+    }
+
+    // Try standard package launch
+    val packageIntent = context.packageManager.getLaunchIntentForPackage(LIFE360_PACKAGE)
+    if (packageIntent != null) {
+        context.startActivity(packageIntent)
+        return
+    }
+
+    // App not installed, open Play Store
+    try {
+        val playStoreIntent = Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=$LIFE360_PACKAGE"))
+        context.startActivity(playStoreIntent)
+    } catch (_: Exception) {
+        // Play Store not available, open web
+        val webIntent = Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=$LIFE360_PACKAGE"))
+        context.startActivity(webIntent)
     }
 }
 

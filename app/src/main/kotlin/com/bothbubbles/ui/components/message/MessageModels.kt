@@ -317,8 +317,16 @@ data class AttachmentUiModel(
         get() = mimeType == "image/gif"
 
     val isVCard: Boolean
-        get() = mimeType == "text/vcard" || mimeType == "text/x-vcard" ||
-                transferName?.lowercase()?.endsWith(".vcf") == true
+        get() = (mimeType == "text/vcard" || mimeType == "text/x-vcard" ||
+                transferName?.lowercase()?.endsWith(".vcf") == true) && !isVLocation
+
+    /**
+     * True if this is an Apple vLocation attachment (native iMessage location format).
+     * Identified by MIME type text/x-vlocation or .loc.vcf extension.
+     */
+    val isVLocation: Boolean
+        get() = mimeType == "text/x-vlocation" ||
+                transferName?.lowercase()?.endsWith(".loc.vcf") == true
 
     val friendlySize: String
         get() = when {

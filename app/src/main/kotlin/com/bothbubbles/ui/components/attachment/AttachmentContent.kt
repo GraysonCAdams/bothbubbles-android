@@ -87,6 +87,7 @@ fun AttachmentContent(
             attachment.isVideo -> "VIDEO"
             attachment.isAudio -> "AUDIO"
             attachment.isVCard -> "VCARD"
+            attachment.isVLocation -> "VLOCATION"
             else -> "FILE"
         }
         Timber.tag("AttachmentDebug").d("   RENDER PATH: $renderPath")
@@ -143,6 +144,13 @@ fun AttachmentContent(
                 )
             )
             attachment.isVCard -> ContactAttachment(
+                attachment = attachment,
+                interactions = AttachmentInteractions(
+                    onClick = { onMediaClick(attachment.guid) }
+                ),
+                isFromMe = isFromMe
+            )
+            attachment.isVLocation -> LocationAttachment(
                 attachment = attachment,
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) }

@@ -64,6 +64,8 @@ fun ChatInputUI(
     onFileClick: () -> Unit,
     onLocationClick: () -> Unit,
     onContactClick: () -> Unit,
+    onEtaClick: () -> Unit = {},
+    isEtaSharingAvailable: Boolean = false,
     // Callbacks - GIF picker
     onGifSearchQueryChange: (String) -> Unit,
     onGifSearch: (String) -> Unit,
@@ -94,6 +96,9 @@ fun ChatInputUI(
     val smartReplySuggestions by composerDelegate.smartReplySuggestions.collectAsStateWithLifecycle()
     val gifPickerState by composerDelegate.gifPickerState.collectAsStateWithLifecycle()
     val gifSearchQuery by composerDelegate.gifSearchQuery.collectAsStateWithLifecycle()
+
+    // Focus request state (e.g., after camera capture to show keyboard)
+    val shouldRequestFocus by composerDelegate.requestTextFieldFocus.collectAsStateWithLifecycle()
     // Audio permission launcher
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -107,8 +112,10 @@ fun ChatInputUI(
 
     Column(
         modifier = modifier
-            .navigationBarsPadding()
-            .imePadding()
+            // Skip system bar insets in bubble mode - bubbles are floating windows without
+            // their own system bars. Using these in bubbles causes incorrect padding.
+            .then(if (!isBubbleMode) Modifier.navigationBarsPadding() else Modifier)
+            .then(if (!isBubbleMode) Modifier.imePadding() else Modifier)
             .onSizeChanged { size -> onSizeChanged(size.height) }
     ) {
         // Note: Both attachment and emoji pickers are rendered inside ChatComposer's ComposerPanelHost
@@ -216,13 +223,19 @@ fun ChatInputUI(
             onFileClick = if (isBubbleMode) ({ }) else onFileClick,
             onLocationClick = if (isBubbleMode) ({ }) else onLocationClick,
             onContactClick = if (isBubbleMode) ({ }) else onContactClick,
+            // ETA sharing - disabled in bubble mode
+            onEtaClick = if (isBubbleMode) ({ }) else onEtaClick,
+            isEtaSharingAvailable = if (isBubbleMode) false else isEtaSharingAvailable,
             // GIF Picker - collected internally from delegate
             gifPickerState = gifPickerState,
             gifSearchQuery = gifSearchQuery,
             onGifSearchQueryChange = onGifSearchQueryChange,
             onGifSearch = onGifSearch,
             onGifSelected = onGifSelected,
-            onSendButtonBoundsChanged = onSendButtonBoundsChanged
+            onSendButtonBoundsChanged = onSendButtonBoundsChanged,
+            // Focus request (e.g., after camera capture to show keyboard)
+            shouldRequestFocus = shouldRequestFocus,
+            onFocusRequested = { composerDelegate.clearTextFieldFocusRequest() }
         )
     }
 }

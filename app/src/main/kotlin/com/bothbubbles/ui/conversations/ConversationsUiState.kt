@@ -48,7 +48,9 @@ data class ConversationsUiState(
     val remindersEnabled: Boolean = true,
     // Conversation filter state (persisted)
     val conversationFilter: String = "all",
-    val categoryFilter: String? = null
+    val categoryFilter: String? = null,
+    // Total unread count from database (matches app icon badge)
+    val totalUnreadCount: Int = 0
 ) {
     /**
      * True when there's a problem in settings that needs attention.

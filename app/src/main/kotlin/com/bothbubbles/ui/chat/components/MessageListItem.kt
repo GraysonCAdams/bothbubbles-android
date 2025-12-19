@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import com.bothbubbles.ui.chat.ChatScreenState
@@ -147,8 +148,9 @@ fun MessageListItem(
         else -> 2.dp
     }
     // Add extra padding if this message has reactions to prevent overlap with previous message
-    // Reactions are positioned at -14dp Y offset, so add 14dp extra for messages with reactions
-    val topPadding = if (message.reactions.isNotEmpty()) basePadding + 14.dp else basePadding
+    // Reactions are positioned at -14dp Y offset. We add 18dp (instead of 14dp) to provide
+    // a 4dp buffer for shadows and emoji font height variations.
+    val topPadding = if (message.reactions.isNotEmpty()) basePadding + 18.dp else basePadding
     val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
     val targetGuid = message.associatedMessageGuid?.let { guid ->
@@ -187,6 +189,7 @@ fun MessageListItem(
 
     Column(
         modifier = Modifier
+            .graphicsLayer { clip = false }
             .zIndex(if (message.isPlacedSticker) 1f else 0f)
             .alpha(stickerFadeAlpha * tapbackHideAlpha)
             .offset(y = stickerOverlapOffset)

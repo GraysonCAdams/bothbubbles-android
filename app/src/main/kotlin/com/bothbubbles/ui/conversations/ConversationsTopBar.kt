@@ -57,6 +57,7 @@ internal fun ConversationsTopBar(
     categorizationEnabled: Boolean,
     enabledCategories: Set<MessageCategory>,
     hasSettingsWarning: Boolean,
+    totalUnreadCount: Int,
     onFilterSelected: (ConversationFilter) -> Unit,
     onCategorySelected: (MessageCategory?) -> Unit,
     onSearchClick: () -> Unit,
@@ -75,25 +76,50 @@ internal fun ConversationsTopBar(
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // App title
-        Text(
-            text = if (useSimpleAppTitle) {
-                buildAnnotatedString { append("Messages") }
-            } else {
-                buildAnnotatedString {
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                        append("Both")
+        // App title with unread badge
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = if (useSimpleAppTitle) {
+                    buildAnnotatedString { append("Messages") }
+                } else {
+                    buildAnnotatedString {
+                        withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+                            append("Both")
+                        }
+                        append("Bubbles")
                     }
-                    append("Bubbles")
+                },
+                style = MaterialTheme.typography.headlineMedium.copy(
+                    fontFamily = KumbhSansFamily,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 22.sp
+                ),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            // Unread count badge
+            if (totalUnreadCount > 0) {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (totalUnreadCount > 10000) "9999+" else totalUnreadCount.toString(),
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
+                        ),
+                        color = MaterialTheme.colorScheme.onPrimary
+                    )
                 }
-            },
-            style = MaterialTheme.typography.headlineMedium.copy(
-                fontFamily = KumbhSansFamily,
-                fontWeight = FontWeight.Normal,
-                fontSize = 22.sp
-            ),
-            color = MaterialTheme.colorScheme.onSurface
-        )
+            }
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 

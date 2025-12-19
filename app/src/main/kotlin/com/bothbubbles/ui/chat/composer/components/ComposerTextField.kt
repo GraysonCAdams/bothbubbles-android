@@ -61,6 +61,8 @@ import kotlinx.collections.immutable.persistentListOf
  * @param isEnabled Whether the text field is enabled
  * @param onSmsBlockedClick Callback when user taps disabled field
  * @param onFocusChanged Callback when focus state changes
+ * @param shouldRequestFocus When true, requests focus on the text field (e.g., after camera capture)
+ * @param onFocusRequested Callback when focus request has been handled (to clear the trigger)
  * @param leadingContent Optional composable for content before the text field
  * @param trailingContent Optional composable for content after the text field
  * @param modifier Modifier for the outer container
@@ -75,6 +77,8 @@ fun ComposerTextField(
     isEnabled: Boolean = true,
     onSmsBlockedClick: () -> Unit = {},
     onFocusChanged: (Boolean) -> Unit = {},
+    shouldRequestFocus: Boolean = false,
+    onFocusRequested: () -> Unit = {},
     leadingContent: @Composable (() -> Unit)? = null,
     trailingContent: @Composable (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -87,6 +91,14 @@ fun ComposerTextField(
 
     // Use TextFieldValue to track both text and cursor position
     var textFieldValue by remember { mutableStateOf(TextFieldValue(text)) }
+
+    // Request focus when triggered (e.g., after camera capture)
+    LaunchedEffect(shouldRequestFocus) {
+        if (shouldRequestFocus) {
+            focusRequester.requestFocus()
+            onFocusRequested()
+        }
+    }
 
     // Sync external text changes (e.g., when mention is inserted)
     LaunchedEffect(text) {

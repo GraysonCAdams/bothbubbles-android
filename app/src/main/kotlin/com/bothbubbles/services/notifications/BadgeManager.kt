@@ -1,6 +1,6 @@
 package com.bothbubbles.services.notifications
 
-import com.bothbubbles.data.repository.UnifiedChatGroupRepository
+import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,7 +12,7 @@ import javax.inject.Singleton
 
 @Singleton
 class BadgeManager @Inject constructor(
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val chatRepository: ChatRepository,
     private val notificationServiceProvider: Provider<NotificationService>,
     @ApplicationScope private val scope: CoroutineScope
 ) {
@@ -21,11 +21,10 @@ class BadgeManager @Inject constructor(
 
     init {
         scope.launch {
-            unifiedChatGroupRepository.observeTotalUnreadCount()
+            chatRepository.observeTotalUnreadMessageCount()
                 .collect { count ->
-                    val unreadCount = count ?: 0
-                    _totalUnread.value = unreadCount
-                    notificationServiceProvider.get().updateAppBadge(unreadCount)
+                    _totalUnread.value = count
+                    notificationServiceProvider.get().updateAppBadge(count)
                 }
         }
     }

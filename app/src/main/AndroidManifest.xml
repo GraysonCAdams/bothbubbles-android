@@ -58,6 +58,27 @@
     <!-- Battery optimization exemption request -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
+    <!-- Package visibility for Android 11+ (API 30+) -->
+    <!-- Required to check if apps are installed and launch them -->
+    <queries>
+        <!-- Discord for video calls -->
+        <package android:name="com.discord" />
+        <!-- Life360 for location sharing -->
+        <package android:name="com.life360.android.safetymapd" />
+        <!-- WhatsApp for video calls -->
+        <package android:name="com.whatsapp" />
+        <!-- Google Maps for navigation -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="google.navigation" />
+        </intent>
+        <!-- Play Store for app installation fallback -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+    </queries>
+
     <application
         android:name=".BothBubblesApp"
         android:allowBackup="true"
@@ -175,6 +196,7 @@
             android:allowEmbedded="true"
             android:documentLaunchMode="always"
             android:resizeableActivity="true"
+            android:windowSoftInputMode="adjustResize"
             android:theme="@style/Theme.BothBubbles" />
 
         <!-- Crash Report Activity (ACRA custom dialog replacement) -->

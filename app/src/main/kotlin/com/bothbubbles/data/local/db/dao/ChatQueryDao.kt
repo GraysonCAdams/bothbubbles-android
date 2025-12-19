@@ -122,6 +122,9 @@ interface ChatQueryDao {
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND has_unread_message = 1")
     fun getUnreadChatCount(): Flow<Int>
 
+    @Query("SELECT COALESCE(SUM(unread_count), 0) FROM chats WHERE date_deleted IS NULL AND is_archived = 0")
+    fun observeTotalUnreadMessageCount(): Flow<Int>
+
     @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_archived = 1")
     fun getArchivedChatCount(): Flow<Int>
 

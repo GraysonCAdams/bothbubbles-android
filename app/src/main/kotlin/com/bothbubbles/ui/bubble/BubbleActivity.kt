@@ -5,7 +5,6 @@ import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.ui.chat.ChatScreen
@@ -46,6 +45,7 @@ class BubbleActivity : ComponentActivity() {
         // Keys matching ChatViewModel's SavedStateHandle expectations
         private const val SAVED_STATE_CHAT_GUID = "chatGuid"
         private const val SAVED_STATE_MERGED_GUIDS = "mergedGuids"
+        private const val SAVED_STATE_IS_BUBBLE_MODE = "isBubbleMode"
 
         /**
          * Create an intent to launch the bubble activity for a specific chat.
@@ -61,6 +61,8 @@ class BubbleActivity : ComponentActivity() {
                 if (mergedGuids != null) {
                     putExtra(SAVED_STATE_MERGED_GUIDS, mergedGuids)
                 }
+                // Mark as bubble mode so ChatViewModel doesn't cancel the notification
+                putExtra(SAVED_STATE_IS_BUBBLE_MODE, true)
                 // Required flags for bubble activities
                 flags = Intent.FLAG_ACTIVITY_NEW_DOCUMENT or Intent.FLAG_ACTIVITY_MULTIPLE_TASK
             }
@@ -68,7 +70,9 @@ class BubbleActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        enableEdgeToEdge()
+        // Note: Do NOT use enableEdgeToEdge() for bubbles - they are floating windows
+        // that don't have their own system bars. Using edge-to-edge causes incorrect
+        // WindowInsets reporting, resulting in extra dead space when the keyboard opens.
         super.onCreate(savedInstanceState)
 
         val chatGuid = intent.getStringExtra(EXTRA_CHAT_GUID) ?: run {

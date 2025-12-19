@@ -61,6 +61,8 @@ class ChatRepository @Inject constructor(
 
     fun observeUnreadChatCount(): Flow<Int> = chatDao.getUnreadChatCount()
 
+    fun observeTotalUnreadMessageCount(): Flow<Int> = chatDao.observeTotalUnreadMessageCount()
+
     // ===== Group/Non-Group Chat Queries =====
 
     suspend fun getGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity> =

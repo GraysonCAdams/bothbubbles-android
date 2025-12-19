@@ -52,6 +52,7 @@ import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
+import android.webkit.WebView
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
 import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
@@ -342,20 +343,29 @@ private fun YouTubePlayerActive(
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var playerView by remember { mutableStateOf<YouTubePlayerView?>(null) }
+    val density = LocalDensity.current
 
-    // Clean up lifecycle observer when composable leaves
+    // Calculate fixed pixel dimensions - this ensures AndroidView gets proper size
+    // The core issue was that Compose layout wasn't providing constraints to AndroidView
+    val widthPx = with(density) { maxWidth.roundToPx() }
+    val heightPx = (widthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val heightDp = with(density) { heightPx.toDp() }
+
+    // Clean up player resources when composable leaves
     DisposableEffect(playerView) {
         onDispose {
             playerView?.let { view ->
                 lifecycleOwner.lifecycle.removeObserver(view)
+                // Release the player to clean up internal resources including
+                // ConnectivityManager callbacks that would otherwise leak MainActivity
+                view.release()
             }
         }
     }
 
     Box(
         modifier = modifier
-            .width(maxWidth)  // Explicit width instead of widthIn
-            .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))  // Explicit height via aspect ratio
+            .size(maxWidth, heightDp)  // Fixed size to ensure child gets constraints
             .clip(RoundedCornerShape(12.dp))
             .background(Color.Black)
             .pointerInput(Unit) {
@@ -366,56 +376,81 @@ private fun YouTubePlayerActive(
             },
         contentAlignment = Alignment.Center
     ) {
-        // YouTube player view
+        // YouTube player view with explicit pixel dimensions in layoutParams
         AndroidView(
             factory = { ctx ->
-                android.util.Log.d("YouTubeAttachment", "Creating YouTubePlayerView for video: $videoId")
-                YouTubePlayerView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+                android.util.Log.d("YouTubeAttachment", "Creating YouTubePlayerView for video: $videoId, target size: ${widthPx}x${heightPx}")
 
-                    // Let library handle automatic initialization (requires lifecycle observer)
+                // Enable WebView debugging to see console errors
+                WebView.setWebContentsDebuggingEnabled(true)
+
+                YouTubePlayerView(ctx).apply {
+                    // Use explicit pixel dimensions instead of MATCH_PARENT
+                    layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
+
+                    // Disable automatic initialization so we can use custom options
+                    enableAutomaticInitialization = false
+
+                    // Register lifecycle observer for pause/resume/release
                     lifecycleOwner.lifecycle.addObserver(this)
                     playerView = this
                     android.util.Log.d("YouTubeAttachment", "Added lifecycle observer")
 
-                    // Add listener to handle player events
-                    addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
-                        override fun onReady(youTubePlayer: YouTubePlayer) {
-                            android.util.Log.d("YouTubeAttachment", "Player READY for video: $videoId")
-                            onPlayerReady(youTubePlayer)
-                            // Load and play the video
-                            if (startTimeSeconds != null) {
-                                android.util.Log.d("YouTubeAttachment", "Loading video at ${startTimeSeconds}s")
-                                youTubePlayer.loadVideo(videoId, startTimeSeconds.toFloat())
-                            } else {
-                                android.util.Log.d("YouTubeAttachment", "Loading video from start")
-                                youTubePlayer.loadVideo(videoId, 0f)
+                    // Configure player options (disable controls since we have custom UI)
+                    val options = IFramePlayerOptions.Builder()
+                        .controls(0)
+                        .rel(0)
+                        .build()
+
+                    // Use OnAttachStateChangeListener to ensure view is attached to window
+                    // before initializing. This is more reliable than post{} for WebViews.
+                    addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
+                        override fun onViewAttachedToWindow(v: android.view.View) {
+                            android.util.Log.d("YouTubeAttachment", "View attached to window: width=$width, height=$height")
+                            // Still use post{} to ensure layout pass completes
+                            post {
+                                android.util.Log.d("YouTubeAttachment", "Post-attach-layout: width=$width, height=$height - initializing player")
+                                initialize(object : AbstractYouTubePlayerListener() {
+                                    override fun onReady(youTubePlayer: YouTubePlayer) {
+                                        android.util.Log.d("YouTubeAttachment", "Player READY for video: $videoId")
+                                        onPlayerReady(youTubePlayer)
+                                        // Load and play the video
+                                        if (startTimeSeconds != null) {
+                                            android.util.Log.d("YouTubeAttachment", "Loading video at ${startTimeSeconds}s")
+                                            youTubePlayer.loadVideo(videoId, startTimeSeconds.toFloat())
+                                        } else {
+                                            android.util.Log.d("YouTubeAttachment", "Loading video from start")
+                                            youTubePlayer.loadVideo(videoId, 0f)
+                                        }
+                                    }
+
+                                    override fun onStateChange(
+                                        youTubePlayer: YouTubePlayer,
+                                        state: PlayerConstants.PlayerState
+                                    ) {
+                                        android.util.Log.d("YouTubeAttachment", "State changed: $state")
+                                        onStateChange(state)
+                                    }
+
+                                    override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
+                                        onCurrentSecond(second)
+                                    }
+
+                                    override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
+                                        android.util.Log.e("YouTubeAttachment", "Player ERROR: $error for video $videoId")
+                                    }
+                                }, options)
+                                android.util.Log.d("YouTubeAttachment", "Initialized player after attach+layout")
                             }
                         }
 
-                        override fun onStateChange(
-                            youTubePlayer: YouTubePlayer,
-                            state: PlayerConstants.PlayerState
-                        ) {
-                            android.util.Log.d("YouTubeAttachment", "State changed: $state")
-                            onStateChange(state)
-                        }
-
-                        override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
-                            onCurrentSecond(second)
-                        }
-
-                        override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
-                            android.util.Log.e("YouTubeAttachment", "Player ERROR: $error for video $videoId")
+                        override fun onViewDetachedFromWindow(v: android.view.View) {
+                            android.util.Log.d("YouTubeAttachment", "View detached from window")
                         }
                     })
-                    android.util.Log.d("YouTubeAttachment", "Listener added, waiting for auto-init")
                 }
             },
-            modifier = Modifier.fillMaxSize(),  // Fill the parent Box
+            modifier = Modifier.size(maxWidth, heightDp),  // Match parent Box size exactly
             update = { view ->
                 android.util.Log.d("YouTubeAttachment", "AndroidView update: width=${view.width}, height=${view.height}")
             }

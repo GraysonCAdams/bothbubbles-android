@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -16,6 +17,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ElevatedCard
@@ -66,88 +68,116 @@ fun AttachmentPreview(
         onClick = onClick ?: {}
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            AsyncImage(
-                model = ImageRequest.Builder(context)
-                    .data(uri)
-                    .crossfade(true)
-                    .build(),
-                contentDescription = "Attachment",
-                modifier = Modifier.fillMaxSize(),
-                contentScale = ContentScale.Crop
-            )
+            // vLocation: Show location icon placeholder
+            if (fileInfo.isVLocation) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.primaryContainer),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = "Location",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
+            } else {
+                // Regular media: Show image/video preview
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(uri)
+                        .crossfade(true)
+                        .build(),
+                    contentDescription = "Attachment",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
 
-            // Semi-transparent gradient overlay at bottom for text visibility
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .height(32.dp)
-                    .background(
-                        brush = Brush.verticalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.Black.copy(alpha = 0.7f)
+                // Semi-transparent gradient overlay at bottom for text visibility
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                colors = listOf(
+                                    Color.Transparent,
+                                    Color.Black.copy(alpha = 0.7f)
+                                )
                             )
                         )
-                    )
-            )
+                )
 
-            // File size at bottom left, or caption indicator
-            Text(
-                text = if (caption != null) "\uD83D\uDCAC" else fileInfo.formattedSize,
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White,
-                modifier = Modifier
-                    .align(Alignment.BottomStart)
-                    .padding(start = 8.dp, bottom = 6.dp)
-            )
-
-            // Video duration badge at bottom right (for videos)
-            if (fileInfo.isVideo && fileInfo.durationFormatted != null) {
-                Row(
+                // File size at bottom left, or caption indicator
+                Text(
+                    text = if (caption != null) "\uD83D\uDCAC" else fileInfo.formattedSize,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.White,
                     modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(end = 8.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = fileInfo.durationFormatted,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = Color.White
-                    )
+                        .align(Alignment.BottomStart)
+                        .padding(start = 8.dp, bottom = 6.dp)
+                )
+
+                // Video duration badge at bottom right (for videos)
+                if (fileInfo.isVideo && fileInfo.durationFormatted != null) {
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 8.dp, bottom = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = fileInfo.durationFormatted,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.White
+                        )
+                    }
+                }
+
+                // Edit button overlay (top left) - only show for images
+                // Uses FilledTonalIconButton for MD3 consistency
+                if (onEdit != null && fileInfo.isImage) {
+                    FilledTonalIconButton(
+                        onClick = onEdit,
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .size(28.dp),
+                        colors = IconButtonDefaults.filledTonalIconButtonColors(
+                            containerColor = Color.Black.copy(alpha = 0.6f),
+                            contentColor = Color.White
+                        )
+                    ) {
+                        Icon(
+                            Icons.Default.Edit,
+                            contentDescription = "Edit attachment",
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
                 }
             }
 
-            // Edit button overlay (top left) - only show for images
-            // Uses FilledTonalIconButton for MD3 consistency
-            if (onEdit != null && fileInfo.isImage) {
-                FilledTonalIconButton(
-                    onClick = onEdit,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(4.dp)
-                        .size(28.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = Color.Black.copy(alpha = 0.6f),
-                        contentColor = Color.White
-                    )
-                ) {
-                    Icon(
-                        Icons.Default.Edit,
-                        contentDescription = "Edit attachment",
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-
-            // Remove button overlay (top right)
+            // Remove button overlay (top right) - always shown
             // Uses FilledTonalIconButton for MD3 consistency
             FilledTonalIconButton(
                 onClick = onRemove,
