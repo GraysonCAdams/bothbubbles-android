@@ -103,18 +103,11 @@ class PendingMessageRepository @Inject constructor(
         forcedLocalId: String?,
         attributedBodyJson: String?
     ): Result<String> = runCatching {
-        val startTime = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage START ──")
-        Timber.i("[SEND_TRACE] chatGuid=$chatGuid, mode=$deliveryMode, attachments=${attachments.size}")
-
         // Use "temp-" prefix so MessageEntity.isSent correctly returns false
         val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] clientGuid=$clientGuid +${System.currentTimeMillis() - startTime}ms")
 
-        // ═══════════════════════════════════════════════════════════════════════════
-        // GLOBAL DUPLICATE DETECTION at Repository level
-        // ═══════════════════════════════════════════════════════════════════════════
+        // Track recent sends for potential duplicate detection (debugging)
         val textForHash = text?.trim() ?: ""
         if (textForHash.isNotBlank()) {
             val textHash = textForHash.hashCode()
@@ -124,31 +117,6 @@ class PendingMessageRepository @Inject constructor(
             val cutoffTime = createdAt - globalDuplicateWindowMs
             synchronized(globalRecentSends) {
                 globalRecentSends.removeAll { it.timestamp < cutoffTime }
-
-                // Check for duplicate in same chat
-                val sameChatDuplicate = globalRecentSends.find {
-                    it.chatGuid == chatGuid && it.textHash == textHash
-                }
-                if (sameChatDuplicate != null) {
-                    val timeSince = (createdAt - sameChatDuplicate.timestamp) / 1000
-                    Timber.w("[REPO_DUPLICATE] ⚠️ ═══════════════════════════════════════════════════════")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ DUPLICATE QUEUED at Repository level!")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ Text: \"$textPreview...\"")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ Same text queued ${timeSince}s ago in same chat")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ Previous localId: ${sameChatDuplicate.localId}")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ Current localId: $clientGuid")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ Chat: $chatGuid")
-                    Timber.w("[REPO_DUPLICATE] ⚠️ ═══════════════════════════════════════════════════════")
-                }
-
-                // Check for duplicate across ANY chat (very suspicious)
-                val anyChatDuplicate = globalRecentSends.find {
-                    it.chatGuid != chatGuid && it.textHash == textHash
-                }
-                if (anyChatDuplicate != null) {
-                    val timeSince = (createdAt - anyChatDuplicate.timestamp) / 1000
-                    Timber.i("[REPO_DUPLICATE] Same text sent to different chat ${timeSince}s ago (probably intentional forward)")
-                }
 
                 // Record this queue
                 globalRecentSends.add(GlobalRecentSend(
@@ -168,15 +136,13 @@ class PendingMessageRepository @Inject constructor(
         val messageSource = inferMessageSource(chatGuid, deliveryMode)
 
         // Persist attachments to internal storage first (outside transaction for I/O)
-        val attachPersistStart = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] Persisting ${attachments.size} attachments +${System.currentTimeMillis() - startTime}ms")
         val persistedAttachments = if (attachments.isNotEmpty()) {
             attachments.mapIndexedNotNull { index, input ->
                 val uri = input.uri
                 val attachmentLocalId = "$clientGuid-att-$index"
                 attachmentPersistenceManager.persistAttachment(uri, attachmentLocalId)
                     .onFailure { e ->
-                        Timber.e(e, "[SEND_TRACE] Failed to persist attachment: $uri")
+                        Timber.e(e, "Failed to persist attachment: $uri")
                     }
                     .getOrNull()
                     ?.let { result ->
@@ -195,13 +161,8 @@ class PendingMessageRepository @Inject constructor(
         } else {
             emptyList()
         }
-        if (attachments.isNotEmpty()) {
-            Timber.i("[SEND_TRACE] Attachment persist DONE: ${System.currentTimeMillis() - attachPersistStart}ms (${attachments.size} files)")
-        }
 
         // Use transaction to ensure atomicity: all-or-nothing for DB operations
-        val txStart = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] Starting DB transaction +${System.currentTimeMillis() - startTime}ms")
         val messageId = database.withTransaction {
             // 1. Create pending message (durability/retry engine)
             val pendingMessage = PendingMessageEntity(
@@ -277,17 +238,10 @@ class PendingMessageRepository @Inject constructor(
 
             pendingId
         }
-        Timber.i("[SEND_TRACE] DB transaction DONE: ${System.currentTimeMillis() - txStart}ms")
-        Timber.i("[SEND_TRACE] Created pending message id=$messageId +${System.currentTimeMillis() - startTime}ms")
-
-        if (persistedAttachments.isNotEmpty()) {
-            Timber.i("[SEND_TRACE] Created ${persistedAttachments.size} attachment echoes")
-        }
 
         // Enqueue expedited WorkManager job for reliable, single-path delivery
         enqueueWorker(messageId, clientGuid)
 
-        Timber.i("[SEND_TRACE] ── PendingMessageRepository.queueMessage RETURNING: ${System.currentTimeMillis() - startTime}ms total ──")
         clientGuid
     }
 
@@ -330,9 +284,6 @@ class PendingMessageRepository @Inject constructor(
      * Uses expedited work for minimal latency while maintaining reliability.
      */
     private suspend fun enqueueWorker(pendingMessageId: Long, localId: String) {
-        val enqueueStart = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] ▶ enqueueWorker START for $localId (pendingId=$pendingMessageId)")
-
         val constraints = Constraints.Builder()
             .setRequiredNetworkType(NetworkType.CONNECTED)
             .build()
@@ -348,8 +299,6 @@ class PendingMessageRepository @Inject constructor(
             .setInputData(workDataOf(MessageSendWorker.KEY_PENDING_MESSAGE_ID to pendingMessageId))
             .build()
 
-        Timber.i("[SEND_TRACE] WorkRequest built +${System.currentTimeMillis() - enqueueStart}ms")
-
         // Use unique work to prevent duplicate sends
         // KEEP policy prevents replacing an in-flight job, avoiding race conditions
         workManager.enqueueUniqueWork(
@@ -358,12 +307,8 @@ class PendingMessageRepository @Inject constructor(
             workRequest
         )
 
-        Timber.i("[SEND_TRACE] ▶ enqueueUniqueWork CALLED +${System.currentTimeMillis() - enqueueStart}ms")
-
         // Store work request ID for cancellation
         pendingMessageDao.updateWorkRequestId(pendingMessageId, workRequest.id.toString())
-
-        Timber.i("[SEND_TRACE] ▶ enqueueWorker DONE: ${System.currentTimeMillis() - enqueueStart}ms total (workId=${workRequest.id})")
     }
 
     /**

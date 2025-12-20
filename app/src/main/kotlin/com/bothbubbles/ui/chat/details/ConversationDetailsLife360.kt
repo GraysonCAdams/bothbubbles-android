@@ -949,12 +949,22 @@ private fun Life360MultiPinMapView(
                     val latitudes = avatarPins.map { it.second.latitude }
                     val longitudes = avatarPins.map { it.second.longitude }
 
-                    val centerLat = (latitudes.minOrNull()!! + latitudes.maxOrNull()!!) / 2
-                    val centerLon = (longitudes.minOrNull()!! + longitudes.maxOrNull()!!) / 2
+                    // Safe collection operations with early return if empty
+                    if (latitudes.isEmpty() || longitudes.isEmpty()) {
+                        return@apply
+                    }
+
+                    val minLat = latitudes.minOrNull() ?: return@apply
+                    val maxLat = latitudes.maxOrNull() ?: return@apply
+                    val minLon = longitudes.minOrNull() ?: return@apply
+                    val maxLon = longitudes.maxOrNull() ?: return@apply
+
+                    val centerLat = (minLat + maxLat) / 2
+                    val centerLon = (minLon + maxLon) / 2
 
                     // Calculate appropriate zoom level based on spread
-                    val latSpread = latitudes.maxOrNull()!! - latitudes.minOrNull()!!
-                    val lonSpread = longitudes.maxOrNull()!! - longitudes.minOrNull()!!
+                    val latSpread = maxLat - minLat
+                    val lonSpread = maxLon - minLon
                     val maxSpread = maxOf(latSpread, lonSpread)
 
                     val zoomLevel = when {

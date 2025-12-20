@@ -633,35 +633,17 @@ class ChatViewModel @Inject constructor(
      * 7. Clear draft from database
      */
     fun sendMessage(effectId: String? = null) {
-        val sendCallTime = System.currentTimeMillis()
-
-        // ═══════════════════════════════════════════════════════════════════════════
-        // ENHANCED SEND LOGGING: Capture context when send is triggered
-        // ═══════════════════════════════════════════════════════════════════════════
-        Timber.i("[VM_SEND] ══════════════════════════════════════════════════════════════")
-        Timber.i("[VM_SEND] sendMessage() TRIGGERED at $sendCallTime")
-        Timber.i("[VM_SEND] Chat: $chatGuid")
-        Timber.i("[VM_SEND] isSending state: ${send.state.value.isSending}")
-        Timber.i("[VM_SEND] Pending messages count: ${send.state.value.pendingMessages.size}")
-        Timber.i("[VM_SEND] Queued messages count: ${send.state.value.queuedMessages.size}")
-
         // Step 1: Get input from composer
         val text = composer.draftText.value.trim()
         val attachments = composer.pendingAttachments.value
 
-        Timber.i("[VM_SEND] Text length: ${text.length}, Preview: \"${text.take(30)}...\"")
-        Timber.i("[VM_SEND] Attachments: ${attachments.size}")
-
         if (text.isBlank() && attachments.isEmpty()) {
-            Timber.i("[VM_SEND] SKIPPED: Empty text and no attachments")
-            Timber.i("[VM_SEND] ══════════════════════════════════════════════════════════════")
             return
         }
 
         // Step 2: Get send mode and chat info
         val currentSendMode = connection.state.value.currentSendMode
         val isLocalSmsChat = chatInfo.state.value.isLocalSmsChat
-        Timber.i("[VM_SEND] SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
 
         // Step 2.5: Get attributedBodyJson BEFORE clearing (for mentions)
         val attributedBodyJson = composer.buildAttributedBodyJson()
@@ -670,14 +652,10 @@ class ChatViewModel @Inject constructor(
         send.cancelTypingIndicator()
 
         // Step 4: Clear composer input immediately for responsive feel
-        Timber.i("[VM_SEND] Clearing composer input +${System.currentTimeMillis() - sendCallTime}ms")
         composer.clearInput()
         composer.clearMentions()
-        Timber.i("[VM_SEND] Composer cleared, launching queue coroutine +${System.currentTimeMillis() - sendCallTime}ms")
-        Timber.i("[VM_SEND] ══════════════════════════════════════════════════════════════")
 
         viewModelScope.launch {
-            val queueStartTime = System.currentTimeMillis()
             // Step 5: Queue message and get info for optimistic UI
             val result = send.queueMessageForSending(
                 text = text,
@@ -689,14 +667,12 @@ class ChatViewModel @Inject constructor(
             )
 
             result.onSuccess { queuedInfo ->
-                Timber.i("[VM_SEND] Queue SUCCESS: guid=${queuedInfo.guid}, took ${System.currentTimeMillis() - queueStartTime}ms")
                 // Step 6: Insert optimistic message using QueuedMessageInfo
                 messageList.insertOptimisticMessage(queuedInfo)
 
                 // Step 7: Clear draft from database
                 composer.clearDraftFromDatabase()
             }.onFailure { error ->
-                Timber.e("[VM_SEND] Queue FAILED after ${System.currentTimeMillis() - queueStartTime}ms: ${error.message}")
                 Timber.e(error, "Failed to queue message")
                 // Error state is updated by ChatSendDelegate
                 // Note: No need to remove optimistic message here because it was never inserted

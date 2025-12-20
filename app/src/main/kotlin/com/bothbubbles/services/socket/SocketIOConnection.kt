@@ -110,7 +110,7 @@ class SocketIOConnection(
                 // Log sanitized server address (hide credentials/full URL for security)
                 val uri = URI.create(serverAddress)
                 Timber.i("Connecting to server: ${uri.scheme}://${uri.host}:${uri.port}")
-                Timber.d("Password length: ${password.length}, first 4 chars: ${password.take(4)}...")
+                Timber.d("Password configured (${password.length} chars)")
 
                 // URL-encode the password for use in query string
                 val encodedPassword = URLEncoder.encode(password, "UTF-8")

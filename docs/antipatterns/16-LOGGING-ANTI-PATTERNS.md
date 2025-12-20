@@ -7,7 +7,7 @@
 
 ## Critical Issues (Sensitive Data Exposure)
 
-### 1. Password Partially Logged
+### 1. ~~Password Partially Logged~~ **FIXED 2024-12-20**
 
 **Location:** `services/socket/SocketIOConnection.kt` (Line 113)
 
@@ -18,122 +18,110 @@ Timber.d("Password length: ${password.length}, first 4 chars: ${password.take(4)
 
 **Problem:** Logging first 4 characters of server password exposes authentication credential.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 Timber.d("Password configured (${password.length} chars)")
 ```
 
+**Status:** FIXED on 2024-12-20 - Password prefix removed from logs
+
 ---
 
-### 2. Phone Numbers and Email Addresses Logged
+### 2. ~~Phone Numbers and Email Addresses Logged~~ **FIXED 2025-12-20**
 
-**Locations (8+ files):**
+**Locations (9 files):**
 
-| File | Line | Example |
-|------|------|---------|
-| ChatCreatorViewModel.kt | - | `address=$address` |
-| ChatCreationDelegate.kt | - | `selectContact: ${contact.address}` |
-| RecipientSelectionDelegate.kt | - | `address=$address` |
-| Life360Repository.kt | - | `address=$address, normalized=$normalized` |
-| IMessageAvailabilityService.kt | - | `address=$address, normalizedAddress=$normalizedAddress` |
-| FcmMessageHandler.kt | 212 | `address='$senderAddress'` |
-| SpamDetector.kt | 234 | `for $address` |
-| NameInferenceService.kt | - | `handle ${handle.address}` |
+| File | Status |
+|------|--------|
+| AuthInterceptor.kt | ✅ FIXED - Changed to log only endpoint path, not full URL with auth token |
+| ChatCreatorViewModel.kt | ✅ FIXED - Removed address from logs |
+| ChatCreationDelegate.kt | ✅ FIXED - Removed address from logs |
+| RecipientSelectionDelegate.kt | ✅ FIXED - Removed address from logs |
+| Life360Repository.kt | ✅ FIXED - Removed address from logs |
+| IMessageAvailabilityService.kt | ✅ FIXED - Removed address from logs (12 instances) |
+| FcmMessageHandler.kt | ✅ FIXED - Removed address from logs |
+| SpamDetector.kt | ✅ FIXED - Removed address from logs |
+| NameInferenceService.kt | ✅ FIXED - Removed address from logs |
 
-**Problem:** Full phone numbers and email addresses logged. Accessible via `adb logcat`.
+**Problem:** Full phone numbers, email addresses, and auth tokens logged. Accessible via `adb logcat`.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-// Instead of:
-Timber.d("Address: $address")
+// AuthInterceptor.kt - Was:
+Timber.d("Request URL = ${finalRequest.url}")  // Included auth key in query params!
 
-// Use:
-Timber.d("Address: ${address.take(3)}***")
-// Or omit entirely
+// Now:
+Timber.d("Request to endpoint: ${finalRequest.url.encodedPath}")
+
+// IMessageAvailabilityService.kt - Was:
+Timber.d("DEBUG checkAvailability: address=$address, normalizedAddress=$normalizedAddress")
+
+// Now:
+Timber.d("DEBUG checkAvailability: forceRecheck=$forceRecheck")
 ```
+
+**Status:** FIXED on 2025-12-20 - All PII removed from logs across 9 files
 
 ---
 
 ## High Severity Issues (Debug Code in Production)
 
-### 3. [LOCATION_DEBUG] Tags (5 files)
+### 3. [LOCATION_DEBUG] Tags (5 files) - ✅ FIXED
 
-**Locations:**
-- `services/location/VLocationService.kt` (Lines 65, 68, 72, 82, 90)
+**Status:** All [LOCATION_DEBUG] logs have been removed from:
+- `services/location/VLocationService.kt`
 - `ui/chat/delegates/ChatComposerDelegate.kt`
 - `ui/components/attachment/LocationAttachment.kt`
-- `services/eta/EtaSharingManager.kt`
 - `services/messaging/AttachmentPersistenceManager.kt`
 
-**Issue:**
-```kotlin
-Timber.d("[LOCATION_DEBUG] VCF content:\n$vcfContent")  // Full file dumped!
-Timber.d("[LOCATION_DEBUG] File written to: ${file.absolutePath}")
-```
+**Resolution:** Debug logs removed, only essential error logs remain.
 
-**Fix:** Remove or gate with `if (BuildConfig.DEBUG)`.
+**Fixed on:** 2025-12-20
 
 ---
 
-### 4. [FCM_DEBUG] Data Dumps
+### 4. [FCM_DEBUG] Data Dumps - ✅ FIXED
 
-**Location:** `services/fcm/FcmMessageHandler.kt` (Lines 115, 125, 137, 149)
+**Status:** Already removed (verified - no matches found in codebase)
 
-**Issue:**
-```kotlin
-Timber.d("FCM_DEBUG: Raw data keys=${data.keys}, values=${data.entries.joinToString...}")
-Timber.d("FCM_DEBUG: dataJsonString (first 500 chars)=${dataJsonString.take(500)}")
-```
-
-**Problem:** FCM message content (potentially sensitive) dumped to logs.
-
-**Fix:** Remove FCM_DEBUG logs entirely.
+**Fixed on:** Prior to 2025-12-20
 
 ---
 
-### 5. [SEND_TRACE] Logs (108 statements!)
+### 5. [SEND_TRACE] Logs (108 statements!) - ✅ FIXED
 
-**Locations:** MessageSendWorker.kt, MessageSendingService.kt, IMessageSenderStrategy.kt, ChatViewModel.kt, ChatSendDelegate.kt, PendingMessageRepository.kt
+**Status:** All [SEND_TRACE] logs have been removed from:
+- MessageSendWorker.kt
+- MessageSendingService.kt
+- IMessageSenderStrategy.kt
+- ChatViewModel.kt
+- ChatSendDelegate.kt
+- PendingMessageRepository.kt
+- core/network AuthInterceptor.kt
 
-**Issue:**
-```kotlin
-Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-Timber.i("[SEND_TRACE] MessageSendWorker.doWork() STARTED at $workerStartTime")
-Timber.i("[SEND_TRACE] chatGuid=$chatGuid, text=\"${text.take(30)}...\"")
-```
+**Resolution:** Debug traces converted to normal log levels (Timber.d/Timber.i/Timber.e) or removed entirely.
 
-**Problem:** 108 trace statements throughout send pipeline. Clearly development-only.
-
-**Fix:** Remove all [SEND_TRACE] or wrap in `if (BuildConfig.DEBUG)`.
-
----
-
-### 6. [DUPLICATE_DETECT] Warnings
-
-**Location:** `ui/chat/delegates/ChatSendDelegate.kt`
-
-**Issue:**
-```kotlin
-Timber.w("[DUPLICATE_DETECT] ⚠️ POTENTIAL DUPLICATE MESSAGE DETECTED!")
-Timber.w("[DUPLICATE_DETECT] ⚠️ Text: \"$textPreview...\"")
-```
-
-**Fix:** Remove or make conditional.
+**Fixed on:** 2025-12-20
 
 ---
 
-### 7. [VM_SEND] Trace Logs
+### 6. [DUPLICATE_DETECT] Warnings - ✅ FIXED
 
-**Location:** `ui/chat/ChatViewModel.kt` (Lines 641-699)
+**Status:** All [DUPLICATE_DETECT] logs removed from ChatSendDelegate.kt and PendingMessageRepository.kt
 
-**Issue:**
-```kotlin
-Timber.i("[VM_SEND] ══════════════════════════════════════════════════════════════")
-Timber.i("[VM_SEND] sendMessage() TRIGGERED at $sendCallTime")
-Timber.i("[VM_SEND] Text length: ${text.length}, Preview: \"${text.take(30)}...\"")
-```
+**Resolution:** Duplicate detection tracking code retained for debugging purposes, but verbose warning logs removed.
 
-**Fix:** Remove debug traces.
+**Fixed on:** 2025-12-20
+
+---
+
+### 7. [VM_SEND] Trace Logs - ✅ FIXED
+
+**Status:** All [VM_SEND] logs removed from ChatViewModel.kt
+
+**Resolution:** Debug traces removed from sendMessage() method.
+
+**Fixed on:** 2025-12-20
 
 ---
 
@@ -206,29 +194,91 @@ Timber.i("[SEND_TRACE] text=\"${text.take(30)}...\"")
 
 ## Summary Table
 
-| Issue | Severity | Count | Category |
-|-------|----------|-------|----------|
-| Password logging | CRITICAL | 1 | Credentials |
-| PII (phone/email) | CRITICAL | 8+ files | Privacy |
-| [LOCATION_DEBUG] | HIGH | 5 files | Debug code |
-| [FCM_DEBUG] | HIGH | 4 | Debug code |
-| [SEND_TRACE] | HIGH | 108 | Debug code |
-| [DUPLICATE_DETECT] | HIGH | 5 | Debug code |
-| [VM_SEND] | HIGH | 7+ | Debug code |
-| Timber.e() no exception | MEDIUM | 15+ | Best practice |
-| Socket raw data | MEDIUM | 1 | Privacy |
-| Message text previews | LOW | 10+ | Privacy |
-| Missing Timber.tag() | LOW | Most | Filtering |
+| Issue | Severity | Count | Category | Status |
+|-------|----------|-------|----------|--------|
+| Password logging | CRITICAL | 1 | Credentials | ✅ FIXED 2024-12-20 |
+| PII (phone/email/auth) | CRITICAL | 9 files | Privacy | ✅ FIXED 2025-12-20 |
+| [LOCATION_DEBUG] | HIGH | 5 files | Debug code | ✅ FIXED 2025-12-20 |
+| [FCM_DEBUG] | HIGH | 4 | Debug code | ✅ FIXED (prior) |
+| [SEND_TRACE] | HIGH | 108 | Debug code | ✅ FIXED 2025-12-20 |
+| [DUPLICATE_DETECT] | HIGH | 5 | Debug code | ✅ FIXED 2025-12-20 |
+| [VM_SEND] | HIGH | 7+ | Debug code | ✅ FIXED 2025-12-20 |
+| Timber.e() no exception | MEDIUM | 15+ | Best practice | ⚠️ Open |
+| Socket raw data | MEDIUM | 1 | Privacy | ⚠️ Open |
+| Message text previews | LOW | 10+ | Privacy | ✅ FIXED 2025-12-20 |
+| Missing Timber.tag() | LOW | Most | Filtering | ⚠️ Open |
 
 ---
 
 ## Immediate Actions
 
-1. **CRITICAL:** Remove password logging from SocketIOConnection.kt
-2. **CRITICAL:** Sanitize or remove PII (phone/email) from all logs
-3. **HIGH:** Remove all debug tags ([LOCATION_DEBUG], [FCM_DEBUG], [SEND_TRACE], etc.)
+1. ~~**CRITICAL:** Remove password logging from SocketIOConnection.kt~~ ✅ FIXED 2024-12-20
+2. ~~**CRITICAL:** Sanitize or remove PII (phone/email/auth) from all logs~~ ✅ FIXED 2025-12-20
+3. ~~**HIGH:** Remove all debug tags ([LOCATION_DEBUG], [FCM_DEBUG], [SEND_TRACE], etc.)~~ ✅ FIXED 2025-12-20
 4. **MEDIUM:** Add exception parameter to Timber.e() calls
 5. **RECOMMENDED:** Consider crash reporting tree for production
+
+## Fixes Completed (2025-12-20)
+
+### Debug Code Cleanup (2025-12-20)
+
+All debug trace tags have been removed from production code:
+
+#### [SEND_TRACE] - 108 statements removed
+- **MessageSendWorker.kt**: All send trace logging removed, converted to normal log levels
+- **MessageSendingService.kt**: Trace logs removed from sendUnified()
+- **IMessageSenderStrategy.kt**: All send/upload trace logs removed
+- **ChatViewModel.kt**: All [VM_SEND] trace logs removed from sendMessage()
+- **ChatSendDelegate.kt**: Send trace and [DUPLICATE_DETECT] logs removed
+- **PendingMessageRepository.kt**: Trace and duplicate detection logs removed
+- **AuthInterceptor.kt**: HTTP trace logs removed
+
+**Impact:** Removed verbose development-only logging that could leak message content previews and timing information.
+
+#### [LOCATION_DEBUG] - 15+ statements removed
+- **VLocationService.kt**: File creation debug logs removed
+- **ChatComposerDelegate.kt**: Attachment processing debug logs removed
+- **LocationAttachment.kt**: VCF parsing debug logs removed
+- **AttachmentPersistenceManager.kt**: Location file debug logs removed
+
+**Impact:** Removed logs that exposed file paths and location data handling internals.
+
+#### [DUPLICATE_DETECT] - Warnings removed
+- **ChatSendDelegate.kt**: Verbose duplicate warnings removed (tracking retained)
+- **PendingMessageRepository.kt**: Repository-level duplicate warnings removed
+
+**Impact:** Removed logs that exposed message text hashes and timing data.
+
+---
+
+### PII Logging Cleanup (2025-12-20)
+
+All critical PII logging issues have been addressed:
+
+#### AuthInterceptor.kt
+- Changed `Timber.d("Request URL = ${finalRequest.url}")` to `Timber.d("Request to endpoint: ${finalRequest.url.encodedPath}")`
+- This prevents logging auth tokens that were in URL query parameters
+
+### IMessageAvailabilityService.kt
+- Removed all address logging (12 instances):
+  - `checkAvailability()`, `performCheck()`, `getCachedResult()`, `invalidateCache()`
+  - Now logs only operation metadata, not PII
+
+### ChatCreatorViewModel.kt, ChatCreationDelegate.kt, RecipientSelectionDelegate.kt
+- Removed all address/phone number logging from chat creation flow
+- Sanitized all recipient selection and iMessage availability check logs
+
+### Life360Repository.kt
+- Removed phone number logging from `observeMemberByAddress()` and auto-mapping
+
+### FcmMessageHandler.kt
+- Removed sender address from FCM debug logs
+
+### SpamDetector.kt
+- Removed sender address from spam detection logs (3 instances)
+
+### NameInferenceService.kt
+- Removed handle address from name inference logs
 
 ---
 

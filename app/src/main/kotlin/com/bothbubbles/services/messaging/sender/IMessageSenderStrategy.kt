@@ -88,15 +88,12 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     override suspend fun send(options: SendOptions): SendResult {
-        Timber.i("[SEND_TRACE] ── IMessageSenderStrategy.send START ──")
-        Timber.i("[SEND_TRACE] hasAttachments=${options.hasAttachments}, text=\"${options.text.take(30)}...\"")
-
         // Parse attributedBody from JSON if present
         val attributedBody = options.attributedBodyJson?.let { json ->
             try {
                 attributedBodyAdapter.fromJson(json)
             } catch (e: Exception) {
-                Timber.w(e, "[SEND_TRACE] Failed to parse attributedBodyJson")
+                Timber.w(e, "Failed to parse attributedBodyJson")
                 null
             }
         }
@@ -106,7 +103,6 @@ class IMessageSenderStrategy @Inject constructor(
         } else {
             sendTextOnly(options, attributedBody)
         }
-        Timber.i("[SEND_TRACE] ── IMessageSenderStrategy.send END: ${if (result is SendResult.Success) "SUCCESS" else "FAILURE"} ──")
         return result
     }
 
@@ -115,22 +111,17 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     private suspend fun sendTextOnly(options: SendOptions, attributedBody: AttributedBodyDto?): SendResult {
-        val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
-        Timber.i("[SEND_TRACE] sendTextOnly: tempGuid=$tempGuid, hasAttributedBody=${attributedBody != null}")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
-            Timber.i("[SEND_TRACE] existingMessage=${existingMessage != null} +${System.currentTimeMillis() - sendStart}ms")
             if (existingMessage != null) {
                 if (existingMessage.error != 0) {
-                    Timber.i("[SEND_TRACE] Retry: clearing error on existing temp message $tempGuid")
                     messageDao.updateErrorStatus(tempGuid, 0)
                 }
             }
 
             if (existingMessage == null) {
-                Timber.i("[SEND_TRACE] Creating temp message entity +${System.currentTimeMillis() - sendStart}ms")
                 val tempMessage = MessageEntity(
                     guid = tempGuid,
                     chatGuid = options.chatGuid,
@@ -144,11 +135,8 @@ class IMessageSenderStrategy @Inject constructor(
                 )
                 messageDao.insertMessage(tempMessage)
                 chatDao.updateLastMessage(options.chatGuid, System.currentTimeMillis(), options.text)
-                Timber.i("[SEND_TRACE] Temp message inserted +${System.currentTimeMillis() - sendStart}ms")
             }
 
-            Timber.i("[SEND_TRACE] ▶▶▶ Calling api.sendMessage (NETWORK) +${System.currentTimeMillis() - sendStart}ms")
-            val apiStart = System.currentTimeMillis()
             val response = api.sendMessage(
                 SendMessageRequest(
                     chatGuid = options.chatGuid,
@@ -160,16 +148,15 @@ class IMessageSenderStrategy @Inject constructor(
                     attributedBody = attributedBody
                 )
             )
-            Timber.i("[SEND_TRACE] ◀◀◀ api.sendMessage RETURNED: ${System.currentTimeMillis() - apiStart}ms (status=${response.code()})")
 
             val body = response.body()
             if (!response.isSuccessful || body == null || body.status != 200) {
                 val errorMessage = body?.message ?: body?.error?.message ?: ""
-                Timber.e("[SEND_TRACE] API FAILED: code=${response.code()}, message=$errorMessage")
+                Timber.e("API failed: code=${response.code()}, message=$errorMessage")
 
                 // Check if server says message is already in transit
                 if (isAlreadyInTransitError(errorMessage)) {
-                    Timber.i("[SEND_TRACE] Server reports message already in transit - waiting for confirmation")
+                    Timber.i("Server reports message already in transit - waiting for confirmation")
                     // Try to find the server GUID from an existing message
                     val existingServerMessage = messageDao.getMessageByGuid(tempGuid)
                     return SendResult.AlreadyInTransit(
@@ -191,17 +178,13 @@ class IMessageSenderStrategy @Inject constructor(
             }
 
             val serverMessage = body.data
-            Timber.i("[SEND_TRACE] API SUCCESS: serverGuid=${serverMessage?.guid} +${System.currentTimeMillis() - sendStart}ms")
             return if (serverMessage != null) {
                 try {
-                    Timber.i("[SEND_TRACE] Replacing temp GUID with server GUID +${System.currentTimeMillis() - sendStart}ms")
                     messageDao.replaceGuid(tempGuid, serverMessage.guid)
-                    Timber.i("[SEND_TRACE] GUID replaced: $tempGuid -> ${serverMessage.guid}")
                 } catch (e: Exception) {
-                    Timber.w("[SEND_TRACE] Non-critical error replacing GUID: ${e.message}")
+                    Timber.w("Non-critical error replacing GUID: ${e.message}")
                 }
 
-                Timber.i("[SEND_TRACE] sendTextOnly SUCCESS: ${System.currentTimeMillis() - sendStart}ms total")
                 SendResult.Success(serverMessage.toEntity(options.chatGuid))
             } else {
                 messageDao.updateErrorStatus(tempGuid, 0)
@@ -213,7 +196,7 @@ class IMessageSenderStrategy @Inject constructor(
                 SendResult.Success(message)
             }
         } catch (e: Exception) {
-            Timber.e("[SEND_TRACE] sendTextOnly EXCEPTION: ${e.message}")
+            Timber.e(e, "sendTextOnly exception: ${e.message}")
             val errorCode = MessageErrorCode.fromException(e)
             messageDao.updateMessageError(tempGuid, errorCode, e.message)
             return SendResult.Failure(e, tempGuid)
@@ -221,14 +204,11 @@ class IMessageSenderStrategy @Inject constructor(
     }
 
     private suspend fun sendWithAttachments(options: SendOptions, attributedBody: AttributedBodyDto?): SendResult {
-        val sendStart = System.currentTimeMillis()
         val tempGuid = options.tempGuid ?: "temp-${UUID.randomUUID()}"
-        Timber.i("[SEND_TRACE] sendWithAttachments: tempGuid=$tempGuid, attachments=${options.attachments.size}, hasAttributedBody=${attributedBody != null}")
 
         try {
             val existingMessage = messageDao.getMessageByGuid(tempGuid)
             val tempAttachmentGuids = options.attachments.indices.map { "$tempGuid-att-$it" }
-            Timber.i("[SEND_TRACE] existingMessage=${existingMessage != null} +${System.currentTimeMillis() - sendStart}ms")
 
             if (existingMessage == null) {
                 database.withTransaction {
@@ -409,19 +389,13 @@ class IMessageSenderStrategy @Inject constructor(
         var fileName = getFileName(uri) ?: "attachment"
         var mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
 
-        Timber.d("[LOCATION_DEBUG] uploadAttachment: uri=$uri")
-        Timber.d("[LOCATION_DEBUG] uploadAttachment: fileName=$fileName, originalMimeType=$mimeType")
-
         // Detect vLocation files and override MIME type
         // Android returns text/vcard for .vcf files, but vLocation needs text/x-vlocation
         val fileNameLower = fileName.lowercase()
         val isVLocation = fileNameLower.contains(".loc.vcf") || fileNameLower.contains("-cl.loc")
-        Timber.d("[LOCATION_DEBUG] uploadAttachment: fileNameLower=$fileNameLower, isVLocation=$isVLocation")
         if (isVLocation) {
-            Timber.d("[LOCATION_DEBUG] Detected vLocation file: $fileName, overriding mimeType from $mimeType to text/x-vlocation")
             mimeType = "text/x-vlocation"
         }
-        Timber.d("[LOCATION_DEBUG] uploadAttachment: finalMimeType=$mimeType")
 
         val isVideo = mimeType.startsWith("video/")
         val shouldCompressVideo = isVideo && settingsDataStore.compressVideosBeforeUpload.first()

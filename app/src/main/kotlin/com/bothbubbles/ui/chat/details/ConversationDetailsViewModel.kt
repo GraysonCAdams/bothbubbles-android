@@ -381,7 +381,7 @@ class ConversationDetailsViewModel @Inject constructor(
                 // Skip if manual refresh is in progress
                 if (!_isRefreshingLife360.value) {
                     // Get current members (may change if participants change)
-                    val currentMembers = life360MembersFlow.first()
+                    val currentMembers = life360MembersFlow.firstOrNull() ?: emptyList()
                     for (member in currentMembers) {
                         try {
                             life360Service.syncMember(member.circleId, member.memberId)

@@ -204,17 +204,10 @@ fun ComposerSendButton(
     val gestureCallbacks = remember(onClick, onLongPress, onModeToggle, hapticFeedback) {
         object : SendModeGestureCallbacks {
             override fun onTap() {
-                val tapTime = System.currentTimeMillis()
-                Timber.i("[SEND_TRACE] ════════════════════════════════════════════════════════════")
-                Timber.i("[SEND_TRACE] 📤 SEND BUTTON TAPPED at $tapTime")
-                Timber.i("[SEND_TRACE] 📤 isSending=$isSending, mode=$currentMode")
-                Timber.i("[SEND_TRACE] 📤 Call stack: ${Thread.currentThread().stackTrace.take(8).joinToString(" <- ") { it.methodName }}")
-                Timber.i("[SEND_TRACE] ════════════════════════════════════════════════════════════")
                 HapticUtils.onTap(hapticFeedback)
                 onClick()
             }
             override fun onLongPress() {
-                Timber.i("[SEND_TRACE] 📤 ComposerSendButton.onLongPress() callback invoked")
                 onLongPress()
             }
             override fun onModeToggle(newMode: ChatSendMode): Boolean = onModeToggle(newMode)

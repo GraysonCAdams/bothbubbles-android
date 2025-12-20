@@ -116,7 +116,7 @@ class MessageSendingService @Inject constructor(
      * Called by sender strategies after successful GUID replacement.
      */
     fun emitGuidReplacement(chatGuid: String, tempGuid: String, serverGuid: String) {
-        Timber.i("[SEND_TRACE] Emitting GuidReplacementEvent: $tempGuid -> $serverGuid")
+        Timber.d("Emitting GuidReplacementEvent: $tempGuid -> $serverGuid")
         _guidReplacementEvents.tryEmit(GuidReplacementEvent(chatGuid, tempGuid, serverGuid))
     }
 
@@ -145,25 +145,17 @@ class MessageSendingService @Inject constructor(
         tempGuid: String?, // Stable ID for retry idempotency
         attributedBodyJson: String?
     ): Result<MessageEntity> {
-        val sendStart = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified START ──")
-        Timber.i("[SEND_TRACE] chatGuid=$chatGuid, text=\"${text.take(30)}...\", tempGuid=$tempGuid")
-        Timber.i("[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachments.size}")
-
         // Determine actual delivery mode
         val actualMode = when (deliveryMode) {
             MessageDeliveryMode.AUTO -> determineDeliveryMode(chatGuid, attachments.isNotEmpty())
             else -> deliveryMode
         }
-        Timber.i("[SEND_TRACE] actualMode=$actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         // Find strategy that can handle this delivery mode
         val strategy = strategies.firstOrNull { it.canHandle(actualMode) }
             ?: return Result.failure(
                 IllegalStateException("No strategy found for delivery mode: $actualMode")
             )
-
-        Timber.i("[SEND_TRACE] Using ${strategy::class.simpleName} for $actualMode +${System.currentTimeMillis() - sendStart}ms")
 
         val options = SendOptions(
             chatGuid = chatGuid,
@@ -177,9 +169,7 @@ class MessageSendingService @Inject constructor(
             attributedBodyJson = attributedBodyJson
         )
 
-        Timber.i("[SEND_TRACE] Calling strategy.send() +${System.currentTimeMillis() - sendStart}ms")
         val result = strategy.send(options).toResult()
-        Timber.i("[SEND_TRACE] strategy.send() returned: success=${result.isSuccess} +${System.currentTimeMillis() - sendStart}ms")
 
         // Emit GUID replacement event on success so UI can update cached message state
         if (result.isSuccess && tempGuid != null) {
@@ -189,7 +179,6 @@ class MessageSendingService @Inject constructor(
             }
         }
 
-        Timber.i("[SEND_TRACE] ── MessageSendingService.sendUnified END: ${System.currentTimeMillis() - sendStart}ms ──")
         return result
     }
 

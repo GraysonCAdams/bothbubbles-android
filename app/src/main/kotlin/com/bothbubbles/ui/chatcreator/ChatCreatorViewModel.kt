@@ -147,7 +147,7 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun startConversationWithAddress(address: String, service: String) {
         viewModelScope.launch {
-            Timber.d("startConversationWithAddress: address=$address, service=$service")
+            Timber.d("startConversationWithAddress: service=$service")
             _uiState.update { it.copy(isLoading = true) }
 
             when (val result = chatCreationDelegate.startConversationWithAddress(address, service)) {
@@ -254,7 +254,7 @@ class ChatCreatorViewModel @Inject constructor(
             recipients.size == 1 -> {
                 // Single recipient - create direct chat (chat screen handles service detection)
                 val recipient = recipients.first()
-                Timber.d("Starting conversation with ${recipient.address} (${recipient.service})")
+                Timber.d("Starting conversation (${recipient.service})")
                 startConversationWithAddress(recipient.address, recipient.service)
             }
             else -> {

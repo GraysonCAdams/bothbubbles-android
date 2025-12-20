@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
-    <external-files-path name="external_files" path="." />
-    <external-cache-path name="external_cache" path="." />
+    <!-- Restrict FileProvider paths to specific subdirectories for security -->
+    <cache-path name="attachments" path="attachments" />
+    <files-path name="exports" path="exports" />
+    <external-files-path name="shared" path="shared" />
+    <external-cache-path name="external_cache" path="attachments" />
 </paths>

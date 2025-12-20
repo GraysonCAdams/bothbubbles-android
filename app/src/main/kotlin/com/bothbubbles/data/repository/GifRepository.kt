@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
 import timber.log.Timber
+import com.bothbubbles.BuildConfig
 import com.bothbubbles.core.network.api.TenorApi
 import com.bothbubbles.core.network.api.TenorGif
 import com.bothbubbles.ui.chat.composer.panels.GifItem
@@ -25,8 +26,7 @@ class GifRepository @Inject constructor(
     private val tenorApi: TenorApi
 ) {
     companion object {
-        // TODO: Move to BuildConfig or secure storage
-        private const val TENOR_API_KEY = "AIzaSyAyimkuYQYF_FXVALexPuGQctUWRURdCYQ"
+        private val TENOR_API_KEY = BuildConfig.TENOR_API_KEY
     }
 
     private val _state = MutableStateFlow<GifPickerState>(GifPickerState.Idle)

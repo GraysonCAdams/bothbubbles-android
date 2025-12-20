@@ -228,7 +228,6 @@ fun Modifier.sendModeGesture(
 
     return this.pointerInput(isEnabled, canToggle, currentMode) {
         if (!isEnabled) {
-            Timber.d("[SEND_TRACE] SendButton gesture BLOCKED (isEnabled=false, likely isSending=true)")
             return@pointerInput
         }
 
@@ -267,17 +266,14 @@ fun Modifier.sendModeGesture(
                             GestureIntent.TAP_OR_HOLD -> {
                                 val elapsed = System.currentTimeMillis() - pressStartTime
                                 if (elapsed < 400) {
-                                    Timber.i("[SEND_TRACE] 🔘 SendButton TAP detected (TAP_OR_HOLD intent, ${elapsed}ms hold) at ${System.currentTimeMillis()}")
                                     callbacks.onTap()
                                 } else {
-                                    Timber.i("[SEND_TRACE] 🔘 SendButton LONG_PRESS detected (${elapsed}ms hold)")
                                     callbacks.onLongPress()
                                 }
                             }
 
                             GestureIntent.UNDETERMINED -> {
                                 // Short tap
-                                Timber.i("[SEND_TRACE] 🔘 SendButton TAP detected (UNDETERMINED intent, quick tap) at ${System.currentTimeMillis()}")
                                 callbacks.onTap()
                             }
                         }

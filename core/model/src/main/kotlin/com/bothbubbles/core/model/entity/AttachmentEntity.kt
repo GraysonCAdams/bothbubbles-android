@@ -194,7 +194,15 @@ data class AttachmentEntity(
      * Aspect ratio for layout calculations
      */
     val aspectRatio: Float
-        get() = if (hasValidSize) width!!.toFloat() / height!!.toFloat() else 1f
+        get() {
+            val w = width
+            val h = height
+            return if (w != null && h != null && w > 0 && h > 0) {
+                w.toFloat() / h.toFloat()
+            } else {
+                1f
+            }
+        }
 
     /**
      * File extension from transfer name

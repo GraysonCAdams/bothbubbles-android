@@ -46,7 +46,7 @@ class ChatCreationDelegate @Inject constructor(
      * Delegates to startConversationWithAddress for consistent behavior.
      */
     suspend fun selectContact(contact: ContactUiModel): ChatCreationResult {
-        Timber.d("selectContact: ${contact.address} (${contact.service})")
+        Timber.d("selectContact: service=${contact.service}")
         return startConversationWithAddress(contact.address, contact.service)
     }
 
@@ -59,7 +59,7 @@ class ChatCreationDelegate @Inject constructor(
      * since BlueBubbles Private API requires a message to create a new chat.
      */
     suspend fun startConversationWithAddress(address: String, service: String): ChatCreationResult {
-        Timber.d("startConversationWithAddress: address=$address, service=$service")
+        Timber.d("startConversationWithAddress: service=$service")
 
         return try {
             // Normalize phone numbers, keep emails as-is
@@ -83,7 +83,7 @@ class ChatCreationDelegate @Inject constructor(
                 "sms;-;$normalizedAddress"  // Lowercase fallback
             )
 
-            Timber.d("Looking for existing chats: $possibleGuids")
+            Timber.d("Looking for existing chats with various service prefixes")
 
             // Find the best existing chat (prefer ones with messages)
             var bestChat: ChatEntity? = null

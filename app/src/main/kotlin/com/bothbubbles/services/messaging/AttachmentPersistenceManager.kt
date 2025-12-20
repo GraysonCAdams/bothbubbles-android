@@ -75,7 +75,6 @@ class AttachmentPersistenceManager @Inject constructor(
 
             // Create destination file with unique name
             val destFileName = "${localId}.$extension"
-            Timber.d("[LOCATION_DEBUG] persistAttachment: original=$fileName, isVLocation=$isVLocation, destFileName=$destFileName")
             val destFile = File(pendingDir, destFileName)
 
             // Copy file content

@@ -134,7 +134,7 @@ class NameInferenceService @Inject constructor(
         if (handle.cachedDisplayName != null || handle.inferredName != null) return
 
         extractNameFromMessage(messageText)?.let { name ->
-            Timber.i("Inferred name '$name' for handle ${handle.address}")
+            Timber.i("Inferred name '$name' from message introduction")
             handleDao.updateInferredName(handleId, name)
         }
     }

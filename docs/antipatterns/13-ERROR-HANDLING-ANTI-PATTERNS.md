@@ -6,9 +6,9 @@
 
 ## Critical Issues (App Crashes)
 
-### 1. Force Unwrap on Empty Collections
+### 1. Force Unwrap on Empty Collections ✅ FIXED
 
-**Location:** `ui/chat/details/ConversationDetailsLife360.kt` (Lines 287-290)
+**Location:** `ui/chat/details/ConversationDetailsLife360.kt` (Lines 947-967)
 
 **Issue:**
 ```kotlin
@@ -19,20 +19,29 @@ val latSpread = latitudes.maxOrNull()!! - latitudes.minOrNull()!!
 
 **Problem:** If `latitudes` or `longitudes` are empty, `minOrNull()` returns null. The `!!` causes NPE crash.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
+// Safe collection operations with early return if empty
 if (latitudes.isEmpty() || longitudes.isEmpty()) {
-    // Show placeholder or error state
-    return
+    return@apply
 }
-val centerLat = ((latitudes.minOrNull() ?: return) + (latitudes.maxOrNull() ?: return)) / 2
+
+val minLat = latitudes.minOrNull() ?: return@apply
+val maxLat = latitudes.maxOrNull() ?: return@apply
+val minLon = longitudes.minOrNull() ?: return@apply
+val maxLon = longitudes.maxOrNull() ?: return@apply
+
+val centerLat = (minLat + maxLat) / 2
+val centerLon = (minLon + maxLon) / 2
+val latSpread = maxLat - minLat
+val lonSpread = maxLon - minLon
 ```
 
 ---
 
-### 2. Unsafe Casts in Flow Combine
+### 2. Unsafe Casts in Flow Combine ✅ FIXED
 
-**Location:** `ui/settings/sms/SmsSettingsViewModel.kt` (Lines 52-63)
+**Location:** `ui/settings/sms/SmsSettingsViewModel.kt` (Lines 59-63)
 
 **Issue:**
 ```kotlin
@@ -48,19 +57,21 @@ combine(smsEnabled, preferSms, simSlot, autoSwitch) { values: Array<Any?> ->
 
 **Problem:** First lambda uses safe casts, but second uses unsafe casts. StateFlow values can be null during initialization.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 .collect { values ->
     val enabled = values.getOrNull(0) as? Boolean ?: false
     val preferSms = values.getOrNull(1) as? Boolean ?: false
+    val simSlot = values.getOrNull(2) as? Int ?: -1
+    val autoSwitch = values.getOrNull(3) as? Boolean ?: true
 }
 ```
 
 ---
 
-### 3. Unsafe Collection Operations
+### 3. Unsafe Collection Operations ✅ FIXED
 
-**Location:** `services/categorization/MessageCategorizer.kt`
+**Location:** `services/categorization/MessageCategorizer.kt` (Line 328)
 
 **Issue:**
 ```kotlin
@@ -69,9 +80,10 @@ val bestCategory = categoryCounts.maxByOrNull { it.value }!!
 
 **Problem:** `maxByOrNull()` returns null if collection is empty. Force unwrap crashes.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-val bestCategory = categoryCounts.maxByOrNull { it.value } ?: return null
+val bestCategory = categoryCounts.maxByOrNull { it.value }
+    ?: return CategoryResult(null, 0, listOf("No best category found"))
 ```
 
 ---
@@ -266,23 +278,53 @@ fun ErrorView(
 
 ---
 
-### 11. Unsafe Flow.first()
+### 11. Unsafe Flow.first() ✅ FIXED
 
-**Location:** `ui/chat/details/ConversationDetailsViewModel.kt`
+**Location:** `ui/chat/details/ConversationDetailsViewModel.kt` (Line 384)
 
 **Issue:**
 ```kotlin
 val currentMembers = life360MembersFlow.first()  // Throws if empty!
 ```
 
-**Fix:**
+**Problem:** `first()` throws `NoSuchElementException` if flow completes without emitting a value.
+
+**Fix Applied:**
 ```kotlin
 val currentMembers = life360MembersFlow.firstOrNull() ?: emptyList()
 ```
 
 ---
 
-### 12. No Cancellation Handling
+### 12. Unsafe Nullable Force Unwrap in Property ✅ FIXED
+
+**Location:** `core/model/src/main/kotlin/com/bothbubbles/core/model/entity/AttachmentEntity.kt` (Line 197)
+
+**Issue:**
+```kotlin
+val aspectRatio: Float
+    get() = if (hasValidSize) width!!.toFloat() / height!!.toFloat() else 1f
+```
+
+**Problem:** Even with `hasValidSize` check, the force unwrap `!!` on `width` and `height` can crash if either is null due to race conditions or data corruption.
+
+**Fix Applied:**
+```kotlin
+val aspectRatio: Float
+    get() {
+        val w = width
+        val h = height
+        return if (w != null && h != null && w > 0 && h > 0) {
+            w.toFloat() / h.toFloat()
+        } else {
+            1f
+        }
+    }
+```
+
+---
+
+### 13. No Cancellation Handling
 
 **Location:** `ui/chat/composer/AttachmentEditScreen.kt`
 
@@ -304,17 +346,18 @@ withContext(Dispatchers.IO) {
 
 ## Summary Table
 
-| Issue | Severity | Category | File |
-|-------|----------|----------|------|
-| Force unwrap on empty list | CRITICAL | Crash | ConversationDetailsLife360.kt |
-| Unsafe casts in combine | CRITICAL | Crash | SmsSettingsViewModel.kt |
-| maxByOrNull()!! | CRITICAL | Crash | MessageCategorizer.kt |
-| Silent exception catch | HIGH | Debug | ServerSettingsViewModel.kt |
-| Ignored audio cleanup | HIGH | Resource | ChatAudioHelper.kt |
-| Non-idempotent retry | HIGH | API | RetryHelper.kt |
-| Generic error message | HIGH | UX | QuickReplyTemplatesViewModel.kt |
-| No recovery state | MEDIUM | UX | SmsSettingsViewModel.kt |
-| No offline fallback | MEDIUM | UX | ServerSettingsViewModel.kt |
-| Missing retry button | MEDIUM | UX | Multiple |
-| Unsafe Flow.first() | MEDIUM | Crash | ConversationDetailsViewModel.kt |
-| No cancellation check | MEDIUM | Resource | AttachmentEditScreen.kt |
+| Issue | Severity | Category | Status | File |
+|-------|----------|----------|--------|------|
+| Force unwrap on empty list | CRITICAL | Crash | ✅ FIXED | ConversationDetailsLife360.kt |
+| Unsafe casts in combine | CRITICAL | Crash | ✅ FIXED | SmsSettingsViewModel.kt |
+| maxByOrNull()!! | CRITICAL | Crash | ✅ FIXED | MessageCategorizer.kt |
+| Silent exception catch | HIGH | Debug | ⚠️ OPEN | ServerSettingsViewModel.kt |
+| Ignored audio cleanup | HIGH | Resource | ⚠️ OPEN | ChatAudioHelper.kt |
+| Non-idempotent retry | HIGH | API | ⚠️ OPEN | RetryHelper.kt |
+| Generic error message | HIGH | UX | ⚠️ OPEN | QuickReplyTemplatesViewModel.kt |
+| No recovery state | MEDIUM | UX | ⚠️ OPEN | SmsSettingsViewModel.kt |
+| No offline fallback | MEDIUM | UX | ⚠️ OPEN | ServerSettingsViewModel.kt |
+| Missing retry button | MEDIUM | UX | ⚠️ OPEN | Multiple |
+| Unsafe Flow.first() | MEDIUM | Crash | ✅ FIXED | ConversationDetailsViewModel.kt |
+| Unsafe nullable force unwrap | MEDIUM | Crash | ✅ FIXED | AttachmentEntity.kt |
+| No cancellation check | MEDIUM | Resource | ⚠️ OPEN | AttachmentEditScreen.kt |

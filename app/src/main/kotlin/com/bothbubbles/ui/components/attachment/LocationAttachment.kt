@@ -87,22 +87,19 @@ fun LocationAttachment(
     val needsDownload = attachment.localPath == null && !isFromMe
 
     LaunchedEffect(attachment.localPath) {
-        Timber.d("[LOCATION_DEBUG] LocationAttachment: localPath=${attachment.localPath}, needsDownload=$needsDownload, isDownloading=$isDownloading")
         attachment.localPath?.let { path ->
             withContext(Dispatchers.IO) {
                 try {
                     val file = File(path)
                     if (file.exists()) {
                         val content = file.readText()
-                        Timber.d("[LOCATION_DEBUG] VCF content: $content")
                         coordinates = parseVLocationCoordinates(content)
                         parseError = coordinates == null
-                        Timber.d("[LOCATION_DEBUG] Parsed coordinates: $coordinates, parseError=$parseError")
                     } else {
-                        Timber.w("[LOCATION_DEBUG] File does not exist: $path")
+                        Timber.w("vLocation file does not exist: $path")
                     }
                 } catch (e: Exception) {
-                    Timber.e(e, "[LOCATION_DEBUG] Error parsing vLocation")
+                    Timber.e(e, "Error parsing vLocation")
                     parseError = true
                 }
             }

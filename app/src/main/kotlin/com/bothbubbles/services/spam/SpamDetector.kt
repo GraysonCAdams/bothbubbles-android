@@ -114,7 +114,7 @@ class SpamDetector @Inject constructor(
         // Check if sender is whitelisted
         val handle = handleDao.getHandleByAddressAny(senderAddress)
         if (handle?.isWhitelisted == true) {
-            Timber.d("Sender $senderAddress is whitelisted, skipping spam detection")
+            Timber.d("Sender is whitelisted, skipping spam detection")
             return SpamResult(0, false, emptyList())
         }
 
@@ -184,9 +184,9 @@ class SpamDetector @Inject constructor(
         val isSpam = score >= threshold
 
         if (isSpam) {
-            Timber.i("Message from $senderAddress classified as spam (score: $score, threshold: $threshold, reasons: $reasons)")
+            Timber.i("Message classified as spam (score: $score, threshold: $threshold, reasons: $reasons)")
         } else {
-            Timber.d("Message from $senderAddress not spam (score: $score, threshold: $threshold)")
+            Timber.d("Message not spam (score: $score, threshold: $threshold)")
         }
 
         return SpamResult(score, isSpam, reasons)
@@ -231,7 +231,7 @@ class SpamDetector @Inject constructor(
 
             false
         } catch (e: Exception) {
-            Timber.w(e, "Error checking contacts for $address")
+            Timber.w(e, "Error checking contacts")
             false
         }
     }

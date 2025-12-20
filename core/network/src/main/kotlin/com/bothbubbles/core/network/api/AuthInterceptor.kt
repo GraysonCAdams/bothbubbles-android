@@ -46,7 +46,7 @@ class AuthInterceptor @Inject constructor(
         val credentials = getCredentialsBlocking()
         val credTime = System.currentTimeMillis() - credStart
         if (credTime > 50) {
-            Timber.w("[SEND_TRACE] AuthInterceptor getCredentials took ${credTime}ms (slow!)")
+            Timber.w("AuthInterceptor getCredentials took ${credTime}ms (slow!)")
         }
         val serverAddress = credentials.serverAddress
         val authKey = credentials.authKey
@@ -97,14 +97,10 @@ class AuthInterceptor @Inject constructor(
         }
 
         val finalRequest = requestBuilder.build()
-        Timber.d("Request URL = ${finalRequest.url}")
+        Timber.d("Request to endpoint: ${finalRequest.url.encodedPath}")
         Timber.d("Request method = ${finalRequest.method}")
 
-        val proceedStart = System.currentTimeMillis()
         val response = chain.proceed(finalRequest)
-        val proceedTime = System.currentTimeMillis() - proceedStart
-        val totalTime = System.currentTimeMillis() - interceptStart
-        Timber.i("[SEND_TRACE] HTTP ${finalRequest.method} ${finalRequest.url.encodedPath}: network=${proceedTime}ms, total=${totalTime}ms, status=${response.code}")
         return response
     }
 

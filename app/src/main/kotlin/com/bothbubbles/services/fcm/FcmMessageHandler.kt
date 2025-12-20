@@ -209,7 +209,7 @@ class FcmMessageHandler @Inject constructor(
 
         // Resolve sender name and avatar - try contact lookup first
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
-        Timber.d("FCM_DEBUG: Resolved sender - name='$senderName', avatarUri='$senderAvatarUri', address='$senderAddress'")
+        Timber.d("FCM_DEBUG: Resolved sender - name='$senderName', hasAvatar=${senderAvatarUri != null}")
 
         val isGroup = chat?.isGroup ?: false
 

@@ -69,7 +69,7 @@ class Life360Repository @Inject constructor(
         val normalized = PhoneNumberFormatter.normalize(address) ?: address
         val digitsOnly = address.filter { it.isDigit() }.takeLast(10)  // Last 10 digits
 
-        Timber.d("Life360 observeMemberByAddress: address=$address, normalized=$normalized, digits=$digitsOnly")
+        Timber.d("Life360 observeMemberByAddress: checking for member match")
 
         return life360Dao.getMemberByPhoneNumberFlow(address, normalized, digitsOnly).map { entity ->
             Timber.d("Life360 observeMemberByAddress result: found=${entity != null}, member=${entity?.firstName} ${entity?.lastName}")
@@ -205,7 +205,7 @@ class Life360Repository @Inject constructor(
             if (handle != null) {
                 life360Dao.mapMemberToHandle(member.memberId, handle.id)
                 mappedCount++
-                Timber.d("Auto-mapped Life360 member ${member.firstName} to handle ${handle.address}")
+                Timber.d("Auto-mapped Life360 member ${member.firstName} to contact")
             }
         }
 

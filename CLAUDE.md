@@ -16,12 +16,150 @@ The following READMEs define **mandatory patterns** for each layer. You MUST rea
 | `app/src/main/kotlin/com/bothbubbles/ui/chat/delegates/README.md` | Delegates | ViewModel delegate pattern |
 | `app/schemas/README.md` | Database | Schema migrations |
 | `docs/guides/COMPOSE_BEST_PRACTICES.md` | Compose | **ANY** Compose UI code |
+| `docs/antipatterns/00-ANTI-PATTERNS-INDEX.md` | Anti-Patterns | **ALL** code changes (consult before implementing) |
 
 **RULE**: When modifying code in a layer, you MUST first read that layer's README and follow its patterns exactly.
+
+## Anti-Pattern Documentation (MANDATORY READING)
+
+The `docs/antipatterns/` directory contains **22 detailed anti-pattern reports** from a comprehensive codebase analysis. Before writing ANY code, you MUST consult the relevant anti-pattern documents:
+
+| Document | When to Consult |
+|----------|----------------|
+| `01-UI-ANTI-PATTERNS.md` | Any Compose/ViewModel code |
+| `02-DATA-ANTI-PATTERNS.md` | Repository, DAO, entity changes |
+| `03-SERVICES-ANTI-PATTERNS.md` | Service/handler changes |
+| `04-DI-UTIL-ANTI-PATTERNS.md` | DI modules or utility classes |
+| `10-SECURITY-ANTI-PATTERNS.md` | Network, auth, or data handling |
+| `11-CONCURRENCY-ANTI-PATTERNS.md` | Any threading/coroutine code |
+| `13-ERROR-HANDLING-ANTI-PATTERNS.md` | Exception handling, Result types |
+| `16-LOGGING-ANTI-PATTERNS.md` | Any Timber logging |
 
 ## Project Overview
 
 BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that connects to a BlueBubbles server for iMessage functionality, with optional SMS/MMS support as a fallback.
+
+---
+
+## CRITICAL RULES (Violations Cause Crashes/Security Issues)
+
+### Security Rules (MANDATORY)
+
+**RULE**: NEVER log sensitive data. The following must NEVER appear in logs:
+- Auth keys, passwords, or tokens (even partial - no `password.take(4)`)
+- Full phone numbers or email addresses (use `address.take(3)***` if needed)
+- Message content (even previews)
+- URLs containing auth parameters
+
+**RULE**: NEVER use unsafe SSL/TLS patterns:
+```kotlin
+// FORBIDDEN - accepts any certificate
+.hostnameVerifier { _, _ -> true }
+override fun checkServerTrusted(...) {}  // Empty implementation
+```
+
+**RULE**: Remove ALL debug logging tags before committing:
+- `[SEND_TRACE]`, `[LOCATION_DEBUG]`, `[FCM_DEBUG]`, `[VM_SEND]`, `[DUPLICATE_DETECT]`
+- Any `Timber.d("DEBUG ...")` statements
+
+### Concurrency Rules (MANDATORY)
+
+**RULE**: NEVER use `SimpleDateFormat` - it is NOT thread-safe. Use `DateTimeFormatter` instead:
+```kotlin
+// FORBIDDEN
+SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(str)
+
+// REQUIRED
+DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US).parse(str)
+```
+
+**RULE**: NEVER use `runBlocking` in production code - it defeats coroutines and causes deadlocks:
+```kotlin
+// FORBIDDEN
+runBlocking { dao.query() }
+
+// REQUIRED - make function suspend
+suspend fun doWork() { dao.query() }
+```
+
+**RULE**: Synchronize ALL operations in check-then-act patterns:
+```kotlin
+// FORBIDDEN - race condition between check and put
+cache.get(key)?.let { return it }
+val result = expensiveOperation()
+cache.put(key, result)
+
+// REQUIRED - single synchronized block
+synchronized(lock) {
+    cache.get(key)?.let { return it }
+    val result = expensiveOperation()
+    cache.put(key, result)
+    return result
+}
+```
+
+**RULE**: Use atomic state updates for related fields:
+```kotlin
+// FORBIDDEN - non-atomic
+activeChatGuid = chatGuid
+activeMergedGuids = mergedGuids
+
+// REQUIRED - single atomic reference
+data class ActiveState(val chatGuid: String, val mergedGuids: Set<String>)
+activeState = ActiveState(chatGuid, mergedGuids)
+```
+
+### Error Handling Rules (MANDATORY)
+
+**RULE**: NEVER use force unwrap (`!!`) on nullable collection operations:
+```kotlin
+// FORBIDDEN - crashes on empty list
+list.minOrNull()!!
+list.maxByOrNull { it.value }!!
+flow.first()
+
+// REQUIRED - safe alternatives
+list.minOrNull() ?: return
+list.maxByOrNull { it.value } ?: defaultValue
+flow.firstOrNull() ?: emptyList()
+```
+
+**RULE**: ALWAYS use safe casts with defaults in Flow combine:
+```kotlin
+// FORBIDDEN - crashes when StateFlow is null during init
+values[0] as Boolean
+
+// REQUIRED - safe cast with default
+values[0] as? Boolean ?: false
+```
+
+**RULE**: NEVER catch exceptions silently - always log:
+```kotlin
+// FORBIDDEN
+} catch (_: Exception) {}
+} catch (e: Exception) { /* silent */ }
+
+// REQUIRED
+} catch (e: Exception) {
+    Timber.w(e, "Context about what failed")
+}
+```
+
+**RULE**: NEVER show raw exception messages to users:
+```kotlin
+// FORBIDDEN
+_uiState.update { it.copy(error = e.message) }
+
+// REQUIRED
+val userMessage = when (e) {
+    is IOException -> "Network error - check your connection"
+    else -> "Something went wrong"
+}
+_uiState.update { it.copy(error = userMessage) }
+Timber.e(e, "Operation failed")  // Log technical details
+```
+
+---
 
 ## Compose Rules (MANDATORY)
 
@@ -31,6 +169,59 @@ BothBubbles is a native Android messaging app (Kotlin + Jetpack Compose) that co
 2.  **Immutable Collections**: ALWAYS use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.
 3.  **Stable Callbacks**: ALWAYS use method references (`viewModel::method`) instead of lambdas capturing state.
 4.  **No Logic in Composition**: NEVER put logging, I/O, or complex calculations in the composition path.
+
+---
+
+## DI & Utility Rules (MANDATORY)
+
+**RULE**: Utilities MUST be stateless. If a class:
+- Has `@Inject` constructor
+- Maintains mutable state
+- Requires `init()` to be called
+- Needs Context parameter
+
+Then it is a **SERVICE**, not a utility. Move it to `services/` package.
+
+**RULE**: Add `@Singleton` to dispatcher providers:
+```kotlin
+@Provides
+@Singleton  // REQUIRED
+@IoDispatcher
+fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
+```
+
+**RULE**: Classes over 500 lines MUST be decomposed:
+- ViewModels > 300 lines → use delegates
+- Utilities > 500 lines → split by responsibility
+- Services > 500 lines → extract handlers
+
+---
+
+## Logging Rules (MANDATORY)
+
+**RULE**: ALWAYS include exception in `Timber.e()`:
+```kotlin
+// FORBIDDEN
+Timber.e("Failed to load")
+
+// REQUIRED
+Timber.e(e, "Failed to load")
+```
+
+**RULE**: Gate verbose logging with BuildConfig.DEBUG:
+```kotlin
+if (BuildConfig.DEBUG) {
+    Timber.d("Verbose debug info...")
+}
+```
+
+**RULE**: Use consistent Timber tags for subsystems:
+```kotlin
+Timber.tag("Socket").d("Connected")
+Timber.tag("MessageSend").d("Queued")
+```
+
+---
 
 ## Build Commands
 
@@ -306,7 +497,7 @@ app/src/main/kotlin/com/bothbubbles/
 │   │   └── ...
 │   └── theme/                    # Material Design 3 theming
 │
-└── util/                         # Utility classes
+└── util/                         # Utility classes (STATELESS ONLY)
     └── parsing/                  # Parsing utilities (Date, URL, Phone)
 ```
 
@@ -337,15 +528,17 @@ app/src/main/kotlin/com/bothbubbles/
 - **RULE**: Services layer CAN depend on Data layer
 - **RULE**: UI layer CAN depend on both Data and Services layers
 - **RULE**: ViewModels with >300 lines MUST use delegates
+- **RULE**: Utilities MUST be stateless (no @Inject, no mutable state, no init())
 
 ### Anti-Pattern Validation (MANDATORY)
 
 **RULE**: Before writing or modifying ANY code, you MUST validate that your approach is NOT an anti-pattern.
 
 Before implementing:
-1. **Verify against known anti-patterns** - Check that your solution doesn't match common anti-patterns for the technology (Compose, Kotlin, Android, Room, Hilt, etc.)
-2. **Consult layer READMEs** - Each layer's README documents anti-patterns specific to that layer. Read them.
-3. **Question your approach** - If the solution feels complex, repetitive, or requires workarounds, it's likely an anti-pattern. Stop and reconsider.
+1. **Consult anti-pattern docs** - Read relevant files in `docs/antipatterns/`
+2. **Verify against known anti-patterns** - Check that your solution doesn't match common anti-patterns for the technology (Compose, Kotlin, Android, Room, Hilt, etc.)
+3. **Consult layer READMEs** - Each layer's README documents anti-patterns specific to that layer. Read them.
+4. **Question your approach** - If the solution feels complex, repetitive, or requires workarounds, it's likely an anti-pattern. Stop and reconsider.
 
 Common anti-patterns to ALWAYS check for:
 - **God objects** - Classes doing too much (use delegates/handlers)
@@ -357,6 +550,11 @@ Common anti-patterns to ALWAYS check for:
 - **Unsafe casts** - Using `as` instead of `as?` with safe defaults
 - **Circular dependencies** - Layers depending on each other incorrectly
 - **Leaking internals** - Exposing implementation details in public APIs
+- **Force unwraps** - Using `!!` on nullable collection operations
+- **SimpleDateFormat** - Not thread-safe, use DateTimeFormatter
+- **runBlocking** - Blocks threads, defeats coroutines
+- **Silent catches** - `catch (_: Exception) {}` hides bugs
+- **Sensitive data in logs** - Auth keys, phone numbers, passwords
 
 If you are unsure whether something is an anti-pattern, **ask before implementing**.
 

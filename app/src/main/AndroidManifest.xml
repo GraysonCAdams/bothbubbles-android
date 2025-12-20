@@ -81,7 +81,7 @@
 
     <application
         android:name=".BothBubblesApp"
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:hardwareAccelerated="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -265,7 +265,7 @@
         <!-- SMS Provider Changed Receiver (API 24+) - detects default SMS app changes -->
         <receiver
             android:name=".services.sms.SmsProviderChangedReceiver"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="android.provider.action.DEFAULT_SMS_PACKAGE_CHANGED" />
             </intent-filter>

@@ -173,7 +173,7 @@ suspend fun getChatByGuid(guid: String): ChatEntity? = chatDao.getChatByGuid(gui
 
 **Locations:**
 - `data/repository/ChatRepository.kt:347,378` - "TODO: Fix by changing API return type"
-- `data/repository/GifRepository.kt:28` - "TODO: Move to BuildConfig" (API key!)
+- ~~`data/repository/GifRepository.kt:28` - "TODO: Move to BuildConfig" (API key!)~~ **FIXED 2024-12-20**
 - `ui/chat/components/ChatBackground.kt:28,29` - "TODO: Add support for per-chat wallpaper"
 - `ui/conversations/ConversationsScreen.kt:531` - "TODO: For full select-all mode"
 

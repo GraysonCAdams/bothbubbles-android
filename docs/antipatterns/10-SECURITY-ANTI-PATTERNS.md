@@ -86,14 +86,11 @@ override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: St
 
 ---
 
-### 4. android:allowBackup="true" with Sensitive Data
+### 4. android:allowBackup="true" with Sensitive Data ✅ FIXED
 
 **Location:** `app/src/main/AndroidManifest.xml` (Line 84)
 
-```xml
-<application
-    android:allowBackup="true"
-```
+**Status:** Fixed - Set to `android:allowBackup="false"`
 
 **Attack Scenario:**
 - `adb backup` extracts all app data
@@ -101,49 +98,37 @@ override fun checkServerTrusted(chain: Array<out X509Certificate>?, authType: St
 - DataStore with server address and auth keys
 - Contact information
 
-**Fix:**
+**Fix Applied:**
 ```xml
 <application
     android:allowBackup="false"
 ```
 
-Or implement `BackupAgent` that excludes sensitive data.
-
 ---
 
-### 5. Exported Components Without Permission Protection
+### 5. Exported Components Without Permission Protection ✅ PARTIALLY FIXED
 
 **Location:** `app/src/main/AndroidManifest.xml`
 
 | Line | Component | Status |
 |------|-----------|--------|
-| 106 | MainActivity | `exported="true"` without permission |
-| 235 | BothBubblesCarAppService | `exported="true"` without permission |
-| 268 | SmsProviderChangedReceiver | `exported="true"` without permission |
+| 106 | MainActivity | `exported="true"` without permission (intentional - launcher activity) |
+| 235 | BothBubblesCarAppService | `exported="true"` without permission (required for Android Auto) |
+| 268 | SmsProviderChangedReceiver | ✅ FIXED - Changed to `exported="false"` |
 | 245 | SmsBroadcastReceiver | Protected with permission |
 | 256 | MmsBroadcastReceiver | Protected with permission |
 
-**Issue (SmsProviderChangedReceiver):**
-```xml
-<receiver
-    android:name=".services.sms.SmsProviderChangedReceiver"
-    android:exported="true">  <!-- No permission! -->
-    <intent-filter>
-        <action android:name="android.provider.action.DEFAULT_SMS_PACKAGE_CHANGED" />
-    </intent-filter>
-</receiver>
-```
+**Status:** SmsProviderChangedReceiver fixed by setting `android:exported="false"`. MainActivity and BothBubblesCarAppService require `exported="true"` for system integration.
 
-**Attack Scenario:**
-- Any app can broadcast to this receiver
-- Potential SMS default app status interference
-- Intent injection through MainActivity extras
-
-**Fix:**
+**Fix Applied (SmsProviderChangedReceiver):**
 ```xml
 <receiver
     android:name=".services.sms.SmsProviderChangedReceiver"
     android:exported="false">
+    <intent-filter>
+        <action android:name="android.provider.action.DEFAULT_SMS_PACKAGE_CHANGED" />
+    </intent-filter>
+</receiver>
 ```
 
 ---
@@ -168,25 +153,27 @@ Timber.d("DEBUG performCheck: responseBody=$responseBody")
 
 ## Medium Severity Issues
 
-### 7. HTTP Logging at HEADERS Level
+### 7. HTTP Logging at HEADERS Level ✅ FIXED
 
-**Location:** `core/network/.../CoreNetworkModule.kt` (Lines 41-48)
+**Location:** `core/network/.../CoreNetworkModule.kt` (Lines 41-54)
 
-```kotlin
-fun provideLoggingInterceptor(): HttpLoggingInterceptor {
-    return HttpLoggingInterceptor().apply {
-        level = HttpLoggingInterceptor.Level.HEADERS
-    }
-}
-```
+**Status:** Fixed - Logging now gated with BuildConfig.DEBUG
 
 **Problem:**
 - HEADERS level logs authorization headers
 - Exposed in release builds if not gated
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-level = if (BuildConfig.DEBUG) Level.HEADERS else Level.NONE
+fun provideLoggingInterceptor(): HttpLoggingInterceptor {
+    return HttpLoggingInterceptor().apply {
+        level = if (BuildConfig.DEBUG) {
+            HttpLoggingInterceptor.Level.HEADERS
+        } else {
+            HttpLoggingInterceptor.Level.NONE
+        }
+    }
+}
 ```
 
 ---
@@ -220,52 +207,56 @@ private fun getRecipientFromUri(uri: Uri): String? {
 
 ---
 
-### 9. FileProvider Root Path Exposure
+### 9. FileProvider Root Path Exposure ✅ FIXED
 
 **Location:** `app/src/main/res/xml/file_paths.xml`
 
-```xml
-<paths>
-    <cache-path name="cache" path="." />
-    <files-path name="files" path="." />
-    <external-files-path name="external_files" path="." />
-</paths>
-```
+**Status:** Fixed - Paths now restricted to specific subdirectories
 
 **Problem:**
 - `path="."` exposes root directories
 - Other apps could access sensitive cached files
 
-**Fix:**
+**Fix Applied:**
 ```xml
-<cache-path name="attachments" path="attachments" />
-<files-path name="exports" path="exports" />
+<paths>
+    <!-- Restrict FileProvider paths to specific subdirectories for security -->
+    <cache-path name="attachments" path="attachments" />
+    <files-path name="exports" path="exports" />
+    <external-files-path name="shared" path="shared" />
+    <external-cache-path name="external_cache" path="attachments" />
+</paths>
 ```
 
 ---
 
 ## Summary Table
 
-| Issue | Severity | Risk | File |
-|-------|----------|------|------|
-| Auth key in logs | CRITICAL | Key theft | AuthInterceptor, IMessageAvailabilityService |
-| Certificate bypass | CRITICAL | MITM | CoreNetworkModule |
-| Cleartext traffic | HIGH | Interception | network_security_config.xml |
-| allowBackup=true | HIGH | Data theft | AndroidManifest.xml |
-| Exported components | HIGH | Intent injection | AndroidManifest.xml |
-| Excessive logging | HIGH | Data exposure | IMessageAvailabilityService |
-| HTTP HEADERS logging | MEDIUM | Header exposure | CoreNetworkModule |
-| Missing URI validation | MEDIUM | Injection | HeadlessSmsSendService |
-| FileProvider paths | MEDIUM | File access | file_paths.xml |
+| Issue | Severity | Risk | File | Status |
+|-------|----------|------|------|--------|
+| Auth key in logs | CRITICAL | Key theft | AuthInterceptor, IMessageAvailabilityService | ⚠️ Open |
+| Certificate bypass | CRITICAL | MITM | CoreNetworkModule | ⚠️ Open |
+| Cleartext traffic | HIGH | Interception | network_security_config.xml | ⚠️ Open |
+| allowBackup=true | HIGH | Data theft | AndroidManifest.xml | ✅ FIXED |
+| Exported components | HIGH | Intent injection | AndroidManifest.xml | ✅ FIXED (SmsProviderChangedReceiver) |
+| Excessive logging | HIGH | Data exposure | IMessageAvailabilityService | ⚠️ Open |
+| HTTP HEADERS logging | MEDIUM | Header exposure | CoreNetworkModule | ✅ FIXED |
+| Missing URI validation | MEDIUM | Injection | HeadlessSmsSendService | ⚠️ Open |
+| FileProvider paths | MEDIUM | File access | file_paths.xml | ✅ FIXED |
 
 ---
 
 ## Immediate Action Items
 
+### Completed ✅
+1. ✅ **HIGH:** Set `android:allowBackup="false"` - DONE
+2. ✅ **HIGH:** Fix exported SmsProviderChangedReceiver - DONE
+3. ✅ **HIGH:** Gate HTTP logging with BuildConfig.DEBUG - DONE
+4. ✅ **MEDIUM:** Restrict FileProvider paths - DONE
+
+### Remaining ⚠️
 1. **CRITICAL:** Sanitize auth keys from all Timber logs
 2. **CRITICAL:** Implement certificate pinning
-3. **HIGH:** Set `android:allowBackup="false"`
-4. **HIGH:** Add permission checks to exported components
-5. **HIGH:** Gate debug logging with BuildConfig.DEBUG
-6. **MEDIUM:** Restrict FileProvider paths
-7. **MEDIUM:** Add input validation to URI handling
+3. **HIGH:** Remove cleartext traffic permission or restrict to debug builds
+4. **HIGH:** Reduce excessive logging in IMessageAvailabilityService
+5. **MEDIUM:** Add input validation to URI handling in HeadlessSmsSendService

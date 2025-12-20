@@ -1,6 +1,7 @@
 package com.bothbubbles.core.network.di
 
 import com.bothbubbles.core.network.AuthCredentialsProvider
+import com.bothbubbles.core.network.BuildConfig
 import com.bothbubbles.core.network.api.AuthInterceptor
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.Life360Api
@@ -43,7 +44,12 @@ object CoreNetworkModule {
             // Use HEADERS level to avoid OOM when logging large attachment bodies
             // Level.BODY would try to buffer entire request/response bodies as strings,
             // which causes OutOfMemoryError for large video/file uploads (100MB+)
-            level = HttpLoggingInterceptor.Level.HEADERS
+            // Disable in release builds to prevent authorization header exposure
+            level = if (BuildConfig.DEBUG) {
+                HttpLoggingInterceptor.Level.HEADERS
+            } else {
+                HttpLoggingInterceptor.Level.NONE
+            }
         }
     }
 

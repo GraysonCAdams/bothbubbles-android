@@ -325,7 +325,8 @@ class MessageCategorizer @Inject constructor(
             return CategoryResult(null, 0, listOf("No categorizable messages"))
         }
 
-        val bestCategory = categoryCounts.maxByOrNull { it.value }!!
+        val bestCategory = categoryCounts.maxByOrNull { it.value }
+            ?: return CategoryResult(null, 0, listOf("No best category found"))
         val confidence = ((bestCategory.value * 100) / totalCategorized).coerceAtMost(100)
 
         return CategoryResult(

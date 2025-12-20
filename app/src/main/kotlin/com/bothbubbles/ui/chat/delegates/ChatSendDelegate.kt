@@ -140,19 +140,6 @@ class ChatSendDelegate @AssistedInject constructor(
             return Result.failure(IllegalArgumentException("Message text and attachments are both empty"))
         }
 
-        val sendStartTime = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-        Timber.i("[SEND_TRACE] STEP 1: queueMessageForSending() CALLED at $sendStartTime")
-        Timber.i("[SEND_TRACE] Text: \"${trimmedText.take(50)}${if (trimmedText.length > 50) "..." else ""}\"")
-        Timber.i("[SEND_TRACE] Attachments: ${attachments.size}, SendMode: $currentSendMode, IsLocalSms: $isLocalSmsChat")
-
-        // Log each attachment in detail
-        attachments.forEachIndexed { index, att ->
-            Timber.tag("AttachmentDebug").i("📤 SEND Attachment[$index]: uri=${att.uri}")
-            Timber.tag("AttachmentDebug").i("   mimeType=${att.mimeType}, name=${att.name}, size=${att.size}")
-            Timber.tag("AttachmentDebug").i("   caption=${att.caption}")
-        }
-
         val sendId = PerformanceProfiler.start("Message.send", "${trimmedText.take(20)}...")
         val replyToGuid = _state.value.replyingToGuid
 
@@ -169,36 +156,14 @@ class ChatSendDelegate @AssistedInject constructor(
         // Generate GUID for optimistic UI
         val tempGuid = "temp-${java.util.UUID.randomUUID()}"
         val creationTime = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] STEP 2: Generated tempGuid=$tempGuid +${System.currentTimeMillis() - sendStartTime}ms")
 
-        // ═══════════════════════════════════════════════════════════════════════════
-        // DUPLICATE DETECTION: Check if same text was sent recently
-        // ═══════════════════════════════════════════════════════════════════════════
+        // Track recent sends for potential duplicate detection (debugging)
         val textHash = trimmedText.hashCode()
         val textPreview = trimmedText.take(30)
 
         // Clean up old entries
         val cutoffTime = creationTime - duplicateWarningWindowMs
         recentSends.removeAll { it.timestamp < cutoffTime }
-
-        // Check for potential duplicate
-        val potentialDuplicate = recentSends.find { it.textHash == textHash }
-        if (potentialDuplicate != null) {
-            val timeSinceLastSend = creationTime - potentialDuplicate.timestamp
-            val timeSinceSeconds = timeSinceLastSend / 1000
-            Timber.w("[DUPLICATE_DETECT] ⚠️ ════════════════════════════════════════════════════")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ POTENTIAL DUPLICATE MESSAGE DETECTED!")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Text: \"$textPreview...\"")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Same text hash sent ${timeSinceSeconds}s ago")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Previous tempGuid: ${potentialDuplicate.tempGuid}")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Current tempGuid: $tempGuid")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Previous timestamp: ${potentialDuplicate.timestamp}")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Current timestamp: $creationTime")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ Chat: $chatGuid")
-            Timber.w("[DUPLICATE_DETECT] ⚠️ ════════════════════════════════════════════════════")
-        } else {
-            Timber.d("[DUPLICATE_DETECT] No duplicate detected for text hash $textHash")
-        }
 
         // Record this send for future duplicate detection
         recentSends.add(RecentSend(
@@ -210,7 +175,6 @@ class ChatSendDelegate @AssistedInject constructor(
         if (recentSends.size > maxRecentSends) {
             recentSends.removeAt(0)
         }
-        Timber.d("[DUPLICATE_DETECT] Tracking ${recentSends.size} recent sends for this chat")
 
         // Determine message source for the optimistic model
         val messageSource = when {
@@ -232,8 +196,6 @@ class ChatSendDelegate @AssistedInject constructor(
 
         // Queue message for offline-first delivery via WorkManager (on IO dispatcher)
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-            Timber.i("[SEND_TRACE] STEP 3: On IO thread, calling queueMessage +${System.currentTimeMillis() - sendStartTime}ms")
-            val queueStart = System.currentTimeMillis()
             pendingMessageSource.queueMessage(
                 chatGuid = chatGuid,
                 text = trimmedText,
@@ -245,8 +207,6 @@ class ChatSendDelegate @AssistedInject constructor(
                 attributedBodyJson = attributedBodyJson
             ).fold(
                 onSuccess = { localId ->
-                    Timber.i("[SEND_TRACE] STEP 4: queueMessage SUCCESS (took ${System.currentTimeMillis() - queueStart}ms) +${System.currentTimeMillis() - sendStartTime}ms total")
-                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                     PerformanceProfiler.end(sendId, "queued")
 
                     // Play send sound for all message types (iMessage and SMS)
@@ -255,7 +215,7 @@ class ChatSendDelegate @AssistedInject constructor(
                     Result.success(queuedInfo)
                 },
                 onFailure = { e ->
-                    Timber.e("[SEND_TRACE] STEP 4: queueMessage FAILED: ${e.message} +${System.currentTimeMillis() - sendStartTime}ms")
+                    Timber.e(e, "Failed to queue message")
                     _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
                     PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
                     Result.failure(e)

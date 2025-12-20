@@ -131,28 +131,22 @@ class MessageSendWorker @AssistedInject constructor(
     }
 
     override suspend fun doWork(): Result {
-        val workerStartTime = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-        Timber.i("[SEND_TRACE] MessageSendWorker.doWork() STARTED at $workerStartTime")
-
         val pendingMessageId = inputData.getLong(KEY_PENDING_MESSAGE_ID, -1)
 
         if (pendingMessageId == -1L) {
-            Timber.e("[SEND_TRACE] FATAL: Pending message ID is missing")
+            Timber.e("Pending message ID is missing")
             return Result.failure()
         }
-        Timber.i("[SEND_TRACE] pendingMessageId=$pendingMessageId +${System.currentTimeMillis() - workerStartTime}ms")
 
         val pendingMessage = pendingMessageDao.getById(pendingMessageId)
         if (pendingMessage == null) {
-            Timber.e("[SEND_TRACE] FATAL: Pending message not found: $pendingMessageId")
+            Timber.e("Pending message not found: $pendingMessageId")
             return Result.failure()
         }
-        Timber.i("[SEND_TRACE] Loaded pending message: localId=${pendingMessage.localId}, chatGuid=${pendingMessage.chatGuid} +${System.currentTimeMillis() - workerStartTime}ms")
 
         // Skip if already sent
         if (pendingMessage.syncStatus == PendingSyncStatus.SENT.name) {
-            Timber.i("[SEND_TRACE] SKIPPING: Message already sent: ${pendingMessage.localId}")
+            Timber.d("Message already sent: ${pendingMessage.localId}")
             return Result.success()
         }
 
@@ -163,9 +157,7 @@ class MessageSendWorker @AssistedInject constructor(
         // ═══════════════════════════════════════════════════════════════════════════
         val existingServerGuid = pendingMessage.serverGuid
         if (existingServerGuid != null) {
-            Timber.w("[SEND_TRACE] ⚠️ API already succeeded on previous attempt!")
-            Timber.w("[SEND_TRACE] ⚠️ serverGuid=$existingServerGuid, skipping API call")
-            Timber.w("[SEND_TRACE] ⚠️ Going straight to confirmation wait...")
+            Timber.i("API already succeeded on previous attempt, going to confirmation for serverGuid=$existingServerGuid")
 
             val confirmationResult = waitForServerConfirmation(
                 serverGuid = existingServerGuid,
@@ -174,22 +166,18 @@ class MessageSendWorker @AssistedInject constructor(
             )
 
             return if (confirmationResult.isSuccess) {
-                Timber.i("[SEND_TRACE] ✓ Confirmation succeeded for previously-sent message")
+                Timber.i("Confirmation succeeded for previously-sent message")
                 pendingMessageDao.markAsSent(pendingMessageId, existingServerGuid)
-                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-                Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE (resumed): ${System.currentTimeMillis() - workerStartTime}ms")
-                Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                 Result.success()
             } else {
-                Timber.e("[SEND_TRACE] ✗ Confirmation failed for previously-sent message")
+                Timber.e("Confirmation failed for previously-sent message")
                 handleServerError(pendingMessageId, pendingMessage.chatGuid, confirmationResult.exceptionOrNull())
             }
         }
 
-        Timber.i("[SEND_TRACE] Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1}) +${System.currentTimeMillis() - workerStartTime}ms")
+        Timber.d("Sending message ${pendingMessage.localId} (attempt ${runAttemptCount + 1})")
 
         // Update status to SENDING
-        Timber.i("[SEND_TRACE] Updating status to SENDING +${System.currentTimeMillis() - workerStartTime}ms")
         pendingMessageDao.updateStatusWithTimestamp(
             pendingMessageId,
             PendingSyncStatus.SENDING.name,
@@ -198,9 +186,7 @@ class MessageSendWorker @AssistedInject constructor(
 
         return try {
             // Get persisted attachments and convert to PendingAttachmentInput
-            Timber.i("[SEND_TRACE] Loading attachments +${System.currentTimeMillis() - workerStartTime}ms")
             val attachments = pendingAttachmentDao.getForMessage(pendingMessageId)
-            Timber.i("[SEND_TRACE] Found ${attachments.size} attachments +${System.currentTimeMillis() - workerStartTime}ms")
             val attachmentInputs = attachments.mapNotNull { attachment ->
                 val file = File(attachment.persistedPath)
                 if (file.exists()) {
@@ -212,7 +198,7 @@ class MessageSendWorker @AssistedInject constructor(
                         size = attachment.fileSize
                     )
                 } else {
-                    Timber.w("[SEND_TRACE] Attachment file missing: ${attachment.persistedPath}")
+                    Timber.w("Attachment file missing: ${attachment.persistedPath}")
                     null
                 }
             }
@@ -223,12 +209,9 @@ class MessageSendWorker @AssistedInject constructor(
             } catch (e: Exception) {
                 MessageDeliveryMode.AUTO
             }
-            Timber.i("[SEND_TRACE] deliveryMode=$deliveryMode, attachments=${attachmentInputs.size} +${System.currentTimeMillis() - workerStartTime}ms")
 
             // Send via MessageSendingService
             // Pass localId as tempGuid to ensure same ID is used across retries
-            Timber.i("[SEND_TRACE] ── Calling MessageSendingService.sendUnified ── +${System.currentTimeMillis() - workerStartTime}ms")
-            val sendStart = System.currentTimeMillis()
             val result = messageSendingService.sendUnified(
                 chatGuid = pendingMessage.chatGuid,
                 text = pendingMessage.text ?: "",
@@ -240,19 +223,16 @@ class MessageSendWorker @AssistedInject constructor(
                 tempGuid = pendingMessage.localId,
                 attributedBodyJson = pendingMessage.attributedBodyJson
             )
-            Timber.i("[SEND_TRACE] sendUnified RETURNED after ${System.currentTimeMillis() - sendStart}ms +${System.currentTimeMillis() - workerStartTime}ms total")
 
             if (result.isSuccess) {
                 val sentMessage = result.getOrThrow()
-                Timber.i("[SEND_TRACE] ✓ Message accepted by server: ${pendingMessage.localId} -> ${sentMessage.guid}")
-                Timber.i("[SEND_TRACE] Server GUID: ${sentMessage.guid}")
+                Timber.i("Message accepted by server: ${pendingMessage.localId} -> ${sentMessage.guid}")
 
                 // ═══════════════════════════════════════════════════════════════════════════
                 // CRITICAL: Save serverGuid IMMEDIATELY after API success, BEFORE confirmation.
                 // This ensures retries can detect "API already succeeded" even if worker dies
                 // during the 2-minute confirmation wait.
                 // ═══════════════════════════════════════════════════════════════════════════
-                Timber.i("[SEND_TRACE] 💾 Persisting serverGuid to prevent duplicate sends on retry")
                 pendingMessageDao.updateServerGuid(pendingMessageId, sentMessage.guid)
 
                 // Wait for server to confirm delivery (or report failure via socket event)
@@ -265,29 +245,25 @@ class MessageSendWorker @AssistedInject constructor(
 
                 if (confirmationResult.isSuccess) {
                     // Mark as sent with server GUID
-                    Timber.i("[SEND_TRACE] Marking as sent in DB +${System.currentTimeMillis() - workerStartTime}ms")
                     pendingMessageDao.markAsSent(pendingMessageId, sentMessage.guid)
 
                     // Note: Attachment files are now relocated (not deleted) by IMessageSenderStrategy
                     // during the GUID replacement process. This preserves local previews and prevents
                     // the need to re-download already-uploaded files.
-                    Timber.i("[SEND_TRACE] Attachments relocated to permanent storage by IMessageSenderStrategy")
+                    Timber.d("Attachments relocated to permanent storage by IMessageSenderStrategy")
 
-                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
-                    Timber.i("[SEND_TRACE] MessageSendWorker COMPLETE: ${System.currentTimeMillis() - workerStartTime}ms total")
-                    Timber.i("[SEND_TRACE] ══════════════════════════════════════════════════════════")
                     Result.success()
                 } else {
                     // Server reported failure during confirmation wait
-                    Timber.e("[SEND_TRACE] ✗ Server reported failure during confirmation: ${confirmationResult.exceptionOrNull()?.message}")
+                    Timber.e("Server reported failure during confirmation: ${confirmationResult.exceptionOrNull()?.message}")
                     handleServerError(pendingMessageId, pendingMessage.chatGuid, confirmationResult.exceptionOrNull())
                 }
             } else {
-                Timber.e("[SEND_TRACE] ✗ sendUnified FAILED: ${result.exceptionOrNull()?.message}")
+                Timber.e("sendUnified failed: ${result.exceptionOrNull()?.message}")
                 handleFailure(pendingMessageId, pendingMessage.chatGuid, result.exceptionOrNull())
             }
         } catch (e: Exception) {
-            Timber.e(e, "[SEND_TRACE] ✗ Exception during send: ${e.message}")
+            Timber.e(e, "Exception during send: ${e.message}")
             handleFailure(pendingMessageId, pendingMessage.chatGuid, e)
         }
     }
@@ -307,7 +283,6 @@ class MessageSendWorker @AssistedInject constructor(
         chatGuid: String
     ): kotlin.Result<Unit> {
         val startTime = System.currentTimeMillis()
-        Timber.i("[SEND_TRACE] Waiting up to ${SERVER_CONFIRMATION_TIMEOUT_MS / 1000}s for server confirmation...")
 
         while (System.currentTimeMillis() - startTime < SERVER_CONFIRMATION_TIMEOUT_MS) {
             val message = messageDao.getMessageByGuid(serverGuid)
@@ -317,7 +292,7 @@ class MessageSendWorker @AssistedInject constructor(
                 if (message.error != 0) {
                     val errorMessage = message.smsErrorMessage
                         ?: MessageErrorCode.getUserMessage(message.error)
-                    Timber.e("[SEND_TRACE] Server reported error ${message.error}: $errorMessage")
+                    Timber.e("Server reported error ${message.error}: $errorMessage")
                     return kotlin.Result.failure(
                         Exception("Delivery failed (error ${message.error}): $errorMessage")
                     )
@@ -325,7 +300,7 @@ class MessageSendWorker @AssistedInject constructor(
 
                 // Check if message was delivered (has dateDelivered)
                 if (message.dateDelivered != null && message.dateDelivered!! > 0) {
-                    Timber.i("[SEND_TRACE] ✓ Message delivery confirmed by server")
+                    Timber.d("Message delivery confirmed by server")
                     return kotlin.Result.success(Unit)
                 }
             }
@@ -334,7 +309,7 @@ class MessageSendWorker @AssistedInject constructor(
         }
 
         // Timeout - no error reported, assume success (server accepted it)
-        Timber.i("[SEND_TRACE] Confirmation timeout reached with no error - assuming success")
+        Timber.d("Confirmation timeout reached with no error - assuming success")
         return kotlin.Result.success(Unit)
     }
 
@@ -354,7 +329,7 @@ class MessageSendWorker @AssistedInject constructor(
     ): Result {
         // Special case: Message already in transit - wait for confirmation
         if (error is MessageAlreadyInTransitException) {
-            Timber.i("[SEND_TRACE] Message already in transit, waiting for confirmation...")
+            Timber.i("Message already in transit, waiting for confirmation...")
             val guidToCheck = error.serverGuid ?: error.tempGuid
 
             val confirmationResult = waitForServerConfirmation(
@@ -364,7 +339,7 @@ class MessageSendWorker @AssistedInject constructor(
             )
 
             return if (confirmationResult.isSuccess) {
-                Timber.i("[SEND_TRACE] ✓ In-transit message confirmed delivered")
+                Timber.i("In-transit message confirmed delivered")
                 pendingMessageDao.markAsSent(pendingMessageId, guidToCheck)
                 Result.success()
             } else {
@@ -379,7 +354,7 @@ class MessageSendWorker @AssistedInject constructor(
         syncAttachmentErrors(pendingMessageId)
 
         // No automatic retries - fail immediately
-        Timber.e("[SEND_TRACE] Send failed (no retry): $errorMessage")
+        Timber.e("Send failed (no retry): $errorMessage")
         return markFailedAndTriggerSmsFallback(pendingMessageId, chatGuid, errorMessage, errorCode)
     }
 
@@ -398,7 +373,7 @@ class MessageSendWorker @AssistedInject constructor(
         val errorCode = MessageErrorCode.parseFromMessage(errorMessage)
             ?: MessageErrorCode.GENERIC_ERROR
 
-        Timber.e("[SEND_TRACE] Server error (no retry): code=$errorCode, message=$errorMessage")
+        Timber.e("Server error (no retry): code=$errorCode, message=$errorMessage")
 
         // Sync attachment errors
         syncAttachmentErrors(pendingMessageId)

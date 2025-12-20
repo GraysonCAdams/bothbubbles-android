@@ -165,7 +165,7 @@ class RecipientSelectionDelegate @Inject constructor(
             try {
                 val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
                 val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
-                Timber.d("checkAndUpdateRecipientService: address=$address, smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
+                Timber.d("checkAndUpdateRecipientService: smsOnlyMode=$smsOnlyMode, isConnected=$isConnected")
 
                 if (!smsOnlyMode && isConnected) {
                     try {
@@ -174,7 +174,7 @@ class RecipientSelectionDelegate @Inject constructor(
                         if (response.isSuccessful) {
                             val isIMessageAvailable = response.body()?.data?.available == true
                             val newService = if (isIMessageAvailable) "iMessage" else "SMS"
-                            Timber.d("Updating recipient $address service to $newService")
+                            Timber.d("Updating recipient service to $newService")
 
                             val updated = _selectedRecipients.value.map { recipient ->
                                 if (recipient.address == address) {
@@ -186,7 +186,7 @@ class RecipientSelectionDelegate @Inject constructor(
                             _selectedRecipients.value = updated
                         }
                     } catch (e: Exception) {
-                        Timber.e(e, "Failed to check iMessage availability for $address")
+                        Timber.e(e, "Failed to check iMessage availability")
                         // Keep as SMS on failure
                     }
                 }

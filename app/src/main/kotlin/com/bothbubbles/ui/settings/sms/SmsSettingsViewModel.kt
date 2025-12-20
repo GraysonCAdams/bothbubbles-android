@@ -57,10 +57,10 @@ class SmsSettingsViewModel @Inject constructor(
                 val autoSwitch = values[3] as? Boolean ?: true
                 arrayOf(enabled, preferSms, simSlot, autoSwitch)
             }.collect { values ->
-                val enabled = values[0] as Boolean
-                val preferSms = values[1] as Boolean
-                val simSlot = values[2] as Int
-                val autoSwitch = values[3] as Boolean
+                val enabled = values.getOrNull(0) as? Boolean ?: false
+                val preferSms = values.getOrNull(1) as? Boolean ?: false
+                val simSlot = values.getOrNull(2) as? Int ?: -1
+                val autoSwitch = values.getOrNull(3) as? Boolean ?: true
                 _uiState.update {
                     it.copy(
                         smsEnabled = enabled,

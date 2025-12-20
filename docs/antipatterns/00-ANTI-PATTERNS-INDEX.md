@@ -75,10 +75,10 @@ This document indexes all identified anti-patterns across the codebase, organize
 
 | # | Issue | Location | Description |
 |---|-------|----------|-------------|
-| 1 | **Hardcoded API Key** | `GifRepository.kt:28` | Tenor API key committed to source control |
+| 1 | ~~**Hardcoded API Key**~~ **FIXED 2024-12-20** | `GifRepository.kt:28` | Tenor API key committed to source control → Moved to BuildConfig |
 | 2 | **Unsafe SSL/TLS** | `CoreNetworkModule.kt:63-98` | All certificates accepted without validation |
 | 3 | **Auth Key in Logs** | `AuthInterceptor.kt:100` | Full URLs with auth tokens logged |
-| 4 | **Password Logged** | `SocketIOConnection.kt:113` | First 4 chars of server password exposed |
+| 4 | ~~**Password Logged**~~ **FIXED 2024-12-20** | `SocketIOConnection.kt:113` | First 4 chars of server password exposed → Changed to length only |
 | 5 | **PII in Logs** | 8+ files | Phone numbers and emails logged to logcat |
 | 6 | **SimpleDateFormat Thread-Safety** | `DateFormatters.kt` | Shared across threads, causes data corruption |
 | 7 | **ExoPlayerPool Race** | `ExoPlayerPool.kt:58-81` | Players can be orphaned, memory leak |
@@ -121,10 +121,10 @@ This document indexes all identified anti-patterns across the codebase, organize
 ## Action Items by Sprint
 
 ### Sprint 1 - Security & Logging (URGENT)
-- [ ] Rotate Tenor API key and move to BuildConfig
+- [x] Rotate Tenor API key and move to BuildConfig (FIXED 2024-12-20)
 - [ ] Implement certificate pinning for SSL/TLS
 - [ ] Sanitize auth keys from all Timber logs
-- [ ] Remove password logging from `SocketIOConnection.kt:113`
+- [x] Remove password logging from `SocketIOConnection.kt:113` (FIXED 2024-12-20)
 - [ ] Sanitize PII (phone/email) from logs in 8+ files
 - [ ] Remove all `[SEND_TRACE]` logs (108 statements!)
 - [ ] Remove `[LOCATION_DEBUG]`, `[FCM_DEBUG]`, `[VM_SEND]` debug tags
@@ -206,7 +206,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 8. Gate HTTP logging with `BuildConfig.DEBUG`
 9. Remove duplicate `getChat`/`getChatByGuid` methods
 10. Restrict FileProvider paths from root to specific directories
-11. Remove password first-4-chars logging in `SocketIOConnection.kt:113`
+11. ~~Remove password first-4-chars logging in `SocketIOConnection.kt:113`~~ **FIXED 2024-12-20**
 12. Add `.use {}` to HTTP response in `OpenGraphParser.kt`
 13. Replace `as Boolean` with `as? Boolean ?: false` in `SmsSettingsViewModel.kt`
 14. Add exception parameter to `Timber.e()` calls (15+ locations)
@@ -215,7 +215,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 17. Add work tags to WorkManager requests for better debugging
 18. Move Timber version to version catalog (hardcoded in 2 files)
 19. Change `api()` to `implementation()` in core:network dependencies
-20. Use `currentBackStackEntry` instead of `getBackStackEntry()` after navigate()
+20. Use `currentBackStackEntry` instead of `getBackStackEntry()` after navigate()`
 
 ---
 
