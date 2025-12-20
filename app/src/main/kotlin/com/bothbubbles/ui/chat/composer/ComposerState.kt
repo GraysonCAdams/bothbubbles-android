@@ -64,7 +64,10 @@ data class ComposerState(
     // Mentions (group chats only)
     val mentions: ImmutableList<MentionSpan> = persistentListOf(),
     val mentionPopupState: MentionPopupState = MentionPopupState.Hidden,
-    val isGroupChat: Boolean = false
+    val isGroupChat: Boolean = false,
+
+    // Location fetching state (shows loading indicator)
+    val isFetchingLocation: Boolean = false
 ) {
     /**
      * Whether the composer has content that can be sent.
@@ -199,6 +202,11 @@ data class AttachmentItem(
     /** Whether this is an audio attachment */
     val isAudio: Boolean
         get() = mimeType?.startsWith("audio/") == true
+
+    /** Whether this is a vLocation attachment (Apple location format) */
+    val isVLocation: Boolean
+        get() = mimeType == "text/x-vlocation" ||
+                uri.toString().lowercase().let { it.contains(".loc.vcf") || it.contains("-cl.loc") }
 
     /** Whether this attachment has an error */
     val hasError: Boolean

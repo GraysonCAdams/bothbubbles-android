@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -106,14 +107,16 @@ internal fun ConversationsTopBar(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .defaultMinSize(minHeight = 18.dp)
+                        .padding(horizontal = 6.dp, vertical = 1.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = if (totalUnreadCount > 10000) "9999+" else totalUnreadCount.toString(),
                         style = MaterialTheme.typography.labelSmall.copy(
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 14.sp
                         ),
                         color = MaterialTheme.colorScheme.onPrimary
                     )

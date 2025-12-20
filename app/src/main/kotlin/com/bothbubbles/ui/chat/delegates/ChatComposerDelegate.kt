@@ -287,7 +287,8 @@ class ChatComposerDelegate @AssistedInject constructor(
             _pendingAttachments,
             _attachmentQuality,
             _activePanel,
-            mentionState
+            mentionState,
+            _isFetchingLocation
         ) { values: Array<Any?> ->
             @Suppress("UNCHECKED_CAST")
             val relevant = values[0] as? ComposerRelevantState ?: ComposerRelevantState()
@@ -300,6 +301,7 @@ class ChatComposerDelegate @AssistedInject constructor(
             val mentions = mentionTriple?.first ?: emptyList()
             val popupState = mentionTriple?.second ?: MentionPopupState.Hidden
             val isGroup = mentionTriple?.third ?: false
+            val fetchingLocation = values[7] as? Boolean ?: false
 
             // Memoized attachment transformation - only rebuild if inputs changed
             val attachmentItems = if (attachments === _lastAttachmentInputs && quality == _lastAttachmentQuality) {
@@ -358,7 +360,8 @@ class ChatComposerDelegate @AssistedInject constructor(
                 activePanel = panel,
                 mentions = mentions.toImmutableList(),
                 mentionPopupState = popupState,
-                isGroupChat = isGroup
+                isGroupChat = isGroup,
+                isFetchingLocation = fetchingLocation
             )
         }
             .distinctUntilChanged()
@@ -590,6 +593,8 @@ class ChatComposerDelegate @AssistedInject constructor(
             var lastWarning: AttachmentWarning? = null
 
             for (uri in uris) {
+                Timber.d("[LOCATION_DEBUG] Processing attachment: uri=$uri")
+
                 // Get file size for new attachment
                 val newFileSize = try {
                     attachmentRepository.getAttachmentSize(uri) ?: 0L
@@ -610,6 +615,13 @@ class ChatComposerDelegate @AssistedInject constructor(
                 } catch (e: Exception) {
                     null
                 }
+
+                // Debug logging for attachment details
+                val uriString = uri.toString().lowercase()
+                val isVLocation = mimeType == "text/x-vlocation" ||
+                    uriString.contains(".loc.vcf") ||
+                    uriString.contains("-cl.loc")
+                Timber.d("[LOCATION_DEBUG] Attachment details: mimeType=$mimeType, name=$name, size=$newFileSize, isVLocation=$isVLocation")
 
                 // Validate
                 val validation = attachmentLimitsProvider.validateAttachment(
@@ -820,17 +832,38 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Creates a vLocation file from coordinates and adds it as an attachment.
      * This sends location in Apple's native iMessage format (text/x-vlocation).
      *
+     * Only ONE location can be attached at a time - existing locations are replaced.
+     *
      * @param latitude The latitude coordinate
      * @param longitude The longitude coordinate
      * @return true if successful, false otherwise
      */
     fun addLocationAsVLocation(latitude: Double, longitude: Double): Boolean {
+        Timber.d("[LOCATION_DEBUG] addLocationAsVLocation called: lat=$latitude, lng=$longitude")
         return try {
+            // Remove any existing location attachments first (only one location allowed)
+            val existingLocations = _pendingAttachments.value.filter { attachment ->
+                val uriString = attachment.uri.toString().lowercase()
+                attachment.mimeType == "text/x-vlocation" ||
+                    uriString.contains(".loc.vcf") ||
+                    uriString.contains("-cl.loc")
+            }
+            if (existingLocations.isNotEmpty()) {
+                Timber.d("[LOCATION_DEBUG] Removing ${existingLocations.size} existing location attachment(s)")
+                _pendingAttachments.update { list ->
+                    list.filter { it !in existingLocations }
+                }
+            }
+
             val vlocationUri = vLocationService.createVLocationFile(latitude, longitude)
+            Timber.d("[LOCATION_DEBUG] vLocation file created: uri=$vlocationUri")
+            Timber.d("[LOCATION_DEBUG] URI string: ${vlocationUri.toString()}")
+            Timber.d("[LOCATION_DEBUG] URI path: ${vlocationUri.path}")
             addAttachment(vlocationUri)
+            Timber.d("[LOCATION_DEBUG] Attachment added successfully")
             true
         } catch (e: Exception) {
-            Timber.e(e, "Failed to create vLocation file")
+            Timber.e(e, "[LOCATION_DEBUG] Failed to create vLocation file")
             false
         }
     }

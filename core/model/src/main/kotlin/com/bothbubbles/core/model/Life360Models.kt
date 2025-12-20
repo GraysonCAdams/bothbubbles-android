@@ -30,6 +30,7 @@ data class Life360Location(
     val longitude: Double,
     val accuracyMeters: Int?,
     val address: String?,
+    val shortAddress: String?,          // City, State (for subtitle display)
     val placeName: String?,             // e.g., "Home", "Work"
     val isDriving: Boolean?,
     val timestamp: Long                 // When Life360 got the location
@@ -76,6 +77,7 @@ fun Life360MemberEntity.toDomain(): Life360Member = Life360Member(
             longitude = longitude,
             accuracyMeters = accuracyMeters,
             address = address,
+            shortAddress = shortAddress,
             placeName = placeName,
             isDriving = isDriving,
             timestamp = locationTimestamp ?: 0L

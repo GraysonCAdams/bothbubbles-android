@@ -40,6 +40,12 @@ object YouTubeUrlParser {
         val startTimeSeconds: Int? = null
     )
 
+    private val TIMESTAMP_PATTERNS = listOf(
+        Pattern.compile("""[?&](?:t|start)=(\d+)(?:s)?(?:&|$)""", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("""[?&]t=(\d+)m(\d+)?s?(?:&|$)""", Pattern.CASE_INSENSITIVE),
+        Pattern.compile("""[?&]t=(\d+)h(\d+)?m?(\d+)?s?(?:&|$)""", Pattern.CASE_INSENSITIVE)
+    )
+
     fun parseUrl(url: String): YouTubeVideo?
     fun extractVideoId(url: String): String?
     fun extractTimestamp(url: String): Int?
@@ -141,23 +147,212 @@ is MessageSegment.YouTubeVideoSegment -> {
 }
 ```
 
-## Current Problem
+---
 
-### Issue: AndroidView has zero size (width=0, height=0)
+## Current Status: BLOCKED
 
-The `YouTubePlayerView` wrapped in Compose's `AndroidView` is not getting any size, which prevents the internal WebView from initializing. The `onReady` callback never fires.
+### Issue: `onReady()` Callback Never Fires
 
-**Debug logs showing the problem:**
+The YouTubePlayerView's `onReady()` callback never fires, preventing video playback. The internal WebView that loads the YouTube IFrame API appears to initialize but never completes its JavaScript handshake with the Android layer.
+
+### What Works
+- YouTube URL parsing and video ID extraction
+- Timestamp extraction from URLs (all formats)
+- Message segmentation correctly detects YouTube links
+- Thumbnail display with play button overlay
+- View dimensions are now correct (690x388 pixels)
+- Lifecycle state is RESUMED
+- `initialize()` is being called
+
+### What Does NOT Work
+- The `onReady()` callback never fires
+- Video playback never starts
+- Screen remains black after tapping play
+
+---
+
+## Comprehensive List of Attempted Fixes
+
+### Phase 1: Addressing Zero-Size Issue
+
+#### Attempt 1: Lifecycle Observer
+**Approach:** Added YouTubePlayerView as lifecycle observer since it requires lifecycle events for its internal WebView.
+```kotlin
+lifecycleOwner.lifecycle.addObserver(this)
 ```
-D YouTubeAttachment: Play clicked for video: v9gIK4j1Ip0
-D YouTubeAttachment: Rendering YouTubePlayerActive for video: v9gIK4j1Ip0
-D YouTubeAttachment: Creating YouTubePlayerView for video: v9gIK4j1Ip0
-D YouTubeAttachment: Added lifecycle observer
-D YouTubeAttachment: Listener added, waiting for auto-init
-D YouTubeAttachment: AndroidView update: width=0, height=0   <-- PROBLEM
-```
+**Result:** Required but insufficient. View still had zero size.
 
-### Current Code (YouTubePlayerActive)
+#### Attempt 2: Explicit Width Modifier
+**Approach:** Changed from `widthIn(max = maxWidth)` to `width(maxWidth)` on parent Box.
+```kotlin
+modifier = modifier.width(maxWidth)
+```
+**Result:** Still zero size.
+
+#### Attempt 3: fillMaxSize() on AndroidView
+**Approach:** Added `fillMaxSize()` modifier to AndroidView.
+```kotlin
+AndroidView(
+    modifier = Modifier.fillMaxSize(),
+    // ...
+)
+```
+**Result:** Still zero size.
+
+#### Attempt 4: aspectRatio() on Parent Box
+**Approach:** Added explicit aspect ratio to parent Box.
+```kotlin
+Box(
+    modifier = modifier
+        .width(maxWidth)
+        .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))
+)
+```
+**Result:** Still zero size.
+
+#### Attempt 5: Fixed Pixel Dimensions
+**Approach:** Used fixed Dp values with `Modifier.size()`.
+```kotlin
+modifier = Modifier.size(240.dp, 135.dp)
+```
+**Result:** Still zero size at view level.
+
+#### Attempt 6: Explicit LayoutParams with Pixel Values
+**Approach:** Converted Dp to pixels and set explicit layoutParams.
+```kotlin
+val widthPx = with(density) { maxWidth.roundToPx() }
+val heightPx = (widthPx / aspectRatio).toInt()
+layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
+```
+**Result:** LayoutParams were set but view.width/height still reported 0.
+
+#### Attempt 7: post{} Delayed Initialization
+**Approach:** Used `post {}` to defer listener setup until after layout pass.
+```kotlin
+post {
+    Log.d("YouTubeAttachment", "Post-layout: width=$width, height=$height")
+    addYouTubePlayerListener(...)
+}
+```
+**Result:** Post-layout showed correct dimensions (690x388), but `onReady` still never fired.
+
+#### Attempt 8: OnAttachStateChangeListener
+**Approach:** Wait for view to be attached to window before initializing.
+```kotlin
+addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+    override fun onViewAttachedToWindow(v: View) {
+        post { /* initialize */ }
+    }
+    override fun onViewDetachedFromWindow(v: View) {}
+})
+```
+**Result:** View attached, dimensions correct, `onReady` never fired.
+
+#### Attempt 9: doOnLayout Callback
+**Approach:** Used Kotlin extension to wait for layout completion.
+```kotlin
+doOnLayout {
+    Log.d("YouTubeAttachment", "doOnLayout: width=$width, height=$height")
+    // Initialize player
+}
+```
+**Result:** Layout completed with correct dimensions, `onReady` never fired.
+
+#### Attempt 10: FrameLayout Wrapper
+**Approach:** Wrapped YouTubePlayerView in FrameLayout with explicit dimensions.
+```kotlin
+FrameLayout(ctx).apply {
+    layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
+    addView(YouTubePlayerView(ctx).apply { ... })
+}
+```
+**Result:** Same behavior - dimensions correct, `onReady` never fired.
+
+#### Attempt 11: BoxWithConstraints
+**Approach:** Used BoxWithConstraints to get actual measured Compose constraints.
+```kotlin
+BoxWithConstraints {
+    val actualWidthPx = with(density) { maxWidth.roundToPx() }
+    val actualHeightPx = with(density) { maxHeight.roundToPx() }
+
+    if (actualWidthPx > 0 && actualHeightPx > 0) {
+        AndroidView(...)
+    }
+}
+```
+**Result:** Constraints were valid (690x388), `onReady` never fired.
+
+#### Attempt 12: Forced measure() and layout()
+**Approach:** Manually called measure() and layout() on the view.
+```kotlin
+measure(
+    View.MeasureSpec.makeMeasureSpec(actualWidthPx, View.MeasureSpec.EXACTLY),
+    View.MeasureSpec.makeMeasureSpec(actualHeightPx, View.MeasureSpec.EXACTLY)
+)
+layout(0, 0, actualWidthPx, actualHeightPx)
+```
+**Result:** View now reports correct dimensions (width=690, height=388), but `onReady` still never fired.
+
+#### Attempt 13: minimumWidth/minimumHeight
+**Approach:** Set minimum dimensions on view.
+```kotlin
+minimumWidth = actualWidthPx
+minimumHeight = actualHeightPx
+```
+**Result:** No change.
+
+---
+
+### Phase 2: Addressing Initialization Issue
+
+#### Attempt 14: enableAutomaticInitialization = true (default)
+**Approach:** Used default automatic initialization with addYouTubePlayerListener.
+```kotlin
+// enableAutomaticInitialization defaults to true
+addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
+    override fun onReady(youTubePlayer: YouTubePlayer) {
+        // Never called
+    }
+})
+```
+**Result:** `onReady` never fired.
+
+#### Attempt 15: enableAutomaticInitialization = false with manual initialize()
+**Approach:** Disabled auto-init and called initialize() manually.
+```kotlin
+enableAutomaticInitialization = false
+lifecycleOwner.lifecycle.addObserver(this)
+
+initialize(object : AbstractYouTubePlayerListener() {
+    override fun onReady(youTubePlayer: YouTubePlayer) {
+        // Never called
+    }
+})
+```
+**Result:** `initialize()` was called (confirmed by logs), but `onReady` never fired.
+
+#### Attempt 16: IFramePlayerOptions Configuration
+**Approach:** Added IFramePlayerOptions to customize player initialization.
+```kotlin
+val options = IFramePlayerOptions.Builder()
+    .controls(0)  // Hide YouTube controls (we provide our own)
+    .rel(0)       // Don't show related videos
+    .build()
+
+initialize(listener, options)
+```
+**Result:** No change - `onReady` never fired.
+
+#### Attempt 17: WebView Debugging
+**Approach:** Enabled WebView debugging to inspect internal state.
+```kotlin
+WebView.setWebContentsDebuggingEnabled(true)
+```
+**Result:** WebView debugging enabled, but no actionable errors found. Sandboxed WebView processes observed being frozen by Android power management.
+
+---
+
+## Final Code State
 
 ```kotlin
 @Composable
@@ -166,11 +361,17 @@ private fun YouTubePlayerActive(
     startTimeSeconds: Int?,
     aspectRatio: Float,
     maxWidth: Dp,
-    // ... other params
+    onTap: () -> Unit,
+    onDoubleTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val lifecycleOwner = LocalLifecycleOwner.current
     var playerView by remember { mutableStateOf<YouTubePlayerView?>(null) }
+    val density = LocalDensity.current
+
+    val widthPx = with(density) { maxWidth.roundToPx() }
+    val heightPx = (widthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
+    val heightDp = with(density) { heightPx.toDp() }
 
     DisposableEffect(playerView) {
         onDispose {
@@ -180,10 +381,9 @@ private fun YouTubePlayerActive(
         }
     }
 
-    Box(
+    BoxWithConstraints(
         modifier = modifier
-            .width(maxWidth)  // Explicit width
-            .aspectRatio(aspectRatio.coerceIn(0.5f, 2f))  // Explicit height
+            .size(maxWidth, heightDp)
             .clip(RoundedCornerShape(12.dp))
             .background(Color.Black)
             .pointerInput(Unit) {
@@ -194,79 +394,75 @@ private fun YouTubePlayerActive(
             },
         contentAlignment = Alignment.Center
     ) {
-        AndroidView(
-            factory = { ctx ->
-                YouTubePlayerView(ctx).apply {
-                    layoutParams = ViewGroup.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT,
-                        ViewGroup.LayoutParams.MATCH_PARENT
-                    )
+        val actualWidthPx = with(density) { this@BoxWithConstraints.maxWidth.roundToPx() }
+        val actualHeightPx = with(density) { this@BoxWithConstraints.maxHeight.roundToPx() }
 
-                    // Add as lifecycle observer for WebView to work
-                    lifecycleOwner.lifecycle.addObserver(this)
-                    playerView = this
+        if (actualWidthPx > 0 && actualHeightPx > 0) {
+            AndroidView(
+                factory = { ctx ->
+                    WebView.setWebContentsDebuggingEnabled(true)
 
-                    addYouTubePlayerListener(object : AbstractYouTubePlayerListener() {
-                        override fun onReady(youTubePlayer: YouTubePlayer) {
-                            // This never gets called because view has zero size
-                            youTubePlayer.loadVideo(videoId, startTimeSeconds?.toFloat() ?: 0f)
-                        }
+                    YouTubePlayerView(ctx).apply {
+                        layoutParams = ViewGroup.LayoutParams(actualWidthPx, actualHeightPx)
+                        minimumWidth = actualWidthPx
+                        minimumHeight = actualHeightPx
 
-                        override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
-                            Log.e("YouTubeAttachment", "Player ERROR: $error")
-                        }
-                    })
+                        measure(
+                            View.MeasureSpec.makeMeasureSpec(actualWidthPx, View.MeasureSpec.EXACTLY),
+                            View.MeasureSpec.makeMeasureSpec(actualHeightPx, View.MeasureSpec.EXACTLY)
+                        )
+                        layout(0, 0, actualWidthPx, actualHeightPx)
+
+                        Log.d("YouTubeAttachment", "After force measure: width=$width, height=$height")
+
+                        enableAutomaticInitialization = false
+                        lifecycleOwner.lifecycle.addObserver(this)
+                        playerView = this
+
+                        Log.d("YouTubeAttachment", "Adding player listener, lifecycle state: ${lifecycleOwner.lifecycle.currentState}")
+
+                        val options = IFramePlayerOptions.Builder()
+                            .controls(0)
+                            .rel(0)
+                            .build()
+
+                        Log.d("YouTubeAttachment", "Calling initialize() manually")
+                        initialize(object : AbstractYouTubePlayerListener() {
+                            override fun onReady(youTubePlayer: YouTubePlayer) {
+                                Log.d("YouTubeAttachment", "Player READY for video: $videoId")
+                                youTubePlayer.loadVideo(videoId, startTimeSeconds?.toFloat() ?: 0f)
+                            }
+
+                            override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
+                                Log.e("YouTubeAttachment", "Player ERROR: $error")
+                            }
+                        }, options)
+                        Log.d("YouTubeAttachment", "initialize() called")
+                    }
+                },
+                modifier = Modifier.fillMaxSize(),
+                update = { view ->
+                    Log.d("YouTubeAttachment", "AndroidView update: width=${view.width}, height=${view.height}")
                 }
-            },
-            modifier = Modifier.fillMaxSize(),
-            update = { view ->
-                Log.d("YouTubeAttachment", "AndroidView update: width=${view.width}, height=${view.height}")
-            }
-        )
-
-        // Overlay controls (mute, fullscreen, play/pause indicator)
-        // ...
+            )
+        }
     }
 }
 ```
 
-### What We've Tried
+## Final Debug Output
 
-1. **Adding lifecycle observer** - Required for WebView initialization, but doesn't fix size issue
-2. **Using `width(maxWidth)` instead of `widthIn(max = maxWidth)`** - Still zero size
-3. **Using `fillMaxSize()` on AndroidView** - Still zero size
-4. **Adding `aspectRatio()` to parent Box** - Still zero size
+```
+12-19 18:05:29.583 D YouTubeAttachment: After force measure: width=690, height=388
+12-19 18:05:29.583 D YouTubeAttachment: Adding player listener, lifecycle state: RESUMED
+12-19 18:05:29.583 D YouTubeAttachment: Calling initialize() manually
+12-19 18:05:29.584 D YouTubeAttachment: initialize() called
+12-19 18:05:29.588 D YouTubeAttachment: AndroidView update: width=690, height=388
+```
 
-### Suspected Root Causes
+**Note:** "Player READY" never appears in logs. The `onReady()` callback never fires.
 
-1. **Compose layout constraints not propagating** - The parent composable may not be providing size constraints to the Box/AndroidView
-2. **LazyColumn item sizing** - If rendered inside a LazyColumn, the item might not have intrinsic size
-3. **AndroidView + WebView interaction** - WebView inside AndroidView may need special handling
-
-### Next Steps to Try
-
-1. **Use fixed pixel dimensions** instead of Dp to rule out density issues:
-   ```kotlin
-   modifier = Modifier.size(240.dp, 135.dp)  // Fixed 16:9
-   ```
-
-2. **Check parent constraints** - Add logging to see what constraints the parent is providing
-
-3. **Try `BoxWithConstraints`** to get explicit constraints:
-   ```kotlin
-   BoxWithConstraints {
-       val width = maxWidth.coerceAtMost(240.dp)
-       val height = width / aspectRatio
-       AndroidView(
-           modifier = Modifier.size(width, height),
-           // ...
-       )
-   }
-   ```
-
-4. **Check if the issue is in MessageSegmentedBubble** - The parent composable may have layout issues
-
-5. **Try using a different AndroidView approach** - Use `AndroidViewBinding` or ensure view is attached before initialization
+---
 
 ## Architecture
 
@@ -289,15 +485,29 @@ YouTubeAttachment (Composable)
         │
         ├── isPlayerActive = false → YouTubeThumbnailWithControls
         │                                    │
-        │                                    └── Thumbnail + Play button
+        │                                    └── Thumbnail + Play button ✓ WORKS
         │
         └── isPlayerActive = true  → YouTubePlayerActive
                                             │
-                                            ├── Box (container with size)
+                                            ├── BoxWithConstraints (690x388) ✓ WORKS
                                             │
                                             ├── AndroidView (YouTubePlayerView)
                                             │       │
-                                            │       └── WebView (IFrame API) ← NOT LOADING (zero size)
+                                            │       ├── View dimensions: 690x388 ✓ WORKS
+                                            │       │
+                                            │       ├── initialize() called ✓ WORKS
+                                            │       │
+                                            │       └── WebView (IFrame API) ✗ NEVER CALLS onReady
                                             │
                                             └── Overlay controls (Compose)
 ```
+
+## Observations
+
+1. The view sizing issue has been resolved - the YouTubePlayerView correctly has dimensions 690x388 pixels.
+2. The lifecycle is in RESUMED state when initialize() is called.
+3. The `initialize()` method is being called (confirmed by logs).
+4. The internal WebView that loads YouTube's IFrame API JavaScript never completes its initialization handshake.
+5. WebView sandboxed processes have been observed being frozen by Android's power management.
+6. No JavaScript errors are visible in logs.
+7. The `onError()` callback is also never triggered - the player is in a limbo state.

@@ -4,15 +4,19 @@ import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
@@ -141,6 +145,7 @@ fun MediaPickerPanel(
     onContactClick: () -> Unit,
     onEtaClick: () -> Unit = {},
     isEtaSharingAvailable: Boolean = false,
+    isFetchingLocation: Boolean = false,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -177,63 +182,90 @@ fun MediaPickerPanel(
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         tonalElevation = 8.dp
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 4.dp, bottom = 16.dp)
-        ) {
-            // Options grid
-            LazyVerticalGrid(
-                columns = GridCells.Fixed(4),
+        Box(modifier = Modifier.fillMaxWidth()) {
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 16.dp)
             ) {
-                items(options) { option ->
-                    MediaPickerOptionItem(
-                        option = option,
-                        onClick = {
-                            when (option) {
-                                MediaPickerOption.GALLERY -> {
-                                    pickMedia.launch(
-                                        PickVisualMediaRequest(
-                                            ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                // Options grid
+                LazyVerticalGrid(
+                    columns = GridCells.Fixed(4),
+                    modifier = Modifier
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    items(options) { option ->
+                        MediaPickerOptionItem(
+                            option = option,
+                            onClick = {
+                                when (option) {
+                                    MediaPickerOption.GALLERY -> {
+                                        pickMedia.launch(
+                                            PickVisualMediaRequest(
+                                                ActivityResultContracts.PickVisualMedia.ImageAndVideo
+                                            )
                                         )
-                                    )
-                                }
-                                MediaPickerOption.CAMERA -> {
-                                    onCameraClick()
-                                    onDismiss()
-                                }
-                                MediaPickerOption.GIF -> {
-                                    onGifClick()
-                                    // Don't dismiss - switch to GIF panel
-                                }
-                                MediaPickerOption.FILES -> {
-                                    onFileClick()
-                                    onDismiss()
-                                }
-                                MediaPickerOption.LOCATION -> {
-                                    onLocationClick()
-                                    onDismiss()
-                                }
-                                MediaPickerOption.AUDIO -> {
-                                    onAudioClick()
-                                    onDismiss()
-                                }
-                                MediaPickerOption.CONTACT -> {
-                                    onContactClick()
-                                    onDismiss()
-                                }
-                                MediaPickerOption.ETA -> {
-                                    onEtaClick()
-                                    onDismiss()
+                                    }
+                                    MediaPickerOption.CAMERA -> {
+                                        onCameraClick()
+                                        onDismiss()
+                                    }
+                                    MediaPickerOption.GIF -> {
+                                        onGifClick()
+                                        // Don't dismiss - switch to GIF panel
+                                    }
+                                    MediaPickerOption.FILES -> {
+                                        onFileClick()
+                                        onDismiss()
+                                    }
+                                    MediaPickerOption.LOCATION -> {
+                                        onLocationClick()
+                                        // Don't dismiss yet - wait for location fetch
+                                    }
+                                    MediaPickerOption.AUDIO -> {
+                                        onAudioClick()
+                                        onDismiss()
+                                    }
+                                    MediaPickerOption.CONTACT -> {
+                                        onContactClick()
+                                        onDismiss()
+                                    }
+                                    MediaPickerOption.ETA -> {
+                                        onEtaClick()
+                                        onDismiss()
+                                    }
                                 }
                             }
-                        }
-                    )
+                        )
+                    }
+                }
+            }
+
+            // Loading overlay when fetching location
+            if (isFetchingLocation) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(40.dp),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Text(
+                            text = "Getting location…",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
             }
         }

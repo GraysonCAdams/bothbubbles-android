@@ -39,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
@@ -109,12 +110,15 @@ fun ChatComposer(
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
     val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
     val density = LocalDensity.current
 
-    // Hide keyboard when any panel opens
+    // Hide keyboard and clear focus when any panel opens
+    // Clearing focus ensures tapping the text field will trigger a focus change event
     LaunchedEffect(state.activePanel) {
         if (state.activePanel != ComposerPanel.None) {
             keyboardController?.hide()
+            focusManager.clearFocus()
         }
     }
 
@@ -238,6 +242,7 @@ fun ChatComposer(
                 onContactClick = onContactClick,
                 onEtaClick = onEtaClick,
                 isEtaSharingAvailable = isEtaSharingAvailable,
+                isFetchingLocation = state.isFetchingLocation,
                 onEmojiSelected = { emoji ->
                     onEvent(ComposerEvent.TextChanged(state.text + emoji))
                 },

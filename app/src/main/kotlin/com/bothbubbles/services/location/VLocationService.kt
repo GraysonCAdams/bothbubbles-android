@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import androidx.core.content.FileProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import timber.log.Timber
 import java.io.File
 import java.util.UUID
 import javax.inject.Inject
@@ -61,9 +62,14 @@ END:VCARD
      * @return URI to the created vLocation file
      */
     fun createVLocationFile(latitude: Double, longitude: Double): Uri {
+        Timber.d("[LOCATION_DEBUG] createVLocationFile: lat=$latitude, lng=$longitude")
+
         val vcfContent = createVLocationString(latitude, longitude)
+        Timber.d("[LOCATION_DEBUG] VCF content:\n$vcfContent")
+
         val guid = "temp-${UUID.randomUUID().toString().take(8)}"
         val fileName = "$guid-CL$FILE_EXTENSION"
+        Timber.d("[LOCATION_DEBUG] Generated filename: $fileName")
 
         // Write to cache directory
         val cacheDir = File(context.cacheDir, "vlocation")
@@ -73,13 +79,16 @@ END:VCARD
 
         val file = File(cacheDir, fileName)
         file.writeText(vcfContent)
+        Timber.d("[LOCATION_DEBUG] File written to: ${file.absolutePath}, exists=${file.exists()}, size=${file.length()}")
 
         // Return content URI via FileProvider
-        return FileProvider.getUriForFile(
+        val uri = FileProvider.getUriForFile(
             context,
             "${context.packageName}.fileprovider",
             file
         )
+        Timber.d("[LOCATION_DEBUG] FileProvider URI: $uri")
+        return uri
     }
 
     /**

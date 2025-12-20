@@ -1,6 +1,7 @@
 package com.bothbubbles.ui.chat.components
 
 import android.net.Uri
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,12 +58,16 @@ fun AttachmentPreview(
 
     // Get file info
     val fileInfo = remember(uri) {
-        getAttachmentInfo(context, uri)
+        Log.d("AttachmentPreview", "Getting attachment info for URI: $uri")
+        val info = getAttachmentInfo(context, uri)
+        Log.d("AttachmentPreview", "Result: isVLocation=${info.isVLocation}, size=${info.formattedSize}")
+        info
     }
 
     // MD3 ElevatedCard provides proper elevation and surface treatment
+    // Size increased to 140dp (40% larger than original 100dp)
     ElevatedCard(
-        modifier = modifier.size(100.dp),
+        modifier = modifier.size(140.dp),
         shape = MaterialTheme.shapes.medium, // MD3 medium shape (typically 12dp)
         elevation = CardDefaults.elevatedCardElevation(defaultElevation = 2.dp),
         onClick = onClick ?: {}
@@ -84,10 +89,10 @@ fun AttachmentPreview(
                             imageVector = Icons.Default.LocationOn,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            modifier = Modifier.size(36.dp)
+                            modifier = Modifier.size(48.dp)
                         )
                         Text(
-                            text = "Location",
+                            text = "Current Location",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onPrimaryContainer
                         )

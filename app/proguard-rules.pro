@@ -46,3 +46,7 @@
 -keepclasseswithmembers class com.bothbubbles.** {
     kotlinx.serialization.KSerializer serializer(...);
 }
+
+# YouTube Player library
+-keep class com.pierfrancescosoffritti.androidyoutubeplayer.** { *; }
+-keep class com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.** { *; }

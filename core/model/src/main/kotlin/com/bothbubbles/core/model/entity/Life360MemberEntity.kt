@@ -64,6 +64,9 @@ data class Life360MemberEntity(
     @ColumnInfo(name = "address")
     val address: String? = null,
 
+    @ColumnInfo(name = "short_address", defaultValue = "NULL")
+    val shortAddress: String? = null,   // City, State (for subtitle display)
+
     @ColumnInfo(name = "place_name")
     val placeName: String? = null,          // e.g., "Home", "Work"
 

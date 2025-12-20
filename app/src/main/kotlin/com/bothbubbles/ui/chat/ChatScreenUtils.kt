@@ -4,6 +4,7 @@ import android.content.Context
 import android.media.MediaRecorder
 import android.net.Uri
 import android.os.Build
+import android.util.Log
 import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
 import java.io.File
@@ -43,6 +44,8 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
     var durationMs: Long? = null
     var displayName: String? = null
 
+    Log.d("AttachmentInfo", "getAttachmentInfo called with uri: $uri")
+
     try {
         // Get MIME type
         val mimeType = context.contentResolver.getType(uri)
@@ -69,18 +72,16 @@ internal fun getAttachmentInfo(context: Context, uri: Uri): AttachmentInfo {
         }
 
         // Also check for vLocation by file extension (.loc.vcf)
-        // Check display name, URI path, and full URI string
+        // Simply check the full URI string which always contains the filename
         if (!isVLocation) {
-            val pathsToCheck = listOfNotNull(
-                displayName,
-                uri.lastPathSegment,
-                uri.path,
-                uri.toString()
-            )
-            if (pathsToCheck.any { it.lowercase().contains(".loc.vcf") }) {
+            val uriString = uri.toString().lowercase()
+            Log.d("AttachmentInfo", "Checking URI string for vLocation: $uriString")
+            if (uriString.contains(".loc.vcf") || uriString.contains("-cl.loc")) {
+                Log.d("AttachmentInfo", "vLocation detected via URI string!")
                 isVLocation = true
             }
         }
+        Log.d("AttachmentInfo", "Final isVLocation: $isVLocation, displayName: $displayName")
 
         // Get video duration if it's a video
         if (isVideo) {

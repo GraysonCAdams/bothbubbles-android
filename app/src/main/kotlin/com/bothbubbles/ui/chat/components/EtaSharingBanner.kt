@@ -122,7 +122,8 @@ private fun EtaSharingBannerContent(
     // 1. Navigation is active
     // 2. NOT currently sharing (when sharing, stop link appears under message)
     // 3. NOT dismissed for this session
-    val shouldShow = isNavigationActive && !isCurrentlySharing && !isDismissed
+    // 4. ETA is more than 2 minutes (no point sharing if almost arrived)
+    val shouldShow = isNavigationActive && !isCurrentlySharing && !isDismissed && currentEtaMinutes > 2
 
     AnimatedVisibility(
         visible = shouldShow,

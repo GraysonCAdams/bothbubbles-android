@@ -44,7 +44,7 @@ import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 /**
  * Link preview card shown inside message bubbles.
  * Displays title, description, and thumbnail image from URL metadata.
- * Tap to open URL, long-press to copy URL to clipboard.
+ * Tap to open URL. Long-press is not handled here to allow parent tapback menu.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -52,16 +52,13 @@ fun LinkPreviewCard(
     preview: LinkPreviewEntity,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
     val handleClick = onClick ?: {
         openUrl(context, preview.url)
-    }
-
-    val handleLongClick = {
-        copyUrlToClipboard(context, preview.url)
     }
 
     // Use theme-aware colors for both sent and received messages
@@ -77,7 +74,7 @@ fun LinkPreviewCard(
             .padding(top = 4.dp)
             .combinedClickable(
                 onClick = handleClick,
-                onLongClick = handleLongClick
+                onLongClick = onLongPress // Propagate long-press for tapbacks
             ),
         colors = cardColors,
         shape = RoundedCornerShape(12.dp)

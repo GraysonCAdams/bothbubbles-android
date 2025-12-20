@@ -940,6 +940,20 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 40 to 41: Add short_address column to life360_members.
+     *
+     * The Life360 API returns address1 (street) and address2 (city, state) separately.
+     * Previously we combined them into the address field. Now we store address2 in
+     * short_address for use in the chat subtitle, which should show "City, State"
+     * instead of the full street address.
+     */
+    val MIGRATION_40_41 = object : Migration(40, 41) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE life360_members ADD COLUMN short_address TEXT DEFAULT NULL")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -984,6 +998,7 @@ object DatabaseMigrations {
         MIGRATION_36_37,
         MIGRATION_37_38,
         MIGRATION_38_39,
-        MIGRATION_39_40
+        MIGRATION_39_40,
+        MIGRATION_40_41
     )
 }

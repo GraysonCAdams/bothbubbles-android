@@ -71,6 +71,7 @@ fun ComposerPanelHost(
     onContactClick: () -> Unit,
     onEtaClick: () -> Unit = {},
     isEtaSharingAvailable: Boolean = false,
+    isFetchingLocation: Boolean = false,
     onEmojiSelected: (String) -> Unit,
     gifPickerState: GifPickerState,
     gifSearchQuery: String,
@@ -154,6 +155,7 @@ fun ComposerPanelHost(
                         onContactClick = onContactClick,
                         onEtaClick = onEtaClick,
                         isEtaSharingAvailable = isEtaSharingAvailable,
+                        isFetchingLocation = isFetchingLocation,
                         onDismiss = onDismiss
                     )
                 }
@@ -217,6 +219,7 @@ fun ComposerPanelHostSimple(
     onContactClick: () -> Unit,
     onEtaClick: () -> Unit = {},
     isEtaSharingAvailable: Boolean = false,
+    isFetchingLocation: Boolean = false,
     onEmojiSelected: (String) -> Unit,
     onGifPanelRequest: () -> Unit = {},
     onDismiss: () -> Unit,
@@ -236,6 +239,7 @@ fun ComposerPanelHostSimple(
         onContactClick = onContactClick,
         onEtaClick = onEtaClick,
         isEtaSharingAvailable = isEtaSharingAvailable,
+        isFetchingLocation = isFetchingLocation,
         onEmojiSelected = onEmojiSelected,
         gifPickerState = GifPickerState.Idle,
         gifSearchQuery = "",

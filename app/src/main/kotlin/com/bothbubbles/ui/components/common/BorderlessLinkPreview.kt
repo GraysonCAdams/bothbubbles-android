@@ -54,16 +54,13 @@ fun BorderlessLinkPreviewCard(
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
     maxWidth: androidx.compose.ui.unit.Dp = 240.dp,
-    onClick: (() -> Unit)? = null
+    onClick: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null
 ) {
     val context = LocalContext.current
 
     val handleClick = onClick ?: {
         openUrl(context, preview.url)
-    }
-
-    val handleLongClick = {
-        copyUrlToClipboard(context, preview.url)
     }
 
     val textColor = MaterialTheme.colorScheme.onSurface
@@ -76,7 +73,7 @@ fun BorderlessLinkPreviewCard(
             .clip(RoundedCornerShape(12.dp))
             .combinedClickable(
                 onClick = handleClick,
-                onLongClick = handleLongClick
+                onLongClick = onLongPress // Propagate long-press for tapbacks
             )
     ) {
         // Thumbnail image (if available)

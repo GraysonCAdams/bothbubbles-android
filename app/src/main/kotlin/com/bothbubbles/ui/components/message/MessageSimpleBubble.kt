@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
@@ -33,7 +34,8 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.ClickableText
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
@@ -213,6 +215,9 @@ internal fun SimpleBubbleContent(
     var showPhoneMenu by remember { mutableStateOf(false) }
     var selectedPhoneNumber by remember { mutableStateOf<DetectedPhoneNumber?>(null) }
     var phoneMenuOffset by remember { mutableStateOf(DpOffset.Zero) }
+
+    // Text layout result for handling clickable text without blocking long press
+    var textLayoutResult by remember { mutableStateOf<TextLayoutResult?>(null) }
 
     // Determine message type label for swipe reveal
     val messageTypeLabel = when (message.messageSource) {
@@ -418,8 +423,22 @@ internal fun SimpleBubbleContent(
                         emojiAnalysis.isEmojiOnly && emojiAnalysis.emojiCount in 1..3
 
                 // Message bubble with floating reactions overlay
+                // Use layout modifier to expand bounds for reactions, preventing clipping
                 val hasReactions = message.reactions.isNotEmpty()
-                Box(modifier = Modifier.graphicsLayer { clip = false }) {
+                val reactionOverflowPx = with(LocalDensity.current) { 17.dp.toPx().toInt() }
+
+                Box(
+                    modifier = Modifier
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            // Expand height to include reaction overflow space at top
+                            val extraHeight = if (hasReactions) reactionOverflowPx else 0
+                            layout(placeable.width, placeable.height + extraHeight) {
+                                // Place content shifted down by overflow amount
+                                placeable.place(0, extraHeight)
+                            }
+                        }
+                ) {
                     // Select shape based on group position for visual grouping
                     val bubbleShape = when (groupPosition) {
                         MessageGroupPosition.SINGLE -> if (message.isFromMe) MessageShapes.sentSingle else MessageShapes.receivedSingle
@@ -580,68 +599,86 @@ internal fun SimpleBubbleContent(
                                     style = textStyle
                                 )
                             } else if (annotatedText != null) {
-                                // Create local val for use in lambda (Kotlin doesn't smart-cast captured variables)
+                                // Use BasicText with custom tap handling that doesn't block long press
+                                // This allows the parent Surface's onLongPress to work for tapbacks
                                 val clickableText = annotatedText
-                                ClickableText(
+                                BasicText(
                                     text = clickableText,
                                     style = textStyle.copy(color = textColor),
-                                    onClick = { offset ->
-                                        // Disable all clickable interactions in selection mode
-                                        if (isSelectionMode) return@ClickableText
+                                    onTextLayout = { textLayoutResult = it },
+                                    modifier = Modifier.pointerInput(clickableText, isSelectionMode) {
+                                        detectTapGestures(
+                                            onTap = { tapOffset ->
+                                                // Disable all clickable interactions in selection mode
+                                                if (isSelectionMode) {
+                                                    onSelectionToggle?.invoke()
+                                                    return@detectTapGestures
+                                                }
 
-                                        // Check for date clicks
-                                        clickableText.getStringAnnotations(
-                                            tag = "DATE",
-                                            start = offset,
-                                            end = offset
-                                        ).firstOrNull()?.let { annotation ->
-                                            val dateIndex = annotation.item.toIntOrNull()
-                                            if (dateIndex != null && dateIndex < detectedDates.size) {
-                                                openCalendarIntent(
-                                                    context,
-                                                    detectedDates[dateIndex],
-                                                    message.text ?: "",
-                                                    detectedDates
-                                                )
+                                                // Get character offset from tap position
+                                                val layoutResult = textLayoutResult ?: return@detectTapGestures
+                                                val offset = layoutResult.getOffsetForPosition(tapOffset)
+
+                                                // Check for date clicks
+                                                clickableText.getStringAnnotations(
+                                                    tag = "DATE",
+                                                    start = offset,
+                                                    end = offset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val dateIndex = annotation.item.toIntOrNull()
+                                                    if (dateIndex != null && dateIndex < detectedDates.size) {
+                                                        openCalendarIntent(
+                                                            context,
+                                                            detectedDates[dateIndex],
+                                                            message.text ?: "",
+                                                            detectedDates
+                                                        )
+                                                    }
+                                                    return@detectTapGestures
+                                                }
+
+                                                // Check for phone number clicks - show context menu
+                                                clickableText.getStringAnnotations(
+                                                    tag = "PHONE",
+                                                    start = offset,
+                                                    end = offset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val phoneIndex = annotation.item.toIntOrNull()
+                                                    if (phoneIndex != null && phoneIndex < detectedPhoneNumbers.size) {
+                                                        selectedPhoneNumber = detectedPhoneNumbers[phoneIndex]
+                                                        showPhoneMenu = true
+                                                        HapticUtils.onTap(hapticFeedback)
+                                                    }
+                                                    return@detectTapGestures
+                                                }
+
+                                                // Check for code clicks - copy to clipboard
+                                                clickableText.getStringAnnotations(
+                                                    tag = "CODE",
+                                                    start = offset,
+                                                    end = offset
+                                                ).firstOrNull()?.let { annotation ->
+                                                    val codeIndex = annotation.item.toIntOrNull()
+                                                    if (codeIndex != null && codeIndex < detectedCodes.size) {
+                                                        copyToClipboard(
+                                                            context,
+                                                            detectedCodes[codeIndex].code,
+                                                            "Code copied"
+                                                        )
+                                                        HapticUtils.onTap(hapticFeedback)
+                                                    }
+                                                    return@detectTapGestures
+                                                }
+
+                                                // Default tap behavior - toggle timestamp
+                                                if (gesturesEnabled) showTimestamp = !showTimestamp
+                                            },
+                                            onLongPress = {
+                                                // Propagate long press to parent for tapback menu
+                                                HapticUtils.onLongPress(hapticFeedback)
+                                                onLongPress()
                                             }
-                                            return@ClickableText
-                                        }
-
-                                        // Check for phone number clicks - show context menu
-                                        clickableText.getStringAnnotations(
-                                            tag = "PHONE",
-                                            start = offset,
-                                            end = offset
-                                        ).firstOrNull()?.let { annotation ->
-                                            val phoneIndex = annotation.item.toIntOrNull()
-                                            if (phoneIndex != null && phoneIndex < detectedPhoneNumbers.size) {
-                                                selectedPhoneNumber = detectedPhoneNumbers[phoneIndex]
-                                                showPhoneMenu = true
-                                                HapticUtils.onTap(hapticFeedback)
-                                            }
-                                            return@ClickableText
-                                        }
-
-                                        // Check for code clicks - copy to clipboard
-                                        clickableText.getStringAnnotations(
-                                            tag = "CODE",
-                                            start = offset,
-                                            end = offset
-                                        ).firstOrNull()?.let { annotation ->
-                                            val codeIndex = annotation.item.toIntOrNull()
-                                            if (codeIndex != null && codeIndex < detectedCodes.size) {
-                                                copyToClipboard(
-                                                    context,
-                                                    detectedCodes[codeIndex].code,
-                                                    "Code copied"
-                                                )
-                                                HapticUtils.onTap(hapticFeedback)
-                                            }
-                                            return@ClickableText
-                                        }
-
-                                        // Default tap behavior - toggle timestamp (disabled for placed stickers and selection mode)
-                                        if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp
+                                        )
                                     }
                                 )
 
@@ -724,6 +761,8 @@ internal fun SimpleBubbleContent(
 
                 // Display reactions floating at top corner outside the bubble
                 // For outbound messages: top-left; for received: top-right
+                // With layout modifier expanding bounds by 20dp, bubble starts at y=20dp.
+                // Negative y offset pushes reaction higher to sit on the bubble's corner.
                 if (hasReactions) {
                     ReactionsDisplay(
                         reactions = message.reactions,
@@ -732,7 +771,7 @@ internal fun SimpleBubbleContent(
                             .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
                             .offset(
                                 x = if (message.isFromMe) (-20).dp else 20.dp,
-                                y = (-14).dp
+                                y = (-15).dp
                             )
                     )
                 }

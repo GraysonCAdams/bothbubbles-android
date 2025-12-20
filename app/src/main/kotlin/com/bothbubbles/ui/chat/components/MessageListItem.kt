@@ -147,10 +147,9 @@ fun MessageListItem(
         groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
         else -> 2.dp
     }
-    // Add extra padding if this message has reactions to prevent overlap with previous message
-    // Reactions are positioned at -14dp Y offset. We add 18dp (instead of 14dp) to provide
-    // a 4dp buffer for shadows and emoji font height variations.
-    val topPadding = if (message.reactions.isNotEmpty()) basePadding + 18.dp else basePadding
+    // The bubble components now use layout modifier to expand bounds by 20dp for reactions,
+    // so we no longer need extra padding here for reaction overflow.
+    val topPadding = basePadding
     val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
     val targetGuid = message.associatedMessageGuid?.let { guid ->
@@ -187,10 +186,15 @@ fun MessageListItem(
         label = "tapbackHideAlpha"
     )
 
+    // Elevate zIndex for stickers and messages with reactions.
+    // In reversed LazyColumn, older items (visually above) are drawn after newer items,
+    // so reactions extending upward would be covered without elevated zIndex.
+    val needsElevatedZIndex = message.isPlacedSticker || message.reactions.isNotEmpty()
+
     Column(
         modifier = Modifier
             .graphicsLayer { clip = false }
-            .zIndex(if (message.isPlacedSticker) 1f else 0f)
+            .zIndex(if (needsElevatedZIndex) 1f else 0f)
             .alpha(stickerFadeAlpha * tapbackHideAlpha)
             .offset(y = stickerOverlapOffset)
             .padding(top = topPadding)

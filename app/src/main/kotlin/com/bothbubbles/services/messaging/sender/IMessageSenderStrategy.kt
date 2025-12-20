@@ -408,6 +408,15 @@ class IMessageSenderStrategy @Inject constructor(
         var fileName = getFileName(uri) ?: "attachment"
         var mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
 
+        // Detect vLocation files and override MIME type
+        // Android returns text/vcard for .vcf files, but vLocation needs text/x-vlocation
+        val fileNameLower = fileName.lowercase()
+        val isVLocation = fileNameLower.contains(".loc.vcf") || fileNameLower.contains("-cl.loc")
+        if (isVLocation) {
+            Timber.d("[LOCATION_DEBUG] Detected vLocation file: $fileName, overriding mimeType from $mimeType to text/x-vlocation")
+            mimeType = "text/x-vlocation"
+        }
+
         val isVideo = mimeType.startsWith("video/")
         val shouldCompressVideo = isVideo && settingsDataStore.compressVideosBeforeUpload.first()
         val isImage = imageCompressor.isCompressible(mimeType)

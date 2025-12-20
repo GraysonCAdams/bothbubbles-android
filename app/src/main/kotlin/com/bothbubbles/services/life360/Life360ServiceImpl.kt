@@ -248,6 +248,7 @@ class Life360ServiceImpl @Inject constructor(
                 (feet * FEET_TO_METERS).roundToInt()
             },
             address = buildAddress(location?.address1, location?.address2),
+            shortAddress = location?.address2?.takeIf { it.isNotBlank() },
             placeName = location?.name,
             battery = location?.battery?.toFloatOrNull()?.roundToInt(),
             isDriving = location?.isDriving == "1",

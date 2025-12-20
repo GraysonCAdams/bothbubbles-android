@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInWindow
@@ -389,10 +390,21 @@ internal fun SegmentedMessageBubble(
                     .onSizeChanged { size -> bubbleWidthPx = size.width }
             ) {
                 // Render segments with reactions on first segment
-                // graphicsLayer with clip = false allows reactions to extend above the bubble without clipping
+                // Use layout modifier to expand bounds for reactions, preventing clipping
+                val hasReactions = message.reactions.isNotEmpty()
+                val reactionOverflowPx = with(LocalDensity.current) { 17.dp.toPx().toInt() }
+
                 Box(
                     modifier = Modifier
-                        .graphicsLayer { clip = false }
+                        .layout { measurable, constraints ->
+                            val placeable = measurable.measure(constraints)
+                            // Expand height to include reaction overflow space at top
+                            val extraHeight = if (hasReactions) reactionOverflowPx else 0
+                            layout(placeable.width, placeable.height + extraHeight) {
+                                // Place content shifted down by overflow amount
+                                placeable.place(0, extraHeight)
+                            }
+                        }
                         .onGloballyPositioned { coordinates ->
                             onBoundsChanged?.invoke(coordinates.boundsInWindow())
                         }
@@ -444,21 +456,10 @@ internal fun SegmentedMessageBubble(
                                         url = segment.url,
                                         isFromMe = message.isFromMe,
                                         maxWidth = 240.dp,
-                                        modifier = Modifier
-                                            .pointerInput(message.guid, isSelectionMode) {
-                                                detectTapGestures(
-                                                    onTap = {
-                                                        if (isSelectionMode) {
-                                                            onSelectionToggle?.invoke()
-                                                        }
-                                                        // Normal mode: link tap is handled by BorderlessLinkPreview internally
-                                                    },
-                                                    onLongPress = {
-                                                        HapticUtils.onLongPress(hapticFeedback)
-                                                        onLongPress()
-                                                    }
-                                                )
-                                            }
+                                        onLongPress = {
+                                            HapticUtils.onLongPress(hapticFeedback)
+                                            onLongPress()
+                                        }
                                     )
                                 }
 
@@ -470,15 +471,10 @@ internal fun SegmentedMessageBubble(
                                         startTimeSeconds = segment.startTimeSeconds,
                                         isShort = segment.isShort,
                                         maxWidth = 240.dp,
-                                        modifier = Modifier
-                                            .pointerInput(message.guid, isSelectionMode) {
-                                                detectTapGestures(
-                                                    onLongPress = {
-                                                        HapticUtils.onLongPress(hapticFeedback)
-                                                        onLongPress()
-                                                    }
-                                                )
-                                            }
+                                        onLongPress = {
+                                            HapticUtils.onLongPress(hapticFeedback)
+                                            onLongPress()
+                                        }
                                     )
                                 }
 
@@ -500,6 +496,8 @@ internal fun SegmentedMessageBubble(
                     }
 
                     // Reactions overlay on top-corner
+                    // With layout modifier expanding bounds by 20dp, bubble starts at y=20dp.
+                    // Negative y offset pushes reaction higher to sit on the bubble's corner.
                     if (message.reactions.isNotEmpty()) {
                         ReactionsDisplay(
                             reactions = message.reactions,
@@ -508,7 +506,7 @@ internal fun SegmentedMessageBubble(
                                 .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
                                 .offset(
                                     x = if (message.isFromMe) (-20).dp else 20.dp,
-                                    y = (-14).dp
+                                    y = (-15).dp
                                 )
                         )
                     }

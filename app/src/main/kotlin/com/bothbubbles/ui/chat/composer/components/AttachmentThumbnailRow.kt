@@ -33,6 +33,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DragHandle
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.CircularProgressIndicator
@@ -70,11 +71,11 @@ import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import kotlin.math.roundToInt
 
-/** Size of attachment thumbnails - larger than before for better visibility */
-private val AttachmentThumbnailSize = 100.dp
+/** Size of attachment thumbnails - larger for better visibility (140dp = 40% bigger than original 100dp) */
+private val AttachmentThumbnailSize = 140.dp
 
 /** Item width including spacing for drag calculations */
-private val ItemWidthWithSpacing = 108.dp // 100dp item + 8dp spacing
+private val ItemWidthWithSpacing = 148.dp // 140dp item + 8dp spacing
 
 /**
  * Attachment thumbnail row for the chat composer.
@@ -354,62 +355,89 @@ private fun AttachmentThumbnail(
             .size(AttachmentThumbnailSize)
             .clip(RoundedCornerShape(12.dp))
     ) {
-        // Thumbnail image
-        AsyncImage(
-            model = ImageRequest.Builder(context)
-                .data(attachment.uri)
-                .crossfade(true)
-                .build(),
-            contentDescription = attachment.displayName ?: "Attachment",
-            modifier = Modifier.fillMaxSize(),
-            contentScale = ContentScale.Crop
-        )
+        // vLocation: Show location icon placeholder instead of trying to load as image
+        if (attachment.isVLocation) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.primaryContainer),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Text(
+                        text = "Current Location",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+        } else {
+            // Thumbnail image for regular attachments
+            AsyncImage(
+                model = ImageRequest.Builder(context)
+                    .data(attachment.uri)
+                    .crossfade(true)
+                    .build(),
+                contentDescription = attachment.displayName ?: "Attachment",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop
+            )
 
-        // Bottom gradient for text visibility
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(32.dp)
-                .background(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.Black.copy(alpha = 0.7f)
+            // Bottom gradient for text visibility
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth()
+                    .height(32.dp)
+                    .background(
+                        brush = Brush.verticalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.Black.copy(alpha = 0.7f)
+                            )
                         )
                     )
-                )
-        )
+            )
 
-        // File size or caption indicator
-        Text(
-            text = when {
-                attachment.caption != null -> "💬"
-                attachment.sizeBytes != null -> formatFileSize(attachment.sizeBytes)
-                else -> ""
-            },
-            style = MaterialTheme.typography.labelSmall,
-            color = Color.White,
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 8.dp, bottom = 6.dp)
-        )
-
-        // Video duration badge
-        if (attachment.isVideo) {
-            Row(
+            // File size or caption indicator
+            Text(
+                text = when {
+                    attachment.caption != null -> "💬"
+                    attachment.sizeBytes != null -> formatFileSize(attachment.sizeBytes)
+                    else -> ""
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = Color.White,
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .padding(end = 8.dp, bottom = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.PlayArrow,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(14.dp)
-                )
+                    .align(Alignment.BottomStart)
+                    .padding(start = 8.dp, bottom = 6.dp)
+            )
+
+            // Video duration badge
+            if (attachment.isVideo) {
+                Row(
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(end = 8.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
             }
         }
 

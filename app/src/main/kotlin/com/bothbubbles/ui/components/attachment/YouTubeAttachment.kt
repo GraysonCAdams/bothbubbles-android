@@ -3,25 +3,24 @@ package com.bothbubbles.ui.components.attachment
 import android.content.Intent
 import android.net.Uri
 import android.view.ViewGroup
+import android.webkit.WebChromeClient
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.OpenInNew
-import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeOff
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.VolumeOff
-import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,7 +29,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -45,29 +43,19 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.AsyncImage
 import coil.compose.AsyncImagePainter
 import coil.request.ImageRequest
 import coil.size.Precision
-import android.webkit.WebView
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.PlayerConstants
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.options.IFramePlayerOptions
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 
 /**
  * Inline YouTube video player that shows thumbnail until user taps play.
- * Modeled after VideoAttachment for consistent UX.
+ * Uses youtube-nocookie.com iframe embed for playback.
  *
  * Features:
  * - Thumbnail preview with play button
- * - Tap to play inline (within message bounds)
- * - Double-tap to open in YouTube app
- * - Native Compose controls overlay (mute, fullscreen)
+ * - Tap to play inline using YouTube's native controls
+ * - Double-tap or button to open in YouTube app
  * - Supports timestamp start points
  *
  * @param videoId The YouTube video ID
@@ -86,23 +74,16 @@ fun YouTubeAttachment(
     startTimeSeconds: Int? = null,
     isShort: Boolean = false,
     maxWidth: Dp = 240.dp,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Aspect ratio: 9:16 for Shorts, 16:9 for regular videos
     val aspectRatio = if (isShort) 9f / 16f else 16f / 9f
 
     // Player state
     var isPlayerActive by remember { mutableStateOf(false) }
-    var isMuted by remember { mutableStateOf(true) }
-    var isLoading by remember { mutableStateOf(false) }
-    var currentSeconds by remember { mutableFloatStateOf(0f) }
-    var isPlaying by remember { mutableStateOf(false) }
-
-    // Keep reference to the player for control
-    var youTubePlayerRef by remember { mutableStateOf<YouTubePlayer?>(null) }
 
     // Open in YouTube app
     fun openInYouTube() {
@@ -113,25 +94,6 @@ fun YouTubeAttachment(
         } catch (e: Exception) {
             // Fallback to browser if YouTube app not installed
             context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(originalUrl)))
-        }
-    }
-
-    // Handle lifecycle - release player on dispose
-    DisposableEffect(lifecycleOwner, videoId) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_PAUSE -> {
-                    youTubePlayerRef?.pause()
-                }
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            youTubePlayerRef = null
-            isPlayerActive = false
         }
     }
 
@@ -146,61 +108,18 @@ fun YouTubeAttachment(
                 isPlayerActive = true
             },
             onOpenInApp = { openInYouTube() },
+            onLongPress = onLongPress,
             modifier = modifier
         )
     } else {
-        android.util.Log.d("YouTubeAttachment", "Rendering YouTubePlayerActive for video: $videoId")
-        // Active playback mode
+        // Active playback mode - uses YouTube's native controls
         YouTubePlayerActive(
             videoId = videoId,
             startTimeSeconds = startTimeSeconds,
             aspectRatio = aspectRatio,
             maxWidth = maxWidth,
-            isMuted = isMuted,
-            isLoading = isLoading,
-            isPlaying = isPlaying,
-            onMuteToggle = {
-                isMuted = !isMuted
-                if (isMuted) {
-                    youTubePlayerRef?.mute()
-                } else {
-                    youTubePlayerRef?.unMute()
-                }
-            },
-            onTap = {
-                if (isPlaying) {
-                    youTubePlayerRef?.pause()
-                } else {
-                    youTubePlayerRef?.play()
-                }
-            },
-            onDoubleTap = { openInYouTube() },
             onOpenInApp = { openInYouTube() },
-            onPlayerReady = { player ->
-                youTubePlayerRef = player
-                player.mute() // Start muted
-            },
-            onStateChange = { state ->
-                when (state) {
-                    PlayerConstants.PlayerState.PLAYING -> {
-                        isPlaying = true
-                        isLoading = false
-                    }
-                    PlayerConstants.PlayerState.PAUSED -> {
-                        isPlaying = false
-                    }
-                    PlayerConstants.PlayerState.BUFFERING -> {
-                        isLoading = true
-                    }
-                    PlayerConstants.PlayerState.ENDED -> {
-                        isPlaying = false
-                        // Reset to thumbnail mode when video ends
-                        isPlayerActive = false
-                    }
-                    else -> {}
-                }
-            },
-            onCurrentSecond = { second -> currentSeconds = second },
+            onLongPress = onLongPress,
             modifier = modifier
         )
     }
@@ -216,6 +135,7 @@ private fun YouTubeThumbnailWithControls(
     maxWidth: Dp,
     onPlayClick: () -> Unit,
     onOpenInApp: () -> Unit,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var isLoading by remember { mutableStateOf(true) }
@@ -229,10 +149,11 @@ private fun YouTubeThumbnailWithControls(
             .widthIn(max = maxWidth)
             .clip(RoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceContainerLow)
-            .pointerInput(Unit) {
+            .pointerInput(onLongPress) {
                 detectTapGestures(
                     onTap = { onPlayClick() },
-                    onDoubleTap = { onOpenInApp() }
+                    onDoubleTap = { onOpenInApp() },
+                    onLongPress = { onLongPress?.invoke() }
                 )
             },
         contentAlignment = Alignment.Center
@@ -294,7 +215,7 @@ private fun YouTubeThumbnailWithControls(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Default.OpenInNew,
+                    Icons.AutoMirrored.Filled.OpenInNew,
                     contentDescription = "Open in YouTube",
                     tint = Color.White,
                     modifier = Modifier.size(18.dp)
@@ -321,7 +242,8 @@ private fun YouTubeThumbnailWithControls(
 }
 
 /**
- * Active YouTube player with native controls overlay.
+ * Active YouTube player using iframe embed.
+ * Uses YouTube's native controls with mute/unmute overlay button.
  */
 @Composable
 private fun YouTubePlayerActive(
@@ -329,152 +251,158 @@ private fun YouTubePlayerActive(
     startTimeSeconds: Int?,
     aspectRatio: Float,
     maxWidth: Dp,
-    isMuted: Boolean,
-    isLoading: Boolean,
-    isPlaying: Boolean,
-    onMuteToggle: () -> Unit,
-    onTap: () -> Unit,
-    onDoubleTap: () -> Unit,
     onOpenInApp: () -> Unit,
-    onPlayerReady: (YouTubePlayer) -> Unit,
-    onStateChange: (PlayerConstants.PlayerState) -> Unit,
-    onCurrentSecond: (Float) -> Unit,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
-    var playerView by remember { mutableStateOf<YouTubePlayerView?>(null) }
     val density = LocalDensity.current
+    var webViewRef by remember { mutableStateOf<WebView?>(null) }
+    var isMuted by remember { mutableStateOf(true) } // Start muted
 
-    // Calculate fixed pixel dimensions - this ensures AndroidView gets proper size
-    // The core issue was that Compose layout wasn't providing constraints to AndroidView
+    // Calculate fixed pixel dimensions
     val widthPx = with(density) { maxWidth.roundToPx() }
     val heightPx = (widthPx / aspectRatio.coerceIn(0.5f, 2f)).toInt()
     val heightDp = with(density) { heightPx.toDp() }
 
-    // Clean up player resources when composable leaves
-    DisposableEffect(playerView) {
+    // Build start time parameter if provided
+    val startParam = startTimeSeconds?.let { "&start=$it" } ?: ""
+
+    // Clean up WebView when composable leaves
+    DisposableEffect(Unit) {
         onDispose {
-            playerView?.let { view ->
-                lifecycleOwner.lifecycle.removeObserver(view)
-                // Release the player to clean up internal resources including
-                // ConnectivityManager callbacks that would otherwise leak MainActivity
-                view.release()
-            }
+            webViewRef?.destroy()
         }
     }
 
     Box(
         modifier = modifier
-            .size(maxWidth, heightDp)  // Fixed size to ensure child gets constraints
+            .size(maxWidth, heightDp)
             .clip(RoundedCornerShape(12.dp))
             .background(Color.Black)
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = { onTap() },
-                    onDoubleTap = { onDoubleTap() }
-                )
-            },
-        contentAlignment = Alignment.Center
     ) {
-        // YouTube player view with explicit pixel dimensions in layoutParams
         AndroidView(
             factory = { ctx ->
-                android.util.Log.d("YouTubeAttachment", "Creating YouTubePlayerView for video: $videoId, target size: ${widthPx}x${heightPx}")
+                object : WebView(ctx) {
+                    private var startX = 0f
+                    private var startY = 0f
+                    private var isHorizontalScroll = false
 
-                // Enable WebView debugging to see console errors
-                WebView.setWebContentsDebuggingEnabled(true)
-
-                YouTubePlayerView(ctx).apply {
-                    // Use explicit pixel dimensions instead of MATCH_PARENT
-                    layoutParams = ViewGroup.LayoutParams(widthPx, heightPx)
-
-                    // Disable automatic initialization so we can use custom options
-                    enableAutomaticInitialization = false
-
-                    // Register lifecycle observer for pause/resume/release
-                    lifecycleOwner.lifecycle.addObserver(this)
-                    playerView = this
-                    android.util.Log.d("YouTubeAttachment", "Added lifecycle observer")
-
-                    // Configure player options (disable controls since we have custom UI)
-                    val options = IFramePlayerOptions.Builder()
-                        .controls(0)
-                        .rel(0)
-                        .build()
-
-                    // Use OnAttachStateChangeListener to ensure view is attached to window
-                    // before initializing. This is more reliable than post{} for WebViews.
-                    addOnAttachStateChangeListener(object : android.view.View.OnAttachStateChangeListener {
-                        override fun onViewAttachedToWindow(v: android.view.View) {
-                            android.util.Log.d("YouTubeAttachment", "View attached to window: width=$width, height=$height")
-                            // Still use post{} to ensure layout pass completes
-                            post {
-                                android.util.Log.d("YouTubeAttachment", "Post-attach-layout: width=$width, height=$height - initializing player")
-                                initialize(object : AbstractYouTubePlayerListener() {
-                                    override fun onReady(youTubePlayer: YouTubePlayer) {
-                                        android.util.Log.d("YouTubeAttachment", "Player READY for video: $videoId")
-                                        onPlayerReady(youTubePlayer)
-                                        // Load and play the video
-                                        if (startTimeSeconds != null) {
-                                            android.util.Log.d("YouTubeAttachment", "Loading video at ${startTimeSeconds}s")
-                                            youTubePlayer.loadVideo(videoId, startTimeSeconds.toFloat())
-                                        } else {
-                                            android.util.Log.d("YouTubeAttachment", "Loading video from start")
-                                            youTubePlayer.loadVideo(videoId, 0f)
-                                        }
-                                    }
-
-                                    override fun onStateChange(
-                                        youTubePlayer: YouTubePlayer,
-                                        state: PlayerConstants.PlayerState
-                                    ) {
-                                        android.util.Log.d("YouTubeAttachment", "State changed: $state")
-                                        onStateChange(state)
-                                    }
-
-                                    override fun onCurrentSecond(youTubePlayer: YouTubePlayer, second: Float) {
-                                        onCurrentSecond(second)
-                                    }
-
-                                    override fun onError(youTubePlayer: YouTubePlayer, error: PlayerConstants.PlayerError) {
-                                        android.util.Log.e("YouTubeAttachment", "Player ERROR: $error for video $videoId")
-                                    }
-                                }, options)
-                                android.util.Log.d("YouTubeAttachment", "Initialized player after attach+layout")
+                    override fun onTouchEvent(event: android.view.MotionEvent?): Boolean {
+                        // Only block parent interception for horizontal swipes (seeking)
+                        // Allow taps and long presses to propagate for tapbacks/context menus
+                        when (event?.action) {
+                            android.view.MotionEvent.ACTION_DOWN -> {
+                                startX = event.x
+                                startY = event.y
+                                isHorizontalScroll = false
+                            }
+                            android.view.MotionEvent.ACTION_MOVE -> {
+                                val dx = kotlin.math.abs(event.x - startX)
+                                val dy = kotlin.math.abs(event.y - startY)
+                                // If horizontal movement exceeds vertical, it's a seek gesture
+                                if (dx > dy && dx > 10) {
+                                    isHorizontalScroll = true
+                                    parent?.requestDisallowInterceptTouchEvent(true)
+                                }
+                            }
+                            android.view.MotionEvent.ACTION_UP,
+                            android.view.MotionEvent.ACTION_CANCEL -> {
+                                if (isHorizontalScroll) {
+                                    parent?.requestDisallowInterceptTouchEvent(false)
+                                }
+                                isHorizontalScroll = false
                             }
                         }
+                        return super.onTouchEvent(event)
+                    }
+                }.apply {
+                    webViewRef = this
 
-                        override fun onViewDetachedFromWindow(v: android.view.View) {
-                            android.util.Log.d("YouTubeAttachment", "View detached from window")
+                    layoutParams = ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+
+                    settings.apply {
+                        javaScriptEnabled = true
+                        domStorageEnabled = true
+                        mediaPlaybackRequiresUserGesture = false
+                        useWideViewPort = true
+                        loadWithOverviewMode = true
+                        setSupportMultipleWindows(false)
+                        javaScriptCanOpenWindowsAutomatically = true
+                        mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                    }
+
+                    webChromeClient = WebChromeClient()
+                    webViewClient = object : WebViewClient() {
+                        override fun shouldOverrideUrlLoading(
+                            view: WebView?,
+                            request: android.webkit.WebResourceRequest?
+                        ): Boolean {
+                            // Open all navigation in external browser
+                            request?.url?.let { uri ->
+                                val intent = Intent(Intent.ACTION_VIEW, uri)
+                                ctx.startActivity(intent)
+                            }
+                            return true
                         }
-                    })
+                    }
+
+                    // Use youtube-nocookie.com domain which avoids privacy-related
+                    // restrictions and sends cleaner referrer data (fixes Error 152/153)
+                    // enablejsapi=1 allows JavaScript control, mute=1 starts muted
+                    val html = """
+                        <!DOCTYPE html>
+                        <html>
+                        <head>
+                            <meta charset="utf-8">
+                            <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+                            <meta name="referrer" content="strict-origin-when-cross-origin">
+                            <style>
+                                * { margin: 0; padding: 0; }
+                                html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+                                iframe { width: 100%; height: 100%; border: none; }
+                            </style>
+                        </head>
+                        <body>
+                            <iframe id="ytplayer"
+                                src="https://www.youtube-nocookie.com/embed/$videoId?autoplay=1&playsinline=1&controls=1&rel=0&modestbranding=1&fs=0&mute=1&cc_load_policy=0&enablejsapi=1$startParam&origin=https://www.youtube-nocookie.com"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                referrerpolicy="strict-origin-when-cross-origin">
+                            </iframe>
+                            <script>
+                                function mutePlayer() {
+                                    document.getElementById('ytplayer').contentWindow.postMessage('{"event":"command","func":"mute","args":""}', '*');
+                                }
+                                function unmutePlayer() {
+                                    document.getElementById('ytplayer').contentWindow.postMessage('{"event":"command","func":"unMute","args":""}', '*');
+                                }
+                            </script>
+                        </body>
+                        </html>
+                    """.trimIndent()
+
+                    loadDataWithBaseURL(
+                        "https://www.youtube-nocookie.com",
+                        html,
+                        "text/html",
+                        "UTF-8",
+                        null
+                    )
                 }
             },
-            modifier = Modifier.size(maxWidth, heightDp),  // Match parent Box size exactly
-            update = { view ->
-                android.util.Log.d("YouTubeAttachment", "AndroidView update: width=${view.width}, height=${view.height}")
-            }
+            modifier = Modifier.fillMaxSize(),
+            update = { }
         )
-
-        // Loading indicator overlay
-        if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color.Black.copy(alpha = 0.3f)),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(40.dp),
-                    strokeWidth = 3.dp,
-                    color = Color.White
-                )
-            }
-        }
 
         // Mute/Unmute button (top-left)
         Surface(
-            onClick = onMuteToggle,
+            onClick = {
+                isMuted = !isMuted
+                val jsCommand = if (isMuted) "mutePlayer()" else "unmutePlayer()"
+                webViewRef?.evaluateJavascript(jsCommand, null)
+            },
             shape = CircleShape,
             color = Color.Black.copy(alpha = 0.6f),
             modifier = Modifier
@@ -484,7 +412,7 @@ private fun YouTubePlayerActive(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    if (isMuted) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
                     contentDescription = if (isMuted) "Unmute" else "Mute",
                     tint = Color.White,
                     modifier = Modifier.size(18.dp)
@@ -504,26 +432,10 @@ private fun YouTubePlayerActive(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    Icons.Default.Fullscreen,
+                    Icons.AutoMirrored.Filled.OpenInNew,
                     contentDescription = "Open in YouTube",
                     tint = Color.White,
                     modifier = Modifier.size(18.dp)
-                )
-            }
-        }
-
-        // Play/Pause indicator in center
-        Surface(
-            shape = CircleShape,
-            color = Color.Black.copy(alpha = 0.4f),
-            modifier = Modifier.size(48.dp)
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                    contentDescription = if (isPlaying) "Tap to pause" else "Tap to play",
-                    tint = Color.White.copy(alpha = 0.8f),
-                    modifier = Modifier.size(28.dp)
                 )
             }
         }

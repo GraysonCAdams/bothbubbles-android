@@ -258,9 +258,7 @@ fun ChatScreen(
                                 longitude = it.longitude
                             )
                             if (success) {
-                                // Send immediately
-                                viewModel.sendMessage()
-                                // Dismiss media picker panel
+                                // Just dismiss panel - don't auto-send, let user tap send
                                 viewModel.composer.dismissPanel()
                             } else {
                                 Toast.makeText(context, "Failed to create location", Toast.LENGTH_SHORT).show()

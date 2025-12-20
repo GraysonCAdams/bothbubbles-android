@@ -112,10 +112,11 @@ fun ChatInputUI(
 
     Column(
         modifier = modifier
-            // Skip system bar insets in bubble mode - bubbles are floating windows without
-            // their own system bars. Using these in bubbles causes incorrect padding.
+            // Skip navigation bar insets in bubble mode - bubbles are floating windows without
+            // their own system bars (status/nav). However, IME padding is still needed for bubbles
+            // since the keyboard appears within the bubble window and content must resize.
             .then(if (!isBubbleMode) Modifier.navigationBarsPadding() else Modifier)
-            .then(if (!isBubbleMode) Modifier.imePadding() else Modifier)
+            .imePadding()
             .onSizeChanged { size -> onSizeChanged(size.height) }
     ) {
         // Note: Both attachment and emoji pickers are rendered inside ChatComposer's ComposerPanelHost

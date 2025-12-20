@@ -243,14 +243,11 @@ class ChatInfoDelegate @AssistedInject constructor(
                         (System.currentTimeMillis() - location.timestamp) > LOCATION_STALE_THRESHOLD_MS
 
                     val placeName = location?.placeName
-                    val address = location?.address
+                    val shortAddress = location?.shortAddress
                     val subtext = when {
                         isStale -> "Location unavailable"
                         placeName != null -> placeName
-                        address != null -> {
-                            // Shorten address to just the street if it's too long
-                            if (address.length > 30) address.substringBefore(",") else address
-                        }
+                        shortAddress != null -> shortAddress
                         else -> null
                     }
 

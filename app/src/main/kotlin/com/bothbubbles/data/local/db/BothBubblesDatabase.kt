@@ -75,7 +75,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         TombstoneEntity::class,
         Life360MemberEntity::class
     ],
-    version = 40,
+    version = 41,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
