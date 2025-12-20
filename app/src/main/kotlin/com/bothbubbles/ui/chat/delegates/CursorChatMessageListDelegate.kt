@@ -410,16 +410,28 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
     /**
      * Format a timestamp for display ("Today", "Yesterday", or date).
+     * Caches Calendar field values to avoid repeated JNI calls.
      */
     private fun formatDisplayDate(timestamp: Long): String {
         val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
         val today = Calendar.getInstance()
         val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
 
+        // Cache Calendar field values to avoid repeated JNI calls
+        val msgYear = messageDate.get(Calendar.YEAR)
+        val msgDayOfYear = messageDate.get(Calendar.DAY_OF_YEAR)
+        val todayYear = today.get(Calendar.YEAR)
+        val todayDayOfYear = today.get(Calendar.DAY_OF_YEAR)
+        val yesterdayYear = yesterday.get(Calendar.YEAR)
+        val yesterdayDayOfYear = yesterday.get(Calendar.DAY_OF_YEAR)
+
+        val isToday = msgYear == todayYear && msgDayOfYear == todayDayOfYear
+        val isYesterday = msgYear == yesterdayYear && msgDayOfYear == yesterdayDayOfYear
+
         return when {
-            isSameDay(messageDate, today) -> "Today"
-            isSameDay(messageDate, yesterday) -> "Yesterday"
-            messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) -> {
+            isToday -> "Today"
+            isYesterday -> "Yesterday"
+            msgYear == todayYear -> {
                 val instant = Instant.ofEpochMilli(timestamp)
                 DISPLAY_DATE_FORMAT_MONTH_DAY.format(instant.atZone(ZoneId.systemDefault()))
             }
@@ -428,11 +440,6 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 DISPLAY_DATE_FORMAT_FULL.format(instant.atZone(ZoneId.systemDefault()))
             }
         }
-    }
-
-    private fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
-        return cal1.get(Calendar.YEAR) == cal2.get(Calendar.YEAR) &&
-            cal1.get(Calendar.DAY_OF_YEAR) == cal2.get(Calendar.DAY_OF_YEAR)
     }
 
     // ============================================================================

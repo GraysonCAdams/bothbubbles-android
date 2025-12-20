@@ -101,6 +101,10 @@ class MediaGalleryViewModel @Inject constructor(
         val calendar = Calendar.getInstance()
         val now = Calendar.getInstance()
 
+        // Cache Calendar field values to avoid repeated JNI calls inside the lambda
+        val nowYear = now.get(Calendar.YEAR)
+        val nowMonth = now.get(Calendar.MONTH)
+
         return items.groupBy { item ->
             calendar.timeInMillis = item.dateCreated
             val year = calendar.get(Calendar.YEAR)
@@ -108,9 +112,9 @@ class MediaGalleryViewModel @Inject constructor(
 
             // Use relative names for recent months
             when {
-                year == now.get(Calendar.YEAR) && month == now.get(Calendar.MONTH) -> "This Month"
-                year == now.get(Calendar.YEAR) && month == now.get(Calendar.MONTH) - 1 -> "Last Month"
-                year == now.get(Calendar.YEAR) - 1 && now.get(Calendar.MONTH) == 0 && month == 11 -> "Last Month"
+                year == nowYear && month == nowMonth -> "This Month"
+                year == nowYear && month == nowMonth - 1 -> "Last Month"
+                year == nowYear - 1 && nowMonth == 0 && month == 11 -> "Last Month"
                 else -> {
                     val instant = Instant.ofEpochMilli(item.dateCreated)
                     MONTH_YEAR_FORMAT.format(instant.atZone(ZoneId.systemDefault()))

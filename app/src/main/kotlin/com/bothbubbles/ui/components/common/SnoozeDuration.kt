@@ -67,13 +67,18 @@ enum class SnoozeDuration(val label: String, val durationMs: Long) {
             val today = java.util.Calendar.getInstance()
             val snoozeDay = java.util.Calendar.getInstance().apply { timeInMillis = snoozeUntil }
 
-            val isSameDay = today.get(java.util.Calendar.YEAR) == snoozeDay.get(java.util.Calendar.YEAR) &&
-                    today.get(java.util.Calendar.DAY_OF_YEAR) == snoozeDay.get(java.util.Calendar.DAY_OF_YEAR)
+            // Cache Calendar field values to avoid repeated JNI calls
+            val todayYear = today.get(java.util.Calendar.YEAR)
+            val todayDayOfYear = today.get(java.util.Calendar.DAY_OF_YEAR)
+            val snoozeYear = snoozeDay.get(java.util.Calendar.YEAR)
+            val snoozeDayOfYear = snoozeDay.get(java.util.Calendar.DAY_OF_YEAR)
+
+            val isSameDay = todayYear == snoozeYear && todayDayOfYear == snoozeDayOfYear
 
             val isTomorrow = run {
                 val tomorrow = java.util.Calendar.getInstance().apply { add(java.util.Calendar.DAY_OF_YEAR, 1) }
-                tomorrow.get(java.util.Calendar.YEAR) == snoozeDay.get(java.util.Calendar.YEAR) &&
-                        tomorrow.get(java.util.Calendar.DAY_OF_YEAR) == snoozeDay.get(java.util.Calendar.DAY_OF_YEAR)
+                tomorrow.get(java.util.Calendar.YEAR) == snoozeYear &&
+                        tomorrow.get(java.util.Calendar.DAY_OF_YEAR) == snoozeDayOfYear
             }
 
             return when {

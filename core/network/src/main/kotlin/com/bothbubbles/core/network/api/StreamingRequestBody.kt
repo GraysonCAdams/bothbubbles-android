@@ -5,7 +5,6 @@ import android.net.Uri
 import okhttp3.MediaType
 import okhttp3.RequestBody
 import okio.BufferedSink
-import okio.source
 import java.io.File
 import java.io.IOException
 
@@ -36,15 +35,12 @@ class FileStreamingRequestBody(
         val totalBytes = file.length()
         var bytesWritten = 0L
 
-        file.inputStream().use { inputStream ->
-            val source = inputStream.source()
+        file.inputStream().use { stream ->
             val buffer = ByteArray(BUFFER_SIZE)
             var bytesRead: Int
 
-            while (source.read(okio.Buffer(), BUFFER_SIZE.toLong()).also {
-                bytesRead = it.toInt()
-            } != -1L && bytesRead > 0) {
-                sink.write(okio.Buffer().apply { write(buffer, 0, bytesRead) }, bytesRead.toLong())
+            while (stream.read(buffer).also { bytesRead = it } != -1) {
+                sink.write(buffer, 0, bytesRead)
                 bytesWritten += bytesRead
                 onProgress?.invoke(bytesWritten, totalBytes)
             }
