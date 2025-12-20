@@ -7,8 +7,11 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.util.parsing.UrlParsingUtils
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
 /**
  * Formats a message preview for display in conversation list.
@@ -194,10 +197,10 @@ fun formatRelativeTime(timestamp: Long, application: Application): String {
     if (timestamp == 0L) return ""
 
     val now = System.currentTimeMillis()
-    val messageDate = Calendar.getInstance().apply { timeInMillis = timestamp }
-    val today = Calendar.getInstance()
+    val messageDateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault())
+    val nowDateTime = LocalDateTime.now()
 
-    val isSameYear = messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR)
+    val isSameYear = messageDateTime.year == nowDateTime.year
 
     // Check if within the last 24 hours (show time instead of day name)
     val hoursDiff = (now - timestamp) / (1000 * 60 * 60)
@@ -210,12 +213,13 @@ fun formatRelativeTime(timestamp: Long, application: Application): String {
     val is24Hour = DateFormat.is24HourFormat(application)
     val timePattern = if (is24Hour) "HH:mm" else "h:mm a"
 
-    return when {
-        isWithin24Hours -> SimpleDateFormat(timePattern, Locale.getDefault()).format(Date(timestamp))
-        daysDiff < 7 -> SimpleDateFormat("EEE", Locale.getDefault()).format(Date(timestamp))
-        isSameYear -> SimpleDateFormat("MMM d", Locale.getDefault()).format(Date(timestamp))
-        else -> SimpleDateFormat("M/d/yy", Locale.getDefault()).format(Date(timestamp))
+    val formatter = when {
+        isWithin24Hours -> DateTimeFormatter.ofPattern(timePattern, Locale.getDefault())
+        daysDiff < 7 -> DateTimeFormatter.ofPattern("EEE", Locale.getDefault())
+        isSameYear -> DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
+        else -> DateTimeFormatter.ofPattern("M/d/yy", Locale.getDefault())
     }
+    return messageDateTime.format(formatter)
 }
 
 /**

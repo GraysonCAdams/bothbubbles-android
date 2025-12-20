@@ -1,6 +1,6 @@
 package com.bothbubbles.util.parsing
 
-import java.util.*
+import java.util.Calendar
 
 /**
  * Represents a detected date in message text with its position and parsed value

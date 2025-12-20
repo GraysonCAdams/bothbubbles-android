@@ -20,8 +20,9 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -244,7 +245,8 @@ fun ChatCreatorScreen(
             }
 
             // Create list state and coroutine scope for fast scrolling
-            val listState = rememberLazyListState()
+            // Use rememberSaveable to persist scroll position across process death
+            val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
             val coroutineScope = rememberCoroutineScope()
 
             // Hide keyboard when scrolling starts (debounced to avoid spam)

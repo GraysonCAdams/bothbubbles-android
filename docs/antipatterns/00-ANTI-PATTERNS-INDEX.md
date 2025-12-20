@@ -189,7 +189,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 ### Sprint 7 - State Restoration ✅ COMPLETE
 - [x] Migrate ChatScreenState dialog flags to SavedStateHandle (FIXED 2025-12-20)
 - [x] Use `rememberSaveable` for ComposerTextField text input (FIXED 2025-12-20)
-- [ ] Persist LazyColumn scroll positions in detail screens (DEFERRED - requires SavedStateHandle in 20+ ViewModels, low impact)
+- [x] Persist LazyColumn scroll positions in detail screens (FIXED 2025-12-20 - using rememberSaveable with LazyListState.Saver)
 - [x] Use `rememberSaveable` for form inputs in Life360SettingsScreen (FIXED 2025-12-20)
 - [x] Add `isStopped` check in MessageSendWorker confirmation wait (FIXED 2025-12-20)
 - [x] Add network constraint to ScheduledMessageWorker (FIXED 2025-12-20)
@@ -218,7 +218,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 4. ~~Move `MessageDeduplicator.kt` from util to services package~~ ✅ FIXED 2025-12-20
 5. ~~Add missing `@Transaction` to `ChatRepository.deleteChat()`~~ ✅ FIXED 2025-12-20
 6. ~~Cache NotificationManager in SocketForegroundService~~ ✅ ALREADY FIXED (uses `by lazy`)
-7. Fix wildcard import in MessageTransformations.kt
+7. ~~Fix wildcard imports in 7 files~~ ✅ FIXED 2025-12-20 (replaced with explicit imports, also replaced remaining SimpleDateFormat with DateTimeFormatter)
 8. ~~Gate HTTP logging with `BuildConfig.DEBUG`~~ ✅ FIXED 2025-12-20
 9. ~~Remove duplicate `getChat`/`getChatByGuid` methods~~ ✅ FIXED 2025-12-20
 10. ~~Restrict FileProvider paths from root to specific directories~~ ✅ FIXED 2025-12-20

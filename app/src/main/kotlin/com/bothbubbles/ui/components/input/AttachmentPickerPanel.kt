@@ -38,7 +38,7 @@ import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
-import java.util.*
+import java.util.Calendar
 
 /**
  * Attachment picker option data class

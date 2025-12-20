@@ -4,7 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Star
@@ -70,7 +71,8 @@ fun ConversationDetailsScreen(
     }
 
     // Track scroll state to determine when header is scrolled out of view
-    val listState = rememberLazyListState()
+    // Use rememberSaveable to persist scroll position across process death
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     // Calculate how much of the header is visible (0 = fully visible, 1 = scrolled away)
     val headerHeightPx = with(LocalDensity.current) { 180.dp.toPx() }

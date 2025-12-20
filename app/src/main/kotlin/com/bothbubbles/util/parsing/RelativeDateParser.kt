@@ -1,6 +1,6 @@
 package com.bothbubbles.util.parsing
 
-import java.util.*
+import java.util.Calendar
 
 /**
  * Parses relative date expressions like "tomorrow", "next week", "in 3 days"

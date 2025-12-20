@@ -12,8 +12,11 @@ import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.*
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 import javax.inject.Inject
 
 /**
@@ -202,18 +205,19 @@ class ContactLoadDelegate @Inject constructor(
      * Convert ChatEntity to GroupChatUiModel
      */
     private fun ChatEntity.toGroupChatUiModel(): GroupChatUiModel {
-        val timeFormatter = SimpleDateFormat("h:mm a", Locale.getDefault())
-        val dateFormatter = SimpleDateFormat("MMM d", Locale.getDefault())
+        val timeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+        val dateFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
         val formattedTime = lastMessageDate?.let { timestamp ->
             val now = System.currentTimeMillis()
             val diff = now - timestamp
             val oneDayMs = 24 * 60 * 60 * 1000L
+            val dateTime = LocalDateTime.ofInstant(Instant.ofEpochMilli(timestamp), ZoneId.systemDefault())
 
             when {
-                diff < oneDayMs -> timeFormatter.format(Date(timestamp))
-                diff < 7 * oneDayMs -> dateFormatter.format(Date(timestamp))
-                else -> dateFormatter.format(Date(timestamp))
+                diff < oneDayMs -> dateTime.format(timeFormatter)
+                diff < 7 * oneDayMs -> dateTime.format(dateFormatter)
+                else -> dateTime.format(dateFormatter)
             }
         }
 

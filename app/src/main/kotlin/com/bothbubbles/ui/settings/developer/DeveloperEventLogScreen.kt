@@ -2,8 +2,8 @@ package com.bothbubbles.ui.settings.developer
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
@@ -24,7 +24,8 @@ fun DeveloperEventLogScreen(
     viewModel: DeveloperEventLogViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    val listState = rememberLazyListState()
+    // Use rememberSaveable to persist scroll position across process death
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     var selectedEvent by rememberSaveable { mutableStateOf<DeveloperEvent?>(null) }
 
     // Event detail dialog

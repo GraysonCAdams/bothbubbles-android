@@ -169,6 +169,16 @@ Timber.e(e, "Operation failed")  // Log technical details
 2.  **Immutable Collections**: ALWAYS use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state.
 3.  **Stable Callbacks**: ALWAYS use method references (`viewModel::method`) instead of lambdas capturing state.
 4.  **No Logic in Composition**: NEVER put logging, I/O, or complex calculations in the composition path.
+5.  **Persist Scroll Positions**: Use `rememberSaveable` with built-in savers to survive process death:
+    ```kotlin
+    // REQUIRED for LazyColumn/LazyRow
+    val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    LazyColumn(state = listState) { ... }
+
+    // REQUIRED for LazyGrid
+    val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
+    LazyVerticalGrid(state = gridState) { ... }
+    ```
 
 ---
 

@@ -2,8 +2,9 @@ package com.bothbubbles.ui.chatcreator
 
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -164,7 +165,8 @@ fun GroupCreatorScreen(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Create list state and coroutine scope for fast scrolling
-            val listState = rememberLazyListState()
+            // Use rememberSaveable to persist scroll position across process death
+            val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
             val coroutineScope = rememberCoroutineScope()
 
             // Build section index map for fast scrolling
