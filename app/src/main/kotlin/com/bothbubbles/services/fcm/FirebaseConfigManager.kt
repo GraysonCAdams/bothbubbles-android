@@ -120,7 +120,7 @@ class FirebaseConfigManager @Inject constructor(
 
             if (!response.isSuccessful) {
                 val error = "Failed to fetch FCM config: ${response.code()}"
-                Timber.e( error)
+                Timber.e(error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
@@ -128,7 +128,7 @@ class FirebaseConfigManager @Inject constructor(
             val fcmClientResponse = response.body()?.data
             if (fcmClientResponse == null) {
                 val error = "FCM config response was empty"
-                Timber.e( error)
+                Timber.e(error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }
@@ -140,7 +140,7 @@ class FirebaseConfigManager @Inject constructor(
                     it.clientInfo?.androidClientInfo?.packageName
                 }?.joinToString() ?: "none"
                 val error = "FCM config missing for package $PACKAGE_NAME. Available: $availablePackages"
-                Timber.e( error)
+                Timber.e(error)
                 _state.value = FirebaseConfigState.Error(error)
                 return@withLock Result.failure(Exception(error))
             }

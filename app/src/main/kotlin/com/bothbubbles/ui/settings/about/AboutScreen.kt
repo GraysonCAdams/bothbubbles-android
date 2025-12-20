@@ -16,6 +16,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -86,7 +88,7 @@ fun AboutContent(
                 ) {
                     Icon(
                         Icons.Default.Message,
-                        contentDescription = null,
+                        contentDescription = "BothBubbles app icon",
                         modifier = Modifier.size(64.dp),
                         tint = MaterialTheme.colorScheme.primary
                     )
@@ -98,7 +100,8 @@ fun AboutContent(
                             }
                             append("Bubbles")
                         },
-                        style = MaterialTheme.typography.headlineSmall.copy(fontFamily = KumbhSansFamily)
+                        style = MaterialTheme.typography.headlineSmall.copy(fontFamily = KumbhSansFamily),
+                        modifier = Modifier.semantics { heading() }
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
@@ -158,12 +161,12 @@ fun AboutContent(
                         headlineContent = { Text("Website") },
                         supportingContent = { Text("bluebubbles.app") },
                         leadingContent = {
-                            Icon(Icons.Default.Language, contentDescription = null)
+                            Icon(Icons.Default.Language, contentDescription = "Website")
                         },
                         trailingContent = {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
+                                contentDescription = "Open website",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -179,12 +182,12 @@ fun AboutContent(
                         headlineContent = { Text("Discord") },
                         supportingContent = { Text("Join our community") },
                         leadingContent = {
-                            Icon(Icons.Default.Forum, contentDescription = null)
+                            Icon(Icons.Default.Forum, contentDescription = "Discord")
                         },
                         trailingContent = {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
+                                contentDescription = "Open Discord",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -200,12 +203,12 @@ fun AboutContent(
                         headlineContent = { Text("GitHub") },
                         supportingContent = { Text("View source code") },
                         leadingContent = {
-                            Icon(Icons.Default.Code, contentDescription = null)
+                            Icon(Icons.Default.Code, contentDescription = "GitHub")
                         },
                         trailingContent = {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
+                                contentDescription = "Open GitHub",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -221,12 +224,12 @@ fun AboutContent(
                         headlineContent = { Text("Documentation") },
                         supportingContent = { Text("Setup guides and FAQ") },
                         leadingContent = {
-                            Icon(Icons.Default.MenuBook, contentDescription = null)
+                            Icon(Icons.Default.MenuBook, contentDescription = "Documentation")
                         },
                         trailingContent = {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
+                                contentDescription = "Open documentation",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -244,12 +247,12 @@ fun AboutContent(
                     ListItem(
                         headlineContent = { Text("Privacy Policy") },
                         leadingContent = {
-                            Icon(Icons.Default.PrivacyTip, contentDescription = null)
+                            Icon(Icons.Default.PrivacyTip, contentDescription = "Privacy Policy")
                         },
                         trailingContent = {
                             Icon(
                                 Icons.AutoMirrored.Filled.OpenInNew,
-                                contentDescription = null,
+                                contentDescription = "Open privacy policy",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         },
@@ -264,7 +267,7 @@ fun AboutContent(
                     ListItem(
                         headlineContent = { Text("Open source licenses") },
                         leadingContent = {
-                            Icon(Icons.Default.Description, contentDescription = null)
+                            Icon(Icons.Default.Description, contentDescription = "Open source licenses")
                         },
                         modifier = Modifier.clickable(onClick = onOpenSourceLicensesClick)
                     )

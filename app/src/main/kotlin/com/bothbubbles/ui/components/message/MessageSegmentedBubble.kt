@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -595,12 +596,14 @@ internal fun SegmentedMessageBubble(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.error
                         )
-                        // Tap to see details button
+                        // Tap to see details button - 48dp touch target for accessibility
                         Surface(
                             onClick = { showFailedMessageDialog = true },
                             color = MaterialTheme.colorScheme.errorContainer,
                             shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier.height(24.dp)
+                            modifier = Modifier
+                                .defaultMinSize(minHeight = 48.dp)
+                                .padding(vertical = 12.dp)
                         ) {
                             Row(
                                 modifier = Modifier.padding(horizontal = 8.dp),
@@ -702,7 +705,7 @@ internal fun TextBubbleSegment(
                 if (isCurrentSearchMatch) {
                     Modifier.border(
                         width = 2.dp,
-                        color = Color(0xFFFF9800),
+                        color = MaterialTheme.colorScheme.tertiary,
                         shape = bubbleShape
                     )
                 } else {

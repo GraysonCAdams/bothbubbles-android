@@ -211,13 +211,14 @@ fun JumpToBottomIndicator(
             modifier = if (hasNewMessages) Modifier.scale(pulseScale) else Modifier
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Icon(
                     Icons.Default.KeyboardArrowDown,
-                    contentDescription = null,
+                    contentDescription = "Scroll down",
                     tint = if (hasNewMessages)
                         MaterialTheme.colorScheme.onPrimary
                     else

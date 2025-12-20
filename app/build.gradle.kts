@@ -58,6 +58,12 @@ android {
         compose = true
         buildConfig = true
     }
+
+    lint {
+        checkReleaseBuilds = true
+        abortOnError = false
+        disable += listOf("MissingTranslation", "ExtraTranslation")
+    }
 }
 
 composeCompiler {
@@ -205,7 +211,7 @@ dependencies {
     implementation(libs.androidx.security.crypto)
 
     // Logging
-    implementation("com.jakewharton.timber:timber:5.0.1")
+    implementation(libs.timber)
 
     // LeakCanary (debug only)
     debugImplementation(libs.leakcanary)

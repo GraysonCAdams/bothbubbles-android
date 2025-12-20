@@ -178,7 +178,7 @@ class FirebaseDatabaseService @Inject constructor(
                 }
 
                 override fun onCancelled(error: DatabaseError) {
-                    Timber.e("Realtime Database listener cancelled: ${error.message}")
+                    Timber.e(error.toException(), "Realtime Database listener cancelled: ${error.message}")
                     _state.value = FirebaseDatabaseState.Error(error.message)
                 }
             }
@@ -201,7 +201,7 @@ class FirebaseDatabaseService @Inject constructor(
             firestoreListener = docRef.addSnapshotListener(object : EventListener<DocumentSnapshot> {
                 override fun onEvent(snapshot: DocumentSnapshot?, error: FirebaseFirestoreException?) {
                     if (error != null) {
-                        Timber.e("Firestore listener error: ${error.message}")
+                        Timber.e(error, "Firestore listener error: ${error.message}")
                         _state.value = FirebaseDatabaseState.Error(error.message ?: "Firestore error")
                         return
                     }

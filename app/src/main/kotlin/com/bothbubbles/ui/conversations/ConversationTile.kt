@@ -108,7 +108,11 @@ internal fun GoogleStyleConversationTile(
             .combinedClickable(
                 onClick = onClick,
                 onLongClick = onLongClick
-            ),
+            )
+            .semantics {
+                onClick(label = "Open conversation with ${conversation.displayName}") { true }
+                onLongClick(label = "Show conversation options") { true }
+            },
         shape = shape,
         color = backgroundColor
     ) {
@@ -124,10 +128,14 @@ internal fun GoogleStyleConversationTile(
                     .size(56.dp)
                     .then(
                         if (onAvatarClick != null && !isSelected) {
-                            Modifier.combinedClickable(
-                                onClick = onAvatarClick,
-                                onLongClick = onAvatarClick
-                            )
+                            Modifier
+                                .combinedClickable(
+                                    onClick = onAvatarClick,
+                                    onLongClick = onAvatarClick
+                                )
+                                .semantics {
+                                    onClick(label = "View ${conversation.displayName} contact details") { true }
+                                }
                         } else {
                             Modifier
                         }

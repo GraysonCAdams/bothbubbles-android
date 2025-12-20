@@ -98,7 +98,7 @@ class FcmTokenRegistrationWorker @AssistedInject constructor(
             if (runAttemptCount < MAX_RETRY_COUNT) {
                 Result.retry()
             } else {
-                Timber.e("FCM registration failed after $MAX_RETRY_COUNT attempts")
+                Timber.e(e, "FCM registration failed after $MAX_RETRY_COUNT attempts")
                 Result.failure()
             }
         }

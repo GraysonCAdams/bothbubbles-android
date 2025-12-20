@@ -12,6 +12,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
@@ -68,7 +69,7 @@ internal fun DeliveryIndicator(
     val color by animateColorAsState(
         targetValue = when {
             hasError -> MaterialTheme.colorScheme.error
-            isRead -> Color(0xFF34B7F1)
+            isRead -> MaterialTheme.colorScheme.primary
             else -> MaterialTheme.colorScheme.onSurfaceVariant
         },
         animationSpec = tween(150, easing = FastOutSlowInEasing),
@@ -85,37 +86,45 @@ internal fun DeliveryIndicator(
         label = "statusScale"
     )
 
-    AnimatedContent(
-        targetState = status,
-        transitionSpec = {
-            fadeIn(tween(100)) togetherWith fadeOut(tween(100))
-        },
-        label = "statusIcon",
+    // Wrap in 48dp touch target for accessibility if clickable
+    Box(
         modifier = Modifier
-            .size(14.dp)
-            .scale(scale)
             .then(
                 if (onClick != null) {
-                    Modifier.pointerInput(Unit) {
-                        detectTapGestures(onTap = { onClick() })
-                    }
+                    Modifier
+                        .size(48.dp)
+                        .pointerInput(Unit) {
+                            detectTapGestures(onTap = { onClick() })
+                        }
                 } else {
                     Modifier
                 }
-            )
-    ) { _ ->
-        Icon(
-            imageVector = icon,
-            contentDescription = when {
-                hasError -> "Failed"
-                isRead -> "Read"
-                isDelivered -> "Delivered"
-                isSent -> "Sent"
-                else -> "Sending"
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        AnimatedContent(
+            targetState = status,
+            transitionSpec = {
+                fadeIn(tween(100)) togetherWith fadeOut(tween(100))
             },
-            tint = color,
-            modifier = Modifier.size(14.dp)
-        )
+            label = "statusIcon",
+            modifier = Modifier
+                .size(14.dp)
+                .scale(scale)
+        ) { _ ->
+            Icon(
+                imageVector = icon,
+                contentDescription = when {
+                    hasError -> "Failed"
+                    isRead -> "Read"
+                    isDelivered -> "Delivered"
+                    isSent -> "Sent"
+                    else -> "Sending"
+                },
+                tint = color,
+                modifier = Modifier.size(14.dp)
+            )
+        }
     }
 }
 
@@ -149,7 +158,7 @@ internal fun DeliveryStatusLegend(
                 )
                 LegendRow(
                     icon = Icons.Default.DoneAll,
-                    color = Color(0xFF34B7F1),
+                    color = MaterialTheme.colorScheme.primary,
                     label = "Read"
                 )
                 LegendRow(

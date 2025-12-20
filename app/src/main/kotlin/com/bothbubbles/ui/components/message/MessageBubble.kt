@@ -175,7 +175,11 @@ fun MessageBubble(
                 .fillMaxWidth()
                 .then(
                     if (isSelectionMode) {
-                        Modifier.clickable(onClick = handleSelectionToggle)
+                        Modifier
+                            .clickable(onClick = handleSelectionToggle)
+                            .semantics {
+                                onClick(label = "Toggle message selection") { true }
+                            }
                     } else {
                         Modifier
                     }
@@ -192,7 +196,11 @@ fun MessageBubble(
                             .padding(end = 8.dp)
                             .then(
                                 if (onAvatarClick != null) {
-                                    Modifier.clickable(onClick = onAvatarClick)
+                                    Modifier
+                                        .clickable(onClick = onAvatarClick)
+                                        .semantics {
+                                            onClick(label = "View ${message.senderName ?: "sender"} contact details") { true }
+                                        }
                                 } else {
                                     Modifier
                                 }

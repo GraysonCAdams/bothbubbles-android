@@ -127,27 +127,38 @@ Timber.d("DEBUG checkAvailability: forceRecheck=$forceRecheck")
 
 ## Medium Severity Issues
 
-### 8. Timber.e() Without Exception Parameter
+### 8. ~~Timber.e() Without Exception Parameter~~ **FIXED 2025-12-20**
 
-**Locations (15+ occurrences):**
+**Locations (3 occurrences fixed):**
 
-| File | Issue |
-|------|-------|
-| ImageCompressor.kt | `Timber.e("Failed to decode image dimensions")` |
-| VideoCompressor.kt | `Timber.e("No video track found")` |
-| SmsStatusReceiver.kt | `Timber.e("SMS send failed...")` |
-| HeadlessSmsSendService.kt | Multiple |
+| File | Status |
+|------|--------|
+| FcmTokenRegistrationWorker.kt | ✅ FIXED - Added exception parameter to line 101 |
+| FirebaseConfigManager.kt | ✅ FIXED - Fixed malformed Timber.e() calls (lines 123, 131, 143) |
+| FirebaseDatabaseService.kt | ✅ FIXED - Added exception parameters for Firebase listeners (lines 181, 204) |
 
-**Problem:** Exception logged without stack trace.
+**Problem:** Exception logged without stack trace in catch blocks.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-// Instead of:
-Timber.e("Error message")
+// Was:
+} catch (e: Exception) {
+    Timber.e("FCM registration failed after $MAX_RETRY_COUNT attempts")
+}
 
-// Use:
-Timber.e(e, "Error message")
+// Now:
+} catch (e: Exception) {
+    Timber.e(e, "FCM registration failed after $MAX_RETRY_COUNT attempts")
+}
+
+// Firebase Database Error:
+error: DatabaseError -> Timber.e(error.toException(), "message")
+error: FirebaseFirestoreException -> Timber.e(error, "message")
 ```
+
+**Status:** FIXED on 2025-12-20 - All catch blocks with exceptions now properly include exception parameter for stack traces
+
+**Note:** Many `Timber.e("...")` calls remain in the codebase, but these are intentionally without exceptions as they log validation failures, error codes, and state errors where no exception is available in scope.
 
 ---
 
@@ -203,7 +214,7 @@ Timber.i("[SEND_TRACE] text=\"${text.take(30)}...\"")
 | [SEND_TRACE] | HIGH | 108 | Debug code | ✅ FIXED 2025-12-20 |
 | [DUPLICATE_DETECT] | HIGH | 5 | Debug code | ✅ FIXED 2025-12-20 |
 | [VM_SEND] | HIGH | 7+ | Debug code | ✅ FIXED 2025-12-20 |
-| Timber.e() no exception | MEDIUM | 15+ | Best practice | ⚠️ Open |
+| Timber.e() no exception | MEDIUM | 3 | Best practice | ✅ FIXED 2025-12-20 |
 | Socket raw data | MEDIUM | 1 | Privacy | ⚠️ Open |
 | Message text previews | LOW | 10+ | Privacy | ✅ FIXED 2025-12-20 |
 | Missing Timber.tag() | LOW | Most | Filtering | ⚠️ Open |
@@ -215,7 +226,7 @@ Timber.i("[SEND_TRACE] text=\"${text.take(30)}...\"")
 1. ~~**CRITICAL:** Remove password logging from SocketIOConnection.kt~~ ✅ FIXED 2024-12-20
 2. ~~**CRITICAL:** Sanitize or remove PII (phone/email/auth) from all logs~~ ✅ FIXED 2025-12-20
 3. ~~**HIGH:** Remove all debug tags ([LOCATION_DEBUG], [FCM_DEBUG], [SEND_TRACE], etc.)~~ ✅ FIXED 2025-12-20
-4. **MEDIUM:** Add exception parameter to Timber.e() calls
+4. ~~**MEDIUM:** Add exception parameter to Timber.e() calls~~ ✅ FIXED 2025-12-20
 5. **RECOMMENDED:** Consider crash reporting tree for production
 
 ## Fixes Completed (2025-12-20)

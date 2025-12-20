@@ -65,7 +65,7 @@ fun NotificationProviderScreen(
                 ) {
                     Icon(
                         Icons.Default.Info,
-                        contentDescription = null,
+                        contentDescription = "Information",
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(top = 2.dp)
                     )
@@ -138,7 +138,7 @@ fun NotificationProviderScreen(
                     ) {
                         Icon(
                             Icons.Default.Warning,
-                            contentDescription = null,
+                            contentDescription = "Warning",
                             tint = MaterialTheme.colorScheme.error
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -175,7 +175,12 @@ fun NotificationProviderScreen(
                                         uiState.fcmTokenState is FcmTokenState.Loading -> Icons.Default.Sync
                                         else -> Icons.Default.CloudOff
                                     },
-                                    contentDescription = null,
+                                    contentDescription = when {
+                                        uiState.fcmTokenState is FcmTokenState.Registered -> "FCM registered"
+                                        uiState.fcmTokenState is FcmTokenState.Error -> "FCM error"
+                                        uiState.fcmTokenState is FcmTokenState.Loading -> "FCM loading"
+                                        else -> "FCM offline"
+                                    },
                                     tint = when {
                                         uiState.fcmTokenState is FcmTokenState.Registered -> MaterialTheme.colorScheme.primary
                                         uiState.fcmTokenState is FcmTokenState.Error -> MaterialTheme.colorScheme.error
@@ -192,7 +197,7 @@ fun NotificationProviderScreen(
                             headlineContent = { Text("Re-register") },
                             supportingContent = { Text("Re-fetch Firebase config and register device") },
                             leadingContent = {
-                                Icon(Icons.Default.Refresh, contentDescription = null)
+                                Icon(Icons.Default.Refresh, contentDescription = "Re-register")
                             },
                             trailingContent = {
                                 if (uiState.isReRegistering) {
@@ -230,7 +235,7 @@ fun NotificationProviderScreen(
                     ) {
                         Icon(
                             Icons.Default.BatteryAlert,
-                            contentDescription = null,
+                            contentDescription = "Battery usage",
                             tint = MaterialTheme.colorScheme.tertiary
                         )
                         Spacer(modifier = Modifier.width(12.dp))

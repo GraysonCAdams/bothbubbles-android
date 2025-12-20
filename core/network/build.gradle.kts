@@ -59,5 +59,5 @@ dependencies {
     ksp(libs.hilt.compiler)
 
     // Logging
-    implementation("com.jakewharton.timber:timber:5.0.1")
+    implementation(libs.timber)
 }

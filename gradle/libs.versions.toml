@@ -83,6 +83,9 @@ libphonenumber = "8.13.50"
 # LeakCanary
 leakcanary = "2.12"
 
+# Logging
+timber = "5.0.1"
+
 # OSMDroid (OpenStreetMap)
 osmdroid = "6.1.18"
 
@@ -211,6 +214,9 @@ car-app-projected = { group = "androidx.car.app", name = "app-projected", versio
 
 # Phone Number
 libphonenumber = { group = "io.michaelrocks", name = "libphonenumber-android", version.ref = "libphonenumber" }
+
+# Logging
+timber = { group = "com.jakewharton.timber", name = "timber", version.ref = "timber" }
 
 # LeakCanary
 leakcanary = { group = "com.squareup.leakcanary", name = "leakcanary-android", version.ref = "leakcanary" }

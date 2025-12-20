@@ -50,3 +50,23 @@
 # YouTube Player library
 -keep class com.pierfrancescosoffritti.androidyoutubeplayer.** { *; }
 -keep class com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.** { *; }
+
+# Hilt DI
+-keep class com.bothbubbles.di.** { *; }
+-keep @dagger.hilt.android.HiltAndroidApp class *
+-keep @javax.inject.* class * { *; }
+
+# Firebase Messaging
+-keep class com.google.firebase.messaging.FirebaseMessagingService { *; }
+
+# CameraX
+-keep class androidx.camera.** { *; }
+
+# ML Kit
+-keep class com.google.mlkit.** { *; }
+
+# AndroidX Lifecycle
+-keep class androidx.lifecycle.** { *; }
+
+# ACRA
+-keep class org.acra.** { *; }

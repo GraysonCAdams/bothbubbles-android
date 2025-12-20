@@ -464,7 +464,7 @@ internal fun SimpleBubbleContent(
                                 if (isCurrentSearchMatch) {
                                     Modifier.border(
                                         width = 2.dp,
-                                        color = Color(0xFFFF9800),
+                                        color = MaterialTheme.colorScheme.tertiary,
                                         shape = bubbleShape
                                     )
                                 } else {

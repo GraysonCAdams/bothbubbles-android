@@ -46,6 +46,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -79,7 +81,8 @@ internal fun ServerConnectionPage(
             text = "BlueBubbles Server",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.semantics { heading() }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -105,7 +108,7 @@ internal fun ServerConnectionPage(
             ) {
                 Icon(
                     Icons.Default.Info,
-                    contentDescription = null,
+                    contentDescription = "Information",
                     tint = MaterialTheme.colorScheme.onSecondaryContainer
                 )
                 Spacer(modifier = Modifier.width(12.dp))
@@ -124,7 +127,7 @@ internal fun ServerConnectionPage(
             onClick = onShowQrScanner,
             modifier = Modifier.fillMaxWidth()
         ) {
-            Icon(Icons.Default.QrCodeScanner, contentDescription = null)
+            Icon(Icons.Default.QrCodeScanner, contentDescription = "Scan QR code")
             Spacer(modifier = Modifier.width(8.dp))
             Text("Scan QR Code")
         }
@@ -157,7 +160,7 @@ internal fun ServerConnectionPage(
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
             leadingIcon = {
-                Icon(Icons.Default.Link, contentDescription = null)
+                Icon(Icons.Default.Link, contentDescription = "Server URL")
             }
         )
 
@@ -177,7 +180,7 @@ internal fun ServerConnectionPage(
             },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
             leadingIcon = {
-                Icon(Icons.Default.Lock, contentDescription = null)
+                Icon(Icons.Default.Lock, contentDescription = "Password")
             },
             trailingIcon = {
                 IconButton(onClick = { showPassword = !showPassword }) {
@@ -232,7 +235,7 @@ internal fun ServerConnectionPage(
                 ) {
                     Icon(
                         if (uiState.isConnectionSuccessful) Icons.Default.CheckCircle else Icons.Default.Error,
-                        contentDescription = null,
+                        contentDescription = if (uiState.isConnectionSuccessful) "Connection successful" else "Connection error",
                         tint = if (uiState.isConnectionSuccessful) {
                             MaterialTheme.colorScheme.primary
                         } else {
@@ -276,7 +279,7 @@ internal fun ServerConnectionPage(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             TextButton(onClick = onBack) {
-                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Go back")
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Back")
             }
@@ -287,7 +290,7 @@ internal fun ServerConnectionPage(
             ) {
                 Text("Continue")
                 Spacer(modifier = Modifier.width(8.dp))
-                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = null)
+                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "Continue")
             }
         }
     }
