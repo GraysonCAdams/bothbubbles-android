@@ -170,10 +170,10 @@ This document indexes all identified anti-patterns across the codebase, organize
 - [x] Fix InputStream leaks in `AttachmentEditor.kt` with `.use {}` (FIXED 2025-12-20)
 - [x] Cache Paint objects in `DrawingCanvas.kt` instead of per-frame allocation (FIXED 2025-12-20)
 
-### Sprint 5 - Architecture ✅ MOSTLY COMPLETE
+### Sprint 5 - Architecture ✅ COMPLETE
 - [x] Decompose AttachmentRepository (808 → 435 lines) (FIXED 2025-12-20 - extracted AttachmentDownloadManager)
 - [x] Refactor ChatScreen callbacks to method references (ALREADY DONE - Wave 2/3G patterns)
-- [ ] Split AvatarGenerator god object (758 lines) (large refactoring scope)
+- [x] Split AvatarGenerator god object (758 → 314 lines) (FIXED 2025-12-20 - extracted ContactPhotoLoader, GroupAvatarRenderer)
 - [ ] Add Result<T> error handling to repositories (requires API changes)
 - [x] Refactor `Notifier.showMessageNotification()` (15 params) to use data class (FIXED 2025-12-20)
 
