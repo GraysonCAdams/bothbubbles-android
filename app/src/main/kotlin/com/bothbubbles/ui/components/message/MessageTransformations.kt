@@ -83,7 +83,8 @@ fun MessageEntity.toUiModel(
                 isOutgoing = attachment.isOutgoing,
                 errorType = attachment.errorType,
                 errorMessage = attachment.errorMessage,
-                retryCount = attachment.retryCount
+                retryCount = attachment.retryCount,
+                uti = attachment.uti
             )
         }
 

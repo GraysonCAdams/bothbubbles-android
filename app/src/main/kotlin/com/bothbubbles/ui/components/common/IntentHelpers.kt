@@ -70,6 +70,50 @@ fun openAddContactIntent(context: Context, phoneNumber: String) {
 }
 
 /**
+ * Opens a vCard file to add the contact to the device's contacts.
+ * Uses ACTION_VIEW with text/vcard MIME type to let the contacts app handle importing.
+ *
+ * @param context The context to start the activity
+ * @param vCardUri The content URI of the vCard file (from FileProvider)
+ */
+fun openVCardContactIntent(context: Context, vCardUri: Uri) {
+    val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(vCardUri, "text/vcard")
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    try {
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        Toast.makeText(context, "No contacts app found", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
+ * Opens a vCard file from a local file path.
+ * Creates a content URI via FileProvider and opens the contacts import screen.
+ *
+ * @param context The context to start the activity
+ * @param filePath The local file path to the vCard file
+ */
+fun openVCardContactFromPath(context: Context, filePath: String) {
+    try {
+        val file = java.io.File(filePath)
+        if (!file.exists()) {
+            Toast.makeText(context, "Contact file not found", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+        openVCardContactIntent(context, uri)
+    } catch (e: Exception) {
+        Toast.makeText(context, "Could not open contact", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/**
  * Opens the calendar app to add a new event.
  */
 fun openCalendarIntent(

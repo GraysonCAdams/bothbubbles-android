@@ -4,6 +4,7 @@ import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,7 +13,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,6 +39,7 @@ import coil.request.ImageRequest
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import timber.log.Timber
 import java.io.File
 import java.net.URLEncoder
 
@@ -50,13 +55,19 @@ import java.net.URLEncoder
  * - Coordinates subtitle
  *
  * Tapping opens the location in the device's default maps app.
+ *
+ * For inbound locations that haven't been downloaded yet, shows a placeholder
+ * with download button or progress indicator.
  */
 @Composable
 fun LocationAttachment(
     attachment: AttachmentUiModel,
     interactions: AttachmentInteractions,
     isFromMe: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onDownloadClick: (() -> Unit)? = null,
+    isDownloading: Boolean = false,
+    downloadProgress: Float = 0f
 ) {
     val context = LocalContext.current
 
@@ -64,17 +75,26 @@ fun LocationAttachment(
     var coordinates by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var parseError by remember { mutableStateOf(false) }
 
+    // Track whether we need to download
+    val needsDownload = attachment.localPath == null && !isFromMe
+
     LaunchedEffect(attachment.localPath) {
+        Timber.d("[LOCATION_DEBUG] LocationAttachment: localPath=${attachment.localPath}, needsDownload=$needsDownload, isDownloading=$isDownloading")
         attachment.localPath?.let { path ->
             withContext(Dispatchers.IO) {
                 try {
                     val file = File(path)
                     if (file.exists()) {
                         val content = file.readText()
+                        Timber.d("[LOCATION_DEBUG] VCF content: $content")
                         coordinates = parseVLocationCoordinates(content)
                         parseError = coordinates == null
+                        Timber.d("[LOCATION_DEBUG] Parsed coordinates: $coordinates, parseError=$parseError")
+                    } else {
+                        Timber.w("[LOCATION_DEBUG] File does not exist: $path")
                     }
                 } catch (e: Exception) {
+                    Timber.e(e, "[LOCATION_DEBUG] Error parsing vLocation")
                     parseError = true
                 }
             }
@@ -82,17 +102,31 @@ fun LocationAttachment(
     }
 
     val coords = coordinates
-    val surfaceColor = if (isFromMe) {
-        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+
+    // Material3 theming - use proper container colors that work in both light and dark mode
+    val containerColor = if (isFromMe) {
+        MaterialTheme.colorScheme.primaryContainer
     } else {
         MaterialTheme.colorScheme.surfaceContainerHigh
+    }
+
+    val contentColor = if (isFromMe) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    val secondaryContentColor = if (isFromMe) {
+        MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
     }
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable {
+            .clickable(enabled = coords != null) {
                 // Open in maps app
                 coords?.let { (lat, lng) ->
                     val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng")
@@ -106,103 +140,165 @@ fun LocationAttachment(
                     }
                 }
             },
-        color = surfaceColor,
+        color = containerColor,
         shape = RoundedCornerShape(12.dp)
     ) {
         Column {
-            if (coords != null) {
-                // Static map preview from OpenStreetMap
-                val (lat, lng) = coords
-                val mapUrl = buildStaticMapUrl(lat, lng)
+            when {
+                // Case 1: We have coordinates - show the map
+                coords != null -> {
+                    val (lat, lng) = coords
+                    val mapUrl = buildStaticMapUrl(lat, lng)
 
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(140.dp)
-                        .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                ) {
-                    AsyncImage(
-                        model = ImageRequest.Builder(context)
-                            .data(mapUrl)
-                            .crossfade(true)
-                            .build(),
-                        contentDescription = "Location map",
-                        contentScale = ContentScale.Crop,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(140.dp)
-                    )
+                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                    ) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(mapUrl)
+                                .crossfade(true)
+                                .build(),
+                            contentDescription = "Location map",
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(140.dp)
+                        )
 
-                    // Location pin overlay
-                    Icon(
-                        imageVector = Icons.Filled.LocationOn,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.error,
+                        // Location pin overlay
+                        Icon(
+                            imageVector = Icons.Filled.LocationOn,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.error,
+                            modifier = Modifier
+                                .align(Alignment.Center)
+                                .size(32.dp)
+                        )
+                    }
+
+                    // Location info
+                    Column(
+                        modifier = Modifier.padding(12.dp)
+                    ) {
+                        Text(
+                            text = "Shared Location",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = contentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = formatCoordinates(lat, lng),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = secondaryContentColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Case 2: Needs download - show download state
+                needsDownload -> {
+                    Box(
                         modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(32.dp)
-                    )
+                            .fillMaxWidth()
+                            .height(140.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.LocationOn,
+                                contentDescription = null,
+                                tint = contentColor.copy(alpha = 0.7f),
+                                modifier = Modifier.size(48.dp)
+                            )
+
+                            if (isDownloading) {
+                                // Show download progress
+                                CircularProgressIndicator(
+                                    progress = { downloadProgress.coerceIn(0f, 1f) },
+                                    modifier = Modifier.size(24.dp),
+                                    strokeWidth = 2.dp,
+                                    color = contentColor
+                                )
+                                Text(
+                                    text = "Loading location...",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = secondaryContentColor
+                                )
+                            } else {
+                                // Show download button
+                                FilledTonalButton(
+                                    onClick = { onDownloadClick?.invoke() }
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Download,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Load Location",
+                                        modifier = Modifier.padding(start = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
 
-                // Location info
-                Column(
-                    modifier = Modifier.padding(12.dp)
-                ) {
-                    Text(
-                        text = "Shared Location",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = if (isFromMe) {
-                            MaterialTheme.colorScheme.onPrimaryContainer
-                        } else {
-                            MaterialTheme.colorScheme.onSurface
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Text(
-                        text = formatCoordinates(lat, lng),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (isFromMe) {
-                            MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f)
-                        } else {
-                            MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                // Case 3: Parse error
+                parseError -> {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.LocationOn,
+                            contentDescription = null,
+                            tint = secondaryContentColor,
+                            modifier = Modifier.size(48.dp)
+                        )
+                        Text(
+                            text = "Unable to load location",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = secondaryContentColor
+                        )
+                    }
                 }
-            } else if (parseError) {
-                // Show error state
-                Column(
-                    modifier = Modifier.padding(16.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.LocationOn,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(48.dp)
-                    )
-                    Text(
-                        text = "Unable to load location",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-            } else {
-                // Loading state
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(100.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.LocationOn,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.size(48.dp)
-                    )
+
+                // Case 4: Loading (parsing file)
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(100.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.LocationOn,
+                                contentDescription = null,
+                                tint = contentColor.copy(alpha = 0.5f),
+                                modifier = Modifier.size(48.dp)
+                            )
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp,
+                                color = contentColor
+                            )
+                        }
+                    }
                 }
             }
         }

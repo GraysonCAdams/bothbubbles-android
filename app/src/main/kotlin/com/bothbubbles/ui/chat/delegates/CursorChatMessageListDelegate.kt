@@ -767,7 +767,8 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 transferState = TransferState.PENDING.name,
                 transferProgress = 0f,
                 // Use message.isFromMe for UI purposes - if I sent this message, treat attachment as "mine"
-                isOutgoing = message.isFromMe
+                isOutgoing = message.isFromMe,
+                uti = attachmentDto.uti
             )
         }?.toStable() ?: emptyList<AttachmentUiModel>().toStable()
 

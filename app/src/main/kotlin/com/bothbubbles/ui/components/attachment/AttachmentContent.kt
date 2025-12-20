@@ -56,7 +56,8 @@ fun AttachmentContent(
     // Show placeholder for inbound attachments that need download
     // This provides blurhash preview while downloading, regardless of auto/manual mode
     // For stickers, ALWAYS show placeholder when not downloaded (they need HEIC→PNG conversion)
-    val showPlaceholder = !showError && (attachment.needsDownload || attachment.isDownloading ||
+    // Exception: vLocation attachments handle their own download state internally
+    val showPlaceholder = !showError && !attachment.isVLocation && (attachment.needsDownload || attachment.isDownloading ||
         (attachment.isSticker && attachment.localPath == null))
 
     // Determine effective downloading state
@@ -155,7 +156,10 @@ fun AttachmentContent(
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) }
                 ),
-                isFromMe = isFromMe
+                isFromMe = isFromMe,
+                onDownloadClick = { onDownloadClick?.invoke(attachment.guid) },
+                isDownloading = effectiveIsDownloading,
+                downloadProgress = downloadProgress
             )
             else -> FileAttachment(
                 attachment = attachment,

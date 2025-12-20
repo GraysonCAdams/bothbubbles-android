@@ -1,32 +1,47 @@
 package com.bothbubbles.ui.components.conversation
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxState
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
+import com.bothbubbles.util.HapticUtils
 
 /**
- * A generic swipe wrapper that adds configurable swipe actions to any content.
- * Use this to wrap conversation tiles or other list items with swipe gestures.
+ * A swipe wrapper using Material 3's SwipeToDismissBox for list items.
+ * Provides configurable swipe actions that snap back after triggering.
+ *
+ * This uses the standard MD3 pattern for swipe gestures which ensures:
+ * - Proper gesture detection that distinguishes from vertical scrolling
+ * - Correct layout alignment between background and content
+ * - Smooth animations with spring physics
  *
  * @param isPinned Current pin state for contextual action
  * @param isMuted Current mute state for contextual action
@@ -34,9 +49,10 @@ import kotlin.math.roundToInt
  * @param isSnoozed Current snooze state for contextual action
  * @param onSwipeAction Callback when swipe action is triggered
  * @param swipeConfig Configuration for swipe behavior and actions
+ * @param gesturesEnabled Whether swipe gestures are enabled
  * @param content The content to wrap, receives hasRoundedCorners flag
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SwipeableConversationTile(
     isPinned: Boolean = false,
@@ -50,8 +66,6 @@ fun SwipeableConversationTile(
     content: @Composable (hasRoundedCorners: Boolean) -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
-    val density = LocalDensity.current
-    val coroutineScope = rememberCoroutineScope()
 
     // Get contextual actions based on current state
     val leftAction = SwipeActionType.getContextualAction(
@@ -83,100 +97,75 @@ fun SwipeableConversationTile(
         return
     }
 
-    // Swipe offset animation
-    val swipeOffset = remember { Animatable(0f) }
-
-    // Direction detection thresholds
-    val detectionDistancePx = with(density) { 15.dp.toPx() }
-    val directionRatio = 1.5f // Horizontal must be 1.5x greater than vertical
-
-    // Calculate swipe threshold (how far to swipe to trigger action)
-    var containerWidthPx by remember { mutableFloatStateOf(0f) }
-    val swipeThresholdPx by remember(containerWidthPx, swipeConfig.sensitivity) {
-        derivedStateOf { containerWidthPx * swipeConfig.sensitivity }
-    }
-
-    // Create gesture state
-    val gestureState = remember(swipeThresholdPx, detectionDistancePx, directionRatio) {
-        SwipeGestureState(swipeOffset, swipeThresholdPx, detectionDistancePx, directionRatio)
-    }
-
-    // Determine swipe direction for background display
-    val currentDirection by remember {
-        derivedStateOf {
-            when {
-                swipeOffset.value > 20 -> SwipeToDismissBoxValue.StartToEnd
-                swipeOffset.value < -20 -> SwipeToDismissBoxValue.EndToStart
-                else -> SwipeToDismissBoxValue.Settled
+    // MD3 SwipeToDismissBox state with confirmValueChange callback
+    val swipeState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { dismissValue ->
+            when (dismissValue) {
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    if (rightAction != SwipeActionType.NONE) {
+                        HapticUtils.onConfirm(haptic)
+                        onSwipeAction(rightAction)
+                    }
+                }
+                SwipeToDismissBoxValue.EndToStart -> {
+                    if (leftAction != SwipeActionType.NONE) {
+                        HapticUtils.onConfirm(haptic)
+                        onSwipeAction(leftAction)
+                    }
+                }
+                SwipeToDismissBoxValue.Settled -> { /* No action */ }
             }
+            // Return false to snap back after action (don't dismiss)
+            false
         }
-    }
+    )
 
-    // Determine if past threshold
-    val targetValue by remember {
-        derivedStateOf {
-            when {
-                swipeOffset.value > swipeThresholdPx -> SwipeToDismissBoxValue.StartToEnd
-                swipeOffset.value < -swipeThresholdPx -> SwipeToDismissBoxValue.EndToStart
-                else -> SwipeToDismissBoxValue.Settled
-            }
-        }
-    }
-
-    Box(
-        modifier = modifier
-            .fillMaxWidth()
-            .onSizeChanged { size -> containerWidthPx = size.width.toFloat() }
-            .pointerInput(swipeConfig.enabled, leftAction, rightAction) {
-                handleSwipeGesture(
-                    state = gestureState,
-                    leftAction = leftAction,
-                    rightAction = rightAction,
-                    haptic = haptic,
-                    coroutineScope = coroutineScope,
-                    onSwipeAction = onSwipeAction
-                )
-            }
-    ) {
-        // Background with swipe action icons
-        SwipeBackground(
-            dismissDirection = currentDirection,
-            targetValue = targetValue,
-            leftAction = leftAction,
-            rightAction = rightAction
-        )
-
-        // Foreground content with offset
-        Box(
-            modifier = Modifier.offset { IntOffset(swipeOffset.value.roundToInt(), 0) }
-        ) {
+    SwipeToDismissBox(
+        state = swipeState,
+        modifier = modifier.fillMaxWidth(),
+        enableDismissFromStartToEnd = rightAction != SwipeActionType.NONE,
+        enableDismissFromEndToStart = leftAction != SwipeActionType.NONE,
+        backgroundContent = {
+            SwipeBackground(
+                state = swipeState,
+                leftAction = leftAction,
+                rightAction = rightAction
+            )
+        },
+        content = {
             content(true)
         }
-    }
+    )
 }
 
 /**
- * Background layer that shows swipe action icons and labels
+ * Background layer that shows swipe action icons and labels.
+ * Uses MD3 design tokens for consistent styling.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-internal fun SwipeBackground(
-    dismissDirection: SwipeToDismissBoxValue,
-    targetValue: SwipeToDismissBoxValue,
+internal fun RowScope.SwipeBackground(
+    state: SwipeToDismissBoxState,
     leftAction: SwipeActionType,
     rightAction: SwipeActionType
 ) {
-    val action = when (targetValue) {
+    val dismissDirection = state.dismissDirection
+
+    // Determine which action to show based on current swipe direction
+    val action = when (dismissDirection) {
         SwipeToDismissBoxValue.StartToEnd -> rightAction
         SwipeToDismissBoxValue.EndToStart -> leftAction
-        else -> SwipeActionType.NONE
+        SwipeToDismissBoxValue.Settled -> SwipeActionType.NONE
     }
 
-    // Use a single desaturated color for all swipe actions (MD3 style)
+    // Calculate if past the commit threshold based on progress
+    val isPastThreshold = state.progress > 0.4f
+
+    // Use MD3 surface container for subtle background
     val swipeBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
 
     val color by animateColorAsState(
-        targetValue = if (targetValue != SwipeToDismissBoxValue.Settled) {
+        targetValue = if (dismissDirection != SwipeToDismissBoxValue.Settled) {
             swipeBackgroundColor
         } else {
             Color.Transparent
@@ -186,7 +175,7 @@ internal fun SwipeBackground(
     )
 
     val scale by animateFloatAsState(
-        targetValue = if (targetValue != SwipeToDismissBoxValue.Settled) 1f else 0.8f,
+        targetValue = if (isPastThreshold) 1f else 0.8f,
         animationSpec = tween(200),
         label = "iconScale"
     )
@@ -195,17 +184,16 @@ internal fun SwipeBackground(
         modifier = Modifier
             .fillMaxSize()
             .padding(vertical = 4.dp)
-            // MD3: use 12.dp ("Large" shape token) for list items
             .clip(RoundedCornerShape(12.dp))
             .background(color)
             .padding(horizontal = 24.dp),
         contentAlignment = when (dismissDirection) {
             SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
             SwipeToDismissBoxValue.EndToStart -> Alignment.CenterEnd
-            else -> Alignment.CenterStart
+            SwipeToDismissBoxValue.Settled -> Alignment.CenterStart
         }
     ) {
-        if (action != SwipeActionType.NONE) {
+        if (action != SwipeActionType.NONE && dismissDirection != SwipeToDismissBoxValue.Settled) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center

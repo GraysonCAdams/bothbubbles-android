@@ -85,7 +85,8 @@ object MessageTransformationUtils {
                     transferProgress = attachment.transferProgress,
                     // Use message.isFromMe for UI purposes - if I sent this message, treat attachment as "mine"
                     // This handles Mac-to-self messages where server reports isOutgoing=false for both copies
-                    isOutgoing = isFromMe
+                    isOutgoing = isFromMe,
+                    uti = attachment.uti
                 )
             }
 

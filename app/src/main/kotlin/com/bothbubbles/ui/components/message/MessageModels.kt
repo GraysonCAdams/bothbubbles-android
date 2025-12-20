@@ -247,7 +247,9 @@ data class AttachmentUiModel(
     val errorMessage: String? = null,
     val retryCount: Int = 0,
     // Caption text displayed below the attachment
-    val caption: String? = null
+    val caption: String? = null,
+    // UTI (Uniform Type Identifier) from server - used for type detection
+    val uti: String? = null
 ) {
     /**
      * True if the attachment needs to be downloaded (inbound, no local file available).
@@ -322,10 +324,11 @@ data class AttachmentUiModel(
 
     /**
      * True if this is an Apple vLocation attachment (native iMessage location format).
-     * Identified by MIME type text/x-vlocation or .loc.vcf extension.
+     * Identified by UTI public.vlocation, MIME type text/x-vlocation, or .loc.vcf extension.
      */
     val isVLocation: Boolean
-        get() = mimeType == "text/x-vlocation" ||
+        get() = uti == "public.vlocation" ||
+                mimeType == "text/x-vlocation" ||
                 transferName?.lowercase()?.endsWith(".loc.vcf") == true
 
     val friendlySize: String

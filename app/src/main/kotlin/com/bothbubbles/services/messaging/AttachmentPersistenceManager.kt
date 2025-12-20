@@ -61,13 +61,21 @@ class AttachmentPersistenceManager @Inject constructor(
             val mimeType = contentResolver.getType(uri) ?: guessMimeTypeFromName(fileName)
 
             // Determine extension for persisted file
-            val extension = MimeTypeMap.getSingleton()
-                .getExtensionFromMimeType(mimeType)
-                ?: getExtensionFromFileName(fileName)
-                ?: "bin"
+            // Special handling for vLocation files - preserve the .loc.vcf extension
+            val fileNameLower = fileName.lowercase()
+            val isVLocation = fileNameLower.endsWith(".loc.vcf") || fileNameLower.contains("-cl.loc")
+            val extension = if (isVLocation) {
+                "loc.vcf"
+            } else {
+                MimeTypeMap.getSingleton()
+                    .getExtensionFromMimeType(mimeType)
+                    ?: getExtensionFromFileName(fileName)
+                    ?: "bin"
+            }
 
             // Create destination file with unique name
             val destFileName = "${localId}.$extension"
+            Timber.d("[LOCATION_DEBUG] persistAttachment: original=$fileName, isVLocation=$isVLocation, destFileName=$destFileName")
             val destFile = File(pendingDir, destFileName)
 
             // Copy file content

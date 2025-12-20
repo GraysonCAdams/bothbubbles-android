@@ -166,8 +166,8 @@ fun AttachmentPreview(
                         onClick = onEdit,
                         modifier = Modifier
                             .align(Alignment.TopStart)
-                            .padding(4.dp)
-                            .size(28.dp),
+                            .padding(8.dp)
+                            .size(17.dp),
                         colors = IconButtonDefaults.filledTonalIconButtonColors(
                             containerColor = Color.Black.copy(alpha = 0.6f),
                             contentColor = Color.White
@@ -176,7 +176,7 @@ fun AttachmentPreview(
                         Icon(
                             Icons.Default.Edit,
                             contentDescription = "Edit attachment",
-                            modifier = Modifier.size(16.dp)
+                            modifier = Modifier.size(10.dp)
                         )
                     }
                 }
@@ -188,8 +188,8 @@ fun AttachmentPreview(
                 onClick = onRemove,
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(4.dp)
-                    .size(28.dp),
+                    .padding(8.dp)
+                    .size(17.dp),
                 colors = IconButtonDefaults.filledTonalIconButtonColors(
                     containerColor = Color.Black.copy(alpha = 0.6f),
                     contentColor = Color.White
@@ -198,7 +198,7 @@ fun AttachmentPreview(
                 Icon(
                     Icons.Default.Close,
                     contentDescription = "Remove attachment",
-                    modifier = Modifier.size(18.dp)
+                    modifier = Modifier.size(11.dp)
                 )
             }
         }
