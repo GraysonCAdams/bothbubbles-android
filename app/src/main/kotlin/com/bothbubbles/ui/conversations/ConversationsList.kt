@@ -22,7 +22,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
-import com.bothbubbles.ui.components.common.staggeredEntrance
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 import com.bothbubbles.ui.components.conversation.SwipeableConversationTile
@@ -167,9 +166,7 @@ internal fun ConversationsList(
                     onSwipeAction(conversation.guid, action)
                 },
                 swipeConfig = conversationSwipeConfig,
-                modifier = Modifier
-                    .staggeredEntrance(index)
-                    .animateItem()
+                modifier = Modifier.animateItem()
             ) { hasRoundedCorners ->
                 GoogleStyleConversationTile(
                     conversation = conversation,

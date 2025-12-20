@@ -126,6 +126,7 @@ class NotificationBuilder @Inject constructor(
     /**
      * Build a notification for a new message.
      *
+     * @param channelId The notification channel ID (per-conversation channel)
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
@@ -134,6 +135,7 @@ class NotificationBuilder @Inject constructor(
      * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
     fun buildMessageNotification(
+        channelId: String,
         chatGuid: String,
         chatTitle: String,
         messageText: String,
@@ -337,7 +339,7 @@ class NotificationBuilder @Inject constructor(
             .setShowsUserInterface(false)
             .build()
 
-        val notificationBuilder = NotificationCompat.Builder(context, NotificationChannelManager.CHANNEL_MESSAGES)
+        val notificationBuilder = NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setNumber(totalUnreadCount)
             .setContentTitle(chatTitle)

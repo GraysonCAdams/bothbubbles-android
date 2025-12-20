@@ -149,9 +149,12 @@ fun MessageListItem(
         groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
         else -> 2.dp
     }
-    // Extra padding between messages from different senders in group chats
-    // This visually groups messages by sender for easier reading
-    val senderChangePadding = if (showSenderName) 10.dp else 0.dp
+    // Extra padding between consecutive inbound messages from different senders in group chats.
+    // Only adds padding when the previous message was also inbound (from someone else),
+    // not when transitioning from an outbound message to inbound.
+    val previousMessage = messages.getOrNull(index + 1)
+    val isPreviousInbound = previousMessage != null && !previousMessage.isFromMe
+    val senderChangePadding = if (showSenderName && isPreviousInbound) 10.dp else 0.dp
     // The bubble components now use layout modifier to expand bounds by 20dp for reactions,
     // so we no longer need extra padding here for reaction overflow.
     val topPadding = basePadding + senderChangePadding
@@ -255,11 +258,17 @@ fun MessageListItem(
         }
 
         if (showSenderName) {
+            // When message has reactions, the bubble adds 17dp of top space via layout modifier
+            // to make room for reaction chips. Use offset to move the sender name down into that
+            // space so it stays visually close to the bubble content.
+            val reactionOffset = if (message.reactions.isNotEmpty()) 17.dp else 0.dp
             Text(
                 text = message.senderName!!,
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(start = 52.dp, bottom = 2.dp)
+                modifier = Modifier
+                    .padding(start = 52.dp, bottom = 2.dp)
+                    .offset(y = reactionOffset)
             )
         }
 

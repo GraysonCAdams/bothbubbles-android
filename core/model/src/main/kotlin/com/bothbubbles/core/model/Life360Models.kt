@@ -19,7 +19,7 @@ data class Life360Member(
     val isCharging: Boolean?,
     val lastUpdated: Long,
     val noLocationReason: NoLocationReason?,
-    val mappedHandleId: Long?
+    val linkedAddress: String?          // Address of linked contact (phone number or email)
 )
 
 /**
@@ -93,5 +93,5 @@ fun Life360MemberEntity.toDomain(): Life360Member = Life360Member(
             null
         }
     },
-    mappedHandleId = mappedHandleId
+    linkedAddress = linkedAddress
 )

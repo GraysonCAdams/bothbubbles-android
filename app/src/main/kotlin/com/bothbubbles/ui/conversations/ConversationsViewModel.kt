@@ -606,6 +606,35 @@ class ConversationsViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Load all remaining conversations when a filter is active.
+     * Filters work on client-side data, so we need all conversations loaded
+     * to show all matching items (e.g., all unread, not just unread in first page).
+     */
+    fun loadAllRemainingConversations() {
+        viewModelScope.launch {
+            val typingChats = observerDelegate.typingChats.value
+            val result = loadingDelegate.loadAllRemainingPages(_uiState.value.conversations, typingChats)
+            when (result) {
+                is ConversationLoadingDelegate.LoadResult.Success -> {
+                    _uiState.update {
+                        it.copy(
+                            conversations = result.conversations.toStable(),
+                            canLoadMore = false, // All loaded
+                            currentPage = result.currentPage
+                        )
+                    }
+                }
+                is ConversationLoadingDelegate.LoadResult.Error -> {
+                    // Error already set by delegate
+                }
+                ConversationLoadingDelegate.LoadResult.AlreadyLoading -> {
+                    // Already loading
+                }
+            }
+        }
+    }
+
     private fun observeConnectionBannerState() {
         viewModelScope.launch {
             combine(

@@ -418,6 +418,8 @@ class ChatComposerDelegate @AssistedInject constructor(
             is ComposerEvent.TextChanged -> {
                 // Timber.tag("PerfTrace").d("TextChanged event received, text length=${event.text.length}")
                 _draftText.value = event.text
+                handleTypingIndicator(event.text)
+                persistDraft(event.text)
             }
             is ComposerEvent.TextFieldFocusChanged -> {
                 _isTextFieldFocused.value = event.isFocused

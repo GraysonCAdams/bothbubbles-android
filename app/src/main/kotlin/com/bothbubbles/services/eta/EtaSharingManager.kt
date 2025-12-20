@@ -8,7 +8,9 @@ import com.bothbubbles.data.repository.AutoShareContactRepository
 import com.bothbubbles.data.repository.PendingMessageSource
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -32,6 +34,8 @@ class EtaSharingManager @Inject constructor(
     private val autoShareContactRepository: AutoShareContactRepository
 ) {
     companion object {
+        private const val TAG = "EtaSharingManager"
+
         // Thresholds
         const val ARRIVING_SOON_THRESHOLD = 2   // Send "arriving soon" at 2 min (terminal message)
 
@@ -42,6 +46,10 @@ class EtaSharingManager @Inject constructor(
 
         // Terminal state protection
         const val TERMINAL_STATE_COOLDOWN_MS = 30 * 60 * 1000L  // 30 min before allowing new session
+
+        // Destination fetch timing
+        const val DESTINATION_FETCH_TIMEOUT_MS = 2_000L  // 2 seconds to scrape destination
+        const val DESTINATION_FETCH_ABANDON_MS = 10_000L  // 10 seconds before abandoning if user doesn't return
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -71,6 +79,14 @@ class EtaSharingManager @Inject constructor(
     // Destination tracking (from AccessibilityService)
     private val _detectedDestination = MutableStateFlow<ParsedDestinationData?>(null)
     val detectedDestination: StateFlow<ParsedDestinationData?> = _detectedDestination.asStateFlow()
+
+    // Destination fetch state machine (for accessibility-based scraping flow)
+    private val _destinationFetchState = MutableStateFlow<DestinationFetchState>(DestinationFetchState.Idle)
+    val destinationFetchState: StateFlow<DestinationFetchState> = _destinationFetchState.asStateFlow()
+
+    // Timeout job for destination fetch
+    private var destinationFetchTimeoutJob: Job? = null
+    private var destinationFetchAbandonJob: Job? = null
 
     /**
      * Start sharing ETA with a recipient
@@ -321,6 +337,9 @@ class EtaSharingManager @Inject constructor(
             _state.value = _state.value.copy(currentEta = updatedEta)
             Timber.d("Merged destination into ETA data: ${destination.destination}")
         }
+
+        // Check if this completes an ongoing destination fetch
+        checkDestinationFetchCompletion(destination)
     }
 
     /**
@@ -330,6 +349,194 @@ class EtaSharingManager @Inject constructor(
         // Prefer accessibility-detected destination (more reliable)
         return _detectedDestination.value?.destination
             ?: _state.value.currentEta?.destination
+    }
+
+    // ===== Destination Fetch Flow (Accessibility-Based Scraping) =====
+
+    /**
+     * Request destination fetch by opening the navigation app.
+     * Called when user taps "Share ETA" with accessibility mode enabled.
+     *
+     * @param chatGuid The chat to share ETA with
+     * @param displayName Display name of the recipient
+     * @param isActivelyDriving Whether the user is currently driving (from DrivingStateTracker)
+     * @return The NavigationApp to open, or null if navigation is not active
+     */
+    fun requestDestinationFetch(
+        chatGuid: String,
+        displayName: String,
+        isActivelyDriving: Boolean
+    ): NavigationApp? {
+        val currentEta = _state.value.currentEta ?: return null
+        val navApp = currentEta.navigationApp
+
+        // Check if we already have a destination - skip the fetch flow
+        if (getCurrentDestination() != null) {
+            Timber.d("$TAG: Already have destination, skipping fetch flow")
+            startSharing(chatGuid, displayName, currentEta)
+            return null
+        }
+
+        Timber.d("$TAG: Starting destination fetch for $displayName via ${navApp.name}")
+
+        // Cancel any existing fetch
+        cancelDestinationFetchJobs()
+
+        // Update state to fetching
+        _destinationFetchState.value = DestinationFetchState.FetchingDestination(
+            chatGuid = chatGuid,
+            displayName = displayName,
+            navigationApp = navApp
+        )
+
+        // Start abandon timeout (10 seconds - if user doesn't return, cancel the flow)
+        destinationFetchAbandonJob = scope.launch {
+            delay(DESTINATION_FETCH_ABANDON_MS)
+            val currentState = _destinationFetchState.value
+            if (currentState is DestinationFetchState.FetchingDestination) {
+                Timber.d("$TAG: Destination fetch abandoned (user didn't return)")
+                _destinationFetchState.value = DestinationFetchState.Idle
+            }
+        }
+
+        return navApp
+    }
+
+    /**
+     * Called when user returns to BothBubbles from the navigation app.
+     * Starts the 2-second timeout for destination scraping.
+     *
+     * @param isActivelyDriving Whether the user is currently driving
+     */
+    fun onReturnedFromNavApp(isActivelyDriving: Boolean) {
+        val currentState = _destinationFetchState.value
+        if (currentState !is DestinationFetchState.FetchingDestination) {
+            Timber.d("$TAG: onReturnedFromNavApp called but not in fetching state")
+            return
+        }
+
+        Timber.d("$TAG: Returned from nav app, checking for destination")
+
+        // Cancel abandon timeout
+        destinationFetchAbandonJob?.cancel()
+        destinationFetchAbandonJob = null
+
+        // Check if we already got a destination while we were away
+        val destination = _detectedDestination.value
+        if (destination != null) {
+            Timber.d("$TAG: Destination already detected: ${destination.destination}")
+            handleDestinationReady(currentState.chatGuid, currentState.displayName, destination)
+            return
+        }
+
+        // Start the 2-second timeout
+        destinationFetchTimeoutJob = scope.launch {
+            delay(DESTINATION_FETCH_TIMEOUT_MS)
+            handleDestinationFetchTimeout(currentState, isActivelyDriving)
+        }
+    }
+
+    /**
+     * Called when destination is detected via AccessibilityService.
+     * If we're in the fetch flow, this completes it.
+     */
+    private fun checkDestinationFetchCompletion(destination: ParsedDestinationData) {
+        val currentState = _destinationFetchState.value
+        if (currentState is DestinationFetchState.FetchingDestination) {
+            Timber.d("$TAG: Destination detected during fetch: ${destination.destination}")
+            cancelDestinationFetchJobs()
+            handleDestinationReady(currentState.chatGuid, currentState.displayName, destination)
+        }
+    }
+
+    private fun handleDestinationReady(chatGuid: String, displayName: String, destination: ParsedDestinationData) {
+        _destinationFetchState.value = DestinationFetchState.DestinationReady(
+            chatGuid = chatGuid,
+            displayName = displayName,
+            destination = destination
+        )
+
+        // Start sharing with the destination
+        val currentEta = _state.value.currentEta?.copy(destination = destination.destination)
+        startSharing(chatGuid, displayName, currentEta)
+
+        // Reset to idle after a brief delay (allow UI to observe DestinationReady)
+        scope.launch {
+            delay(100)
+            _destinationFetchState.value = DestinationFetchState.Idle
+        }
+    }
+
+    private fun handleDestinationFetchTimeout(
+        fetchState: DestinationFetchState.FetchingDestination,
+        isActivelyDriving: Boolean
+    ) {
+        // Check one more time if destination was detected
+        val destination = _detectedDestination.value
+        if (destination != null) {
+            Timber.d("$TAG: Destination detected just before timeout")
+            handleDestinationReady(fetchState.chatGuid, fetchState.displayName, destination)
+            return
+        }
+
+        Timber.d("$TAG: Destination fetch timed out, isActivelyDriving=$isActivelyDriving")
+        _destinationFetchState.value = DestinationFetchState.FetchFailed(
+            chatGuid = fetchState.chatGuid,
+            displayName = fetchState.displayName,
+            isActivelyDriving = isActivelyDriving
+        )
+    }
+
+    /**
+     * Accept sharing without destination (from countdown dialog or manual acceptance).
+     */
+    fun acceptShareWithoutDestination() {
+        val currentState = _destinationFetchState.value
+        if (currentState !is DestinationFetchState.FetchFailed) {
+            Timber.w("$TAG: acceptShareWithoutDestination called but not in FetchFailed state")
+            return
+        }
+
+        Timber.d("$TAG: Sharing without destination")
+        val currentEta = _state.value.currentEta
+        startSharing(currentState.chatGuid, currentState.displayName, currentEta)
+        _destinationFetchState.value = DestinationFetchState.Idle
+    }
+
+    /**
+     * Share with a manually entered destination.
+     */
+    fun shareWithManualDestination(destination: String?) {
+        val currentState = _destinationFetchState.value
+        if (currentState !is DestinationFetchState.FetchFailed) {
+            Timber.w("$TAG: shareWithManualDestination called but not in FetchFailed state")
+            return
+        }
+
+        Timber.d("$TAG: Sharing with manual destination: $destination")
+        val currentEta = if (!destination.isNullOrBlank()) {
+            _state.value.currentEta?.copy(destination = destination)
+        } else {
+            _state.value.currentEta
+        }
+        startSharing(currentState.chatGuid, currentState.displayName, currentEta)
+        _destinationFetchState.value = DestinationFetchState.Idle
+    }
+
+    /**
+     * Cancel the destination fetch flow.
+     */
+    fun cancelDestinationFetch() {
+        Timber.d("$TAG: Cancelling destination fetch")
+        cancelDestinationFetchJobs()
+        _destinationFetchState.value = DestinationFetchState.Idle
+    }
+
+    private fun cancelDestinationFetchJobs() {
+        destinationFetchTimeoutJob?.cancel()
+        destinationFetchTimeoutJob = null
+        destinationFetchAbandonJob?.cancel()
+        destinationFetchAbandonJob = null
     }
 
     // ===== Auto-Share Logic =====

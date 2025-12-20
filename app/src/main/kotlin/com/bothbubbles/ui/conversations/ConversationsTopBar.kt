@@ -115,7 +115,7 @@ internal fun ConversationsTopBar(
                             HapticUtils.onTap(haptic)
                             onUnreadBadgeClick()
                         }
-                        .defaultMinSize(minHeight = 18.dp)
+                        .defaultMinSize(minWidth = 18.dp, minHeight = 18.dp)
                         .padding(horizontal = 6.dp, vertical = 1.dp),
                     contentAlignment = Alignment.Center
                 ) {
@@ -152,6 +152,16 @@ internal fun ConversationsTopBar(
                     } else {
                         MaterialTheme.colorScheme.onSurface
                     }
+                )
+            }
+            // Active filter badge indicator
+            if (hasActiveFilter) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .offset(x = 32.dp, y = 10.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
                 )
             }
 

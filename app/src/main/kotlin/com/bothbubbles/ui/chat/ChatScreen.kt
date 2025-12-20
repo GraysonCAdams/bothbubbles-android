@@ -45,10 +45,16 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.ui.chat.components.CaptureTypeSheet
 import com.bothbubbles.ui.chat.components.ChatBackground
+import com.bothbubbles.ui.chat.components.EtaDestinationInputDialog
+import com.bothbubbles.ui.chat.components.EtaDrivingWarningDialog
 import com.bothbubbles.ui.chat.components.MessageSelectionHeader
+import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.components.common.copyToClipboard
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
@@ -312,6 +318,22 @@ fun ChatScreen(
 
     // Collect ETA sharing state for media picker (needs to show ETA option when navigation active)
     val etaSharingState by viewModel.etaSharing.etaSharingState.collectAsStateWithLifecycle()
+    // Collect destination fetch state for accessibility-based destination scraping dialogs
+    val destinationFetchUiState by viewModel.etaSharing.destinationFetchUiState.collectAsStateWithLifecycle()
+
+    // Lifecycle observer to detect return from navigation app (for accessibility destination scraping)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.etaSharing.onReturnedFromNavApp()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Load featured GIFs when GIF panel opens
     // Use dedicated activePanel flow instead of full composerState to avoid recomposition on text changes
@@ -632,7 +654,19 @@ fun ChatScreen(
                 onDismissSaveContactBanner = viewModel.chatInfo::dismissSaveContactBanner,
                 onMarkAsSafe = viewModel.operations::markAsSafe,
                 onStartSharingEta = {
-                    viewModel.etaSharing.startSharingEta(currentChatGuid, currentChatInfoState.chatTitle)
+                    viewModel.etaSharing.startSharingWithAccessibilityScrape(
+                        chatGuid = currentChatGuid,
+                        displayName = currentChatInfoState.chatTitle,
+                        openNavApp = { navApp ->
+                            val intent = viewModel.etaSharing.createNavAppIntent(navApp)
+                            if (intent != null) {
+                                context.startActivity(intent)
+                                true
+                            } else {
+                                false
+                            }
+                        }
+                    )
                 },
                 onStopSharingEta = viewModel.etaSharing::stopSharingEta,
                 onDismissEtaBanner = viewModel.etaSharing::dismissBanner,
@@ -872,6 +906,24 @@ fun ChatScreen(
         },
         onDismiss = { state.showCaptureTypeSheet = false }
     )
+
+    // ETA destination fetch dialogs (accessibility-based destination scraping)
+    when (val fetchState = destinationFetchUiState) {
+        is ChatEtaSharingDelegate.DestinationFetchUiState.ShowingDrivingWarning -> {
+            EtaDrivingWarningDialog(
+                countdownSeconds = fetchState.countdownSeconds,
+                onShareNow = viewModel.etaSharing::acceptShareWithoutDestination,
+                onCancel = viewModel.etaSharing::cancelCountdownAndFetch
+            )
+        }
+        is ChatEtaSharingDelegate.DestinationFetchUiState.ShowingDestinationInput -> {
+            EtaDestinationInputDialog(
+                onShare = viewModel.etaSharing::shareWithManualDestination,
+                onCancel = viewModel.etaSharing::cancelCountdownAndFetch
+            )
+        }
+        else -> { /* Idle or FetchingDestination - no dialog */ }
+    }
 }
 
 /**

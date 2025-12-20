@@ -93,3 +93,36 @@ enum class DestinationConfidence {
     MEDIUM,  // Found via text pattern matching
     LOW      // Found via positional heuristics or fallback
 }
+
+/**
+ * State machine for the destination fetch flow when user taps "Share ETA"
+ * with accessibility-based destination scraping enabled.
+ *
+ * Flow: Idle -> FetchingDestination -> (DestinationReady | FetchFailed) -> Idle
+ */
+sealed class DestinationFetchState {
+    /** Idle - no fetch in progress */
+    data object Idle : DestinationFetchState()
+
+    /** User pressed Share ETA, nav app opened, waiting for destination scrape */
+    data class FetchingDestination(
+        val chatGuid: String,
+        val displayName: String,
+        val navigationApp: NavigationApp,
+        val startTimeMillis: Long = System.currentTimeMillis()
+    ) : DestinationFetchState()
+
+    /** Destination successfully fetched, ready to share */
+    data class DestinationReady(
+        val chatGuid: String,
+        val displayName: String,
+        val destination: ParsedDestinationData
+    ) : DestinationFetchState()
+
+    /** Destination fetch failed or timed out */
+    data class FetchFailed(
+        val chatGuid: String,
+        val displayName: String,
+        val isActivelyDriving: Boolean
+    ) : DestinationFetchState()
+}

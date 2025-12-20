@@ -86,13 +86,13 @@ internal fun DeliveryIndicator(
         label = "statusScale"
     )
 
-    // Wrap in 48dp touch target for accessibility if clickable
+    // Use padding for touch target expansion instead of size to avoid affecting visual layout
     Box(
         modifier = Modifier
             .then(
                 if (onClick != null) {
                     Modifier
-                        .size(48.dp)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                         .pointerInput(Unit) {
                             detectTapGestures(onTap = { onClick() })
                         }

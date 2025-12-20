@@ -36,7 +36,7 @@ class LinkPreviewService @Inject constructor(
         private const val TAG = "LinkPreviewService"
         private const val TIMEOUT_MS = 8000L
         private const val MAX_CONTENT_LENGTH = 512 * 1024 // 512KB max for HTML
-        private const val USER_AGENT = "BlueBubbles/1.0 (Android; Link Preview Bot)"
+        private const val USER_AGENT = "facebookexternalhit/1.1"
         private const val MAX_CONCURRENT_REQUESTS = 5
     }
 

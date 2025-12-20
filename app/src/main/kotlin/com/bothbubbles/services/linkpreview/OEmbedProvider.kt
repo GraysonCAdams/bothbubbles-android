@@ -9,7 +9,11 @@ import java.net.URLEncoder
 /**
  * Handles oEmbed provider lookup and metadata fetching for supported platforms.
  *
- * Supports: YouTube, Twitter/X, TikTok, Reddit, Vimeo, Spotify, SoundCloud, Imgur, Giphy
+ * Supports: YouTube, Twitter/X, TikTok, Vimeo, Spotify, SoundCloud, Imgur, Giphy
+ *
+ * Note: Reddit is intentionally NOT included here. Reddit's oEmbed returns no thumbnail,
+ * but their OpenGraph tags (served to facebookexternalhit User-Agent) include rich
+ * preview images with rendered comment/post screenshots via share.redd.it.
  */
 internal class OEmbedProviderHandler(
     private val httpClient: OkHttpClient,
@@ -41,14 +45,6 @@ internal class OEmbedProviderHandler(
                 urlPatterns = listOf(
                     """tiktok\.com/""".toRegex(),
                     """vm\.tiktok\.com/""".toRegex()
-                )
-            ),
-            OEmbedProvider(
-                name = "Reddit",
-                endpoint = "https://www.reddit.com/oembed?url=%s",
-                urlPatterns = listOf(
-                    """reddit\.com/r/[^/]+/comments/""".toRegex(),
-                    """redd\.it/""".toRegex()
                 )
             ),
             OEmbedProvider(

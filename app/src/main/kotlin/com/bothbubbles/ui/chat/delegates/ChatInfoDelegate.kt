@@ -225,11 +225,10 @@ class ChatInfoDelegate @AssistedInject constructor(
                     // Only for 1:1 chats
                     if (_state.value.isGroup) return@flatMapLatest flowOf(null)
 
-                    // Use handle ID to respect explicit linking/delinking
-                    // (address matching ignores delinked members)
-                    val handleId = participants.firstOrNull()?.id
-                    if (handleId != null) {
-                        life360Repository.observeMemberByHandle(handleId)
+                    // Use address-based lookup to work across iMessage/SMS handles
+                    val address = participants.firstOrNull()?.address
+                    if (!address.isNullOrBlank()) {
+                        life360Repository.observeMemberByLinkedAddress(address)
                     } else {
                         flowOf(null)
                     }

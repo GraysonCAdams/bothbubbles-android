@@ -256,7 +256,7 @@ class Life360ServiceImpl @Inject constructor(
             locationTimestamp = location?.timestamp?.toLongOrNull()?.let { it * 1000 },
             lastUpdated = now,
             noLocationReason = noLocationReason,
-            mappedHandleId = null  // Preserved by DAO upsert
+            linkedAddress = null  // Preserved by DAO upsert
         )
     }
 

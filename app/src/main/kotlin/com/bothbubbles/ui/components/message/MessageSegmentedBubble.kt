@@ -564,7 +564,7 @@ internal fun SegmentedMessageBubble(
                     Row(
                         modifier = Modifier
                             .align(Alignment.End)
-                            .padding(end = 4.dp, top = 2.dp),
+                            .padding(end = 4.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {

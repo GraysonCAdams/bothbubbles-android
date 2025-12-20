@@ -165,12 +165,15 @@ fun ConversationsScreen(
         }
     }
 
-    // Trigger load more when scrolled near bottom
-    LaunchedEffect(listState) {
+    // Trigger load more when scrolled near bottom (only when no filter is active)
+    val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
+    LaunchedEffect(listState, hasActiveFilter) {
         snapshotFlow {
             val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()
             val totalItems = listState.layoutInfo.totalItemsCount
-            val shouldLoad = lastVisibleItem != null && totalItems > 0 && lastVisibleItem.index >= totalItems - 5
+            // Only trigger scroll-based pagination when no filter is active
+            val shouldLoad = !hasActiveFilter &&
+                lastVisibleItem != null && totalItems > 0 && lastVisibleItem.index >= totalItems - 5
             Triple(lastVisibleItem?.index ?: -1, totalItems, shouldLoad)
         }
         .distinctUntilChanged()
@@ -178,6 +181,14 @@ fun ConversationsScreen(
             if (shouldLoadMore) {
                 viewModel.loadMoreConversations()
             }
+        }
+    }
+
+    // When a filter is activated and there's more data to load, load all remaining pages
+    // so the filter can work on complete data
+    LaunchedEffect(hasActiveFilter, uiState.canLoadMore) {
+        if (hasActiveFilter && uiState.canLoadMore && !uiState.isLoadingMore) {
+            viewModel.loadAllRemainingConversations()
         }
     }
 

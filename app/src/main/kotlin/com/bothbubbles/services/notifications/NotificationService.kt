@@ -15,22 +15,36 @@ import javax.inject.Singleton
 /**
  * Main notification service that coordinates notification operations.
  * Delegates to specialized helpers for channel management, bubble metadata, and notification building.
+ *
+ * Uses per-conversation notification channels, allowing users to customize
+ * sound, vibration, and importance for individual conversations via Android Settings.
  */
 @Singleton
 class NotificationService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val notificationBuilder: NotificationBuilder,
+    private val notificationChannelManager: NotificationChannelManager,
     private val badgeManager: BadgeManager
 ) : Notifier {
     private val notificationManager = NotificationManagerCompat.from(context)
 
     /**
      * Show a notification for a new message.
+     *
+     * Creates a per-conversation notification channel if one doesn't exist,
+     * allowing users to customize notification settings per conversation.
      */
     override fun showMessageNotification(params: MessageNotificationParams) {
         if (!hasNotificationPermission()) return
 
+        // Get or create per-conversation channel
+        val channelId = notificationChannelManager.getOrCreateConversationChannel(
+            chatGuid = params.chatGuid,
+            chatTitle = params.chatTitle
+        )
+
         val notification = notificationBuilder.buildMessageNotification(
+            channelId = channelId,
             chatGuid = params.chatGuid,
             chatTitle = params.chatTitle,
             messageText = params.messageText,

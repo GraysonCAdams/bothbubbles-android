@@ -967,6 +967,152 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 42 to 43: Add linked_address column to life360_members.
+     *
+     * Changes Life360 contact linking from handle ID-based to address-based.
+     * This fixes the issue where a contact with multiple handles (iMessage + SMS)
+     * would only show location in chats using the specific handle ID that was linked.
+     *
+     * The migration:
+     * 1. Adds linked_address column
+     * 2. Populates it from existing mapped_handle_id by looking up the handle's address
+     * 3. Keeps mapped_handle_id for backwards compatibility (will be removed in future)
+     */
+    val MIGRATION_42_43 = object : Migration(42, 43) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Add linked_address column
+            db.execSQL("ALTER TABLE life360_members ADD COLUMN linked_address TEXT DEFAULT NULL")
+
+            // Add index for address-based lookups
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_life360_members_linked_address ON life360_members(linked_address)")
+
+            // Migrate existing mappings: copy address from handles table
+            db.execSQL("""
+                UPDATE life360_members
+                SET linked_address = (
+                    SELECT h.address FROM handles h
+                    WHERE h.id = life360_members.mapped_handle_id
+                )
+                WHERE mapped_handle_id IS NOT NULL
+            """)
+        }
+    }
+
+    /**
+     * Migration from version 43 to 44: Remove unused per-chat notification settings columns.
+     *
+     * These columns were part of a custom notification settings UI that duplicated
+     * Android's native notification channel functionality. We now use per-conversation
+     * notification channels instead, allowing users to customize sound/vibration/importance
+     * via Android Settings > Apps > BothBubbles > Notifications.
+     *
+     * Removed columns:
+     * - custom_notification_sound
+     * - notification_priority
+     * - bubble_enabled
+     * - pop_on_screen
+     * - lock_screen_visibility
+     * - show_notification_dot
+     * - vibration_enabled
+     *
+     * Kept columns:
+     * - notifications_enabled (app-level mute toggle)
+     * - snooze_until (app-level snooze functionality)
+     *
+     * SQLite doesn't support DROP COLUMN on older versions, so we recreate the table.
+     */
+    val MIGRATION_43_44 = object : Migration(43, 44) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Create new table without the removed columns
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS chats_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    guid TEXT NOT NULL,
+                    chat_identifier TEXT DEFAULT NULL,
+                    display_name TEXT DEFAULT NULL,
+                    is_pinned INTEGER NOT NULL DEFAULT 0,
+                    pin_index INTEGER DEFAULT NULL,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    is_starred INTEGER NOT NULL DEFAULT 0,
+                    mute_type TEXT DEFAULT NULL,
+                    mute_args TEXT DEFAULT NULL,
+                    has_unread_message INTEGER NOT NULL DEFAULT 0,
+                    unread_count INTEGER NOT NULL DEFAULT 0,
+                    style INTEGER DEFAULT NULL,
+                    is_group INTEGER NOT NULL DEFAULT 0,
+                    last_message_text TEXT DEFAULT NULL,
+                    last_message_date INTEGER DEFAULT NULL,
+                    custom_avatar_path TEXT DEFAULT NULL,
+                    notifications_enabled INTEGER NOT NULL DEFAULT 1,
+                    snooze_until INTEGER DEFAULT NULL,
+                    auto_send_read_receipts INTEGER DEFAULT NULL,
+                    auto_send_typing_indicators INTEGER DEFAULT NULL,
+                    text_field_text TEXT DEFAULT NULL,
+                    lock_chat_name INTEGER NOT NULL DEFAULT 0,
+                    lock_chat_icon INTEGER NOT NULL DEFAULT 0,
+                    latest_message_date INTEGER DEFAULT NULL,
+                    date_created INTEGER NOT NULL DEFAULT 0,
+                    date_deleted INTEGER DEFAULT NULL,
+                    is_sms_fallback INTEGER NOT NULL DEFAULT 0,
+                    fallback_reason TEXT DEFAULT NULL,
+                    fallback_updated_at INTEGER DEFAULT NULL,
+                    is_spam INTEGER NOT NULL DEFAULT 0,
+                    spam_score INTEGER NOT NULL DEFAULT 0,
+                    spam_reported_to_carrier INTEGER NOT NULL DEFAULT 0,
+                    category TEXT DEFAULT NULL,
+                    category_confidence INTEGER NOT NULL DEFAULT 0,
+                    category_last_updated INTEGER DEFAULT NULL,
+                    preferred_send_mode TEXT DEFAULT NULL,
+                    send_mode_manually_set INTEGER NOT NULL DEFAULT 0
+                )
+            """.trimIndent())
+
+            // Copy data from old table (excluding removed columns)
+            db.execSQL("""
+                INSERT INTO chats_new (
+                    id, guid, chat_identifier, display_name, is_pinned, pin_index,
+                    is_archived, is_starred, mute_type, mute_args, has_unread_message,
+                    unread_count, style, is_group, last_message_text, last_message_date,
+                    custom_avatar_path, notifications_enabled, snooze_until,
+                    auto_send_read_receipts, auto_send_typing_indicators, text_field_text,
+                    lock_chat_name, lock_chat_icon, latest_message_date, date_created,
+                    date_deleted, is_sms_fallback, fallback_reason, fallback_updated_at,
+                    is_spam, spam_score, spam_reported_to_carrier, category,
+                    category_confidence, category_last_updated, preferred_send_mode,
+                    send_mode_manually_set
+                )
+                SELECT
+                    id, guid, chat_identifier, display_name, is_pinned, pin_index,
+                    is_archived, is_starred, mute_type, mute_args, has_unread_message,
+                    unread_count, style, is_group, last_message_text, last_message_date,
+                    custom_avatar_path, notifications_enabled, snooze_until,
+                    auto_send_read_receipts, auto_send_typing_indicators, text_field_text,
+                    lock_chat_name, lock_chat_icon, latest_message_date, date_created,
+                    date_deleted, is_sms_fallback, fallback_reason, fallback_updated_at,
+                    is_spam, spam_score, spam_reported_to_carrier, category,
+                    category_confidence, category_last_updated, preferred_send_mode,
+                    send_mode_manually_set
+                FROM chats
+            """.trimIndent())
+
+            // Drop old table
+            db.execSQL("DROP TABLE chats")
+
+            // Rename new table
+            db.execSQL("ALTER TABLE chats_new RENAME TO chats")
+
+            // Recreate indexes
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_chats_guid ON chats(guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_pinned ON chats(is_pinned)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_starred ON chats(is_starred)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_latest_message_date ON chats(latest_message_date)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_spam ON chats(is_spam)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_category ON chats(category)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_is_archived ON chats(is_archived)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1013,6 +1159,8 @@ object DatabaseMigrations {
         MIGRATION_38_39,
         MIGRATION_39_40,
         MIGRATION_40_41,
-        MIGRATION_41_42
+        MIGRATION_41_42,
+        MIGRATION_42_43,
+        MIGRATION_43_44
     )
 }

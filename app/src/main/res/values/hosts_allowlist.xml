@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Android Auto host allowlist for production builds.
+    These are the official Google hosts for Android Auto and Android Automotive OS.
+    See: https://developer.android.com/training/cars/testing
+-->
+<resources>
+    <string-array name="hosts_allowlist">
+        <!-- Android Auto (phone projection) -->
+        <item>com.google.android.projection.gearhead</item>
+        <!-- Android Automotive OS (embedded) -->
+        <item>com.google.android.apps.automotive.templates.host</item>
+        <!-- Android Auto Desktop Head Unit (testing only, but safe to include) -->
+        <item>com.google.android.projection.dhu</item>
+    </string-array>
+</resources>

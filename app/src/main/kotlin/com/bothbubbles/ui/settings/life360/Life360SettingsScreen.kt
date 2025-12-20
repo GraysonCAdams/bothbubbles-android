@@ -310,10 +310,10 @@ private fun Life360SettingsContentInternal(
     isEnabled: Boolean,
     isPaused: Boolean,
     availableHandles: ImmutableList<HandleEntity>,
-    handleDisplayNames: ImmutableMap<Long, String>,
+    handleDisplayNames: ImmutableMap<String, String>,
     onSetEnabled: (Boolean) -> Unit,
     onSetPaused: (Boolean) -> Unit,
-    onMapMember: (String, Long) -> Unit,
+    onMapMember: (String, String) -> Unit,
     onUnmapMember: (String) -> Unit,
     onLogout: () -> Unit,
     onClearError: () -> Unit
@@ -327,8 +327,8 @@ private fun Life360SettingsContentInternal(
         ContactPickerDialog(
             memberName = member.displayName,
             handles = availableHandles,
-            onSelect = { handleId ->
-                onMapMember(member.memberId, handleId)
+            onSelect = { address ->
+                onMapMember(member.memberId, address)
                 memberToMap = null
             },
             onDismiss = { memberToMap = null }
@@ -399,7 +399,7 @@ private fun Life360SettingsContentInternal(
             items(members, key = { it.memberId }) { member ->
                 MemberCard(
                     member = member,
-                    mappedContactName = member.mappedHandleId?.let { handleDisplayNames[it] },
+                    mappedContactName = member.linkedAddress?.let { handleDisplayNames[it] },
                     onMapClick = { memberToMap = member },
                     onUnmapClick = { onUnmapMember(member.memberId) }
                 )
@@ -563,7 +563,7 @@ private fun MemberCard(
 private fun ContactPickerDialog(
     memberName: String,
     handles: ImmutableList<HandleEntity>,
-    onSelect: (Long) -> Unit,
+    onSelect: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     var searchQuery by rememberSaveable { mutableStateOf("") }
@@ -628,7 +628,7 @@ private fun ContactPickerDialog(
                                     }
                                 }
                             },
-                            modifier = Modifier.clickable { onSelect(handle.id) }
+                            modifier = Modifier.clickable { onSelect(handle.address) }
                         )
                         HorizontalDivider()
                     }

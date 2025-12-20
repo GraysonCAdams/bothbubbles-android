@@ -52,30 +52,15 @@ class Life360Repository @Inject constructor(
         }
 
     /**
-     * Observe member mapped to a specific handle (for conversation view).
+     * Observe member linked to a specific address (for conversation view).
+     * This is the primary method for looking up Life360 members in chats.
+     * Uses address-based linking which works across multiple handle IDs for the same contact.
      */
-    fun observeMemberByHandle(handleId: Long): Flow<Life360Member?> =
-        life360Dao.getMemberByHandleIdFlow(handleId).map { entity ->
-            Timber.d("Life360 observeMemberByHandle: handleId=$handleId, found=${entity != null}, member=${entity?.firstName} ${entity?.lastName}")
+    fun observeMemberByLinkedAddress(address: String): Flow<Life360Member?> =
+        life360Dao.getMemberByLinkedAddressFlow(address).map { entity ->
+            Timber.d("Life360 observeMemberByLinkedAddress: address=$address, found=${entity != null}, member=${entity?.firstName} ${entity?.lastName}")
             entity?.toDomain()
         }
-
-    /**
-     * Observe member by phone number/address.
-     * More reliable than handle ID matching since handles can differ across services.
-     */
-    fun observeMemberByAddress(address: String): Flow<Life360Member?> {
-        // Normalize the phone number for matching
-        val normalized = PhoneNumberFormatter.normalize(address) ?: address
-        val digitsOnly = address.filter { it.isDigit() }.takeLast(10)  // Last 10 digits
-
-        Timber.d("Life360 observeMemberByAddress: checking for member match")
-
-        return life360Dao.getMemberByPhoneNumberFlow(address, normalized, digitsOnly).map { entity ->
-            Timber.d("Life360 observeMemberByAddress result: found=${entity != null}, member=${entity?.firstName} ${entity?.lastName}")
-            entity?.toDomain()
-        }
-    }
 
     /**
      * Observe all members with valid location data.
@@ -92,12 +77,6 @@ class Life360Repository @Inject constructor(
      */
     suspend fun getMember(memberId: String): Life360Member? =
         life360Dao.getMemberById(memberId)?.toDomain()
-
-    /**
-     * Get member mapped to a handle.
-     */
-    suspend fun getMemberByHandle(handleId: Long): Life360Member? =
-        life360Dao.getMemberByHandleId(handleId)?.toDomain()
 
     /**
      * Get members by circle.
@@ -159,14 +138,17 @@ class Life360Repository @Inject constructor(
     // ===== Contact Mapping =====
 
     /**
-     * Map a Life360 member to a BothBubbles contact (handle).
+     * Map a Life360 member to a BothBubbles contact by address.
      * Also clears the auto_link_disabled flag so future auto-linking
      * can work if the user unlinks again.
+     *
+     * @param memberId The Life360 member ID
+     * @param address The contact's phone number or email address
      */
-    suspend fun mapMemberToContact(memberId: String, handleId: Long) {
-        life360Dao.mapMemberToHandle(memberId, handleId)
+    suspend fun mapMemberToContact(memberId: String, address: String) {
+        life360Dao.mapMemberToAddress(memberId, address)
         life360Dao.setAutoLinkDisabled(memberId, false)
-        Timber.d("Mapped Life360 member $memberId to handle $handleId")
+        Timber.d("Mapped Life360 member $memberId to address $address")
     }
 
     /**
@@ -192,7 +174,7 @@ class Life360Repository @Inject constructor(
         var mappedCount = 0
 
         for (member in membersWithPhones) {
-            if (member.mappedHandleId != null) continue  // Already mapped
+            if (member.linkedAddress != null) continue  // Already mapped
             if (member.autoLinkDisabled) continue  // User manually unlinked, don't re-link
 
             val phoneNumber = member.phoneNumber ?: continue
@@ -203,9 +185,10 @@ class Life360Repository @Inject constructor(
                 ?: handleDao.getHandlesByAddress(phoneNumber).firstOrNull()
 
             if (handle != null) {
-                life360Dao.mapMemberToHandle(member.memberId, handle.id)
+                // Store the handle's address, not the handle ID
+                life360Dao.mapMemberToAddress(member.memberId, handle.address)
                 mappedCount++
-                Timber.d("Auto-mapped Life360 member ${member.firstName} to contact")
+                Timber.d("Auto-mapped Life360 member ${member.firstName} to address ${handle.address}")
             }
         }
 

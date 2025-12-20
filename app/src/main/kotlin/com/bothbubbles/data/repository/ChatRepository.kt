@@ -421,37 +421,12 @@ class ChatRepository @Inject constructor(
     }
 
     // ===== Per-Chat Notification Settings =====
+    // Note: Sound, vibration, importance, and other customizations are handled by
+    // Android's per-conversation notification channels. Users customize these via
+    // Android Settings > Apps > BothBubbles > Notifications > [Conversation].
 
     suspend fun setNotificationsEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
         chatDao.updateNotificationsEnabled(guid, enabled)
-    }
-
-    suspend fun setNotificationPriority(guid: String, priority: String): Result<Unit> = runCatching {
-        chatDao.updateNotificationPriority(guid, priority)
-    }
-
-    suspend fun setBubbleEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
-        chatDao.updateBubbleEnabled(guid, enabled)
-    }
-
-    suspend fun setPopOnScreen(guid: String, enabled: Boolean): Result<Unit> = runCatching {
-        chatDao.updatePopOnScreen(guid, enabled)
-    }
-
-    suspend fun setNotificationSound(guid: String, sound: String?): Result<Unit> = runCatching {
-        chatDao.updateNotificationSound(guid, sound)
-    }
-
-    suspend fun setLockScreenVisibility(guid: String, visibility: String): Result<Unit> = runCatching {
-        chatDao.updateLockScreenVisibility(guid, visibility)
-    }
-
-    suspend fun setShowNotificationDot(guid: String, enabled: Boolean): Result<Unit> = runCatching {
-        chatDao.updateShowNotificationDot(guid, enabled)
-    }
-
-    suspend fun setVibrationEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
-        chatDao.updateVibrationEnabled(guid, enabled)
     }
 
     /**

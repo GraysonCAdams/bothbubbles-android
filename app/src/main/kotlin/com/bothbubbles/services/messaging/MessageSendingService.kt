@@ -354,13 +354,33 @@ class MessageSendingService @Inject constructor(
     }
 
     /**
-     * Retry sending a failed message
+     * Retry sending a failed message.
+     * Fetches the original message's attachments and re-sends with a new temp GUID
+     * so the retry appears at the end of the conversation with pending state.
      */
     override suspend fun retryMessage(messageGuid: String): Result<MessageEntity> {
         // Note: retryMessage calls sendUnified which already has the block check
         return safeCall {
         val message = messageDao.getMessageByGuid(messageGuid)
             ?: throw MessageError.SendFailed(messageGuid, "Message not found")
+
+        // Fetch attachments for the original message (same pattern as forwardMessage)
+        val attachments = attachmentDao.getAttachmentsForMessage(messageGuid)
+        val attachmentInputs = attachments.mapNotNull { attachment ->
+            attachment.localPath?.let { path ->
+                try {
+                    PendingAttachmentInput(
+                        uri = Uri.parse(path),
+                        mimeType = attachment.mimeType,
+                        name = attachment.transferName,
+                        size = attachment.totalBytes
+                    )
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to parse attachment path for retry: $path")
+                    null
+                }
+            }
+        }
 
         // Soft delete the original failed message so it doesn't appear alongside the retry
         messageDao.softDeleteMessage(messageGuid)
@@ -372,14 +392,21 @@ class MessageSendingService @Inject constructor(
             else -> MessageDeliveryMode.IMESSAGE
         }
 
-        // Re-send
+        // Generate temp GUID so the retry appears with pending state in UI
+        val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+
+        Timber.d("Retrying message $messageGuid with ${attachmentInputs.size} attachments, tempGuid=$tempGuid")
+
+        // Re-send with attachments and temp GUID
         sendUnified(
             chatGuid = message.chatGuid,
             text = message.text ?: "",
             replyToGuid = message.threadOriginatorGuid,
             effectId = message.expressiveSendStyleId,
             subject = message.subject,
-            deliveryMode = deliveryMode
+            attachments = attachmentInputs,
+            deliveryMode = deliveryMode,
+            tempGuid = tempGuid
         ).getOrThrow()
         }
     }
@@ -387,6 +414,7 @@ class MessageSendingService @Inject constructor(
     /**
      * Retry sending a failed iMessage as SMS/MMS.
      * This marks the original message as superseded and sends a new message via SMS.
+     * Fetches original attachments and re-sends with a temp GUID for pending state.
      */
     override suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> {
         // Note: retryAsSms calls sendUnified which already has the block check
@@ -402,6 +430,24 @@ class MessageSendingService @Inject constructor(
             throw SmsError.PermissionDenied(Exception("Cannot send SMS to this contact (no phone number)"))
         }
 
+        // Fetch attachments for the original message (same pattern as forwardMessage)
+        val attachments = attachmentDao.getAttachmentsForMessage(messageGuid)
+        val attachmentInputs = attachments.mapNotNull { attachment ->
+            attachment.localPath?.let { path ->
+                try {
+                    PendingAttachmentInput(
+                        uri = Uri.parse(path),
+                        mimeType = attachment.mimeType,
+                        name = attachment.transferName,
+                        size = attachment.totalBytes
+                    )
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to parse attachment path for SMS retry: $path")
+                    null
+                }
+            }
+        }
+
         // Soft delete the original failed message
         messageDao.softDeleteMessage(messageGuid)
 
@@ -409,7 +455,7 @@ class MessageSendingService @Inject constructor(
         chatFallbackTracker.enterFallbackMode(message.chatGuid, FallbackReason.IMESSAGE_FAILED)
 
         // Determine SMS/MMS based on whether it had attachments or is group
-        val deliveryMode = if (message.hasAttachments || chat?.isGroup == true) {
+        val deliveryMode = if (attachmentInputs.isNotEmpty() || chat?.isGroup == true) {
             MessageDeliveryMode.LOCAL_MMS
         } else {
             MessageDeliveryMode.LOCAL_SMS
@@ -417,14 +463,19 @@ class MessageSendingService @Inject constructor(
 
         ensureCarrierReadyOrThrow(requireMms = deliveryMode == MessageDeliveryMode.LOCAL_MMS)
 
-        Timber.i("Retrying message $messageGuid as $deliveryMode")
+        // Generate temp GUID so the retry appears with pending state in UI
+        val tempGuid = "temp-${java.util.UUID.randomUUID()}"
 
-        // Re-send via SMS/MMS
+        Timber.i("Retrying message $messageGuid as $deliveryMode with ${attachmentInputs.size} attachments, tempGuid=$tempGuid")
+
+        // Re-send via SMS/MMS with attachments
         sendUnified(
             chatGuid = message.chatGuid,
             text = message.text ?: "",
             subject = message.subject,
-            deliveryMode = deliveryMode
+            attachments = attachmentInputs,
+            deliveryMode = deliveryMode,
+            tempGuid = tempGuid
         ).getOrThrow()
         }
     }

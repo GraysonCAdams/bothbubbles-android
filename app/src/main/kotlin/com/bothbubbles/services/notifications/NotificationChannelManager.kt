@@ -13,6 +13,10 @@ import javax.inject.Singleton
 /**
  * Manages notification channels and related constants.
  * Responsible for creating and maintaining notification channels.
+ *
+ * Uses per-conversation channels for message notifications, allowing users
+ * to customize sound, vibration, and importance per conversation via
+ * Android's native notification settings.
  */
 @Singleton
 class NotificationChannelManager @Inject constructor(
@@ -20,7 +24,8 @@ class NotificationChannelManager @Inject constructor(
 ) {
     companion object {
         // Channel IDs
-        const val CHANNEL_MESSAGES = "messages"
+        const val CHANNEL_MESSAGES = "messages"  // Fallback/legacy channel
+        const val CHANNEL_CONVERSATION_PREFIX = "conversation_"
         const val CHANNEL_SERVICE = "service"
         const val CHANNEL_FACETIME = "facetime"
         const val CHANNEL_SYNC_STATUS = "sync_status"
@@ -104,5 +109,53 @@ class NotificationChannelManager @Inject constructor(
         notificationManager.createNotificationChannels(
             listOf(messagesChannel, serviceChannel, faceTimeChannel, syncStatusChannel)
         )
+    }
+
+    /**
+     * Get or create a notification channel for a specific conversation.
+     *
+     * Per-conversation channels allow users to customize notification settings
+     * (sound, vibration, importance) for individual conversations via
+     * Android Settings > Apps > BothBubbles > Notifications.
+     *
+     * @param chatGuid Unique identifier for the conversation
+     * @param chatTitle Display name for the conversation (used as channel name)
+     * @return The channel ID to use when building notifications
+     */
+    fun getOrCreateConversationChannel(chatGuid: String, chatTitle: String): String {
+        val channelId = "$CHANNEL_CONVERSATION_PREFIX${chatGuid.hashCode()}"
+
+        // Check if channel already exists
+        val existingChannel = notificationManager.getNotificationChannel(channelId)
+        if (existingChannel != null) {
+            return channelId
+        }
+
+        // Create new per-conversation channel
+        val channel = NotificationChannel(
+            channelId,
+            chatTitle.take(40),  // Android limits channel names
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Messages from $chatTitle"
+            enableVibration(true)
+            enableLights(true)
+            setShowBadge(true)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                setAllowBubbles(true)
+            }
+        }
+
+        notificationManager.createNotificationChannel(channel)
+        return channelId
+    }
+
+    /**
+     * Delete a conversation's notification channel.
+     * Call this when a conversation is deleted.
+     */
+    fun deleteConversationChannel(chatGuid: String) {
+        val channelId = "$CHANNEL_CONVERSATION_PREFIX${chatGuid.hashCode()}"
+        notificationManager.deleteNotificationChannel(channelId)
     }
 }

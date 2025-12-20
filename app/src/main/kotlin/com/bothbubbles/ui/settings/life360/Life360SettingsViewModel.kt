@@ -58,11 +58,11 @@ class Life360SettingsViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentListOf())
 
     /**
-     * Map of handleId to display name for showing mapped contact names.
+     * Map of address to display name for showing mapped contact names.
      */
-    val handleDisplayNames: StateFlow<ImmutableMap<Long, String>> = handleDao.getAllHandles()
+    val handleDisplayNames: StateFlow<ImmutableMap<String, String>> = handleDao.getAllHandles()
         .map { handles ->
-            handles.associate { it.id to it.displayNameSimple }.toImmutableMap()
+            handles.associate { it.address to it.displayNameSimple }.toImmutableMap()
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentMapOf())
 
@@ -141,12 +141,12 @@ class Life360SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Map a Life360 member to a contact (handle).
+     * Map a Life360 member to a contact by address.
      */
-    fun mapMemberToContact(memberId: String, handleId: Long) {
+    fun mapMemberToContact(memberId: String, address: String) {
         viewModelScope.launch {
-            life360Repository.mapMemberToContact(memberId, handleId)
-            Timber.d("Mapped member $memberId to contact $handleId")
+            life360Repository.mapMemberToContact(memberId, address)
+            Timber.d("Mapped member $memberId to address $address")
         }
     }
 

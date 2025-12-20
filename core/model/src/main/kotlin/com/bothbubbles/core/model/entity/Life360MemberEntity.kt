@@ -26,7 +26,8 @@ import androidx.room.PrimaryKey
         )
     ],
     indices = [
-        Index(value = ["mapped_handle_id"]),  // Critical for conversation list performance
+        Index(value = ["mapped_handle_id"]),  // DEPRECATED: for backwards compat during migration
+        Index(value = ["linked_address"]),    // For address-based contact lookup in chats
         Index(value = ["circle_id"]),         // For filtering by circle
         Index(value = ["phone_number"])       // For auto-matching contacts
     ]
@@ -92,8 +93,16 @@ data class Life360MemberEntity(
     val noLocationReason: String? = null,   // If location unavailable, why
 
     // Contact mapping (nullable FK to HandleEntity)
+    // DEPRECATED: Use linkedAddress instead. Kept for backwards compatibility during migration.
     @ColumnInfo(name = "mapped_handle_id")
     val mappedHandleId: Long? = null,
+
+    // Address-based contact linking (replaces handle ID-based linking)
+    // This is the normalized phone number/email of the linked contact.
+    // Using address instead of handle ID fixes the issue where a contact with
+    // multiple handles (iMessage + SMS) would only show location in one chat type.
+    @ColumnInfo(name = "linked_address", defaultValue = "NULL")
+    val linkedAddress: String? = null,
 
     // Auto-linking control: when true, prevents autoMapContacts from re-linking
     // Set to true when user manually unlinks, cleared when user manually links

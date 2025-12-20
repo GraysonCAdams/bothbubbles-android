@@ -37,12 +37,21 @@ interface Life360Dao {
 
     /**
      * Get member mapped to a specific handle (for showing location in conversation).
+     * DEPRECATED: Use getMemberByLinkedAddressFlow instead.
      */
     @Query("SELECT * FROM life360_members WHERE mapped_handle_id = :handleId LIMIT 1")
     suspend fun getMemberByHandleId(handleId: Long): Life360MemberEntity?
 
     @Query("SELECT * FROM life360_members WHERE mapped_handle_id = :handleId LIMIT 1")
     fun getMemberByHandleIdFlow(handleId: Long): Flow<Life360MemberEntity?>
+
+    /**
+     * Get member linked to a specific address (phone number or email).
+     * This is the primary lookup method for showing location in conversations.
+     * Uses address-based matching which works across multiple handle IDs for the same contact.
+     */
+    @Query("SELECT * FROM life360_members WHERE linked_address = :address LIMIT 1")
+    fun getMemberByLinkedAddressFlow(address: String): Flow<Life360MemberEntity?>
 
     /**
      * Get member by phone number (for matching by address when handle IDs differ).
@@ -133,15 +142,15 @@ interface Life360Dao {
     )
 
     /**
-     * Map a Life360 member to a BothBubbles handle (contact).
+     * Map a Life360 member to a BothBubbles contact by address.
      */
-    @Query("UPDATE life360_members SET mapped_handle_id = :handleId WHERE member_id = :memberId")
-    suspend fun mapMemberToHandle(memberId: String, handleId: Long?)
+    @Query("UPDATE life360_members SET linked_address = :address WHERE member_id = :memberId")
+    suspend fun mapMemberToAddress(memberId: String, address: String?)
 
     /**
-     * Clear handle mapping for a member.
+     * Clear contact mapping for a member.
      */
-    @Query("UPDATE life360_members SET mapped_handle_id = NULL WHERE member_id = :memberId")
+    @Query("UPDATE life360_members SET linked_address = NULL WHERE member_id = :memberId")
     suspend fun unmapMember(memberId: String)
 
     /**
@@ -152,9 +161,9 @@ interface Life360Dao {
     suspend fun setAutoLinkDisabled(memberId: String, disabled: Boolean)
 
     /**
-     * Clear all handle mappings (e.g., when rebuilding mappings).
+     * Clear all contact mappings (e.g., when rebuilding mappings).
      */
-    @Query("UPDATE life360_members SET mapped_handle_id = NULL")
+    @Query("UPDATE life360_members SET linked_address = NULL")
     suspend fun clearAllMappings()
 
     // ===== Deletes =====
@@ -177,7 +186,7 @@ interface Life360Dao {
     // ===== Upsert =====
 
     /**
-     * Upsert members from API response, preserving handle mappings and auto_link_disabled flags.
+     * Upsert members from API response, preserving contact mappings and auto_link_disabled flags.
      */
     @Transaction
     suspend fun upsertMembers(circleId: String, members: List<Life360MemberEntity>) {
@@ -188,7 +197,7 @@ interface Life360Dao {
         val membersWithPreservedState = members.map { member ->
             val existing = existingMembers[member.memberId]
             member.copy(
-                mappedHandleId = existing?.mappedHandleId,
+                linkedAddress = existing?.linkedAddress,
                 autoLinkDisabled = existing?.autoLinkDisabled ?: false
             )
         }

@@ -20,8 +20,6 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
@@ -30,7 +28,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Content delegate for the Chats tab in Android Auto.
@@ -52,14 +50,13 @@ class ConversationListContent(
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
-    private val messageSendingService: MessageSendingService,
     private val syncService: SyncService?,
-    private val socketConnection: SocketConnection?,
     private val featurePreferences: FeaturePreferences?,
     private val attachmentRepository: AttachmentRepository?,
     private val attachmentDao: AttachmentDao?,
     private val screenManager: ScreenManager,
-    private val onInvalidate: () -> Unit
+    private val onInvalidate: () -> Unit,
+    private val isConnected: () -> Boolean = { true }
 ) {
     private val contentScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -84,12 +81,12 @@ class ConversationListContent(
     @Volatile
     private var privacyModeEnabled = false
 
-    // Name caches
-    private val senderNameCache = mutableMapOf<Long, String>()
-    private val participantNameCache = mutableMapOf<String, String>()
+    // Thread-safe name caches for coroutine access
+    private val senderNameCache = ConcurrentHashMap<Long, String>()
+    private val participantNameCache = ConcurrentHashMap<String, String>()
 
-    // Avatar bitmap cache for async loading pattern
-    private val avatarCache = mutableMapOf<String, Bitmap?>()
+    // Thread-safe avatar bitmap cache for async loading pattern
+    private val avatarCache = ConcurrentHashMap<String, Bitmap?>()
 
     @Volatile
     private var avatarsLoading = false
@@ -274,8 +271,11 @@ class ConversationListContent(
             )
         }
 
+        // Show offline indicator in title when disconnected
+        val title = if (isConnected()) "Messages" else "Messages (Offline)"
+
         return ListTemplate.Builder()
-            .setTitle("Messages")
+            .setTitle(title)
             .setSingleList(itemListBuilder.build())
             .build()
     }
@@ -322,9 +322,7 @@ class ConversationListContent(
                             messageDao = messageDao,
                             handleDao = handleDao,
                             chatRepository = chatRepository,
-                            messageSendingService = messageSendingService,
                             syncService = syncService,
-                            socketConnection = socketConnection,
                             featurePreferences = featurePreferences,
                             attachmentRepository = attachmentRepository,
                             attachmentDao = attachmentDao,

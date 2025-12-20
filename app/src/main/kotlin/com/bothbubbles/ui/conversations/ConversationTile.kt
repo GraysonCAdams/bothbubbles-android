@@ -55,7 +55,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.Placeholder
 import androidx.compose.ui.text.PlaceholderVerticalAlign
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.semantics.onClick
@@ -257,18 +256,6 @@ internal fun GoogleStyleConversationTile(
                             tint = MaterialTheme.colorScheme.primary
                         )
                     }
-                }
-
-                // "is typing..." indicator text under the name
-                if (conversation.isTyping) {
-                    Text(
-                        text = "is typing...",
-                        style = MaterialTheme.typography.bodySmall.copy(
-                            fontStyle = FontStyle.Italic
-                        ),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 1
-                    )
                 }
 
                 Spacer(modifier = Modifier.height(2.dp))

@@ -69,30 +69,9 @@ data class ChatEntity(
     @ColumnInfo(name = "custom_avatar_path")
     val customAvatarPath: String? = null,
 
-    @ColumnInfo(name = "custom_notification_sound")
-    val customNotificationSound: String? = null,
-
-    // Per-chat notification settings
+    // App-level notification mute toggle (independent of Android channel settings)
     @ColumnInfo(name = "notifications_enabled", defaultValue = "1")
     val notificationsEnabled: Boolean = true,
-
-    @ColumnInfo(name = "notification_priority", defaultValue = "'default'")
-    val notificationPriority: String = "default", // "priority", "default", "silent"
-
-    @ColumnInfo(name = "bubble_enabled", defaultValue = "0")
-    val bubbleEnabled: Boolean = false,
-
-    @ColumnInfo(name = "pop_on_screen", defaultValue = "1")
-    val popOnScreen: Boolean = true,
-
-    @ColumnInfo(name = "lock_screen_visibility", defaultValue = "'all'")
-    val lockScreenVisibility: String = "all", // "all", "hide_sensitive", "hide_all"
-
-    @ColumnInfo(name = "show_notification_dot", defaultValue = "1")
-    val showNotificationDot: Boolean = true,
-
-    @ColumnInfo(name = "vibration_enabled", defaultValue = "1")
-    val vibrationEnabled: Boolean = true,
 
     // Snooze notifications until timestamp (-1 = indefinite, null = not snoozed)
     @ColumnInfo(name = "snooze_until")

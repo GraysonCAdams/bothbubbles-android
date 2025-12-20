@@ -20,8 +20,6 @@ import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.services.messaging.MessageSendingService
-import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.PhoneNumberFormatter
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -33,9 +31,11 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Android Auto screen displaying messages in a conversation.
@@ -47,9 +47,7 @@ class ConversationDetailScreen(
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
-    private val messageSendingService: MessageSendingService,
     private val syncService: SyncService? = null,
-    private val socketConnection: SocketConnection? = null,
     private val featurePreferences: FeaturePreferences? = null,
     private val attachmentRepository: AttachmentRepository? = null,
     private val attachmentDao: AttachmentDao? = null,
@@ -65,8 +63,8 @@ class ConversationDetailScreen(
     // TTS for reading messages aloud
     private val textToSpeech by lazy { AutoTextToSpeech(carContext) }
 
-    // Cache for audio attachments by message guid
-    private val audioAttachmentCache = mutableMapOf<String, AttachmentEntity?>()
+    // Cache for audio attachments by message guid (thread-safe for coroutine access)
+    private val audioAttachmentCache = ConcurrentHashMap<String, AttachmentEntity?>()
 
     @Volatile
     private var cachedMessages: List<MessageEntity> = emptyList()
@@ -88,10 +86,12 @@ class ConversationDetailScreen(
     @Volatile
     private var privacyModeEnabled = false
 
-    // Cache for sender names to avoid blocking calls
-    private val senderNameCache = mutableMapOf<Long, String>()
+    // Cache for sender names to avoid blocking calls (thread-safe for coroutine access)
+    private val senderNameCache = ConcurrentHashMap<Long, String>()
 
-    private val dateFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
+    // Thread-safe date formatter
+    private val dateFormat = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+        .withZone(ZoneId.systemDefault())
 
     init {
         // Register lifecycle observer to cancel scope when screen is destroyed
@@ -280,52 +280,14 @@ class ConversationDetailScreen(
             )
         }
 
-        // Create action strip with reply and mark as read
-        val replyAction = Action.Builder()
-            .setTitle("Reply")
-            .setIcon(
-                CarIcon.Builder(
-                    IconCompat.createWithResource(carContext, android.R.drawable.ic_menu_send)
-                ).build()
-            )
-            .setOnClickListener {
-                // Push to voice reply screen
-                screenManager.push(
-                    VoiceReplyScreen(
-                        carContext = carContext,
-                        chat = chat,
-                        messageSendingService = messageSendingService,
-                        onMessageSent = {
-                            refreshMessages()
-                            onRefresh()
-                        },
-                        socketConnection = socketConnection
-                    )
-                )
-            }
-            .build()
-
-        val markReadAction = Action.Builder()
-            .setTitle("Mark Read")
-            .setOnClickListener {
-                screenScope.launch {
-                    try {
-                        chatRepository.markChatAsRead(chat.guid)
-                        CarToast.makeText(carContext, "Marked as read", CarToast.LENGTH_SHORT).show()
-                        onRefresh()
-                    } catch (e: Exception) {
-                        Timber.e(e, "Failed to mark as read")
-                    }
-                }
-            }
-            .build()
+        // NOTE: Reply functionality is handled via Android Auto's notification-based
+        // messaging (MessagingStyle notifications). This is the required pattern per
+        // Android Auto guidelines. Tap the notification to reply via voice.
 
         return ListTemplate.Builder()
             .setTitle(displayTitle)
             .setHeaderAction(Action.BACK)
             .setSingleList(itemListBuilder.build())
-            .addAction(replyAction)
-            .addAction(markReadAction)
             .build()
     }
 
@@ -354,7 +316,7 @@ class ConversationDetailScreen(
             getSenderName(message)
         }
 
-        val time = dateFormat.format(Date(message.dateCreated))
+        val time = dateFormat.format(Instant.ofEpochMilli(message.dateCreated))
 
         return try {
             val rowBuilder = Row.Builder()

@@ -235,6 +235,71 @@ class ConversationLoadingDelegate @AssistedInject constructor(
     }
 
     /**
+     * Load all remaining pages at once.
+     * Used when a filter is active - filters work on client-side data,
+     * so we need all conversations loaded to show all matching items.
+     */
+    suspend fun loadAllRemainingPages(
+        currentConversations: List<ConversationUiModel>,
+        typingChats: Set<String>
+    ): LoadResult {
+        if (_isLoadingMore.value) return LoadResult.AlreadyLoading
+        if (!_canLoadMore.value) return LoadResult.Success(currentConversations, false, _currentPage.value)
+
+        _isLoadingMore.value = true
+
+        try {
+            var allConversations = currentConversations.toMutableList()
+            var page = _currentPage.value
+
+            // Load pages until no more data
+            while (true) {
+                page++
+                val offset = page * PAGE_SIZE
+
+                val moreUnifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(PAGE_SIZE, offset)
+                val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
+                val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
+
+                val newConversations = buildConversationList(
+                    unifiedGroups = moreUnifiedGroups,
+                    groupChats = moreGroupChats,
+                    nonGroupChats = moreNonGroupChats,
+                    typingChats = typingChats
+                )
+
+                if (newConversations.isEmpty()) {
+                    break // No more data
+                }
+
+                // Merge with existing
+                val existingGuids = allConversations.map { it.guid }.toSet()
+                val uniqueNew = newConversations.filter { it.guid !in existingGuids }
+                allConversations.addAll(uniqueNew)
+            }
+
+            // Sort final result
+            val sorted = allConversations
+                .distinctBy { it.guid }
+                .sortedWith(
+                    compareByDescending<ConversationUiModel> { it.isPinned }
+                        .thenByDescending { it.lastMessageTimestamp }
+                )
+
+            _isLoadingMore.value = false
+            _currentPage.value = page
+            _canLoadMore.value = false
+
+            Timber.d("loadAllRemainingPages: Loaded all ${sorted.size} conversations")
+            return LoadResult.Success(sorted, false, page)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load all remaining conversations")
+            _isLoadingMore.value = false
+            return LoadResult.Error(e.message)
+        }
+    }
+
+    /**
      * Build conversation list from paginated entities.
      * Converts unified groups, group chats, and orphan 1:1 chats to UI models.
      *

@@ -26,6 +26,7 @@ import com.bothbubbles.services.notifications.BadgeManager
 import com.bothbubbles.services.notifications.NotificationMediaUpdater
 import com.bothbubbles.services.life360.Life360SyncWorker
 import com.bothbubbles.services.life360.Life360TokenStorage
+import com.bothbubbles.services.socket.SocketEventHandler
 import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.HapticUtils
@@ -100,6 +101,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var syncService: SyncService
+
+    @Inject
+    lateinit var socketEventHandler: SocketEventHandler
 
     @Inject
     lateinit var firebaseDatabaseService: FirebaseDatabaseService
@@ -184,6 +188,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         connectionModeManager.initialize()
         PerformanceProfiler.end(connectionModeId)
 
+        // Start socket event handler to process incoming messages in real-time
+        initializeSocketEventHandler()
+
         // Initialize SMS content observer for external SMS detection (Android Auto, etc.)
         initializeSmsObserver()
 
@@ -247,6 +254,18 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 Timber.w(e, "Error initializing haptics settings")
             }
         }
+    }
+
+    /**
+     * Start socket event handler to process incoming messages in real-time.
+     *
+     * The socket event handler listens for Socket.IO events (new messages, updates, etc.)
+     * and processes them to save to the database, show notifications, and trigger UI updates.
+     * Without this, socket events would be emitted but not processed.
+     */
+    private fun initializeSocketEventHandler() {
+        socketEventHandler.startListening()
+        Timber.i("Socket event handler started - listening for real-time message events")
     }
 
     /**
