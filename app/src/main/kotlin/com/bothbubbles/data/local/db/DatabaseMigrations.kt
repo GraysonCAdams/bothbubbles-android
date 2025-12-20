@@ -954,6 +954,19 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 41 to 42: Add auto_link_disabled column to life360_members.
+     *
+     * When a user manually unlinks a Life360 member from a contact in the settings,
+     * this flag is set to true to prevent autoMapContacts() from re-linking them
+     * on the next sync. The flag is cleared when the user manually links to a contact.
+     */
+    val MIGRATION_41_42 = object : Migration(41, 42) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE life360_members ADD COLUMN auto_link_disabled INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -999,6 +1012,7 @@ object DatabaseMigrations {
         MIGRATION_37_38,
         MIGRATION_38_39,
         MIGRATION_39_40,
-        MIGRATION_40_41
+        MIGRATION_40_41,
+        MIGRATION_41_42
     )
 }

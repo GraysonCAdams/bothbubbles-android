@@ -160,22 +160,30 @@ class Life360Repository @Inject constructor(
 
     /**
      * Map a Life360 member to a BothBubbles contact (handle).
+     * Also clears the auto_link_disabled flag so future auto-linking
+     * can work if the user unlinks again.
      */
     suspend fun mapMemberToContact(memberId: String, handleId: Long) {
         life360Dao.mapMemberToHandle(memberId, handleId)
+        life360Dao.setAutoLinkDisabled(memberId, false)
         Timber.d("Mapped Life360 member $memberId to handle $handleId")
     }
 
     /**
-     * Clear contact mapping for a member.
+     * Clear contact mapping for a member and disable auto-linking.
+     * The auto_link_disabled flag prevents autoMapContacts from re-linking
+     * this member on subsequent syncs.
      */
     suspend fun unmapMember(memberId: String) {
         life360Dao.unmapMember(memberId)
-        Timber.d("Unmapped Life360 member $memberId")
+        life360Dao.setAutoLinkDisabled(memberId, true)
+        Timber.d("Unmapped Life360 member $memberId and disabled auto-linking")
     }
 
     /**
      * Auto-map Life360 members to contacts by matching phone numbers.
+     * Skips members that are already mapped or have auto-linking disabled
+     * (i.e., were manually unlinked by the user).
      *
      * @return Number of members successfully mapped
      */
@@ -185,6 +193,7 @@ class Life360Repository @Inject constructor(
 
         for (member in membersWithPhones) {
             if (member.mappedHandleId != null) continue  // Already mapped
+            if (member.autoLinkDisabled) continue  // User manually unlinked, don't re-link
 
             val phoneNumber = member.phoneNumber ?: continue
             val normalizedPhone = PhoneNumberFormatter.normalize(phoneNumber)

@@ -51,7 +51,12 @@ fun MessageEntity.toUiModel(
             ReactionUiModel(
                 tapback = it,
                 isFromMe = reaction.isFromMe,
-                senderName = reaction.handleId?.let { id -> handleIdToName[id] }
+                senderName = resolveSenderName(
+                    reaction.senderAddress,
+                    reaction.handleId,
+                    addressToName,
+                    handleIdToName
+                )
             )
         }
     }

@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import com.bothbubbles.ui.theme.MotionTokens
@@ -175,27 +177,55 @@ fun MessageListItem(
         }
     }
 
-    // Hide the message when it's selected for tapback overlay (prevents double-vision)
+    // Focus state for tapback overlay: highlight selected, dim others
     val isSelectedForTapback = selectedMessageForTapback?.guid == message.guid
-    val tapbackHideAlpha by animateFloatAsState(
-        targetValue = if (isSelectedForTapback) 0f else 1f,
-        animationSpec = tween(
-            durationMillis = MotionTokens.Duration.SHORT_3,
-            delayMillis = MotionTokens.Duration.SHORT_1
-        ),
-        label = "tapbackHideAlpha"
+    val isFocusModeActive = selectedMessageForTapback != null
+
+    // Dim non-selected messages when focus mode is active
+    val focusDimAlpha by animateFloatAsState(
+        targetValue = when {
+            !isFocusModeActive -> 1f  // No focus mode: full opacity
+            isSelectedForTapback -> 1f  // Selected: full opacity
+            else -> 0.3f  // Other messages: dimmed
+        },
+        animationSpec = tween(durationMillis = MotionTokens.Duration.SHORT_4),
+        label = "focusDimAlpha"
     )
 
-    // Elevate zIndex for stickers and messages with reactions.
+    // Scale up selected message slightly
+    val focusScale by animateFloatAsState(
+        targetValue = if (isSelectedForTapback) 1.03f else 1f,
+        animationSpec = spring(
+            dampingRatio = Spring.DampingRatioMediumBouncy,
+            stiffness = Spring.StiffnessMedium
+        ),
+        label = "focusScale"
+    )
+
+    // Elevate selected message
+    val focusElevation by animateFloatAsState(
+        targetValue = if (isSelectedForTapback) 16f else 0f,
+        animationSpec = spring(stiffness = Spring.StiffnessMedium),
+        label = "focusElevation"
+    )
+
+    // Elevate zIndex for stickers, messages with reactions, and focused message.
     // In reversed LazyColumn, older items (visually above) are drawn after newer items,
     // so reactions extending upward would be covered without elevated zIndex.
-    val needsElevatedZIndex = message.isPlacedSticker || message.reactions.isNotEmpty()
+    val needsElevatedZIndex = message.isPlacedSticker ||
+        message.reactions.isNotEmpty() ||
+        isSelectedForTapback
 
     Column(
         modifier = Modifier
-            .graphicsLayer { clip = false }
-            .zIndex(if (needsElevatedZIndex) 1f else 0f)
-            .alpha(stickerFadeAlpha * tapbackHideAlpha)
+            .graphicsLayer {
+                clip = false
+                scaleX = focusScale
+                scaleY = focusScale
+                shadowElevation = focusElevation
+            }
+            .zIndex(if (isSelectedForTapback) 100f else if (needsElevatedZIndex) 1f else 0f)
+            .alpha(stickerFadeAlpha * focusDimAlpha)
             .offset(y = stickerOverlapOffset)
             .padding(top = topPadding)
             .newMessageEntrance(

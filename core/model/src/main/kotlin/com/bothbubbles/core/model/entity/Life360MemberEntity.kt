@@ -93,7 +93,12 @@ data class Life360MemberEntity(
 
     // Contact mapping (nullable FK to HandleEntity)
     @ColumnInfo(name = "mapped_handle_id")
-    val mappedHandleId: Long? = null
+    val mappedHandleId: Long? = null,
+
+    // Auto-linking control: when true, prevents autoMapContacts from re-linking
+    // Set to true when user manually unlinks, cleared when user manually links
+    @ColumnInfo(name = "auto_link_disabled", defaultValue = "0")
+    val autoLinkDisabled: Boolean = false
 ) {
     /**
      * Combined display name from first and last name.

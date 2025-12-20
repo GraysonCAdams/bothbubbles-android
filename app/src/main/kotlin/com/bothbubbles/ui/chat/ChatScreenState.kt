@@ -88,6 +88,17 @@ class ChatScreenState(
     var targetMessageHandled by mutableStateOf(false)
     var isScrollToSafetyInProgress by mutableStateOf(false)
 
+    // ===== Tapback Focus Scroll Preservation =====
+    /** Scroll position before tapback menu opened (for restoration on close) */
+    var preFocusScrollIndex by mutableStateOf<Int?>(null)
+        private set
+    var preFocusScrollOffset by mutableStateOf<Int?>(null)
+        private set
+
+    /** Whether we've scrolled to accommodate the menu (need to restore on close) */
+    var didScrollForFocus by mutableStateOf(false)
+        private set
+
     // ===== Message Effects & Animation =====
     // Track processed screen effects this session to avoid re-triggering
     val processedEffectMessages = mutableSetOf<String>()
@@ -124,10 +135,24 @@ class ChatScreenState(
         if (revealed) revealInvisibleInk(guid) else concealInvisibleInk(guid)
     }
 
-    /** Clears the tapback selection state */
+    /** Saves scroll position before opening tapback menu */
+    fun saveFocusScrollPosition(index: Int, offset: Int) {
+        preFocusScrollIndex = index
+        preFocusScrollOffset = offset
+    }
+
+    /** Marks that we scrolled to accommodate the menu */
+    fun markScrolledForFocus() {
+        didScrollForFocus = true
+    }
+
+    /** Clears the tapback selection state and scroll preservation */
     fun clearTapbackSelection() {
         selectedMessageForTapback = null
         selectedMessageBounds = null
+        preFocusScrollIndex = null
+        preFocusScrollOffset = null
+        didScrollForFocus = false
     }
 
     /** Clears the retry selection state */

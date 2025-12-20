@@ -145,6 +145,13 @@ interface Life360Dao {
     suspend fun unmapMember(memberId: String)
 
     /**
+     * Set auto_link_disabled flag for a member.
+     * When true, prevents autoMapContacts from re-linking this member.
+     */
+    @Query("UPDATE life360_members SET auto_link_disabled = :disabled WHERE member_id = :memberId")
+    suspend fun setAutoLinkDisabled(memberId: String, disabled: Boolean)
+
+    /**
      * Clear all handle mappings (e.g., when rebuilding mappings).
      */
     @Query("UPDATE life360_members SET mapped_handle_id = NULL")
@@ -170,22 +177,24 @@ interface Life360Dao {
     // ===== Upsert =====
 
     /**
-     * Upsert members from API response, preserving handle mappings.
+     * Upsert members from API response, preserving handle mappings and auto_link_disabled flags.
      */
     @Transaction
     suspend fun upsertMembers(circleId: String, members: List<Life360MemberEntity>) {
-        // Get existing mappings to preserve them
-        val existingMappings = getMembersByCircleOnce(circleId)
-            .filter { it.mappedHandleId != null }
-            .associate { it.memberId to it.mappedHandleId }
+        // Get existing members to preserve mappings and auto_link_disabled flags
+        val existingMembers = getMembersByCircleOnce(circleId).associateBy { it.memberId }
 
-        // Apply mappings to new members
-        val membersWithMappings = members.map { member ->
-            member.copy(mappedHandleId = existingMappings[member.memberId])
+        // Apply preserved values to new members
+        val membersWithPreservedState = members.map { member ->
+            val existing = existingMembers[member.memberId]
+            member.copy(
+                mappedHandleId = existing?.mappedHandleId,
+                autoLinkDisabled = existing?.autoLinkDisabled ?: false
+            )
         }
 
         // Insert/replace all members
-        insertMembers(membersWithMappings)
+        insertMembers(membersWithPreservedState)
 
         // Clean up members no longer in circle
         val currentMemberIds = members.map { it.memberId }

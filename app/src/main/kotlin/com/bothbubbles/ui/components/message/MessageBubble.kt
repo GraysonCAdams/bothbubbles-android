@@ -155,34 +155,12 @@ fun MessageBubble(
     val shouldShowAvatarSpace = isGroupChat && !message.isFromMe
     val avatarSize = 28.dp
 
-    // Wrap content in a column to show reply indicator above the bubble
+    // Wrap content in a column for the message content
     // Align based on whether this message (the reply) is from me
     Column(
         modifier = modifier,
         horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
     ) {
-        // Reply quote indicator (shown above reply messages)
-        message.replyPreview?.let { preview ->
-            message.threadOriginatorGuid?.let { originGuid ->
-                // Add left padding to align with message bubble when avatar space is present
-                val replyPadding = if (shouldShowAvatarSpace) (avatarSize + 8.dp) else 0.dp
-                ReplyQuoteIndicator(
-                    replyPreview = preview,
-                    isFromMe = message.isFromMe,
-                    onTap = {
-                        // Tap scrolls to original if callback provided, otherwise fall back to thread
-                        if (onScrollToOriginal != null) {
-                            onScrollToOriginal(originGuid)
-                        } else {
-                            onReplyIndicatorClick?.invoke(originGuid)
-                        }
-                    },
-                    onLongPress = { onReplyIndicatorClick?.invoke(originGuid) },
-                    modifier = Modifier.padding(start = replyPadding)
-                )
-            }
-        }
-
         // Haptic feedback for selection toggle
         val hapticFeedback = LocalHapticFeedback.current
         val handleSelectionToggle: () -> Unit = {
@@ -229,6 +207,20 @@ fun MessageBubble(
             // Message content - disable media/link interactions in selection mode
             val effectiveOnMediaClick: (String) -> Unit = if (isSelectionMode) { _ -> } else onMediaClick
 
+            // Prepare reply quote tap handler
+            val onReplyQuoteTap: (() -> Unit)? = message.threadOriginatorGuid?.let { originGuid ->
+                {
+                    if (onScrollToOriginal != null) {
+                        onScrollToOriginal(originGuid)
+                    } else {
+                        onReplyIndicatorClick?.invoke(originGuid)
+                    }
+                }
+            }
+            val onReplyQuoteLongPress: (() -> Unit)? = message.threadOriginatorGuid?.let { originGuid ->
+                { onReplyIndicatorClick?.invoke(originGuid) }
+            }
+
             if (needsSegmentation) {
                 // Use segmented rendering for messages with media/links
                 SegmentedMessageBubble(
@@ -253,6 +245,9 @@ fun MessageBubble(
                     isSelectionMode = isSelectionMode,
                     isSelected = isSelected,
                     onSelectionToggle = onSelectionToggle,
+                    replyPreview = message.replyPreview,
+                    onReplyQuoteTap = onReplyQuoteTap,
+                    onReplyQuoteLongPress = onReplyQuoteLongPress,
                     modifier = Modifier.weight(1f)
                 )
             } else {
@@ -279,6 +274,9 @@ fun MessageBubble(
                     isSelectionMode = isSelectionMode,
                     isSelected = isSelected,
                     onSelectionToggle = onSelectionToggle,
+                    replyPreview = message.replyPreview,
+                    onReplyQuoteTap = onReplyQuoteTap,
+                    onReplyQuoteLongPress = onReplyQuoteLongPress,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -502,5 +500,137 @@ fun MessageTypeChip(
             color = color,
             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
         )
+    }
+}
+
+/**
+ * Inline reply quote displayed inside the message bubble at the top.
+ * Shows a compact preview of the original message being replied to.
+ *
+ * @param replyPreview The preview data for the quoted message
+ * @param isFromMe Whether the current message (not the quoted one) is from the user
+ * @param bubbleColor The background color of the parent bubble (used for contrast)
+ * @param onTap Called when tapped - should scroll to original message
+ * @param onLongPress Called when long-pressed - should open thread overlay
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun InlineReplyQuote(
+    replyPreview: ReplyPreviewData,
+    isFromMe: Boolean,
+    bubbleColor: Color,
+    onTap: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    val hapticFeedback = LocalHapticFeedback.current
+
+    // Determine colors based on bubble context
+    val accentColor = if (replyPreview.isFromMe)
+        BothBubblesTheme.bubbleColors.iMessageSent
+    else
+        MaterialTheme.colorScheme.primary
+
+    // Use a semi-transparent overlay that works on both light and dark bubbles
+    val quoteBackgroundColor = if (isFromMe) {
+        Color.Black.copy(alpha = 0.1f)
+    } else {
+        Color.Black.copy(alpha = 0.06f)
+    }
+
+    // Text colors that work on the quote background
+    val senderTextColor = accentColor
+    val previewTextColor = if (isFromMe) {
+        BothBubblesTheme.bubbleColors.iMessageSentText.copy(alpha = 0.8f)
+    } else {
+        BothBubblesTheme.bubbleColors.receivedText.copy(alpha = 0.8f)
+    }
+
+    Surface(
+        color = quoteBackgroundColor,
+        shape = RoundedCornerShape(8.dp),
+        modifier = modifier
+            .fillMaxWidth()
+            .then(
+                if (onTap != null || onLongPress != null) {
+                    Modifier.combinedClickable(
+                        onClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onTap?.invoke()
+                        },
+                        onLongClick = {
+                            hapticFeedback.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onLongPress?.invoke()
+                        }
+                    )
+                } else {
+                    Modifier
+                }
+            )
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Vertical accent bar
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(28.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(accentColor)
+            )
+
+            Spacer(modifier = Modifier.width(8.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                // Sender name
+                Text(
+                    text = if (replyPreview.isFromMe) "You" else (replyPreview.senderName ?: "Unknown"),
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.Medium,
+                    color = senderTextColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+
+                // Preview text
+                val displayText = when {
+                    replyPreview.isNotLoaded -> "Tap to view"
+                    replyPreview.previewText.isNullOrBlank() && replyPreview.hasAttachment -> "📎 Attachment"
+                    replyPreview.previewText.isNullOrBlank() -> "Message"
+                    else -> replyPreview.previewText
+                }
+
+                Text(
+                    text = displayText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = previewTextColor,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+
+            // Thumbnail preview for images/videos
+            if (replyPreview.thumbnailUri != null) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant),
+                    contentAlignment = Alignment.Center
+                ) {
+                    AsyncImage(
+                        model = File(replyPreview.thumbnailUri),
+                        contentDescription = "Quoted attachment",
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(6.dp)),
+                        contentScale = ContentScale.Crop
+                    )
+                }
+            }
+        }
     }
 }

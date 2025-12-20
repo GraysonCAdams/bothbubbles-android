@@ -125,7 +125,11 @@ internal fun SimpleBubbleContent(
     // Multi-message selection support
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
-    onSelectionToggle: (() -> Unit)? = null
+    onSelectionToggle: (() -> Unit)? = null,
+    // Inline reply quote support
+    replyPreview: ReplyPreviewData? = null,
+    onReplyQuoteTap: (() -> Unit)? = null,
+    onReplyQuoteLongPress: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -488,12 +492,31 @@ internal fun SimpleBubbleContent(
                                 )
                             }
                     ) {
+                    // Determine bubble color for passing to inline quote
+                    val currentBubbleColor = if (isLargeEmoji) Color.Transparent else when {
+                        message.isFromMe && isIMessage -> bubbleColors.iMessageSent
+                        message.isFromMe -> bubbleColors.smsSent
+                        else -> bubbleColors.received
+                    }
+
                     Column(
                         modifier = Modifier.padding(
                             horizontal = 16.dp,
                             vertical = 12.dp
                         )
                     ) {
+                        // Inline reply quote at the top of the bubble
+                        replyPreview?.let { preview ->
+                            InlineReplyQuote(
+                                replyPreview = preview,
+                                isFromMe = message.isFromMe,
+                                bubbleColor = currentBubbleColor,
+                                onTap = onReplyQuoteTap,
+                                onLongPress = onReplyQuoteLongPress,
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+
                         // Attachments
                         // TEMPORARILY DISABLED: Skip attachment rendering to focus on text-only performance
                         // if (message.attachments.isNotEmpty()) {
@@ -770,7 +793,7 @@ internal fun SimpleBubbleContent(
                         modifier = Modifier
                             .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
                             .offset(
-                                x = if (message.isFromMe) (-20).dp else 20.dp,
+                                x = if (message.isFromMe) (-14).dp else 14.dp,
                                 y = (-15).dp
                             )
                     )

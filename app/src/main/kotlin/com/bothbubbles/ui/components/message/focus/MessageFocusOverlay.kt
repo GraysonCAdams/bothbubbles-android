@@ -2,34 +2,26 @@ package com.bothbubbles.ui.components.message.focus
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
@@ -43,26 +35,21 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.theme.MotionTokens
-import kotlinx.collections.immutable.ImmutableSet
 import kotlin.math.roundToInt
 
 /**
  * Full-screen overlay for tapback/reaction menu with Material Design 3 styling.
  *
- * This overlay uses a same-window layered approach (not Popup) which provides:
- * - No clipping issues at screen edges
- * - Proper touch event handling
- * - Single composition for synchronized animations
- * - Full z-index control
+ * This overlay provides a tap-to-dismiss layer and positions the menu card
+ * above the focused message. The actual message highlighting and other-message
+ * dimming is handled in MessageListItem, not here.
  *
  * Architecture:
  * ```
  * ┌─────────────────────────────────────────┐
- * │  Layer 3: Menu (positioned)             │  ← Reaction picker + actions
+ * │  Layer 2: Menu (positioned above msg)   │  ← Reaction picker + actions
  * ├─────────────────────────────────────────┤
- * │  Layer 2: Message Ghost (elevated)      │  ← Re-rendered message
- * ├─────────────────────────────────────────┤
- * │  Layer 1: Scrim (full-screen)           │  ← Dims background
+ * │  Layer 1: Tap-to-dismiss (transparent)  │  ← Intercepts taps outside menu
  * └─────────────────────────────────────────┘
  * ```
  *
@@ -72,7 +59,7 @@ import kotlin.math.roundToInt
  * @param onReply Called when user taps reply
  * @param onCopy Called when user taps copy
  * @param onForward Called when user taps forward
- * @param messageContent Composable to render the focused message
+ * @param onSelect Called when user taps select
  */
 @Composable
 fun MessageFocusOverlay(
@@ -83,8 +70,7 @@ fun MessageFocusOverlay(
     onCopy: () -> Unit = {},
     onForward: () -> Unit = {},
     onSelect: () -> Unit = {},
-    modifier: Modifier = Modifier,
-    messageContent: @Composable BoxScope.() -> Unit
+    modifier: Modifier = Modifier
 ) {
     // Back button dismisses overlay
     BackHandler(enabled = state.isValid) {
@@ -119,7 +105,7 @@ fun MessageFocusOverlay(
         )
     }
 
-    // Calculate menu position
+    // Calculate menu position (always above the message now)
     val menuPosition = remember(bounds, safeZone, screenWidth, screenHeight, state.isFromMe) {
         calculateMenuPosition(
             messageBounds = bounds,
@@ -130,30 +116,6 @@ fun MessageFocusOverlay(
             density = density.density
         )
     }
-
-    // Animated scrim alpha
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (state.visible) 0.5f else 0f,
-        animationSpec = tween(MotionTokens.Duration.MEDIUM_1),
-        label = "scrimAlpha"
-    )
-
-    // Animated message elevation (lift effect)
-    val messageElevation by animateFloatAsState(
-        targetValue = if (state.visible) 16f else 0f,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "messageElevation"
-    )
-
-    // Animated message scale (subtle zoom)
-    val messageScale by animateFloatAsState(
-        targetValue = if (state.visible) 1.03f else 1f,
-        animationSpec = spring(
-            dampingRatio = Spring.DampingRatioMediumBouncy,
-            stiffness = Spring.StiffnessMedium
-        ),
-        label = "messageScale"
-    )
 
     // Focus requester for accessibility
     val focusRequester = remember { FocusRequester() }
@@ -170,11 +132,11 @@ fun MessageFocusOverlay(
             .fillMaxSize()
             .zIndex(1000f)
     ) {
-        // Layer 1: Scrim - dims background, dismisses on tap
+        // Layer 1: Transparent tap-to-dismiss layer
+        // (Message dimming is handled in MessageListItem, not here)
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(MaterialTheme.colorScheme.scrim.copy(alpha = scrimAlpha))
                 .semantics {
                     contentDescription = "Dismiss message options"
                     onClick(label = "Dismiss") {
@@ -187,28 +149,7 @@ fun MessageFocusOverlay(
                 }
         )
 
-        // Layer 2: Message Ghost - re-rendered message with elevation
-        Box(
-            modifier = Modifier
-                .offset {
-                    IntOffset(
-                        x = bounds.left.roundToInt(),
-                        y = bounds.top.roundToInt()
-                    )
-                }
-                .graphicsLayer {
-                    scaleX = messageScale
-                    scaleY = messageScale
-                    transformOrigin = TransformOrigin(0.5f, 0.5f)
-                    shadowElevation = messageElevation
-                    shape = RoundedCornerShape(20.dp)
-                    clip = false
-                }
-        ) {
-            messageContent()
-        }
-
-        // Layer 3: Menu - positioned above or below message
+        // Layer 2: Menu - positioned above the message
         AnimatedVisibility(
             visible = state.visible,
             enter = fadeIn(tween(MotionTokens.Duration.SHORT_4, delayMillis = 50)) +
@@ -298,7 +239,7 @@ private fun calculateMenuPosition(
 ): OverlayPosition {
     val spacing = 12 * density
     val margin = 16 * density
-    val estimatedMenuHeight = 220 * density // Reactions + 3 actions
+    val estimatedMenuHeight = 120 * density // Reactions row + horizontal actions bar
     val estimatedMenuWidth = 280 * density
 
     // Usable area

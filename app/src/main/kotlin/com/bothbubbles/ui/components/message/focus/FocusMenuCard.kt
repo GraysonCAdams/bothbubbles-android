@@ -11,20 +11,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.CheckBox
-import androidx.compose.material.icons.outlined.ContentCopy
-import androidx.compose.material.icons.outlined.ForwardToInbox
-import androidx.compose.material.icons.outlined.Quickreply
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,7 +30,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -176,37 +167,45 @@ fun FocusMenuCard(
                 }
             }
 
-            // === Actions List ===
-            Column(
-                modifier = Modifier.padding(vertical = 4.dp)
+            // === Horizontal Actions Bar ===
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                var needsSeparator = false
+
                 if (canReply) {
-                    ActionItem(
-                        icon = Icons.Outlined.Quickreply,
+                    ActionTextButton(
                         label = "Reply",
                         onClick = onReply
                     )
+                    needsSeparator = true
                 }
 
                 if (canCopy) {
-                    ActionItem(
-                        icon = Icons.Outlined.ContentCopy,
+                    if (needsSeparator) ActionSeparator()
+                    ActionTextButton(
                         label = "Copy",
                         onClick = onCopy
                     )
+                    needsSeparator = true
                 }
 
                 if (canForward) {
-                    ActionItem(
-                        icon = Icons.Outlined.ForwardToInbox,
+                    if (needsSeparator) ActionSeparator()
+                    ActionTextButton(
                         label = "Forward",
                         onClick = onForward
                     )
+                    needsSeparator = true
                 }
 
                 // Always show Select action to enter multi-select mode
-                ActionItem(
-                    icon = Icons.Outlined.CheckBox,
+                if (needsSeparator) ActionSeparator()
+                ActionTextButton(
                     label = "Select",
                     onClick = onSelect
                 )
@@ -285,39 +284,39 @@ private fun ReactionEmoji(
 }
 
 /**
- * Individual action item with icon and label.
+ * Horizontal action text button (no icon).
  */
 @Composable
-private fun ActionItem(
-    icon: ImageVector,
+private fun ActionTextButton(
     label: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
+    Text(
+        text = label,
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.primary,
         modifier = modifier
-            .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .padding(horizontal = 8.dp, vertical = 6.dp)
             .semantics {
                 contentDescription = label
                 role = Role.Button
-            },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = null, // Handled by row semantics
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp)
-        )
-        Spacer(modifier = Modifier.width(14.dp))
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyLarge,
-            color = MaterialTheme.colorScheme.onSurface
-        )
-    }
+            }
+    )
+}
+
+/**
+ * Separator between action buttons.
+ */
+@Composable
+private fun ActionSeparator() {
+    Text(
+        text = "|",
+        style = MaterialTheme.typography.labelLarge,
+        color = MaterialTheme.colorScheme.outlineVariant,
+        modifier = Modifier.padding(horizontal = 2.dp)
+    )
 }
 
 /**
@@ -338,20 +337,24 @@ fun ActionOnlyMenuCard(
         shadowElevation = 8.dp,
         color = MaterialTheme.colorScheme.surfaceContainerHigh
     ) {
-        Column(
-            modifier = Modifier.padding(vertical = 4.dp)
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
             if (canCopy) {
-                ActionItem(
-                    icon = Icons.Outlined.ContentCopy,
+                ActionTextButton(
                     label = "Copy",
                     onClick = onCopy
                 )
             }
 
+            if (canCopy && canForward) {
+                ActionSeparator()
+            }
+
             if (canForward) {
-                ActionItem(
-                    icon = Icons.Outlined.ForwardToInbox,
+                ActionTextButton(
                     label = "Forward",
                     onClick = onForward
                 )

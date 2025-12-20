@@ -128,7 +128,11 @@ internal fun SegmentedMessageBubble(
     // Multi-message selection support
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
-    onSelectionToggle: (() -> Unit)? = null
+    onSelectionToggle: (() -> Unit)? = null,
+    // Inline reply quote support
+    replyPreview: ReplyPreviewData? = null,
+    onReplyQuoteTap: (() -> Unit)? = null,
+    onReplyQuoteLongPress: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -412,6 +416,30 @@ internal fun SegmentedMessageBubble(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
+                        // Inline reply quote at the top (wrapped in a bubble-like surface)
+                        replyPreview?.let { preview ->
+                            val quoteBubbleColor = when {
+                                message.isFromMe && isIMessage -> bubbleColors.iMessageSent
+                                message.isFromMe -> bubbleColors.smsSent
+                                else -> bubbleColors.received
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(18.dp),
+                                color = quoteBubbleColor,
+                                modifier = Modifier.widthIn(max = 240.dp)
+                            ) {
+                                Box(modifier = Modifier.padding(12.dp)) {
+                                    InlineReplyQuote(
+                                        replyPreview = preview,
+                                        isFromMe = message.isFromMe,
+                                        bubbleColor = quoteBubbleColor,
+                                        onTap = onReplyQuoteTap,
+                                        onLongPress = onReplyQuoteLongPress
+                                    )
+                                }
+                            }
+                        }
+
                         segments.forEachIndexed { index, segment ->
                             when (segment) {
                                 is MessageSegment.MediaSegment -> {
@@ -505,7 +533,7 @@ internal fun SegmentedMessageBubble(
                             modifier = Modifier
                                 .align(if (message.isFromMe) Alignment.TopStart else Alignment.TopEnd)
                                 .offset(
-                                    x = if (message.isFromMe) (-20).dp else 20.dp,
+                                    x = if (message.isFromMe) (-14).dp else 14.dp,
                                     y = (-15).dp
                                 )
                         )

@@ -186,6 +186,9 @@ class ChatComposerDelegate @AssistedInject constructor(
     private val _isFetchingLocation = MutableStateFlow(false)
     val isFetchingLocation: StateFlow<Boolean> = _isFetchingLocation.asStateFlow()
 
+    // Text field focus state (for keyboard/panel coordination)
+    private val _isTextFieldFocused = MutableStateFlow(false)
+
     // ============================================================================
     // MEMOIZATION CACHES
     // For expensive transformations inside the combine block
@@ -288,7 +291,8 @@ class ChatComposerDelegate @AssistedInject constructor(
             _attachmentQuality,
             _activePanel,
             mentionState,
-            _isFetchingLocation
+            _isFetchingLocation,
+            _isTextFieldFocused
         ) { values: Array<Any?> ->
             @Suppress("UNCHECKED_CAST")
             val relevant = values[0] as? ComposerRelevantState ?: ComposerRelevantState()
@@ -302,6 +306,7 @@ class ChatComposerDelegate @AssistedInject constructor(
             val popupState = mentionTriple?.second ?: MentionPopupState.Hidden
             val isGroup = mentionTriple?.third ?: false
             val fetchingLocation = values[7] as? Boolean ?: false
+            val textFieldFocused = values[8] as? Boolean ?: false
 
             // Memoized attachment transformation - only rebuild if inputs changed
             val attachmentItems = if (attachments === _lastAttachmentInputs && quality == _lastAttachmentQuality) {
@@ -342,6 +347,7 @@ class ChatComposerDelegate @AssistedInject constructor(
 
             ComposerState(
                 text = text,
+                isTextFieldFocused = textFieldFocused,
                 attachments = attachmentItems,
                 attachmentWarning = relevant.attachmentWarning?.let { warning ->
                     ComposerAttachmentWarning(
@@ -412,6 +418,13 @@ class ChatComposerDelegate @AssistedInject constructor(
             is ComposerEvent.TextChanged -> {
                 // Timber.tag("PerfTrace").d("TextChanged event received, text length=${event.text.length}")
                 _draftText.value = event.text
+            }
+            is ComposerEvent.TextFieldFocusChanged -> {
+                _isTextFieldFocused.value = event.isFocused
+                // When text field gains focus, dismiss any open panel (keyboard takes over)
+                if (event.isFocused && _activePanel.value != ComposerPanel.None) {
+                    _activePanel.value = ComposerPanel.None
+                }
             }
             is ComposerEvent.AddAttachments -> {
                 addAttachments(event.uris)

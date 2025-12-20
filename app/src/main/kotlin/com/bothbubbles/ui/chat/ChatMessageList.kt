@@ -631,6 +631,7 @@ fun ChatMessageList(
                     // Overlays (jump to bottom + message spotlight)
                     MessageListOverlays(
                         listState = listState,
+                        chatScreenState = chatScreenState,
                         isScrolledAwayFromBottom = isScrolledAwayFromBottom,
                         newMessageCountWhileAway = newMessageCountWhileAway,
                         onResetNewMessageCount = { newMessageCountWhileAway = 0 },

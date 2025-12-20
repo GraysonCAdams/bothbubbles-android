@@ -214,9 +214,13 @@ private fun VideoPlayerActive(
     onFullscreenClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Clamp aspect ratio to prevent extreme proportions
+    val clampedAspectRatio = aspectRatio.coerceIn(0.4f, 2.5f)
+
     Box(
         modifier = modifier
             .widthIn(max = MediaSizing.MAX_WIDTH)
+            .aspectRatio(clampedAspectRatio)
             .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(Color.Black)
@@ -323,15 +327,17 @@ private fun VideoThumbnailWithControls(
 
     val thumbnailUrl = attachment.thumbnailPath ?: attachment.localPath ?: attachment.webUrl
 
+    // Clamp aspect ratio to prevent extreme proportions
+    val clampedAspectRatio = aspectRatio.coerceIn(0.4f, 2.5f)
+
     val density = LocalDensity.current
     val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
-    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+    val targetHeightPx = (maxWidthPx / clampedAspectRatio).toInt()
 
     Box(
         modifier = modifier
             .widthIn(max = MediaSizing.MAX_WIDTH)
+            .aspectRatio(clampedAspectRatio)
             .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -348,7 +354,7 @@ private fun VideoThumbnailWithControls(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, targetHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",
@@ -472,16 +478,18 @@ private fun VideoThumbnailFallback(
         16f / 9f // Default video aspect ratio
     }
 
+    // Clamp aspect ratio to prevent extreme proportions
+    val clampedAspectRatio = aspectRatio.coerceIn(0.4f, 2.5f)
+
     // Calculate target size in pixels for memory-efficient loading
     val density = LocalDensity.current
     val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
-    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+    val targetHeightPx = (maxWidthPx / clampedAspectRatio).toInt()
 
     Box(
         modifier = modifier
             .widthIn(max = MediaSizing.MAX_WIDTH)
+            .aspectRatio(clampedAspectRatio)
             .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
@@ -493,7 +501,7 @@ private fun VideoThumbnailFallback(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(thumbnailUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, targetHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Video",

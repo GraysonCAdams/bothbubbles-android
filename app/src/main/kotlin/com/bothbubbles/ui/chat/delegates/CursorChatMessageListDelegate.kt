@@ -464,22 +464,28 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
         // Build reply preview map
         val replyPreviewMap = buildReplyPreviewMap(dedupedEntities)
 
-        // Fetch missing handles
+        // Fetch missing handles (include both messages and reactions)
         val mutableHandleIdToName = handleIdToName.toMutableMap()
-        val missingHandleIds = dedupedEntities
+        val allEntitiesForHandles = dedupedEntities + reactions
+        val missingHandleIds = allEntitiesForHandles
             .filter { !it.isFromMe && it.handleId != null && it.handleId !in mutableHandleIdToName }
             .mapNotNull { it.handleId }
             .distinct()
+
+        // Also make addressToName mutable so we can add entries for reactions
+        val mutableAddressToName = addressToName.toMutableMap()
 
         if (missingHandleIds.isNotEmpty()) {
             val handles = handleRepository.getHandlesByIds(missingHandleIds)
             handles.forEach { handle ->
                 val normalizedAddress = normalizeAddress(handle.address)
-                val matchingName = addressToName[normalizedAddress]
+                val matchingName = mutableAddressToName[normalizedAddress]
                 if (matchingName != null) {
                     mutableHandleIdToName[handle.id] = matchingName
                 } else {
                     mutableHandleIdToName[handle.id] = handle.displayName
+                    // Also add to addressToName so senderAddress lookups work
+                    mutableAddressToName[normalizedAddress] = handle.displayName
                 }
             }
         }
@@ -495,7 +501,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 reactions = entityReactions,
                 attachments = entityAttachments,
                 handleIdToName = mutableHandleIdToName,
-                addressToName = addressToName,
+                addressToName = mutableAddressToName,
                 addressToAvatarPath = addressToAvatarPath,
                 replyPreview = replyPreview
             )

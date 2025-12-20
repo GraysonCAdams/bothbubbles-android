@@ -6,15 +6,19 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
+import com.bothbubbles.ui.chat.ChatScreenState
 import com.bothbubbles.ui.components.message.JumpToBottomIndicator
-import com.bothbubbles.ui.components.message.MessageBubble
-import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.components.message.focus.MessageFocusOverlay
@@ -37,11 +41,14 @@ data class MessageListOverlayCallbacks(
  *
  * Includes:
  * - Jump to bottom indicator (shows new message count)
- * - Message spotlight overlay (tapback reactions and actions)
+ * - Message focus overlay (tapback reactions and actions)
+ * - Scroll-to-accommodate logic (scrolls list to make room for menu above message)
+ * - Scroll restoration on dismiss
  */
 @Composable
 fun MessageListOverlays(
     listState: LazyListState,
+    chatScreenState: ChatScreenState,
     isScrolledAwayFromBottom: Boolean,
     newMessageCountWhileAway: Int,
     onResetNewMessageCount: () -> Unit,
@@ -56,6 +63,52 @@ fun MessageListOverlays(
 ) {
     val context = LocalContext.current
     val scrollScope = rememberCoroutineScope()
+    val density = LocalDensity.current
+    val view = LocalView.current
+
+    // Get safe area top (status bar height)
+    val safeAreaTop = remember(view) {
+        val windowInsets = ViewCompat.getRootWindowInsets(view)
+        val systemBars = windowInsets?.getInsets(WindowInsetsCompat.Type.systemBars())
+        (systemBars?.top ?: 0).toFloat()
+    }
+
+    // Menu height estimate (reactions row + horizontal actions bar)
+    val menuHeightPx = with(density) { 120.dp.toPx() }
+    val spacingPx = with(density) { 16.dp.toPx() }
+
+    // Save scroll position when a message is selected
+    LaunchedEffect(selectedMessageForTapback) {
+        if (selectedMessageForTapback != null && chatScreenState.preFocusScrollIndex == null) {
+            // Save current scroll position before any accommodation scroll
+            chatScreenState.saveFocusScrollPosition(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset
+            )
+        }
+    }
+
+    // Scroll to accommodate menu when bounds are available
+    LaunchedEffect(selectedMessageBounds) {
+        val bounds = selectedMessageBounds ?: return@LaunchedEffect
+        if (selectedMessageForTapback == null) return@LaunchedEffect
+
+        // Calculate space above the message
+        val spaceAbove = bounds.top - safeAreaTop - spacingPx
+        val spaceNeeded = menuHeightPx + spacingPx
+
+        if (spaceAbove < spaceNeeded) {
+            // Need to scroll up to make room for the menu
+            // Increase the scroll offset to push content up
+            val scrollAmount = (spaceNeeded - spaceAbove).toInt()
+            val currentIndex = listState.firstVisibleItemIndex
+            val currentOffset = listState.firstVisibleItemScrollOffset
+            val newOffset = currentOffset + scrollAmount
+
+            chatScreenState.markScrolledForFocus()
+            listState.animateScrollToItem(currentIndex, newOffset)
+        }
+    }
 
     Box(modifier = modifier.fillMaxSize()) {
         // Jump to bottom indicator
@@ -92,13 +145,29 @@ fun MessageListOverlays(
             }
         }
 
-        // Message Focus Overlay
-        MessageFocusOverlay(
-            state = focusState,
-            onDismiss = {
+        // Dismiss handler that restores scroll position
+        val handleDismiss: () -> Unit = {
+            scrollScope.launch {
+                // Restore scroll position if we scrolled to accommodate
+                if (chatScreenState.didScrollForFocus) {
+                    val savedIndex = chatScreenState.preFocusScrollIndex
+                    val savedOffset = chatScreenState.preFocusScrollOffset
+                    if (savedIndex != null) {
+                        listState.animateScrollToItem(savedIndex, savedOffset ?: 0)
+                    }
+                }
+
+                // Clear selection state
+                chatScreenState.clearTapbackSelection()
                 onSelectMessageForTapback(null)
                 onSelectedBoundsChange(null)
-            },
+            }
+        }
+
+        // Message Focus Overlay (menu only, no ghost - highlighting is in MessageListItem)
+        MessageFocusOverlay(
+            state = focusState,
+            onDismiss = handleDismiss,
             onReactionSelected = { tapback ->
                 selectedMessageForTapback?.let { message ->
                     callbacks.onToggleReaction(message.guid, tapback)
@@ -126,18 +195,6 @@ fun MessageListOverlays(
                     callbacks.onEnterSelectionMode(message.guid)
                 }
             }
-        ) {
-            // Render the focused message as the "ghost"
-            selectedMessageForTapback?.let { message ->
-                MessageBubble(
-                    message = message,
-                    onLongPress = {},
-                    onMediaClick = {},
-                    groupPosition = MessageGroupPosition.SINGLE,
-                    showDeliveryIndicator = false,
-                    onBoundsChanged = null
-                )
-            }
-        }
+        )
     }
 }

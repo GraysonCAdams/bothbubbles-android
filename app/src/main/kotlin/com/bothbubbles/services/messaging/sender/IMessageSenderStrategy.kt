@@ -19,7 +19,8 @@ import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.AttachmentQuality
 import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.core.network.api.ProgressRequestBody
+import com.bothbubbles.core.network.api.FileStreamingRequestBody
+import com.bothbubbles.core.network.api.UriStreamingRequestBody
 import com.bothbubbles.core.network.api.dto.AttributedBodyDto
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.core.network.api.dto.SendMessageRequest
@@ -427,7 +428,7 @@ class IMessageSenderStrategy @Inject constructor(
         val isImage = imageCompressor.isCompressible(mimeType)
         val shouldCompressImage = isImage && imageQuality != AttachmentQuality.AUTO && imageQuality != AttachmentQuality.ORIGINAL
 
-        val bytes: ByteArray
+        // Track compressed file path for cleanup and streaming source selection
         var compressedPath: String? = null
 
         if (shouldCompressImage) {
@@ -437,14 +438,10 @@ class IMessageSenderStrategy @Inject constructor(
 
             if (compressionResult != null) {
                 compressedPath = compressionResult.path
-                bytes = File(compressedPath).readBytes()
                 if (compressionResult.path.endsWith(".jpg")) {
                     mimeType = "image/jpeg"
                     fileName = fileName.substringBeforeLast('.') + ".jpg"
                 }
-            } else {
-                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw MessageError.UnsupportedAttachment("unknown")
             }
         } else if (shouldCompressVideo) {
             val qualityStr = settingsDataStore.videoCompressionQuality.first()
@@ -461,24 +458,31 @@ class IMessageSenderStrategy @Inject constructor(
             }
 
             if (compressedPath != null) {
-                bytes = File(compressedPath).readBytes()
                 mimeType = "video/mp4"
                 fileName = fileName.substringBeforeLast('.') + ".mp4"
-            } else {
-                bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                    ?: throw MessageError.UnsupportedAttachment("unknown")
+            }
+        }
+
+        // Create streaming request body - never loads entire file into memory
+        // Uses FileStreamingRequestBody for compressed temp files, UriStreamingRequestBody for original URIs
+        val streamingRequestBody = if (compressedPath != null) {
+            FileStreamingRequestBody(
+                file = File(compressedPath),
+                contentType = mimeType.toMediaTypeOrNull()
+            ) { bytesWritten, totalBytes ->
+                _uploadProgress.value = UploadProgress(fileName, bytesWritten, totalBytes, attachmentIndex, totalAttachments)
             }
         } else {
-            bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
-                ?: throw MessageError.UnsupportedAttachment("unknown")
+            UriStreamingRequestBody(
+                contentResolver = contentResolver,
+                uri = uri,
+                contentType = mimeType.toMediaTypeOrNull()
+            ) { bytesWritten, totalBytes ->
+                _uploadProgress.value = UploadProgress(fileName, bytesWritten, totalBytes, attachmentIndex, totalAttachments)
+            }
         }
 
-        val baseRequestBody = bytes.toRequestBody(mimeType.toMediaTypeOrNull())
-        val progressRequestBody = ProgressRequestBody(baseRequestBody) { bytesWritten, contentLength ->
-            _uploadProgress.value = UploadProgress(fileName, bytesWritten, contentLength, attachmentIndex, totalAttachments)
-        }
-
-        val filePart = MultipartBody.Part.createFormData("attachment", fileName, progressRequestBody)
+        val filePart = MultipartBody.Part.createFormData("attachment", fileName, streamingRequestBody)
 
         val response = api.sendAttachment(
             chatGuid = chatGuid.toRequestBody("text/plain".toMediaTypeOrNull()),
