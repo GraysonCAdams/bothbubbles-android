@@ -8,9 +8,9 @@
 
 ### 1. Empty Catch Blocks with Swallowed Exceptions
 
-#### 1.1 VideoCompressor.kt (Lines 190-198)
+~~#### 1.1 VideoCompressor.kt (Lines 190-198)~~ **FIXED 2024-12-20**
 
-```kotlin
+~~```kotlin
 finally {
     try { videoDecoder?.stop() } catch (_: Exception) {}
     try { videoDecoder?.release() } catch (_: Exception) {}
@@ -21,31 +21,45 @@ finally {
     try { muxer?.release() } catch (_: Exception) {}
     try { extractor?.release() } catch (_: Exception) {}
 }
-```
+```~~
 
-**Problem:** Silent exception swallowing makes debugging impossible.
+~~**Problem:** Silent exception swallowing makes debugging impossible.~~
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 try { videoDecoder?.stop() } catch (e: Exception) { Timber.d(e, "Failed to stop video decoder") }
+// All 9 cleanup operations now log exceptions with Timber.d()
 ```
 
-#### 1.2 ChatAudioHelper.kt (Lines 157, 189)
+~~#### 1.2 ChatAudioHelper.kt (Lines 157, 189)~~ **FIXED 2024-12-20**
 
-```kotlin
+~~```kotlin
 try {
     mediaRecorder?.stop()
     mediaRecorder?.release()
 } catch (_: Exception) {}
-```
+```~~
 
-#### 1.3 IMessageSenderStrategy.kt (Line 495)
+**Fix Applied:** Added exception logging with descriptive messages for both locations.
 
-```kotlin
+~~#### 1.3 IMessageSenderStrategy.kt (Line 469)~~ **FIXED 2024-12-20**
+
+~~```kotlin
 compressedPath?.let { try { File(it).delete() } catch (e: Exception) { } }
-```
+```~~
 
-**Problem:** File deletion failures silently ignored, could leave temp files.
+~~**Problem:** File deletion failures silently ignored, could leave temp files.~~
+
+**Fix Applied:**
+```kotlin
+compressedPath?.let {
+    try {
+        File(it).delete()
+    } catch (e: Exception) {
+        Timber.d(e, "Failed to delete compressed file: $it")
+    }
+}
+```
 
 ---
 
@@ -219,14 +233,14 @@ val normalizedProgress = (x / width).coerceIn(0f, 1f)
 
 ## Summary Table
 
-| Issue | Severity | Count | Impact |
-|-------|----------|-------|--------|
-| Empty catch blocks | HIGH | 3 | Hides failures |
-| Broad Exception catching | HIGH | 40+ | Masks bugs |
-| Code duplication (UI) | MEDIUM | 2 | Maintenance burden |
-| Streaming body bug | MEDIUM | 1 | Data corruption risk |
-| Boolean parameters | MEDIUM | 3+ | API clarity |
-| Missing KDoc | LOW | 40+ | Documentation |
-| Stale TODOs | LOW | 6 | Tech debt |
-| Duplicate methods | LOW | 2 | Confusion |
-| Single-letter vars | LOW | 10+ | Readability |
+| Issue | Severity | Count | Impact | Status |
+|-------|----------|-------|--------|--------|
+| ~~Empty catch blocks~~ | HIGH | ~~3~~ 0 | Hides failures | **FIXED 2024-12-20** |
+| Broad Exception catching | HIGH | 40+ | Masks bugs | Open |
+| Code duplication (UI) | MEDIUM | 2 | Maintenance burden | Open |
+| Streaming body bug | MEDIUM | 1 | Data corruption risk | Open |
+| Boolean parameters | MEDIUM | 3+ | API clarity | Open |
+| Missing KDoc | LOW | 40+ | Documentation | Open |
+| Stale TODOs | LOW | 6 | Tech debt | Open |
+| Duplicate methods | LOW | 2 | Confusion | Open |
+| Single-letter vars | LOW | 10+ | Readability | Open |

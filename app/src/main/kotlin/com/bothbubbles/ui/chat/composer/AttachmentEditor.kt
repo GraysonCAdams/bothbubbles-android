@@ -101,9 +101,9 @@ class AttachmentEditor(private val context: Context) {
      */
     fun rotateImage(uri: Uri, degrees: Float): Uri? {
         return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream.close()
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream)
+            } ?: return null
 
             val matrix = Matrix().apply { postRotate(degrees) }
             val rotatedBitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
@@ -128,9 +128,9 @@ class AttachmentEditor(private val context: Context) {
      */
     fun cropImage(uri: Uri, left: Int, top: Int, width: Int, height: Int): Uri? {
         return try {
-            val inputStream = context.contentResolver.openInputStream(uri) ?: return null
-            val bitmap = BitmapFactory.decodeStream(inputStream)
-            inputStream.close()
+            val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                BitmapFactory.decodeStream(inputStream)
+            } ?: return null
 
             val croppedBitmap = Bitmap.createBitmap(bitmap, left, top, width, height)
             bitmap.recycle()

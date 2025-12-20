@@ -248,19 +248,16 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 val senderAvatarUri = androidContactsService.getContactPhotoUri(address)
 
                 notificationService.showMessageNotification(
-                    chatGuid = chatGuid,
-                    chatTitle = chat?.displayName ?: senderName ?: address,
-                    messageText = notificationText,
-                    messageGuid = "mms-pending-$mmsId",
-                    senderName = senderName,
-                    senderAddress = address,
-                    isGroup = false,
-                    avatarUri = senderAvatarUri,
-                    linkPreviewTitle = null,
-                    linkPreviewDomain = null,
-                    participantNames = emptyList(),
-                    participantAvatarPaths = emptyList(),
-                    subject = null
+                    com.bothbubbles.services.notifications.MessageNotificationParams(
+                        chatGuid = chatGuid,
+                        chatTitle = chat?.displayName ?: senderName ?: address,
+                        messageText = notificationText,
+                        messageGuid = "mms-pending-$mmsId",
+                        senderName = senderName,
+                        senderAddress = address,
+                        isGroup = false,
+                        avatarUri = senderAvatarUri
+                    )
                 )
             }
 

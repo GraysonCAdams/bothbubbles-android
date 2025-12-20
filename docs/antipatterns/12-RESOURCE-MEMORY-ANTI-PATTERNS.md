@@ -6,7 +6,7 @@
 
 ## High Severity Issues
 
-### 1. HTTP Response Not Closed (Connection Leak)
+### 1. HTTP Response Not Closed (Connection Leak) ✅ FIXED
 
 **Location:** `services/linkpreview/OpenGraphParser.kt` (Lines 29-90)
 
@@ -27,7 +27,7 @@ if (html.isNullOrBlank()) {
 
 **Problem:** Response object never closed on early returns, causing connection pool exhaustion.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 httpClient.newCall(request).execute().use { response ->
     if (!response.isSuccessful) {
@@ -40,7 +40,7 @@ httpClient.newCall(request).execute().use { response ->
 
 ---
 
-### 2. InputStream Not Closed on Exception
+### 2. InputStream Not Closed on Exception ✅ FIXED
 
 **Locations:**
 - `ui/chat/composer/AttachmentEditor.kt` (Lines 104-106, 131-133)
@@ -55,7 +55,7 @@ inputStream.close()  // Only reached if decodeStream succeeds
 
 **Problem:** If `BitmapFactory.decodeStream()` throws, inputStream leaks.
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
     BitmapFactory.decodeStream(inputStream)
@@ -64,7 +64,7 @@ val bitmap = context.contentResolver.openInputStream(uri)?.use { inputStream ->
 
 ---
 
-### 3. Paint Objects Created Every Frame
+### 3. Paint Objects Created Every Frame ✅ FIXED
 
 **Location:** `ui/chat/composer/drawing/DrawingCanvas.kt` (Lines 147-185, 205-226)
 
@@ -85,20 +85,58 @@ drawingState.strokes.forEach { stroke ->
 - In drawing canvas, this happens every frame during active drawing
 - Causes GC pressure and jank
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 class DrawingState {
-    private val strokePaint = Paint().apply {
+    // Reusable Paint objects to avoid allocations every frame
+    private val eraserPaint = Paint().apply {
         style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
         isAntiAlias = true
     }
 
-    fun getConfiguredPaint(stroke: Stroke): Paint {
+    private val eraserPreviewPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        color = android.graphics.Color.GRAY
+        alpha = 128
+        isAntiAlias = true
+    }
+
+    private val strokePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+
+    fun getEraserPaint(strokeWidth: Float): Paint {
+        return eraserPaint.apply { this.strokeWidth = strokeWidth }
+    }
+
+    fun getEraserPreviewPaint(strokeWidth: Float): Paint {
+        return eraserPreviewPaint.apply { this.strokeWidth = strokeWidth }
+    }
+
+    fun getStrokePaint(strokeWidth: Float, color: Color): Paint {
         return strokePaint.apply {
-            strokeWidth = stroke.strokeWidth
-            color = stroke.color
+            this.strokeWidth = strokeWidth
+            this.color = color.toArgb()
         }
     }
+}
+
+// Usage in Canvas:
+drawingState.strokes.forEach { stroke ->
+    val paint = if (stroke.isEraser) {
+        drawingState.getEraserPaint(stroke.strokeWidth)
+    } else {
+        drawingState.getStrokePaint(stroke.strokeWidth, stroke.color)
+    }
+    canvas.drawPath(stroke.path.asAndroidPath(), paint)
 }
 ```
 
@@ -192,15 +230,15 @@ fun DrawingState.renderToBitmap(width: Int, height: Int): Bitmap {
 
 ## Summary Table
 
-| Issue | Severity | File | Type | Fix |
-|-------|----------|------|------|-----|
-| HTTP Response leak | HIGH | OpenGraphParser.kt | Network | Use `.use {}` |
-| InputStream leak | HIGH | AttachmentEditor.kt | File | Use `.use {}` |
-| InputStream leak | HIGH | AttachmentEditScreen.kt | File | Use `.use {}` |
-| Paint over-allocation | HIGH | DrawingCanvas.kt | Composition | Cache Paint |
-| Bitmap recycle gaps | MEDIUM | AvatarGenerator.kt | Memory | try-finally |
-| MMS OOM risk | MEDIUM | SmsBackupService.kt | Memory | Stream encode |
-| Canvas not released | LOW | DrawingCanvas.kt | Native | Explicit cleanup |
+| Issue | Severity | File | Type | Fix | Status |
+|-------|----------|------|------|-----|--------|
+| HTTP Response leak | HIGH | OpenGraphParser.kt | Network | Use `.use {}` | ✅ FIXED |
+| InputStream leak | HIGH | AttachmentEditor.kt | File | Use `.use {}` | ✅ FIXED |
+| InputStream leak | HIGH | AttachmentEditScreen.kt | File | Use `.use {}` | ✅ FIXED |
+| Paint over-allocation | HIGH | DrawingCanvas.kt | Composition | Cache Paint | ✅ FIXED |
+| Bitmap recycle gaps | MEDIUM | AvatarGenerator.kt | Memory | try-finally | TODO |
+| MMS OOM risk | MEDIUM | SmsBackupService.kt | Memory | Stream encode | TODO |
+| Canvas not released | LOW | DrawingCanvas.kt | Native | Explicit cleanup | TODO |
 
 ---
 

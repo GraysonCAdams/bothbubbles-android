@@ -251,19 +251,16 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Show notification (only for non-spam, non-snoozed, notifications-enabled chats)
             // Notification will play its own sound for inactive conversations
             notificationService.showMessageNotification(
-                chatGuid = chatGuid,
-                chatTitle = chat.displayName ?: senderName ?: address,
-                messageText = fullBody,
-                messageGuid = message.guid,
-                senderName = senderName,
-                senderAddress = address,
-                isGroup = false,
-                avatarUri = senderAvatarUri,
-                linkPreviewTitle = null,
-                linkPreviewDomain = null,
-                participantNames = emptyList(),
-                participantAvatarPaths = emptyList(),
-                subject = null
+                com.bothbubbles.services.notifications.MessageNotificationParams(
+                    chatGuid = chatGuid,
+                    chatTitle = chat.displayName ?: senderName ?: address,
+                    messageText = fullBody,
+                    messageGuid = message.guid,
+                    senderName = senderName,
+                    senderAddress = address,
+                    isGroup = false,
+                    avatarUri = senderAvatarUri
+                )
             )
 
             Timber.d("Saved incoming SMS from $address: ${fullBody.take(50)}...")

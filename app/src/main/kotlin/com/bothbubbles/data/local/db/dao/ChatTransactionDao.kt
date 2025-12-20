@@ -11,7 +11,7 @@ import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
  * Separated from main ChatDao for better organization.
  */
 @Dao
-interface ChatTransactionDao : ChatUpdateDao, ChatParticipantDao {
+interface ChatTransactionDao : ChatUpdateDao, ChatParticipantDao, ChatDeleteDao {
 
     @Query("""
         SELECT guid, fallback_reason AS reason, fallback_updated_at AS updatedAt
@@ -50,6 +50,21 @@ interface ChatTransactionDao : ChatUpdateDao, ChatParticipantDao {
             val crossRefs = participantIds.map { ChatHandleCrossRef(chat.guid, it) }
             insertChatHandleCrossRefs(crossRefs)
         }
+    }
+
+    /**
+     * Delete a chat and all its dependencies in a transaction.
+     * This ensures atomicity when deleting tombstone records, messages, and the chat itself.
+     */
+    @Transaction
+    suspend fun deleteChatWithDependencies(
+        guid: String,
+        tombstoneDao: TombstoneDao,
+        messageDao: MessageDao
+    ) {
+        tombstoneDao.recordDeletedChat(guid)
+        messageDao.deleteMessagesForChat(guid)
+        deleteChatByGuid(guid)
     }
 
 }

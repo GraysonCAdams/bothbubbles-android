@@ -218,21 +218,21 @@ class NotificationMediaUpdater @Inject constructor(
 
             // Update the notification with inline media
             notificationService.showMessageNotification(
-                chatGuid = chatGuid,
-                chatTitle = chatTitle,
-                messageText = messageText,
-                messageGuid = message.guid,
-                senderName = senderName,
-                senderAddress = senderAddress,
-                isGroup = chat.isGroup,
-                avatarUri = senderAvatarUri,
-                linkPreviewTitle = null,
-                linkPreviewDomain = null,
-                participantNames = participantNames,
-                participantAvatarPaths = participantAvatarPaths,
-                subject = message.subject,
-                attachmentUri = attachmentUri,
-                attachmentMimeType = notificationMimeType
+                MessageNotificationParams(
+                    chatGuid = chatGuid,
+                    chatTitle = chatTitle,
+                    messageText = messageText,
+                    messageGuid = message.guid,
+                    senderName = senderName,
+                    senderAddress = senderAddress,
+                    isGroup = chat.isGroup,
+                    avatarUri = senderAvatarUri,
+                    participantNames = participantNames,
+                    participantAvatarPaths = participantAvatarPaths,
+                    subject = message.subject,
+                    attachmentUri = attachmentUri,
+                    attachmentMimeType = notificationMimeType
+                )
             )
         } catch (e: Exception) {
             Timber.e(e, "$TAG: Error updating notification for attachment: $attachmentGuid")

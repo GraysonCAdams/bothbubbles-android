@@ -54,6 +54,7 @@ class SmsContentObserver @Inject constructor(
 
     private var smsObserver: ContentObserver? = null
     private var mmsObserver: ContentObserver? = null
+    private var handler: Handler? = null
 
     private val _isObserving = MutableStateFlow(false)
     val isObserving: StateFlow<Boolean> = _isObserving.asStateFlow()
@@ -76,10 +77,10 @@ class SmsContentObserver @Inject constructor(
             lastMmsId = getLatestMmsId()
         }
 
-        val handler = Handler(Looper.getMainLooper())
+        handler = handler ?: Handler(Looper.getMainLooper())
 
         // SMS observer
-        smsObserver = object : ContentObserver(handler) {
+        smsObserver = object : ContentObserver(handler!!) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 Timber.d("SMS content changed: $uri")
                 debounceAndProcess { processSmsChanges() }
@@ -87,7 +88,7 @@ class SmsContentObserver @Inject constructor(
         }
 
         // MMS observer
-        mmsObserver = object : ContentObserver(handler) {
+        mmsObserver = object : ContentObserver(handler!!) {
             override fun onChange(selfChange: Boolean, uri: Uri?) {
                 Timber.d("MMS content changed: $uri")
                 debounceAndProcess { processMmsChanges() }
@@ -119,11 +120,13 @@ class SmsContentObserver @Inject constructor(
     fun stopObserving() {
         Timber.d("Stopping SMS/MMS content observers")
 
+        handler?.removeCallbacksAndMessages(null)
         smsObserver?.let { context.contentResolver.unregisterContentObserver(it) }
         mmsObserver?.let { context.contentResolver.unregisterContentObserver(it) }
 
         smsObserver = null
         mmsObserver = null
+        handler = null
         debounceJob?.cancel()
 
         _isObserving.value = false
@@ -213,19 +216,16 @@ class SmsContentObserver @Inject constructor(
                             val senderAvatarUri = androidContactsService.getContactPhotoUri(address)
 
                             notificationService.showMessageNotification(
-                                chatGuid = chatGuid,
-                                chatTitle = chat?.displayName ?: senderName ?: address,
-                                messageText = body ?: "",
-                                messageGuid = existingGuid,
-                                senderName = senderName,
-                                senderAddress = normalizedAddress,
-                                isGroup = false,
-                                avatarUri = senderAvatarUri,
-                                linkPreviewTitle = null,
-                                linkPreviewDomain = null,
-                                participantNames = emptyList(),
-                                participantAvatarPaths = emptyList(),
-                                subject = null
+                                com.bothbubbles.services.notifications.MessageNotificationParams(
+                                    chatGuid = chatGuid,
+                                    chatTitle = chat?.displayName ?: senderName ?: address,
+                                    messageText = body ?: "",
+                                    messageGuid = existingGuid,
+                                    senderName = senderName,
+                                    senderAddress = normalizedAddress,
+                                    isGroup = false,
+                                    avatarUri = senderAvatarUri
+                                )
                             )
                         }
                     }
@@ -366,21 +366,18 @@ class SmsContentObserver @Inject constructor(
                             }
 
                             notificationService.showMessageNotification(
-                                chatGuid = chatGuid,
-                                chatTitle = chat?.displayName ?: senderName ?: primaryAddress,
-                                messageText = textContent ?: "[MMS]",
-                                messageGuid = existingGuid,
-                                senderName = if (isGroup) (senderName ?: primaryAddress) else senderName,
-                                senderAddress = primaryAddress,
-                                isGroup = isGroup,
-                                avatarUri = senderAvatarUri,
-                                linkPreviewTitle = null,
-                                linkPreviewDomain = null,
-                                participantNames = emptyList(),
-                                participantAvatarPaths = emptyList(),
-                                subject = null,
-                                attachmentUri = firstMediaAttachment?.dataUri,
-                                attachmentMimeType = firstMediaAttachment?.contentType
+                                com.bothbubbles.services.notifications.MessageNotificationParams(
+                                    chatGuid = chatGuid,
+                                    chatTitle = chat?.displayName ?: senderName ?: primaryAddress,
+                                    messageText = textContent ?: "[MMS]",
+                                    messageGuid = existingGuid,
+                                    senderName = if (isGroup) (senderName ?: primaryAddress) else senderName,
+                                    senderAddress = primaryAddress,
+                                    isGroup = isGroup,
+                                    avatarUri = senderAvatarUri,
+                                    attachmentUri = firstMediaAttachment?.dataUri,
+                                    attachmentMimeType = firstMediaAttachment?.contentType
+                                )
                             )
                         }
                     }

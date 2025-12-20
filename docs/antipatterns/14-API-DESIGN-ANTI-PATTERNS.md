@@ -6,44 +6,44 @@
 
 ## High Severity Issues
 
-### 1. Too Many Parameters (15 Parameters!)
+### 1. Too Many Parameters (15 Parameters!) - ✅ FIXED
 
-**Location:** `services/notifications/Notifier.kt` (Lines 35-51)
+**Location:** `services/notifications/Notifier.kt` (Lines 3-57)
 
-**Issue:**
-```kotlin
-fun showMessageNotification(
-    chatGuid: String,
-    chatTitle: String,
-    messageText: String,
-    messageGuid: String,
-    senderName: String?,
-    senderAddress: String? = null,
-    isGroup: Boolean = false,
-    avatarUri: String? = null,
-    linkPreviewTitle: String? = null,
-    linkPreviewDomain: String? = null,
-    participantNames: List<String> = emptyList(),
-    participantAvatarPaths: List<String?> = emptyList(),
-    subject: String? = null,
-    attachmentUri: android.net.Uri? = null,
-    attachmentMimeType: String? = null
-)
-```
+**Status:** FIXED - Created `MessageNotificationParams` data class and updated all 9 call sites.
 
-**Problem:** 15 parameters exceeds recommended 5-6 max.
-
-**Fix:**
+**Fixed Implementation:**
 ```kotlin
 data class MessageNotificationParams(
     val chatGuid: String,
     val chatTitle: String,
     val messageText: String,
-    // ... all fields
+    val messageGuid: String,
+    val senderName: String?,
+    val senderAddress: String? = null,
+    val isGroup: Boolean = false,
+    val avatarUri: String? = null,
+    val linkPreviewTitle: String? = null,
+    val linkPreviewDomain: String? = null,
+    val participantNames: List<String> = emptyList(),
+    val participantAvatarPaths: List<String?> = emptyList(),
+    val subject: String? = null,
+    val attachmentUri: android.net.Uri? = null,
+    val attachmentMimeType: String? = null
 )
 
 fun showMessageNotification(params: MessageNotificationParams)
 ```
+
+**Updated Call Sites:**
+- `MessageEventHandler.kt`
+- `FcmMessageHandler.kt`
+- `SmsBroadcastReceiver.kt`
+- `MmsBroadcastReceiver.kt`
+- `SmsContentObserver.kt` (2 calls)
+- `BackgroundSyncWorker.kt`
+- `NotificationMediaUpdater.kt`
+- `NotificationService.kt`
 
 ---
 
@@ -107,22 +107,16 @@ fun getTimeSinceLastSuccess(): Long? {
 
 ---
 
-### 4. Duplicate Methods with Different Names
+### 4. Duplicate Methods with Different Names - ✅ FIXED
 
-**Location:** `data/repository/ChatRepository.kt` (Lines 38-52)
+**Location:** `data/repository/ChatRepository.kt` (Lines 38-48)
 
-**Issue:**
-```kotlin
-fun observeAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
-fun getAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()  // DUPLICATE!
+**Status:** FIXED - Removed duplicate methods.
 
-suspend fun getChat(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
-suspend fun getChatByGuid(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)  // DUPLICATE!
-```
-
-**Problem:** Two methods doing identical work creates API confusion.
-
-**Fix:** Keep only one with consistent naming.
+**Fixed Implementation:**
+- Removed `getAllChats()` - kept `observeAllChats()`
+- Removed `getChatByGuid()` - kept `getChat()`
+- Updated `ExportViewModel.kt` to use `observeAllChats()`
 
 ---
 
@@ -270,19 +264,18 @@ suspend fun setPinned(guid: String, isPinned: Boolean): Result<Unit> = runCatchi
 
 ---
 
-### 11. Unused Parameter in Method
+### 11. Unused Parameter in Method - ✅ FIXED
 
-**Location:** `data/repository/ChatRepository.kt` (Lines 504-506)
+**Location:** `data/repository/ChatRepository.kt` (Lines 495-500)
 
-**Issue:**
+**Status:** FIXED - Removed unused `text` parameter.
+
+**Fixed Implementation:**
 ```kotlin
-suspend fun updateLastMessage(chatGuid: String, text: String?, date: Long) {
+suspend fun updateLastMessage(chatGuid: String, date: Long) {
     chatDao.updateLatestMessageDate(chatGuid, date)
-    // `text` parameter is NEVER USED!
 }
 ```
-
-**Fix:** Either use the parameter or remove it.
 
 ---
 

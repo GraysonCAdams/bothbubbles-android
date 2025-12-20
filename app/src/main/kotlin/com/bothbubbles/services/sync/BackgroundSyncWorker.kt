@@ -242,19 +242,19 @@ class BackgroundSyncWorker @AssistedInject constructor(
             Timber.d("Showing notification: chat=$chatTitle, message='${message.text?.take(30)}...'")
 
             notificationService.showMessageNotification(
-                chatGuid = chat.guid,
-                chatTitle = chatTitle,
-                messageText = message.text ?: "",
-                messageGuid = message.guid,
-                senderName = displaySenderName,
-                senderAddress = senderAddress,
-                isGroup = isGroup,
-                avatarUri = senderAvatarUri,
-                linkPreviewTitle = null,
-                linkPreviewDomain = null,
-                participantNames = participantNames,
-                participantAvatarPaths = participantAvatarPaths,
-                subject = message.subject
+                com.bothbubbles.services.notifications.MessageNotificationParams(
+                    chatGuid = chat.guid,
+                    chatTitle = chatTitle,
+                    messageText = message.text ?: "",
+                    messageGuid = message.guid,
+                    senderName = displaySenderName,
+                    senderAddress = senderAddress,
+                    isGroup = isGroup,
+                    avatarUri = senderAvatarUri,
+                    participantNames = participantNames,
+                    participantAvatarPaths = participantAvatarPaths,
+                    subject = message.subject
+                )
             )
         }
     }

@@ -611,9 +611,6 @@ interface MessageDao {
     @Query("DELETE FROM messages WHERE guid = :guid")
     suspend fun deleteMessage(guid: String)
 
-    @Query("DELETE FROM messages WHERE guid = :guid")
-    suspend fun deleteMessageByGuid(guid: String)
-
     @Query("DELETE FROM messages WHERE chat_guid = :chatGuid")
     suspend fun deleteMessagesForChat(chatGuid: String)
 

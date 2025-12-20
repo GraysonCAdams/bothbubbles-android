@@ -108,28 +108,30 @@ class GifRepository @Inject constructor(
     /**
      * Downloads a GIF to cache and returns the local file URI.
      */
-    suspend fun downloadGif(gif: GifItem): Uri? = withContext(Dispatchers.IO) {
-        try {
-            val gifDir = File(context.cacheDir, "gifs")
-            if (!gifDir.exists()) gifDir.mkdirs()
+    suspend fun downloadGif(gif: GifItem): Uri? {
+        return withContext(Dispatchers.IO) {
+            try {
+                val gifDir = File(context.cacheDir, "gifs")
+                if (!gifDir.exists()) gifDir.mkdirs()
 
-            val fileName = "${gif.id}.gif"
-            val gifFile = File(gifDir, fileName)
+                val fileName = "${gif.id}.gif"
+                val gifFile = File(gifDir, fileName)
 
-            URL(gif.fullUrl).openStream().use { input ->
-                gifFile.outputStream().use { output ->
-                    input.copyTo(output)
+                URL(gif.fullUrl).openStream().use { input ->
+                    gifFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
                 }
-            }
 
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                gifFile
-            )
-        } catch (e: Exception) {
-            Timber.e(e, "Error downloading GIF")
-            null
+                FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    gifFile
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Error downloading GIF")
+                null
+            }
         }
     }
 

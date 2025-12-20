@@ -82,7 +82,8 @@ class NavigationListenerService : NotificationListenerService() {
         super.onDestroy()
         Timber.d("NavigationListenerService destroyed")
         scope.cancel()
-        pendingPromptRunnable?.let { handler.removeCallbacks(it) }
+        handler.removeCallbacksAndMessages(null)
+        pendingPromptRunnable = null
     }
 
     override fun onListenerConnected() {

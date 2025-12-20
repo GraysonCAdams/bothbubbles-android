@@ -53,7 +53,7 @@ object GroupAvatarGenerator { /* group collage logic */ }
 
 ## Medium Severity Issues
 
-### 2. Missing @Singleton on Dispatcher Providers
+### 2. ~~Missing @Singleton on Dispatcher Providers~~ **FIXED 2024-12-20**
 
 **Location:** `di/CoroutinesModule.kt` (Lines 42-51)
 
@@ -78,13 +78,25 @@ fun provideDefaultDispatcher(): CoroutineDispatcher = Dispatchers.Default  // No
 - Minor performance overhead
 - Makes intent unclear
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
 @Provides
 @Singleton
 @IoDispatcher
 fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
+
+@Provides
+@Singleton
+@MainDispatcher
+fun provideMainDispatcher(): CoroutineDispatcher = Dispatchers.Main
+
+@Provides
+@Singleton
+@DefaultDispatcher
+fun provideDefaultDispatcher(): CoroutineDispatcher = Dispatchers.Default
 ```
+
+**Status:** FIXED on 2024-12-20 - All dispatcher providers now properly scoped as @Singleton
 
 ---
 
@@ -278,7 +290,7 @@ Use double-checked locking or synchronized block.
 | Issue | Severity | File | Lines | Category |
 |-------|----------|------|-------|----------|
 | God Object (758 lines) | MAJOR | AvatarGenerator.kt | All | Class Design |
-| Missing @Singleton | MEDIUM | CoroutinesModule.kt | 42-51 | Scope |
+| ~~Missing @Singleton~~ | ~~MEDIUM~~ | ~~CoroutinesModule.kt~~ | ~~42-51~~ | ~~Scope~~ FIXED |
 | Mutable Global State | MEDIUM | PerformanceProfiler.kt | 13-24 | State |
 | Wrong Package | MEDIUM | MessageDeduplicator.kt | 26-141 | Organization |
 | Mutable Global State | MEDIUM | HapticUtils.kt | 52-61 | State |

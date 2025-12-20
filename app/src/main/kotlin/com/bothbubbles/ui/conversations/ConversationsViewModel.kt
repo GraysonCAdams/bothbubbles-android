@@ -111,6 +111,35 @@ class ConversationsViewModel @Inject constructor(
     private val _searchQuery = MutableStateFlow("")
     private val _smsStateRefreshTrigger = MutableStateFlow(0)
 
+    // Derived state for filter enums (moved from composition to avoid enum lookups in UI)
+    val selectedConversationFilter: StateFlow<ConversationFilter> = _uiState.map { state ->
+        ConversationFilter.entries.find {
+            it.name.lowercase() == state.conversationFilter.lowercase()
+        } ?: ConversationFilter.ALL
+    }.stateIn(viewModelScope, SharingStarted.Lazily, ConversationFilter.ALL)
+
+    val selectedCategoryFilter: StateFlow<com.bothbubbles.services.categorization.MessageCategory?> = _uiState.map { state ->
+        state.categoryFilter?.let { savedCategory ->
+            com.bothbubbles.services.categorization.MessageCategory.entries.find {
+                it.name.equals(savedCategory, ignoreCase = true)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+    val enabledCategories: StateFlow<Set<com.bothbubbles.services.categorization.MessageCategory>> = combine(
+        _uiState.map { it.transactionsEnabled }.distinctUntilChanged(),
+        _uiState.map { it.deliveriesEnabled }.distinctUntilChanged(),
+        _uiState.map { it.promotionsEnabled }.distinctUntilChanged(),
+        _uiState.map { it.remindersEnabled }.distinctUntilChanged()
+    ) { transactionsEnabled, deliveriesEnabled, promotionsEnabled, remindersEnabled ->
+        buildSet {
+            if (transactionsEnabled) add(com.bothbubbles.services.categorization.MessageCategory.TRANSACTIONS)
+            if (deliveriesEnabled) add(com.bothbubbles.services.categorization.MessageCategory.DELIVERIES)
+            if (promotionsEnabled) add(com.bothbubbles.services.categorization.MessageCategory.PROMOTIONS)
+            if (remindersEnabled) add(com.bothbubbles.services.categorization.MessageCategory.REMINDERS)
+        }
+    }.stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+
     // Track if we've already started categorization this session
     private var hasStartedCategorization = false
 

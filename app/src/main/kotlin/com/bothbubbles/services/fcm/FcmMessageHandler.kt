@@ -246,17 +246,19 @@ class FcmMessageHandler @Inject constructor(
         // Show notification
         Timber.d("DEBUG: Showing notification - chatTitle=$chatTitle, notificationText=$notificationText, displaySenderName=$displaySenderName, isGroup=$isGroup")
         notificationService.showMessageNotification(
-            chatGuid = chatGuid,
-            chatTitle = chatTitle,
-            messageText = notificationText,
-            messageGuid = messageGuid,
-            senderName = displaySenderName,
-            senderAddress = senderAddress,
-            isGroup = isGroup,
-            avatarUri = senderAvatarUri,
-            participantNames = participantNames,
-            participantAvatarPaths = participantAvatarPaths,
-            subject = messageSubject
+            com.bothbubbles.services.notifications.MessageNotificationParams(
+                chatGuid = chatGuid,
+                chatTitle = chatTitle,
+                messageText = notificationText,
+                messageGuid = messageGuid,
+                senderName = displaySenderName,
+                senderAddress = senderAddress,
+                isGroup = isGroup,
+                avatarUri = senderAvatarUri,
+                participantNames = participantNames,
+                participantAvatarPaths = participantAvatarPaths,
+                subject = messageSubject
+            )
         )
         Timber.d("DEBUG: Notification shown successfully!")
 

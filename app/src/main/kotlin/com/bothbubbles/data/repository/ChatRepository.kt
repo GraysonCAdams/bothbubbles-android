@@ -37,8 +37,6 @@ class ChatRepository @Inject constructor(
 
     fun observeAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
 
-    fun getAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
-
     fun observeActiveChats(): Flow<List<ChatEntity>> = chatDao.getActiveChats()
 
     fun observeArchivedChats(): Flow<List<ChatEntity>> = chatDao.getArchivedChats()
@@ -48,8 +46,6 @@ class ChatRepository @Inject constructor(
     fun observeChat(guid: String): Flow<ChatEntity?> = chatDao.observeChatByGuid(guid)
 
     suspend fun getChat(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
-
-    suspend fun getChatByGuid(guid: String): ChatEntity? = chatDao.getChatByGuid(guid)
 
     suspend fun getChatsByGuids(guids: List<String>): List<ChatEntity> = chatDao.getChatsByGuids(guids)
 
@@ -426,9 +422,7 @@ class ChatRepository @Inject constructor(
      * Records a tombstone to prevent resurrection during sync.
      */
     suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
-        tombstoneDao.recordDeletedChat(guid)
-        messageDao.deleteMessagesForChat(guid)
-        chatDao.deleteChatByGuid(guid)
+        chatDao.deleteChatWithDependencies(guid, tombstoneDao, messageDao)
     }
 
     // ===== Per-Chat Notification Settings =====
@@ -501,7 +495,7 @@ class ChatRepository @Inject constructor(
     /**
      * Update the last message info for a chat
      */
-    suspend fun updateLastMessage(chatGuid: String, text: String?, date: Long) {
+    suspend fun updateLastMessage(chatGuid: String, date: Long) {
         chatDao.updateLatestMessageDate(chatGuid, date)
     }
 

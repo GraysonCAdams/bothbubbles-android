@@ -80,6 +80,10 @@ fun ConversationsScreen(
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val context = LocalContext.current
 
+    // Collect derived filter states from ViewModel (moved from composition to avoid enum lookups in UI)
+    val conversationFilter by viewModel.selectedConversationFilter.collectAsStateWithLifecycle()
+    val categoryFilter by viewModel.selectedCategoryFilter.collectAsStateWithLifecycle()
+    val enabledCategories by viewModel.enabledCategories.collectAsStateWithLifecycle()
 
     // Refresh state when screen resumes (to catch permission/default app changes)
     DisposableEffect(lifecycleOwner) {
@@ -98,28 +102,6 @@ fun ConversationsScreen(
 
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
-    // Filter state - derived from persisted settings
-    val conversationFilter = remember(uiState.conversationFilter) {
-        ConversationFilter.entries.find { it.name.lowercase() == uiState.conversationFilter.lowercase() } ?: ConversationFilter.ALL
-    }
-    val categoryFilter = remember(uiState.categoryFilter) {
-        uiState.categoryFilter?.let { savedCategory ->
-            MessageCategory.entries.find { it.name.equals(savedCategory, ignoreCase = true) }
-        }
-    }
-    val enabledCategories = remember(
-        uiState.transactionsEnabled,
-        uiState.deliveriesEnabled,
-        uiState.promotionsEnabled,
-        uiState.remindersEnabled
-    ) {
-        buildSet {
-            if (uiState.transactionsEnabled) add(MessageCategory.TRANSACTIONS)
-            if (uiState.deliveriesEnabled) add(MessageCategory.DELIVERIES)
-            if (uiState.promotionsEnabled) add(MessageCategory.PROMOTIONS)
-            if (uiState.remindersEnabled) add(MessageCategory.REMINDERS)
-        }
-    }
     var showFilterDropdown by remember { mutableStateOf(false) }
     val focusRequester = remember { FocusRequester() }
     val focusManager = LocalFocusManager.current
@@ -212,14 +194,14 @@ fun ConversationsScreen(
     }
 
     // Scroll to position when a chat is pinned
-    LaunchedEffect(Unit) {
+    LaunchedEffect(viewModel) {
         viewModel.scrollToIndexEvent.collect { index ->
             listState.animateScrollToItem(index)
         }
     }
 
     // Auto-scroll to top on new message if user is near the top (within top 20%)
-    LaunchedEffect(Unit) {
+    LaunchedEffect(viewModel) {
         viewModel.newMessageEvent.collect {
             val totalItems = listState.layoutInfo.totalItemsCount
             val firstVisibleIndex = listState.firstVisibleItemIndex
@@ -244,7 +226,17 @@ fun ConversationsScreen(
     var pendingSwipeAction by remember { mutableStateOf<Pair<String, SwipeActionType>?>(null) }
     // Batch action confirmation state (for selection mode)
     var pendingBatchAction by remember { mutableStateOf<SwipeActionType?>(null) }
-    var isQuickActionContactStarred by remember { mutableStateOf(false) }
+
+    // Derive starred status from contact info - ViewModel handles the I/O
+    val isQuickActionContactStarred = remember(quickActionsContact) {
+        quickActionsContact?.let { contact ->
+            if (contact.hasContact && !contact.isGroup) {
+                viewModel.isContactStarred(contact.address)
+            } else {
+                false
+            }
+        } ?: false
+    }
 
     // Group photo picker state
     var pendingGroupPhotoChat by remember { mutableStateOf<String?>(null) }
@@ -257,19 +249,6 @@ fun ConversationsScreen(
             }
         }
         pendingGroupPhotoChat = null
-    }
-
-    // Update starred status when contact popup opens
-    LaunchedEffect(quickActionsContact) {
-        quickActionsContact?.let { contact ->
-            if (contact.hasContact && !contact.isGroup) {
-                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                    isQuickActionContactStarred = viewModel.isContactStarred(contact.address)
-                }
-            } else {
-                isQuickActionContactStarred = false
-            }
-        }
     }
 
     // Pure grayscale background for header (no color hue)

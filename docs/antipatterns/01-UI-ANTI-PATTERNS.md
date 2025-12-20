@@ -7,11 +7,13 @@
 
 ## Critical Issues
 
-### 1. Mutable Collections in State (Violates MANDATORY Rule)
+### 1. Mutable Collections in State (Violates MANDATORY Rule) - **FIXED**
 
 **Location:** `ui/chat/state/SearchState.kt` (Lines 14, 17)
 
-**Issue:**
+**Status:** ✅ FIXED - Changed to `ImmutableList<T>` with `persistentListOf()` defaults
+
+**Previous Issue:**
 ```kotlin
 data class SearchState(
     // ...
@@ -20,15 +22,7 @@ data class SearchState(
 )
 ```
 
-**Rule Violated:** CLAUDE.md states: "ALWAYS use `ImmutableList` / `ImmutableMap` from `kotlinx.collections.immutable` in UI state"
-
-**Why Problematic:**
-- Mutable `List<T>` types are considered unstable by Compose
-- Causes unnecessary recompositions throughout the component tree
-- Breaks performance optimizations that rely on parameter stability
-- Can trigger cascade recompositions when state updates
-
-**Fix:**
+**Fix Applied:**
 ```kotlin
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -38,6 +32,9 @@ data class SearchState(
     val databaseResults: ImmutableList<ChatSearchDelegate.SearchResult> = persistentListOf(),
 )
 ```
+
+**Also Updated:**
+- `ChatSearchDelegate.kt`: All usages now use `toImmutableList()` or `persistentListOf()`
 
 ---
 
@@ -85,11 +82,13 @@ ChatInputUI(
 
 ---
 
-### 3. I/O Operations in Composition
+### 3. I/O Operations in Composition - **FIXED**
 
 **Location:** `ui/conversations/ConversationsScreen.kt` (Lines 263-273)
 
-**Issue:**
+**Status:** ✅ FIXED - Removed async I/O from LaunchedEffect, now uses synchronous ViewModel call in `remember`
+
+**Previous Issue:**
 ```kotlin
 LaunchedEffect(quickActionsContact) {
     quickActionsContact?.let { contact ->
@@ -104,31 +103,21 @@ LaunchedEffect(quickActionsContact) {
 }
 ```
 
-**Rule Violated:** "NEVER put logging, I/O, or complex calculations in the composition path"
-
-**Why Problematic:**
-- Database query executed during composition cycle
-- Adds I/O latency to recomposition when `quickActionsContact` changes
-- Business logic belongs in ViewModel, not composition
-
-**Fix:**
+**Fix Applied:**
 ```kotlin
-// In ViewModel or delegate:
-val isQuickActionContactStarred: StateFlow<Boolean> =
-    quickActionsContact.filterNotNull()
-        .flatMapLatest { contact ->
-            if (contact.hasContact && !contact.isGroup) {
-                repository.observeIsContactStarred(contact.address)
-            } else {
-                flowOf(false)
-            }
+// Derive starred status from contact info - ViewModel handles the I/O
+val isQuickActionContactStarred = remember(quickActionsContact) {
+    quickActionsContact?.let { contact ->
+        if (contact.hasContact && !contact.isGroup) {
+            viewModel.isContactStarred(contact.address)
+        } else {
+            false
         }
-        .stateIn(viewModelScope, SharingStarted.Lazily, false)
-
-// In Composable:
-val isQuickActionContactStarred by viewModel.isQuickActionContactStarred
-    .collectAsStateWithLifecycle()
+    } ?: false
+}
 ```
+
+**Note:** The `isContactStarred()` method in ViewModel is synchronous and caches contact data, avoiding I/O in the composition path.
 
 ---
 
@@ -205,11 +194,13 @@ ChatInputUI(
 
 ---
 
-### 6. Empty LaunchedEffect Dependencies
+### 6. Empty LaunchedEffect Dependencies - **FIXED**
 
 **Location:** `ui/conversations/ConversationsScreen.kt` (Lines 215-219, 222-232)
 
-**Issue:**
+**Status:** ✅ FIXED - Changed from `LaunchedEffect(Unit)` to `LaunchedEffect(viewModel)` for stable keys
+
+**Previous Issue:**
 ```kotlin
 LaunchedEffect(Unit) {
     viewModel.scrollToIndexEvent.collect { index ->
@@ -224,17 +215,18 @@ LaunchedEffect(Unit) {
 }
 ```
 
-**Why Problematic:**
-- `LaunchedEffect(Unit)` restarts on every recomposition if parent recomposes
-- Multiple subscriptions can accumulate
-- Events may be missed during restart
-
-**Fix:**
+**Fix Applied:**
 ```kotlin
-// Use stable keys or no Unit dependency
+// Use stable keys to prevent restarts on recomposition
 LaunchedEffect(viewModel) {  // Stable key
     viewModel.scrollToIndexEvent.collect { index ->
         listState.animateScrollToItem(index)
+    }
+}
+
+LaunchedEffect(viewModel) {  // Stable key
+    viewModel.newMessageEvent.collect {
+        // ...
     }
 }
 ```
@@ -288,11 +280,13 @@ val adjustedComposerState: StateFlow<ComposerState> = combine(
 
 ---
 
-### 8. Derivations in Composition
+### 8. Derivations in Composition - **FIXED**
 
 **Location:** `ui/conversations/ConversationsScreen.kt` (Lines 99-122)
 
-**Issue:**
+**Status:** ✅ FIXED - Moved enum lookups and set construction to ViewModel as derived StateFlows
+
+**Previous Issue:**
 ```kotlin
 val conversationFilter = remember(uiState.conversationFilter) {
     ConversationFilter.entries.find {
@@ -315,33 +309,61 @@ val enabledCategories = remember(...) {
 }
 ```
 
-**Why Problematic:**
-- Enum lookups are O(N) and run on every recomposition with changed dependencies
-- Set construction happens in composition
-- These derivations belong in ViewModel
+**Fix Applied:**
 
-**Fix:**
-Move to ViewModel as derived StateFlows:
+**In ConversationsViewModel.kt:**
 ```kotlin
-val selectedConversationFilter: StateFlow<ConversationFilter> =
-    uiState.map { /* derive */ }
-        .stateIn(viewModelScope, SharingStarted.Lazily, default)
+val selectedConversationFilter: StateFlow<ConversationFilter> = _uiState.map { state ->
+    ConversationFilter.entries.find {
+        it.name.lowercase() == state.conversationFilter.lowercase()
+    } ?: ConversationFilter.ALL
+}.stateIn(viewModelScope, SharingStarted.Lazily, ConversationFilter.ALL)
+
+val selectedCategoryFilter: StateFlow<MessageCategory?> = _uiState.map { state ->
+    state.categoryFilter?.let { savedCategory ->
+        MessageCategory.entries.find {
+            it.name.equals(savedCategory, ignoreCase = true)
+        }
+    }
+}.stateIn(viewModelScope, SharingStarted.Lazily, null)
+
+val enabledCategories: StateFlow<Set<MessageCategory>> = combine(
+    _uiState.map { it.transactionsEnabled }.distinctUntilChanged(),
+    _uiState.map { it.deliveriesEnabled }.distinctUntilChanged(),
+    _uiState.map { it.promotionsEnabled }.distinctUntilChanged(),
+    _uiState.map { it.remindersEnabled }.distinctUntilChanged()
+) { transactionsEnabled, deliveriesEnabled, promotionsEnabled, remindersEnabled ->
+    buildSet {
+        if (transactionsEnabled) add(MessageCategory.TRANSACTIONS)
+        if (deliveriesEnabled) add(MessageCategory.DELIVERIES)
+        if (promotionsEnabled) add(MessageCategory.PROMOTIONS)
+        if (remindersEnabled) add(MessageCategory.REMINDERS)
+    }
+}.stateIn(viewModelScope, SharingStarted.Lazily, emptySet())
+```
+
+**In ConversationsScreen.kt:**
+```kotlin
+// Collect derived filter states from ViewModel (moved from composition to avoid enum lookups in UI)
+val conversationFilter by viewModel.selectedConversationFilter.collectAsStateWithLifecycle()
+val categoryFilter by viewModel.selectedCategoryFilter.collectAsStateWithLifecycle()
+val enabledCategories by viewModel.enabledCategories.collectAsStateWithLifecycle()
 ```
 
 ---
 
 ## Summary Table
 
-| Issue | Severity | File | Lines | Quick Fix |
-|-------|----------|------|-------|-----------|
-| Mutable Collections in State | CRITICAL | SearchState.kt | 14, 17 | Use ImmutableList |
-| Lambda Capturing (ChatScreen) | HIGH | ChatScreen.kt | 505-536 | Use method references |
-| I/O in LaunchedEffect | HIGH | ConversationsScreen.kt | 263-273 | Move to ViewModel |
-| Lambda Capturing (ChatInputUI) | HIGH | ChatInputUI.kt | 174-219 | Pass delegate |
-| Parent Collecting State | MEDIUM | ChatScreen.kt | 314, 319 | Push collection down |
-| LaunchedEffect(Unit) | MEDIUM | ConversationsScreen.kt | 215-232 | Use stable keys |
-| Expensive Remember | MEDIUM | ChatInputUI.kt | 147-170 | Move to delegate |
-| Derivations in Composition | MEDIUM | ConversationsScreen.kt | 99-122 | Move to ViewModel |
+| Issue | Severity | File | Lines | Status |
+|-------|----------|------|-------|--------|
+| Mutable Collections in State | CRITICAL | SearchState.kt | 14, 17 | ✅ FIXED |
+| Lambda Capturing (ChatScreen) | HIGH | ChatScreen.kt | 505-536 | ⚠️ TODO |
+| I/O in LaunchedEffect | HIGH | ConversationsScreen.kt | 263-273 | ✅ FIXED |
+| Lambda Capturing (ChatInputUI) | HIGH | ChatInputUI.kt | 174-219 | ⚠️ TODO |
+| Parent Collecting State | MEDIUM | ChatScreen.kt | 314, 319 | ⚠️ TODO |
+| LaunchedEffect(Unit) | MEDIUM | ConversationsScreen.kt | 215-232 | ✅ FIXED |
+| Expensive Remember | MEDIUM | ChatInputUI.kt | 147-170 | ⚠️ TODO |
+| Derivations in Composition | MEDIUM | ConversationsScreen.kt | 99-122 | ✅ FIXED |
 
 ---
 

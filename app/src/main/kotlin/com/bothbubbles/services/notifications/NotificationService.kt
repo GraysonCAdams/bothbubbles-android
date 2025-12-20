@@ -26,53 +26,30 @@ class NotificationService @Inject constructor(
 
     /**
      * Show a notification for a new message.
-     *
-     * @param senderAddress The sender's address (phone/email) used for bubble filtering
-     * @param participantNames List of participant names for group chats (used for group avatar collage)
-     * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
-     * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
-     * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
-     * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
-    override fun showMessageNotification(
-        chatGuid: String,
-        chatTitle: String,
-        messageText: String,
-        messageGuid: String,
-        senderName: String?,
-        senderAddress: String?,
-        isGroup: Boolean,
-        avatarUri: String?,
-        linkPreviewTitle: String?,
-        linkPreviewDomain: String?,
-        participantNames: List<String>,
-        participantAvatarPaths: List<String?>,
-        subject: String?,
-        attachmentUri: android.net.Uri?,
-        attachmentMimeType: String?
-    ) {
+    override fun showMessageNotification(params: MessageNotificationParams) {
         if (!hasNotificationPermission()) return
 
         val notification = notificationBuilder.buildMessageNotification(
-            chatGuid = chatGuid,
-            chatTitle = chatTitle,
-            messageText = messageText,
-            messageGuid = messageGuid,
-            senderName = senderName,
-            senderAddress = senderAddress,
-            isGroup = isGroup,
-            avatarUri = avatarUri,
-            linkPreviewTitle = linkPreviewTitle,
-            linkPreviewDomain = linkPreviewDomain,
-            participantNames = participantNames,
-            participantAvatarPaths = participantAvatarPaths,
-            subject = subject,
+            chatGuid = params.chatGuid,
+            chatTitle = params.chatTitle,
+            messageText = params.messageText,
+            messageGuid = params.messageGuid,
+            senderName = params.senderName,
+            senderAddress = params.senderAddress,
+            isGroup = params.isGroup,
+            avatarUri = params.avatarUri,
+            linkPreviewTitle = params.linkPreviewTitle,
+            linkPreviewDomain = params.linkPreviewDomain,
+            participantNames = params.participantNames,
+            participantAvatarPaths = params.participantAvatarPaths,
+            subject = params.subject,
             totalUnreadCount = badgeManager.totalUnread.value,
-            attachmentUri = attachmentUri,
-            attachmentMimeType = attachmentMimeType
+            attachmentUri = params.attachmentUri,
+            attachmentMimeType = params.attachmentMimeType
         )
 
-        notificationManager.notify(chatGuid.hashCode(), notification)
+        notificationManager.notify(params.chatGuid.hashCode(), notification)
     }
 
     /**

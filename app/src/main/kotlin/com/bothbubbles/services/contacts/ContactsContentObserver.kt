@@ -49,6 +49,7 @@ class ContactsContentObserver @Inject constructor(
     }
 
     private var observer: ContentObserver? = null
+    private var handler: Handler? = null
     private var debounceJob: Job? = null
 
     private val _isObserving = MutableStateFlow(false)
@@ -69,9 +70,9 @@ class ContactsContentObserver @Inject constructor(
 
         Timber.d("Starting contacts content observer")
 
-        val handler = Handler(Looper.getMainLooper())
+        handler = handler ?: Handler(Looper.getMainLooper())
 
-        observer = object : ContentObserver(handler) {
+        observer = object : ContentObserver(handler!!) {
             override fun onChange(selfChange: Boolean) {
                 // Guard: Skip refresh if permission was revoked
                 if (!permissionStateMonitor.hasContactsPermission()) {
@@ -105,8 +106,10 @@ class ContactsContentObserver @Inject constructor(
     fun stopObserving() {
         Timber.d("Stopping contacts content observer")
 
+        handler?.removeCallbacksAndMessages(null)
         observer?.let { context.contentResolver.unregisterContentObserver(it) }
         observer = null
+        handler = null
         debounceJob?.cancel()
 
         _isObserving.value = false

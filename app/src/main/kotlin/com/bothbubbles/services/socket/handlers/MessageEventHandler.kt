@@ -199,19 +199,21 @@ class MessageEventHandler @Inject constructor(
             }
 
             notificationService.showMessageNotification(
-                chatGuid = event.chatGuid,
-                chatTitle = chatTitle,
-                messageText = notificationText,
-                messageGuid = savedMessage.guid,
-                senderName = displaySenderName,
-                senderAddress = senderAddress,
-                isGroup = chat?.isGroup ?: false,
-                avatarUri = senderAvatarUri,
-                linkPreviewTitle = linkTitle,
-                linkPreviewDomain = linkDomain,
-                participantNames = participantNames,
-                participantAvatarPaths = participantAvatarPaths,
-                subject = savedMessage.subject
+                com.bothbubbles.services.notifications.MessageNotificationParams(
+                    chatGuid = event.chatGuid,
+                    chatTitle = chatTitle,
+                    messageText = notificationText,
+                    messageGuid = savedMessage.guid,
+                    senderName = displaySenderName,
+                    senderAddress = senderAddress,
+                    isGroup = chat?.isGroup ?: false,
+                    avatarUri = senderAvatarUri,
+                    linkPreviewTitle = linkTitle,
+                    linkPreviewDomain = linkDomain,
+                    participantNames = participantNames,
+                    participantAvatarPaths = participantAvatarPaths,
+                    subject = savedMessage.subject
+                )
             )
 
             // Enqueue first image/video attachment for download so notification can update with inline preview

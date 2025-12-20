@@ -26,68 +26,68 @@ internal class OpenGraphParser(
             .header("Accept-Language", "en-US,en;q=0.5")
             .build()
 
-        val response = httpClient.newCall(request).execute()
+        httpClient.newCall(request).execute().use { response ->
+            if (!response.isSuccessful) {
+                Timber.w("HTTP error ${response.code} for $url")
+                return LinkMetadataResult.Error("HTTP ${response.code}")
+            }
 
-        if (!response.isSuccessful) {
-            Timber.w("HTTP error ${response.code} for $url")
-            return LinkMetadataResult.Error("HTTP ${response.code}")
-        }
+            val contentType = response.header("Content-Type") ?: ""
+            val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0
 
-        val contentType = response.header("Content-Type") ?: ""
-        val contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0
+            // Check content length
+            if (contentLength > maxContentLength) {
+                Timber.w("Content too large ($contentLength bytes) for $url")
+                return LinkMetadataResult.Error("Content too large")
+            }
 
-        // Check content length
-        if (contentLength > maxContentLength) {
-            Timber.w("Content too large ($contentLength bytes) for $url")
-            return LinkMetadataResult.Error("Content too large")
-        }
-
-        // For images/videos, return basic metadata
-        when {
-            contentType.startsWith("image/") -> {
-                return LinkMetadataResult.Success(
-                    LinkMetadata(
-                        title = null,
-                        description = null,
-                        imageUrl = url,
-                        faviconUrl = null,
-                        siteName = null,
-                        contentType = "image"
+            // For images/videos, return basic metadata
+            when {
+                contentType.startsWith("image/") -> {
+                    return LinkMetadataResult.Success(
+                        LinkMetadata(
+                            title = null,
+                            description = null,
+                            imageUrl = url,
+                            faviconUrl = null,
+                            siteName = null,
+                            contentType = "image"
+                        )
                     )
-                )
-            }
-            contentType.startsWith("video/") -> {
-                return LinkMetadataResult.Success(
-                    LinkMetadata(
-                        title = null,
-                        description = null,
-                        imageUrl = null,
-                        faviconUrl = null,
-                        siteName = null,
-                        contentType = "video"
+                }
+                contentType.startsWith("video/") -> {
+                    return LinkMetadataResult.Success(
+                        LinkMetadata(
+                            title = null,
+                            description = null,
+                            imageUrl = null,
+                            faviconUrl = null,
+                            siteName = null,
+                            contentType = "video"
+                        )
                     )
-                )
+                }
+                !contentType.contains("html") -> {
+                    Timber.d("Non-HTML content type: $contentType for $url")
+                    return LinkMetadataResult.NoPreview
+                }
             }
-            !contentType.contains("html") -> {
-                Timber.d("Non-HTML content type: $contentType for $url")
-                return LinkMetadataResult.NoPreview
+
+            // Parse HTML for Open Graph / meta tags
+            val html = response.body?.string()
+            if (html.isNullOrBlank()) {
+                return LinkMetadataResult.Error("Empty response body")
             }
-        }
 
-        // Parse HTML for Open Graph / meta tags
-        val html = response.body?.string()
-        if (html.isNullOrBlank()) {
-            return LinkMetadataResult.Error("Empty response body")
-        }
+            // Limit HTML size to prevent memory issues
+            val truncatedHtml = if (html.length > maxContentLength) {
+                html.substring(0, maxContentLength)
+            } else {
+                html
+            }
 
-        // Limit HTML size to prevent memory issues
-        val truncatedHtml = if (html.length > maxContentLength) {
-            html.substring(0, maxContentLength)
-        } else {
-            html
+            return parseHtmlMetadata(truncatedHtml, url, urlResolver)
         }
-
-        return parseHtmlMetadata(truncatedHtml, url, urlResolver)
     }
 
     /**

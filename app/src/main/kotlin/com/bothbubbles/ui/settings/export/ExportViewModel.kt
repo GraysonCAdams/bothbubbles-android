@@ -35,7 +35,7 @@ class ExportViewModel @Inject constructor(
 
     private fun loadChats() {
         viewModelScope.launch {
-            chatRepository.getAllChats().collect { chats ->
+            chatRepository.observeAllChats().collect { chats ->
                 val chatInfoList = chats.map { chat ->
                     ExportableChatInfo(
                         guid = chat.guid,

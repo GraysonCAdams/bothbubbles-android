@@ -1,6 +1,44 @@
 package com.bothbubbles.services.notifications
 
 /**
+ * Parameters for showing a message notification.
+ * Consolidates the 15 parameters into a single data class for better API design.
+ *
+ * @param chatGuid Unique identifier for the chat
+ * @param chatTitle Display name of the conversation
+ * @param messageText The message content
+ * @param messageGuid Unique identifier for the message
+ * @param senderName Display name of the sender
+ * @param senderAddress The sender's address (phone/email) used for bubble filtering
+ * @param isGroup Whether this is a group conversation
+ * @param avatarUri Optional URI to the sender's contact photo
+ * @param linkPreviewTitle Optional link preview title
+ * @param linkPreviewDomain Optional link preview domain
+ * @param participantNames List of participant names for group chats (used for group avatar collage)
+ * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
+ * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
+ * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
+ * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
+ */
+data class MessageNotificationParams(
+    val chatGuid: String,
+    val chatTitle: String,
+    val messageText: String,
+    val messageGuid: String,
+    val senderName: String?,
+    val senderAddress: String? = null,
+    val isGroup: Boolean = false,
+    val avatarUri: String? = null,
+    val linkPreviewTitle: String? = null,
+    val linkPreviewDomain: String? = null,
+    val participantNames: List<String> = emptyList(),
+    val participantAvatarPaths: List<String?> = emptyList(),
+    val subject: String? = null,
+    val attachmentUri: android.net.Uri? = null,
+    val attachmentMimeType: String? = null
+)
+
+/**
  * Interface for notification operations.
  * Allows mocking in tests without modifying the concrete implementation.
  *
@@ -15,40 +53,8 @@ interface Notifier {
 
     /**
      * Show a notification for a new message.
-     *
-     * @param chatGuid Unique identifier for the chat
-     * @param chatTitle Display name of the conversation
-     * @param messageText The message content
-     * @param messageGuid Unique identifier for the message
-     * @param senderName Display name of the sender
-     * @param senderAddress The sender's address (phone/email) used for bubble filtering
-     * @param isGroup Whether this is a group conversation
-     * @param avatarUri Optional URI to the sender's contact photo
-     * @param linkPreviewTitle Optional link preview title
-     * @param linkPreviewDomain Optional link preview domain
-     * @param participantNames List of participant names for group chats (used for group avatar collage)
-     * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
-     * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
-     * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
-     * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
-    fun showMessageNotification(
-        chatGuid: String,
-        chatTitle: String,
-        messageText: String,
-        messageGuid: String,
-        senderName: String?,
-        senderAddress: String? = null,
-        isGroup: Boolean = false,
-        avatarUri: String? = null,
-        linkPreviewTitle: String? = null,
-        linkPreviewDomain: String? = null,
-        participantNames: List<String> = emptyList(),
-        participantAvatarPaths: List<String?> = emptyList(),
-        subject: String? = null,
-        attachmentUri: android.net.Uri? = null,
-        attachmentMimeType: String? = null
-    )
+    fun showMessageNotification(params: MessageNotificationParams)
 
     /**
      * Cancel notification for a specific chat.

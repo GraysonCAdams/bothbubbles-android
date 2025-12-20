@@ -466,7 +466,13 @@ class IMessageSenderStrategy @Inject constructor(
             attachment = filePart
         )
 
-        compressedPath?.let { try { File(it).delete() } catch (e: Exception) { } }
+        compressedPath?.let {
+            try {
+                File(it).delete()
+            } catch (e: Exception) {
+                Timber.d(e, "Failed to delete compressed file: $it")
+            }
+        }
 
         val body = response.body()
         if (!response.isSuccessful || body == null || body.status != 200) {

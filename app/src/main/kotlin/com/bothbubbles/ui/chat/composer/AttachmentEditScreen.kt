@@ -146,9 +146,9 @@ fun AttachmentEditScreen(
             val finalUri = withContext(Dispatchers.IO) {
                 try {
                     // Load original image
-                    val inputStream = context.contentResolver.openInputStream(currentUri)
-                    val originalBitmap = BitmapFactory.decodeStream(inputStream)
-                    inputStream?.close()
+                    val originalBitmap = context.contentResolver.openInputStream(currentUri)?.use { inputStream ->
+                        BitmapFactory.decodeStream(inputStream)
+                    }
 
                     if (originalBitmap == null) {
                         return@withContext if (rotation != 0f) {

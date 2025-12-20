@@ -11,6 +11,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.core.net.toUri
 import com.bothbubbles.util.HapticUtils
 import kotlinx.coroutines.delay
+import timber.log.Timber
 import java.io.File
 
 /**
@@ -154,7 +155,9 @@ class ChatAudioState {
         try {
             mediaRecorder?.stop()
             mediaRecorder?.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Timber.d(e, "Failed to stop/release media recorder")
+        }
         mediaRecorder = null
         isRecording = false
 
@@ -186,7 +189,9 @@ class ChatAudioState {
         try {
             mediaRecorder?.stop()
             mediaRecorder?.release()
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Timber.d(e, "Failed to stop/release media recorder during restart")
+        }
         mediaRecorder = null
         recordingFile?.delete()
 

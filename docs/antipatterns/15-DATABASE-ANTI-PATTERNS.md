@@ -147,20 +147,17 @@ Index(value = ["date_deleted", "date_created"])
 
 ---
 
-### 8. Duplicate DAO Methods
+### 8. Duplicate DAO Methods - ✅ FIXED
 
-**Location:** `data/local/db/dao/MessageDao.kt` (Lines 611-615)
+**Location:** `data/local/db/dao/MessageDao.kt` (Lines 611-612)
 
-**Issue:**
+**Status:** FIXED - Removed `deleteMessageByGuid()` duplicate.
+
+**Fixed Implementation:**
 ```kotlin
 @Query("DELETE FROM messages WHERE guid = :guid")
 suspend fun deleteMessage(guid: String)
-
-@Query("DELETE FROM messages WHERE guid = :guid")
-suspend fun deleteMessageByGuid(guid: String)  // Exact duplicate!
 ```
-
-**Fix:** Remove duplicate.
 
 ---
 

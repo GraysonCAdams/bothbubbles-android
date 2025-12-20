@@ -187,15 +187,15 @@ class VideoCompressor @Inject constructor(
             outputFile.delete()
             null
         } finally {
-            try { videoDecoder?.stop() } catch (_: Exception) {}
-            try { videoDecoder?.release() } catch (_: Exception) {}
-            try { videoEncoder?.stop() } catch (_: Exception) {}
-            try { videoEncoder?.release() } catch (_: Exception) {}
-            try { audioDecoder?.stop() } catch (_: Exception) {}
-            try { audioDecoder?.release() } catch (_: Exception) {}
-            try { muxer?.release() } catch (_: Exception) {}
-            try { extractor?.release() } catch (_: Exception) {}
-            try { inputFd.close() } catch (_: Exception) {}
+            try { videoDecoder?.stop() } catch (e: Exception) { Timber.d(e, "Failed to stop video decoder") }
+            try { videoDecoder?.release() } catch (e: Exception) { Timber.d(e, "Failed to release video decoder") }
+            try { videoEncoder?.stop() } catch (e: Exception) { Timber.d(e, "Failed to stop video encoder") }
+            try { videoEncoder?.release() } catch (e: Exception) { Timber.d(e, "Failed to release video encoder") }
+            try { audioDecoder?.stop() } catch (e: Exception) { Timber.d(e, "Failed to stop audio decoder") }
+            try { audioDecoder?.release() } catch (e: Exception) { Timber.d(e, "Failed to release audio decoder") }
+            try { muxer?.release() } catch (e: Exception) { Timber.d(e, "Failed to release muxer") }
+            try { extractor?.release() } catch (e: Exception) { Timber.d(e, "Failed to release extractor") }
+            try { inputFd.close() } catch (e: Exception) { Timber.d(e, "Failed to close input file descriptor") }
         }
     }
 

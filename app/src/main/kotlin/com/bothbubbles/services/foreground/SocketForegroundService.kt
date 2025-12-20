@@ -79,6 +79,10 @@ class SocketForegroundService : Service() {
     // Service-scoped job for notification updates - cancelled when service is destroyed
     private var notificationJob: Job? = null
 
+    private val notificationManager: android.app.NotificationManager by lazy {
+        getSystemService(android.app.NotificationManager::class.java)
+    }
+
     override fun onCreate() {
         super.onCreate()
         Timber.d("Service created")
@@ -179,7 +183,6 @@ class SocketForegroundService : Service() {
 
     private fun updateNotification(statusText: String) {
         val notification = createNotification(statusText)
-        val notificationManager = getSystemService(NOTIFICATION_SERVICE) as android.app.NotificationManager
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
 }

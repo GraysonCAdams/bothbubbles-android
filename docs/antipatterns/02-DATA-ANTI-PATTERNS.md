@@ -163,7 +163,7 @@ suspend fun refreshAllContactInfo() {
 
 ---
 
-### 5. Missing @Transaction on Multi-Table Operations
+### 5. ~~Missing @Transaction on Multi-Table Operations~~ **FIXED 2024-12-20**
 
 **Location:** `data/repository/ChatRepository.kt` (Lines 428-432)
 
@@ -182,16 +182,27 @@ suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
 - If Step 3 fails, messages are deleted but chat remains
 - Data inconsistency on partial failure
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-// In ChatDao:
+// In ChatTransactionDao.kt:
 @Transaction
-suspend fun deleteChatWithMessages(guid: String, tombstoneDao: TombstoneDao, messageDao: MessageDao) {
+suspend fun deleteChatWithDependencies(
+    guid: String,
+    tombstoneDao: TombstoneDao,
+    messageDao: MessageDao
+) {
     tombstoneDao.recordDeletedChat(guid)
     messageDao.deleteMessagesForChat(guid)
     deleteChatByGuid(guid)
 }
+
+// In ChatRepository.kt:
+suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
+    chatDao.deleteChatWithDependencies(guid, tombstoneDao, messageDao)
+}
 ```
+
+**Status:** FIXED on 2024-12-20 - Chat deletion now uses @Transaction for atomicity
 
 ---
 
@@ -407,7 +418,7 @@ interface ChatRepositoryContract {
 | God Repository | HIGH | ChatRepository.kt | 536 lines | Architecture |
 | Missing Result<T> | HIGH | HandleRepository.kt | 81-128 | Error Handling |
 | N+1 Query Pattern | HIGH | ChatParticipantOperations.kt | 109-137 | Performance |
-| Missing @Transaction | HIGH | ChatRepository.kt | 428-432 | Data Integrity |
+| ~~Missing @Transaction~~ | ~~HIGH~~ | ~~ChatRepository.kt~~ | ~~428-432~~ | ~~Data Integrity~~ FIXED |
 | Repository Dependencies | MEDIUM | MessageRepository.kt | 39-41 | Architecture |
 | UI Type Import | MEDIUM | ChatRepository.kt | 96-101 | Layering |
 | Blocking I/O | MEDIUM | GifRepository.kt | 119-122 | Threading |

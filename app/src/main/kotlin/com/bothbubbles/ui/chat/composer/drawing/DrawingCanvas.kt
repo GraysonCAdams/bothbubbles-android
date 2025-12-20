@@ -48,6 +48,59 @@ class DrawingState {
     var currentStrokeWidth by mutableStateOf(8f)
     var isEraserMode by mutableStateOf(false)
 
+    // Reusable Paint objects to avoid allocations every frame
+    private val eraserPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+        isAntiAlias = true
+    }
+
+    private val eraserPreviewPaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        color = android.graphics.Color.GRAY
+        alpha = 128
+        isAntiAlias = true
+    }
+
+    private val strokePaint = Paint().apply {
+        style = Paint.Style.STROKE
+        strokeCap = Paint.Cap.ROUND
+        strokeJoin = Paint.Join.ROUND
+        isAntiAlias = true
+    }
+
+    /**
+     * Get configured Paint for drawing a stroke.
+     */
+    fun getEraserPaint(strokeWidth: Float): Paint {
+        return eraserPaint.apply {
+            this.strokeWidth = strokeWidth
+        }
+    }
+
+    /**
+     * Get configured Paint for eraser preview.
+     */
+    fun getEraserPreviewPaint(strokeWidth: Float): Paint {
+        return eraserPreviewPaint.apply {
+            this.strokeWidth = strokeWidth
+        }
+    }
+
+    /**
+     * Get configured Paint for drawing a regular stroke.
+     */
+    fun getStrokePaint(strokeWidth: Float, color: Color): Paint {
+        return strokePaint.apply {
+            this.strokeWidth = strokeWidth
+            this.color = color.toArgb()
+        }
+    }
+
     fun addStroke(stroke: DrawingStroke) {
         strokes.add(stroke)
         undoneStrokes.clear()
@@ -145,14 +198,7 @@ fun DrawingCanvas(
                 if (stroke.isEraser) {
                     // For eraser, we draw with native canvas to use blend mode
                     drawContext.canvas.nativeCanvas.apply {
-                        val paint = Paint().apply {
-                            style = Paint.Style.STROKE
-                            strokeWidth = stroke.strokeWidth
-                            strokeCap = Paint.Cap.ROUND
-                            strokeJoin = Paint.Join.ROUND
-                            xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-                            isAntiAlias = true
-                        }
+                        val paint = drawingState.getEraserPaint(stroke.strokeWidth)
                         drawPath(stroke.path.asAndroidPath(), paint)
                     }
                 } else {
@@ -172,15 +218,7 @@ fun DrawingCanvas(
             currentPath?.let { path ->
                 if (drawingState.isEraserMode) {
                     drawContext.canvas.nativeCanvas.apply {
-                        val paint = Paint().apply {
-                            style = Paint.Style.STROKE
-                            strokeWidth = drawingState.currentStrokeWidth
-                            strokeCap = Paint.Cap.ROUND
-                            strokeJoin = Paint.Join.ROUND
-                            color = android.graphics.Color.GRAY
-                            alpha = 128
-                            isAntiAlias = true
-                        }
+                        val paint = drawingState.getEraserPreviewPaint(drawingState.currentStrokeWidth)
                         drawPath(path.asAndroidPath(), paint)
                     }
                 } else {
@@ -207,17 +245,10 @@ fun DrawingState.renderToBitmap(width: Int, height: Int): Bitmap {
     val canvas = android.graphics.Canvas(bitmap)
 
     strokes.forEach { stroke ->
-        val paint = Paint().apply {
-            style = Paint.Style.STROKE
-            strokeWidth = stroke.strokeWidth
-            strokeCap = Paint.Cap.ROUND
-            strokeJoin = Paint.Join.ROUND
-            isAntiAlias = true
-            if (stroke.isEraser) {
-                xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-            } else {
-                color = stroke.color.toArgb()
-            }
+        val paint = if (stroke.isEraser) {
+            getEraserPaint(stroke.strokeWidth)
+        } else {
+            getStrokePaint(stroke.strokeWidth, stroke.color)
         }
         canvas.drawPath(stroke.path.asAndroidPath(), paint)
     }

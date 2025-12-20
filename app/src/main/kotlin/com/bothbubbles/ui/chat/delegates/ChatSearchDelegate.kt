@@ -9,6 +9,8 @@ import com.bothbubbles.util.text.TextNormalization
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
+import kotlinx.collections.immutable.persistentListOf
+import kotlinx.collections.immutable.toImmutableList
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -77,10 +79,10 @@ class ChatSearchDelegate @AssistedInject constructor(
             SearchState(
                 isActive = true,
                 query = "",
-                matchIndices = emptyList(),
+                matchIndices = persistentListOf(),
                 currentMatchIndex = -1,
                 isSearchingDatabase = false,
-                databaseResults = emptyList(),
+                databaseResults = persistentListOf(),
                 showResultsSheet = false
             )
         }
@@ -123,9 +125,9 @@ class ChatSearchDelegate @AssistedInject constructor(
 
         if (query.isBlank()) {
             _state.update { it.copy(
-                matchIndices = emptyList(),
+                matchIndices = persistentListOf(),
                 currentMatchIndex = -1,
-                databaseResults = emptyList(),
+                databaseResults = persistentListOf(),
                 isSearchingDatabase = false
             )}
             return
@@ -141,7 +143,7 @@ class ChatSearchDelegate @AssistedInject constructor(
             }
 
             _state.update { it.copy(
-                matchIndices = matchIndices,
+                matchIndices = matchIndices.toImmutableList(),
                 currentMatchIndex = if (matchIndices.isNotEmpty()) 0 else -1
             )}
 
@@ -191,10 +193,10 @@ class ChatSearchDelegate @AssistedInject constructor(
                 val results = withContext(Dispatchers.IO) {
                     searchDatabase(query, chatGuids, loadedMessages)
                 }
-                _state.update { it.copy(databaseResults = results) }
+                _state.update { it.copy(databaseResults = results.toImmutableList()) }
             } catch (e: Exception) {
                 // Log error but don't crash - database search is optional
-                _state.update { it.copy(databaseResults = emptyList()) }
+                _state.update { it.copy(databaseResults = persistentListOf()) }
             } finally {
                 _state.update { it.copy(isSearchingDatabase = false) }
             }
