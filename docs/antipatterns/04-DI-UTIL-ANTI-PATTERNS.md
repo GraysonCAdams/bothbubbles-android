@@ -8,59 +8,7 @@
 
 ## Major Issues
 
-### 1. God Module with Repetitive DAO Providers
-
-**Location:** `di/DatabaseModule.kt` (Lines 69-182)
-
-**Issue:**
-```kotlin
-@Provides
-@Singleton
-fun provideChatDao(database: BothBubblesDatabase): ChatDao {
-    return database.chatDao()
-}
-
-@Provides
-@Singleton
-fun provideMessageDao(database: BothBubblesDatabase): MessageDao {
-    return database.messageDao()
-}
-
-// ... repeated 16 more times (18 total!)
-```
-
-**Why Problematic:**
-- 18 nearly identical boilerplate methods
-- Violates DRY principle
-- Room DAOs are already singletons via database
-- `@Singleton` is redundant (database is singleton)
-- Makes module hard to maintain
-
-**Fix Options:**
-
-Option 1 - Remove individual providers, inject database directly:
-```kotlin
-@Singleton
-class MessageRepository @Inject constructor(
-    private val database: BothBubblesDatabase
-) {
-    private val messageDao = database.messageDao()
-}
-```
-
-Option 2 - Factory class:
-```kotlin
-@Singleton
-class DaoFactory @Inject constructor(database: BothBubblesDatabase) {
-    val chatDao = database.chatDao()
-    val messageDao = database.messageDao()
-    // ...
-}
-```
-
----
-
-### 2. AvatarGenerator God Object
+### 1. AvatarGenerator God Object
 
 **Location:** `util/AvatarGenerator.kt` (758 lines!)
 
@@ -105,7 +53,7 @@ object GroupAvatarGenerator { /* group collage logic */ }
 
 ## Medium Severity Issues
 
-### 3. Missing @Singleton on Dispatcher Providers
+### 2. Missing @Singleton on Dispatcher Providers
 
 **Location:** `di/CoroutinesModule.kt` (Lines 42-51)
 
@@ -140,7 +88,7 @@ fun provideIoDispatcher(): CoroutineDispatcher = Dispatchers.IO
 
 ---
 
-### 4. Mutable Global State in PerformanceProfiler
+### 3. Mutable Global State in PerformanceProfiler
 
 **Location:** `util/PerformanceProfiler.kt` (Lines 13-24)
 
@@ -173,7 +121,7 @@ class PerformanceProfiler @Inject constructor() {
 
 ---
 
-### 5. Service in Wrong Package (MessageDeduplicator)
+### 4. Service in Wrong Package (MessageDeduplicator)
 
 **Location:** `util/MessageDeduplicator.kt` (Lines 26-141)
 
@@ -201,7 +149,7 @@ Move to `services/messaging/MessageDeduplicator.kt`
 
 ---
 
-### 6. Mutable State in HapticUtils
+### 5. Mutable State in HapticUtils
 
 **Location:** `util/HapticUtils.kt` (Lines 52-61)
 
@@ -232,7 +180,7 @@ fun onTap(haptic: HapticFeedback, enabled: Boolean = true) {
 
 ---
 
-### 7. AudioHapticSync Should Be Service
+### 6. AudioHapticSync Should Be Service
 
 **Location:** `util/AudioHapticSync.kt` (Lines 46-284)
 
@@ -264,7 +212,7 @@ class AudioHapticSync @Inject constructor(
 
 ## Low Severity Issues
 
-### 8. PhoneNumberFormatter Requires init()
+### 7. PhoneNumberFormatter Requires init()
 
 **Location:** `util/PhoneNumberFormatter.kt` (Lines 17-35)
 
@@ -294,7 +242,7 @@ Make it a properly injected service with automatic initialization.
 
 ---
 
-### 9. BlurhashDecoder Race Condition
+### 8. BlurhashDecoder Race Condition
 
 **Location:** `util/BlurhashDecoder.kt` (Line 24)
 
@@ -325,28 +273,10 @@ Use double-checked locking or synchronized block.
 
 ---
 
-### 10. Redundant @Singleton on DAO Providers
-
-**Location:** `di/DatabaseModule.kt` (All DAO providers)
-
-**Issue:**
-All 18 DAO providers have `@Singleton`, but Room DAOs are already singletons when accessed through a singleton database.
-
-**Why Problematic:**
-- Redundant annotations add noise
-- Creates confusion about what's actually singleton
-- Not harmful, but not necessary
-
-**Fix:**
-Either remove `@Singleton` or add comment explaining why it's there.
-
----
-
 ## Summary Table
 
 | Issue | Severity | File | Lines | Category |
 |-------|----------|------|-------|----------|
-| God Module (18 DAOs) | MAJOR | DatabaseModule.kt | 69-182 | Organization |
 | God Object (758 lines) | MAJOR | AvatarGenerator.kt | All | Class Design |
 | Missing @Singleton | MEDIUM | CoroutinesModule.kt | 42-51 | Scope |
 | Mutable Global State | MEDIUM | PerformanceProfiler.kt | 13-24 | State |
@@ -355,7 +285,6 @@ Either remove `@Singleton` or add comment explaining why it's there.
 | Should Be Service | MEDIUM | AudioHapticSync.kt | 46-284 | Organization |
 | Requires init() | LOW | PhoneNumberFormatter.kt | 17-35 | API Design |
 | Race Condition | LOW | BlurhashDecoder.kt | 24 | Thread Safety |
-| Redundant @Singleton | LOW | DatabaseModule.kt | Various | Style |
 
 ---
 
