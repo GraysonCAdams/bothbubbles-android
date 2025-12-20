@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.attachment
 
+import android.media.MediaMetadataRetriever
 import android.view.ViewGroup
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -49,7 +51,16 @@ import coil.size.Precision
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import com.bothbubbles.ui.theme.MediaSizing
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import timber.log.Timber
+import java.util.concurrent.ConcurrentHashMap
+
+/**
+ * Cache for extracted video aspect ratios.
+ * Maps video path to aspect ratio to avoid re-extracting on recomposition.
+ */
+private val videoAspectRatioCache = ConcurrentHashMap<String, Float>()
 
 /**
  * Inline video attachment that shows thumbnail until user taps play.
@@ -75,21 +86,42 @@ fun VideoAttachment(
     // IMPORTANT: For inbound attachments, webUrl won't work (ExoPlayer lacks auth headers)
     val videoUrl = attachment.displayUrl
 
-    // DEBUG LOGGING
-    Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    Timber.tag("AttachmentDebug").d("🎬 VideoAttachment RENDER: guid=${attachment.guid}")
-    Timber.tag("AttachmentDebug").d("   RESOLVED videoUrl=$videoUrl")
-    Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}")
-    Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
-    Timber.tag("AttachmentDebug").d("   isOutgoing=${attachment.isOutgoing}, isAwaitingDownload=${attachment.isAwaitingDownload}")
-    Timber.tag("AttachmentDebug").d("   mimeType=${attachment.mimeType}")
-    Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    // Check if we have valid dimensions from the server
+    val hasValidServerDimensions = attachment.width != null && attachment.height != null &&
+        attachment.width > 0 && attachment.height > 0
 
-    // Calculate aspect ratio
-    val aspectRatio = if (attachment.width != null && attachment.height != null && attachment.height > 0) {
-        attachment.width.toFloat() / attachment.height.toFloat()
-    } else {
-        16f / 9f // Default video aspect ratio
+    // Use server dimensions if valid, otherwise extract locally
+    var aspectRatio by remember(attachment.guid) {
+        mutableFloatStateOf(
+            if (hasValidServerDimensions) {
+                attachment.width!!.toFloat() / attachment.height!!.toFloat()
+            } else {
+                // Check cache first
+                attachment.localPath?.let { videoAspectRatioCache[it] } ?: (16f / 9f)
+            }
+        )
+    }
+
+    // Extract dimensions from local file if server didn't provide them
+    LaunchedEffect(attachment.localPath, hasValidServerDimensions) {
+        if (!hasValidServerDimensions && attachment.localPath != null) {
+            // Check cache first
+            val cached = videoAspectRatioCache[attachment.localPath]
+            if (cached != null) {
+                aspectRatio = cached
+                return@LaunchedEffect
+            }
+
+            // Extract dimensions on IO thread
+            val extracted = withContext(Dispatchers.IO) {
+                extractVideoAspectRatio(attachment.localPath)
+            }
+            if (extracted != null) {
+                videoAspectRatioCache[attachment.localPath] = extracted
+                aspectRatio = extracted
+                Timber.tag("VideoAttachment").d("Extracted aspect ratio $extracted for ${attachment.guid}")
+            }
+        }
     }
 
     // Player state - only acquire when actively playing
@@ -546,6 +578,48 @@ private fun VideoThumbnailFallback(
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Extract video aspect ratio from a local file using MediaMetadataRetriever.
+ * Returns null if extraction fails.
+ *
+ * @param filePath Path to the local video file
+ * @return Aspect ratio (width/height) or null if extraction fails
+ */
+private fun extractVideoAspectRatio(filePath: String): Float? {
+    val retriever = MediaMetadataRetriever()
+    return try {
+        retriever.setDataSource(filePath)
+
+        val widthStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)
+        val heightStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)
+        val rotationStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)
+
+        val width = widthStr?.toIntOrNull()
+        val height = heightStr?.toIntOrNull()
+        val rotation = rotationStr?.toIntOrNull() ?: 0
+
+        if (width != null && height != null && width > 0 && height > 0) {
+            // Account for video rotation - 90 or 270 degrees means width/height are swapped
+            if (rotation == 90 || rotation == 270) {
+                height.toFloat() / width.toFloat()
+            } else {
+                width.toFloat() / height.toFloat()
+            }
+        } else {
+            null
+        }
+    } catch (e: Exception) {
+        Timber.tag("VideoAttachment").w(e, "Failed to extract aspect ratio from $filePath")
+        null
+    } finally {
+        try {
+            retriever.release()
+        } catch (e: Exception) {
+            // Ignore release errors
         }
     }
 }
