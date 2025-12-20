@@ -9,7 +9,8 @@ import com.bothbubbles.util.EmojiUtils.analyzeEmojis
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.ui.util.toStable
 import java.text.SimpleDateFormat
-import java.util.*
+import java.util.Date
+import java.util.Locale
 
 /**
  * Shared transformation functions for converting MessageEntity to MessageUiModel.

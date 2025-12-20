@@ -203,15 +203,16 @@ class AttachmentRepository @Inject constructor(
      *
      * @param messageDto The message DTO containing attachment information
      * @param tempMessageGuid Optional temp GUID to clean up temp attachments from
+     * @return Result indicating success or failure
      */
-    suspend fun syncAttachmentsFromDto(messageDto: MessageDto, tempMessageGuid: String? = null) {
+    suspend fun syncAttachmentsFromDto(messageDto: MessageDto, tempMessageGuid: String? = null): Result<Unit> = runCatching {
         // Delete any temp attachments that were created for immediate display
         tempMessageGuid?.let { tempGuid ->
             attachmentDao.deleteAttachmentsForMessage(tempGuid)
         }
 
         val attachments = messageDto.attachments
-        if (attachments.isNullOrEmpty()) return
+        if (attachments.isNullOrEmpty()) return@runCatching
 
         val serverAddress = settingsDataStore.serverAddress.first()
 

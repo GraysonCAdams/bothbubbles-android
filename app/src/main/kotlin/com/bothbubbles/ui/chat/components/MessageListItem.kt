@@ -149,9 +149,12 @@ fun MessageListItem(
         groupPosition == MessageGroupPosition.SINGLE || groupPosition == MessageGroupPosition.FIRST -> 6.dp
         else -> 2.dp
     }
+    // Extra padding between messages from different senders in group chats
+    // This visually groups messages by sender for easier reading
+    val senderChangePadding = if (showSenderName) 10.dp else 0.dp
     // The bubble components now use layout modifier to expand bounds by 20dp for reactions,
     // so we no longer need extra padding here for reaction overflow.
-    val topPadding = basePadding
+    val topPadding = basePadding + senderChangePadding
     val stickerOverlapOffset = if (message.isPlacedSticker) (-20).dp else 0.dp
 
     val targetGuid = message.associatedMessageGuid?.let { guid ->

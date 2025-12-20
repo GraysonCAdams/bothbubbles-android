@@ -39,7 +39,7 @@ class SmsSenderStrategy @Inject constructor(
         val useMms = isGroup || hasAttachments || hasSubject
 
         return if (useMms) {
-            sendMms(options, isGroup)
+            sendMms(options)
         } else {
             sendSms(options)
         }
@@ -74,7 +74,7 @@ class SmsSenderStrategy @Inject constructor(
         return SendResult.fromResult(result)
     }
 
-    private suspend fun sendMms(options: SendOptions, isGroup: Boolean): SendResult {
+    private suspend fun sendMms(options: SendOptions): SendResult {
         val status = smsPermissionHelper.getSmsCapabilityStatus()
         if (!status.deviceSupportsMms) {
             return SendResult.Failure(

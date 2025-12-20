@@ -84,20 +84,26 @@ interface PendingMessageSource {
     /**
      * Re-enqueue all pending messages.
      * Called at app startup to restart stalled jobs.
+     *
+     * @return Result indicating success or failure
      */
-    suspend fun reEnqueuePendingMessages()
+    suspend fun reEnqueuePendingMessages(): Result<Unit>
 
     /**
      * Clean up sent messages (run periodically or on startup).
+     *
+     * @return Result indicating success or failure
      */
-    suspend fun cleanupSentMessages()
+    suspend fun cleanupSentMessages(): Result<Unit>
 
     /**
      * Clean up orphaned temp messages that weren't properly replaced.
      * This handles race conditions where both temp and server messages exist.
      * Called at app startup.
+     *
+     * @return Result indicating success or failure
      */
-    suspend fun cleanupOrphanedTempMessages()
+    suspend fun cleanupOrphanedTempMessages(): Result<Unit>
 
     /**
      * Get count of unsent messages (for startup indicator).

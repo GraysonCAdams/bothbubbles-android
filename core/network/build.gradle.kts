@@ -44,7 +44,7 @@ dependencies {
     api(libs.retrofit)
     api(libs.retrofit.converter.moshi)
     api(libs.okhttp)
-    api(libs.okhttp.logging)
+    implementation(libs.okhttp.logging)
 
     // JSON - Moshi
     api(libs.moshi)

@@ -257,23 +257,23 @@ class ChatRepository @Inject constructor(
 
     // ===== Local Mutation Operations =====
 
-    suspend fun insertChat(chat: ChatEntity) {
+    suspend fun insertChat(chat: ChatEntity): Result<Unit> = runCatching {
         chatDao.insertChat(chat)
     }
 
-    suspend fun updateDisplayName(chatGuid: String, displayName: String?) {
+    suspend fun updateDisplayName(chatGuid: String, displayName: String?): Result<Unit> = runCatching {
         chatDao.updateDisplayName(chatGuid, displayName)
     }
 
-    suspend fun updateCustomAvatarPath(chatGuid: String, path: String?) {
+    suspend fun updateCustomAvatarPath(chatGuid: String, path: String?): Result<Unit> = runCatching {
         chatDao.updateCustomAvatarPath(chatGuid, path)
     }
 
-    suspend fun deleteAllChats() {
+    suspend fun deleteAllChats(): Result<Unit> = runCatching {
         chatDao.deleteAllChats()
     }
 
-    suspend fun deleteAllChatHandleCrossRefs() {
+    suspend fun deleteAllChatHandleCrossRefs(): Result<Unit> = runCatching {
         chatDao.deleteAllChatHandleCrossRefs()
     }
 
@@ -284,20 +284,15 @@ class ChatRepository @Inject constructor(
      * Used for accurate progress tracking during initial sync.
      *
      * @param after Optional timestamp to count messages after (epoch ms)
-     * @return Total message count, or null if the API call failed
+     * @return Result containing total message count
      */
-    suspend fun getServerMessageCount(after: Long? = null): Int? {
-        return try {
-            val response = api.getMessageCount(after = after)
-            if (response.isSuccessful) {
-                response.body()?.data?.total
-            } else {
-                Timber.w("Failed to get message count: ${response.code()}")
-                null
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to get message count")
-            null
+    suspend fun getServerMessageCount(after: Long? = null): Result<Int> = runCatching {
+        val response = api.getMessageCount(after = after)
+        if (response.isSuccessful) {
+            response.body()?.data?.total
+                ?: throw Exception("No message count in response")
+        } else {
+            throw Exception("Failed to get message count: ${response.code()}")
         }
     }
 
@@ -488,14 +483,14 @@ class ChatRepository @Inject constructor(
     /**
      * Update draft text for a chat
      */
-    suspend fun updateDraftText(guid: String, text: String?) {
+    suspend fun updateDraftText(guid: String, text: String?): Result<Unit> = runCatching {
         chatDao.updateDraftText(guid, text?.takeIf { it.isNotBlank() })
     }
 
     /**
      * Update the last message info for a chat
      */
-    suspend fun updateLastMessage(chatGuid: String, date: Long) {
+    suspend fun updateLastMessage(chatGuid: String, date: Long): Result<Unit> = runCatching {
         chatDao.updateLatestMessageDate(chatGuid, date)
     }
 
@@ -506,7 +501,7 @@ class ChatRepository @Inject constructor(
      * @param mode The preferred mode ("imessage", "sms", or null for automatic)
      * @param manuallySet Whether the user manually set this preference
      */
-    suspend fun updatePreferredSendMode(chatGuid: String, mode: String?, manuallySet: Boolean) {
+    suspend fun updatePreferredSendMode(chatGuid: String, mode: String?, manuallySet: Boolean): Result<Unit> = runCatching {
         chatDao.updatePreferredSendMode(chatGuid, mode, manuallySet)
     }
 
@@ -518,13 +513,13 @@ class ChatRepository @Inject constructor(
      * like "(smsfp)", "(smsft)", or look like chat GUIDs (e.g., "c46271").
      * Should be called once on app startup.
      */
-    suspend fun cleanupInvalidDisplayNames(): Int {
+    suspend fun cleanupInvalidDisplayNames(): Result<Int> = runCatching {
         val chatCount = chatDao.clearInvalidDisplayNames()
         val groupCount = unifiedChatGroupDao.clearInvalidDisplayNames()
         val totalCount = chatCount + groupCount
         if (totalCount > 0) {
             Timber.i("Cleaned up $totalCount invalid display names (chats: $chatCount, groups: $groupCount)")
         }
-        return totalCount
+        totalCount
     }
 }

@@ -396,7 +396,7 @@ class PendingMessageRepository @Inject constructor(
      * Re-enqueue all pending messages.
      * Called at app startup to restart stalled jobs.
      */
-    override suspend fun reEnqueuePendingMessages() {
+    override suspend fun reEnqueuePendingMessages(): Result<Unit> = runCatching {
         // Reset messages stuck in SENDING status (app was killed during send)
         // Consider stale if SENDING for more than 2 minutes
         val staleThreshold = System.currentTimeMillis() - (2 * 60 * 1000)
@@ -431,7 +431,7 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Clean up sent messages (run periodically or on startup).
      */
-    override suspend fun cleanupSentMessages() {
+    override suspend fun cleanupSentMessages(): Result<Unit> = runCatching {
         val sentCount = pendingMessageDao.getByStatus(PendingSyncStatus.SENT.name).size
         if (sentCount > 0) {
             pendingMessageDao.deleteSent()
@@ -444,7 +444,7 @@ class PendingMessageRepository @Inject constructor(
      * This handles race conditions where both temp and server messages exist.
      * Called at app startup.
      */
-    override suspend fun cleanupOrphanedTempMessages() {
+    override suspend fun cleanupOrphanedTempMessages(): Result<Unit> = runCatching {
         // Find temp messages older than 5 minutes (legitimate temps should be replaced within seconds)
         val staleThreshold = System.currentTimeMillis() - (5 * 60 * 1000)
         val orphanedTemps = messageDao.getOrphanedTempMessages(staleThreshold)

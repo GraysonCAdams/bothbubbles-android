@@ -121,7 +121,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 | 21 | ~~Lambda Capturing State~~ | `ChatScreen.kt:505-536` | ✅ ALREADY OPTIMIZED (Wave 2/3G) |
 | 22 | ~~android:allowBackup~~ | `AndroidManifest.xml:84` | ✅ FIXED 2025-12-20 |
 | 23 | ~~Exported Components~~ | `AndroidManifest.xml` | ✅ FIXED 2025-12-20 |
-| 24 | Missing Result Handling | Multiple repositories | ⚠️ OPEN |
+| 24 | ~~Missing Result Handling~~ | Multiple repositories | ✅ FIXED 2025-12-20 |
 | 25 | ~~N+1 Query Patterns~~ | `ChatParticipantOperations.kt:109` | ✅ FIXED 2025-12-20 |
 | 26 | ~~Uncancelled Flow~~ | `SocketEventHandler.kt:92` | ✅ FIXED 2025-12-20 |
 | 27 | ~~Duplicate Detection Race~~ | `PendingMessageRepository.kt:125` | ✅ FIXED 2025-12-20 |
@@ -174,14 +174,14 @@ This document indexes all identified anti-patterns across the codebase, organize
 - [x] Decompose AttachmentRepository (808 → 435 lines) (FIXED 2025-12-20 - extracted AttachmentDownloadManager)
 - [x] Refactor ChatScreen callbacks to method references (ALREADY DONE - Wave 2/3G patterns)
 - [x] Split AvatarGenerator god object (758 → 314 lines) (FIXED 2025-12-20 - extracted ContactPhotoLoader, GroupAvatarRenderer)
-- [ ] Add Result<T> error handling to repositories (requires API changes)
+- [x] Add Result<T> error handling to repositories (FIXED 2025-12-20 - MessageRepository, ChatRepository, AttachmentRepository, PendingMessageRepository)
 - [x] Refactor `Notifier.showMessageNotification()` (15 params) to use data class (FIXED 2025-12-20)
 
 ### Sprint 6 - Code Quality & API Design ✅ COMPLETE
 - [x] Add logging to empty catch blocks (FIXED 2025-12-20)
 - [x] Fix FileStreamingRequestBody buffer bug (FIXED 2025-12-20 - was reading to temp buffer then writing uninitialized array)
-- [ ] Replace boolean parameters with enums (low priority - existing code is readable)
-- [ ] Move stateful utilities to services package (low priority - deferred)
+- [x] Replace boolean parameters with enums (FIXED 2025-12-20 - removed unused isGroup param from SmsSenderStrategy.sendMms)
+- [x] Move stateful utilities to services package (FIXED 2025-12-20 - MessageDeduplicator moved to services/messaging/)
 - [x] Remove duplicate DAO methods (`deleteMessage`/`deleteMessageByGuid`) (FIXED 2025-12-20)
 - [x] Remove duplicate repository methods (`observeAllChats`/`getAllChats`) (FIXED 2025-12-20)
 - [x] Non-idempotent retry logic in `RetryHelper.kt` (NOT A BUG - code analysis confirmed correct 2025-12-20)
@@ -189,7 +189,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 ### Sprint 7 - State Restoration ✅ COMPLETE
 - [x] Migrate ChatScreenState dialog flags to SavedStateHandle (FIXED 2025-12-20)
 - [x] Use `rememberSaveable` for ComposerTextField text input (FIXED 2025-12-20)
-- [ ] Persist LazyColumn scroll positions in detail screens (not critical)
+- [ ] Persist LazyColumn scroll positions in detail screens (DEFERRED - requires SavedStateHandle in 20+ ViewModels, low impact)
 - [x] Use `rememberSaveable` for form inputs in Life360SettingsScreen (FIXED 2025-12-20)
 - [x] Add `isStopped` check in MessageSendWorker confirmation wait (FIXED 2025-12-20)
 - [x] Add network constraint to ScheduledMessageWorker (FIXED 2025-12-20)
@@ -213,11 +213,11 @@ This document indexes all identified anti-patterns across the codebase, organize
 ## Quick Wins (< 1 hour each)
 
 1. ~~Add `@Singleton` to dispatcher providers in `CoroutinesModule.kt`~~ ✅ FIXED 2025-12-20
-2. Change `LaunchedEffect(Unit)` to proper keys in `ConversationsScreen.kt`
+2. ~~Change `LaunchedEffect(Unit)` to proper keys in `ConversationsScreen.kt`~~ ✅ ALREADY FIXED (remaining instance is inside AnimatedVisibility - correct behavior)
 3. ~~Replace unsafe `!!` casts with safe casts in entity computed properties~~ ✅ FIXED 2025-12-20
-4. Move `MessageDeduplicator.kt` from util to services package
+4. ~~Move `MessageDeduplicator.kt` from util to services package~~ ✅ FIXED 2025-12-20
 5. ~~Add missing `@Transaction` to `ChatRepository.deleteChat()`~~ ✅ FIXED 2025-12-20
-6. Cache NotificationManager in SocketForegroundService
+6. ~~Cache NotificationManager in SocketForegroundService~~ ✅ ALREADY FIXED (uses `by lazy`)
 7. Fix wildcard import in MessageTransformations.kt
 8. ~~Gate HTTP logging with `BuildConfig.DEBUG`~~ ✅ FIXED 2025-12-20
 9. ~~Remove duplicate `getChat`/`getChatByGuid` methods~~ ✅ FIXED 2025-12-20
@@ -230,7 +230,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 16. ~~Replace `remember` with `rememberSaveable` for dropdown expanded state~~ ✅ FIXED 2025-12-20
 17. ~~Add work tags to WorkManager requests for better debugging~~ ✅ FIXED 2025-12-20
 18. ~~Move Timber version to version catalog (hardcoded in 2 files)~~ ✅ FIXED 2025-12-20
-19. Change `api()` to `implementation()` in core:network dependencies
+19. ~~Change `api()` to `implementation()` in core:network dependencies~~ ✅ PARTIALLY FIXED 2025-12-20 (okhttp.logging→implementation, others are correctly api since types are exposed)
 20. ~~Use `currentBackStackEntry` instead of `getBackStackEntry()` after navigate()~~ ✅ FIXED 2025-12-20
 
 ---

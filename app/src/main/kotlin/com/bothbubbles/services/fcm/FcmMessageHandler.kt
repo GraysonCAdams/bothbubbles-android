@@ -16,7 +16,7 @@ import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.effects.MessageEffect
-import com.bothbubbles.util.MessageDeduplicator
+import com.bothbubbles.services.messaging.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.google.firebase.messaging.RemoteMessage
 import dagger.Lazy

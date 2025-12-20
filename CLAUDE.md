@@ -386,6 +386,41 @@ Consistent error handling using sealed classes in `util/error/`:
 - `safeCall {}` - Wrapper for operations that can fail
 - `Result<T>.handle()` - Extension for handling success/failure
 
+**RULE**: Repository methods that can fail MUST return `Result<T>`:
+```kotlin
+// REQUIRED for database mutations
+suspend fun deleteMessage(guid: String): Result<Unit> = runCatching {
+    dao.deleteMessage(guid)
+}
+
+// REQUIRED for network operations
+suspend fun getServerCount(): Result<Int> = runCatching {
+    val response = api.getCount()
+    if (response.isSuccessful) {
+        response.body()?.data ?: throw Exception("No data")
+    } else {
+        throw Exception("Request failed: ${response.code()}")
+    }
+}
+
+// For early returns, use return@runCatching
+suspend fun syncData(items: List<Item>): Result<Unit> = runCatching {
+    if (items.isEmpty()) return@runCatching  // Early exit
+    items.forEach { dao.insert(it) }
+}
+```
+
+Methods that **require** `Result<T>`:
+- Database insert/update/delete operations
+- Network requests (API calls)
+- File I/O operations
+- Any operation that can throw exceptions
+
+Methods that **don't need** `Result<T>`:
+- Pure queries returning `Flow<T>` (errors handled by collector)
+- Simple property accessors
+- Pure in-memory calculations
+
 #### 6. Attachment Types
 
 Use `PendingAttachmentInput` for attachments throughout the send flow:

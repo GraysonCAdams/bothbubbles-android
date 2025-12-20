@@ -235,7 +235,7 @@ class MessageRepository @Inject constructor(
     /**
      * Delete all messages from the database.
      */
-    suspend fun deleteAllMessages() {
+    suspend fun deleteAllMessages(): Result<Unit> = runCatching {
         messageDao.deleteAllMessages()
     }
 
@@ -487,7 +487,7 @@ class MessageRepository @Inject constructor(
      * Delete a message locally.
      * Records a tombstone to prevent resurrection during sync.
      */
-    suspend fun deleteMessageLocally(messageGuid: String) {
+    suspend fun deleteMessageLocally(messageGuid: String): Result<Unit> = runCatching {
         tombstoneDao.recordDeletedMessage(messageGuid)
         messageDao.deleteMessage(messageGuid)
     }
@@ -498,8 +498,8 @@ class MessageRepository @Inject constructor(
      *
      * @param guids List of message GUIDs to delete
      */
-    suspend fun softDeleteMessages(guids: List<String>) {
-        if (guids.isEmpty()) return
+    suspend fun softDeleteMessages(guids: List<String>): Result<Unit> = runCatching {
+        if (guids.isEmpty()) return@runCatching
         // Record tombstones to prevent resurrection during sync
         guids.forEach { guid ->
             tombstoneDao.recordDeletedMessage(guid)
@@ -516,7 +516,7 @@ class MessageRepository @Inject constructor(
      * @param errorMessage Human-readable error message
      * @param errorCode Numeric error code (e.g., 22 = not registered with iMessage). Default is 1 (generic error).
      */
-    suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String, errorCode: Int = 1) {
+    suspend fun markMessageAsFailed(messageGuid: String, errorMessage: String, errorCode: Int = 1): Result<Unit> = runCatching {
         // Update the message error code and error message
         messageDao.updateMessageError(messageGuid, errorCode, errorMessage)
         Timber.d("Marked message $messageGuid as failed (code $errorCode): $errorMessage")
@@ -525,7 +525,7 @@ class MessageRepository @Inject constructor(
     /**
      * Mark a message's effect as played by setting the datePlayed timestamp.
      */
-    suspend fun markEffectPlayed(messageGuid: String) {
+    suspend fun markEffectPlayed(messageGuid: String): Result<Unit> = runCatching {
         messageDao.updateDatePlayed(messageGuid, System.currentTimeMillis())
     }
 

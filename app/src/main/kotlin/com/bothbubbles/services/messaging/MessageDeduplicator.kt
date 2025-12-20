@@ -1,4 +1,4 @@
-package com.bothbubbles.util
+package com.bothbubbles.services.messaging
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.SeenMessageDao

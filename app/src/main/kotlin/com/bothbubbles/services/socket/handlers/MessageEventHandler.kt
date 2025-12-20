@@ -20,7 +20,7 @@ import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.UiRefreshEvent
 import com.bothbubbles.services.spam.SpamRepository
 import com.bothbubbles.ui.effects.MessageEffect
-import com.bothbubbles.util.MessageDeduplicator
+import com.bothbubbles.services.messaging.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.parsing.UrlParsingUtils
 import com.bothbubbles.core.network.api.dto.AttachmentDto
