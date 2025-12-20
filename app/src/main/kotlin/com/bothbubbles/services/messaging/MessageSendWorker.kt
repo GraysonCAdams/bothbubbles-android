@@ -285,6 +285,12 @@ class MessageSendWorker @AssistedInject constructor(
         val startTime = System.currentTimeMillis()
 
         while (System.currentTimeMillis() - startTime < SERVER_CONFIRMATION_TIMEOUT_MS) {
+            // Check if worker has been cancelled or stopped
+            if (isStopped) {
+                Timber.w("Worker stopped during confirmation wait")
+                return kotlin.Result.failure(Exception("Worker was stopped"))
+            }
+
             val message = messageDao.getMessageByGuid(serverGuid)
 
             if (message != null) {

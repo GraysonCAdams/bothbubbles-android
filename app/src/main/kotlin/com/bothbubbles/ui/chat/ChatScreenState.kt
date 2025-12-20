@@ -12,6 +12,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.unit.dp
@@ -25,31 +26,49 @@ import kotlinx.coroutines.CoroutineScope
  * Consolidates all local UI state (dialog visibility, selection states, layout measurements)
  * into a single @Stable class to reduce ChatScreen.kt size and improve state management.
  *
+ * Dialog states are backed by rememberSaveable to survive process death and configuration changes.
+ *
  * Created as part of Stage 3 refactoring.
  */
 @Stable
 class ChatScreenState(
     val listState: LazyListState,
     val snackbarHostState: SnackbarHostState,
-    val coroutineScope: CoroutineScope
+    val coroutineScope: CoroutineScope,
+    // Dialog visibility - all backed by rememberSaveable
+    showDeleteDialog: Boolean = false,
+    showBlockDialog: Boolean = false,
+    showVideoCallDialog: Boolean = false,
+    showSmsBlockedDialog: Boolean = false,
+    showDiscordSetupDialog: Boolean = false,
+    showDiscordHelpOverlay: Boolean = false,
+    showAttachmentPicker: Boolean = false,
+    showEmojiPicker: Boolean = false,
+    showScheduleDialog: Boolean = false,
+    showVCardOptionsDialog: Boolean = false,
+    showEffectPicker: Boolean = false,
+    showQualitySheet: Boolean = false,
+    showForwardDialog: Boolean = false,
+    showCaptureTypeSheet: Boolean = false,
+    showDeleteMessagesDialog: Boolean = false
 ) {
     // ===== Dialog Visibility =====
-    var showDeleteDialog by mutableStateOf(false)
-    var showBlockDialog by mutableStateOf(false)
-    var showVideoCallDialog by mutableStateOf(false)
-    var showSmsBlockedDialog by mutableStateOf(false)
-    var showDiscordSetupDialog by mutableStateOf(false)
-    var showDiscordHelpOverlay by mutableStateOf(false)
-    var showAttachmentPicker by mutableStateOf(false)
-    var showEmojiPicker by mutableStateOf(false)
-    var showScheduleDialog by mutableStateOf(false)
-    var showVCardOptionsDialog by mutableStateOf(false)
-    var showEffectPicker by mutableStateOf(false)
-    var showQualitySheet by mutableStateOf(false)
-    var showForwardDialog by mutableStateOf(false)
-    var showCaptureTypeSheet by mutableStateOf(false)
+    var showDeleteDialog by mutableStateOf(showDeleteDialog)
+    var showBlockDialog by mutableStateOf(showBlockDialog)
+    var showVideoCallDialog by mutableStateOf(showVideoCallDialog)
+    var showSmsBlockedDialog by mutableStateOf(showSmsBlockedDialog)
+    var showDiscordSetupDialog by mutableStateOf(showDiscordSetupDialog)
+    var showDiscordHelpOverlay by mutableStateOf(showDiscordHelpOverlay)
+    var showAttachmentPicker by mutableStateOf(showAttachmentPicker)
+    var showEmojiPicker by mutableStateOf(showEmojiPicker)
+    var showScheduleDialog by mutableStateOf(showScheduleDialog)
+    var showVCardOptionsDialog by mutableStateOf(showVCardOptionsDialog)
+    var showEffectPicker by mutableStateOf(showEffectPicker)
+    var showQualitySheet by mutableStateOf(showQualitySheet)
+    var showForwardDialog by mutableStateOf(showForwardDialog)
+    var showCaptureTypeSheet by mutableStateOf(showCaptureTypeSheet)
     /** Show confirmation dialog for deleting selected messages */
-    var showDeleteMessagesDialog by mutableStateOf(false)
+    var showDeleteMessagesDialog by mutableStateOf(showDeleteMessagesDialog)
 
     // ===== Selection / Data =====
     var pendingContactData by mutableStateOf<ContactData?>(null)
@@ -206,6 +225,8 @@ class ChatScreenState(
 /**
  * Creates and remembers a [ChatScreenState] instance with proper initialization.
  *
+ * Dialog states use rememberSaveable to survive process death and configuration changes.
+ *
  * @param initialScrollPosition Initial scroll position index (from navigation state or cache)
  * @param initialScrollOffset Initial scroll offset within the item
  * @param cachedScrollPosition Cached scroll position from LRU cache (fallback if no nav state)
@@ -237,11 +258,62 @@ fun rememberChatScreenState(
     val snackbarHostState = remember { SnackbarHostState() }
     val coroutineScope = rememberCoroutineScope()
 
-    return remember(listState, snackbarHostState, coroutineScope) {
+    // Dialog states - use rememberSaveable to survive process death
+    val showDeleteDialog = rememberSaveable { mutableStateOf(false) }
+    val showBlockDialog = rememberSaveable { mutableStateOf(false) }
+    val showVideoCallDialog = rememberSaveable { mutableStateOf(false) }
+    val showSmsBlockedDialog = rememberSaveable { mutableStateOf(false) }
+    val showDiscordSetupDialog = rememberSaveable { mutableStateOf(false) }
+    val showDiscordHelpOverlay = rememberSaveable { mutableStateOf(false) }
+    val showAttachmentPicker = rememberSaveable { mutableStateOf(false) }
+    val showEmojiPicker = rememberSaveable { mutableStateOf(false) }
+    val showScheduleDialog = rememberSaveable { mutableStateOf(false) }
+    val showVCardOptionsDialog = rememberSaveable { mutableStateOf(false) }
+    val showEffectPicker = rememberSaveable { mutableStateOf(false) }
+    val showQualitySheet = rememberSaveable { mutableStateOf(false) }
+    val showForwardDialog = rememberSaveable { mutableStateOf(false) }
+    val showCaptureTypeSheet = rememberSaveable { mutableStateOf(false) }
+    val showDeleteMessagesDialog = rememberSaveable { mutableStateOf(false) }
+
+    return remember(
+        listState,
+        snackbarHostState,
+        coroutineScope,
+        showDeleteDialog,
+        showBlockDialog,
+        showVideoCallDialog,
+        showSmsBlockedDialog,
+        showDiscordSetupDialog,
+        showDiscordHelpOverlay,
+        showAttachmentPicker,
+        showEmojiPicker,
+        showScheduleDialog,
+        showVCardOptionsDialog,
+        showEffectPicker,
+        showQualitySheet,
+        showForwardDialog,
+        showCaptureTypeSheet,
+        showDeleteMessagesDialog
+    ) {
         ChatScreenState(
             listState = listState,
             snackbarHostState = snackbarHostState,
-            coroutineScope = coroutineScope
+            coroutineScope = coroutineScope,
+            showDeleteDialog = showDeleteDialog.value,
+            showBlockDialog = showBlockDialog.value,
+            showVideoCallDialog = showVideoCallDialog.value,
+            showSmsBlockedDialog = showSmsBlockedDialog.value,
+            showDiscordSetupDialog = showDiscordSetupDialog.value,
+            showDiscordHelpOverlay = showDiscordHelpOverlay.value,
+            showAttachmentPicker = showAttachmentPicker.value,
+            showEmojiPicker = showEmojiPicker.value,
+            showScheduleDialog = showScheduleDialog.value,
+            showVCardOptionsDialog = showVCardOptionsDialog.value,
+            showEffectPicker = showEffectPicker.value,
+            showQualitySheet = showQualitySheet.value,
+            showForwardDialog = showForwardDialog.value,
+            showCaptureTypeSheet = showCaptureTypeSheet.value,
+            showDeleteMessagesDialog = showDeleteMessagesDialog.value
         ).apply {
             // Mark if scroll position needs restoration
             scrollRestored = effectiveScrollPosition.first == 0 && effectiveScrollPosition.second == 0

@@ -16,6 +16,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.bothbubbles.ui.conversations.ConversationsScreen
 import com.bothbubbles.ui.theme.MotionTokens
+import timber.log.Timber
 
 // MD3 motion tokens for navigation transitions
 private val ENTER_DURATION = MotionTokens.Duration.MEDIUM_4
@@ -96,16 +97,11 @@ fun BothBubblesNavHost(
                 // Keep Conversations in the back stack so back button works
                 launchSingleTop = true
             }
-            // Set scroll position on the chat entry's saved state handle
-            try {
-                val chatEntry = navController.getBackStackEntry(
-                    Screen.Chat(stateRestorationData.chatGuid, stateRestorationData.mergedGuids)
-                )
-                chatEntry.savedStateHandle["restore_scroll_position"] = stateRestorationData.scrollPosition
-                chatEntry.savedStateHandle["restore_scroll_offset"] = stateRestorationData.scrollOffset
-            } catch (_: Exception) {
-                // Entry might not be found immediately
-            }
+            // Set scroll position on current back stack entry
+            navController.currentBackStackEntry?.savedStateHandle?.apply {
+                set(NavigationKeys.RESTORE_SCROLL_POSITION, stateRestorationData.scrollPosition)
+                set(NavigationKeys.RESTORE_SCROLL_OFFSET, stateRestorationData.scrollOffset)
+            } ?: Timber.w("Failed to set scroll position: currentBackStackEntry is null")
         }
     }
 
@@ -113,19 +109,12 @@ fun BothBubblesNavHost(
     LaunchedEffect(shareIntentData) {
         if (shareIntentData?.directShareChatGuid != null && isSetupComplete) {
             // Pass shared content to the chat screen via savedStateHandle
-            try {
-                val chatEntry = navController.getBackStackEntry(
-                    Screen.Chat(shareIntentData.directShareChatGuid)
-                )
-                chatEntry.savedStateHandle.apply {
-                    shareIntentData.sharedText?.let { set("shared_text", it) }
-                    if (shareIntentData.sharedUris.isNotEmpty()) {
-                        set("shared_uris", ArrayList(shareIntentData.sharedUris.map { it.toString() }))
-                    }
+            navController.currentBackStackEntry?.savedStateHandle?.apply {
+                shareIntentData.sharedText?.let { set(NavigationKeys.SHARED_TEXT, it) }
+                if (shareIntentData.sharedUris.isNotEmpty()) {
+                    set(NavigationKeys.SHARED_URIS, ArrayList(shareIntentData.sharedUris.map { it.toString() }))
                 }
-            } catch (_: Exception) {
-                // Entry might not be found immediately
-            }
+            } ?: Timber.w("Failed to set shared content: currentBackStackEntry is null")
         }
     }
 
@@ -133,7 +122,7 @@ fun BothBubblesNavHost(
         if (returnToSettings) {
             navController.previousBackStackEntry
                 ?.savedStateHandle
-                ?.set("open_settings_panel", true)
+                ?.set(NavigationKeys.OPEN_SETTINGS_PANEL, true)
         }
         navController.popBackStack()
     }
@@ -177,7 +166,7 @@ fun BothBubblesNavHost(
         // Conversations list (home)
         composable<Screen.Conversations> { backStackEntry ->
             val reopenSettingsPanelFlow = remember(backStackEntry) {
-                backStackEntry.savedStateHandle.getStateFlow("open_settings_panel", false)
+                backStackEntry.savedStateHandle.getStateFlow(NavigationKeys.OPEN_SETTINGS_PANEL, false)
             }
             val reopenSettingsPanel by reopenSettingsPanelFlow.collectAsState(initial = false)
 
@@ -217,7 +206,7 @@ fun BothBubblesNavHost(
                 },
                 reopenSettingsPanel = reopenSettingsPanel,
                 onSettingsPanelHandled = {
-                    backStackEntry.savedStateHandle["open_settings_panel"] = false
+                    backStackEntry.savedStateHandle[NavigationKeys.OPEN_SETTINGS_PANEL] = false
                 }
             )
         }

@@ -18,6 +18,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,8 +38,8 @@ fun Life360LoginWebView(
     onTokenExtracted: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var isLoading by remember { mutableStateOf(true) }
-    var loadingProgress by remember { mutableFloatStateOf(0f) }
+    var isLoading by rememberSaveable { mutableStateOf(true) }
+    var loadingProgress by rememberSaveable { mutableFloatStateOf(0f) }
     var webView by remember { mutableStateOf<WebView?>(null) }
 
     // Cleanup WebView on dispose

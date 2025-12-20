@@ -7,6 +7,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.toRoute
 import com.bothbubbles.ui.setup.SetupScreen
 import com.bothbubbles.ui.share.SharePickerScreen
+import timber.log.Timber
 
 /**
  * Setup and sharing-related navigation routes.
@@ -34,41 +35,28 @@ fun NavGraphBuilder.setupShareNavigation(navController: NavHostController) {
             sharedUris = route.sharedUris.map { it.toUri() },
             onConversationSelected = { chatGuid ->
                 // Navigate to chat with shared content
-                // Pass shared URIs as strings in a special format that ChatScreen can parse
-                val chatRoute = Screen.Chat(chatGuid)
-                navController.navigate(chatRoute) {
+                navController.navigate(Screen.Chat(chatGuid)) {
                     popUpTo(Screen.SharePicker(route.sharedText, route.sharedUris)) { inclusive = true }
                 }
-                // Set shared content on the destination entry after navigation
-                try {
-                    val chatEntry = navController.getBackStackEntry(chatRoute)
-                    chatEntry.savedStateHandle.apply {
-                        route.sharedText?.let { set("shared_text", it) }
-                        if (route.sharedUris.isNotEmpty()) {
-                            set("shared_uris", ArrayList(route.sharedUris))
-                        }
+                // Set shared content on current back stack entry
+                navController.currentBackStackEntry?.savedStateHandle?.apply {
+                    route.sharedText?.let { set(NavigationKeys.SHARED_TEXT, it) }
+                    if (route.sharedUris.isNotEmpty()) {
+                        set(NavigationKeys.SHARED_URIS, ArrayList(route.sharedUris))
                     }
-                } catch (_: Exception) {
-                    // Entry might not be found immediately - the Chat screen handles this
-                }
+                } ?: Timber.w("Failed to set shared content: currentBackStackEntry is null")
             },
             onNewConversation = {
                 // Navigate to chat creator with shared content
-                val creatorRoute = Screen.ChatCreator(
-                    initialAttachments = route.sharedUris
-                )
-                navController.navigate(creatorRoute) {
+                navController.navigate(
+                    Screen.ChatCreator(initialAttachments = route.sharedUris)
+                ) {
                     popUpTo(Screen.SharePicker(route.sharedText, route.sharedUris)) { inclusive = true }
                 }
-                // Pass shared text via saved state handle
-                try {
-                    val creatorEntry = navController.getBackStackEntry(creatorRoute)
-                    route.sharedText?.let {
-                        creatorEntry.savedStateHandle.set("shared_text", it)
-                    }
-                } catch (_: Exception) {
-                    // Entry might not be found immediately
-                }
+                // Pass shared text via current back stack entry
+                navController.currentBackStackEntry?.savedStateHandle?.apply {
+                    route.sharedText?.let { set(NavigationKeys.SHARED_TEXT, it) }
+                } ?: Timber.w("Failed to set shared text: currentBackStackEntry is null")
             },
             onCancel = {
                 // Just finish the activity - go back to the source app

@@ -49,6 +49,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -187,9 +188,9 @@ private enum class LoginMethod {
 private fun TokenEntryScreen(
     onTokenSubmit: (String) -> Unit
 ) {
-    var loginMethod by remember { mutableStateOf(LoginMethod.NONE) }
-    var manualToken by remember { mutableStateOf("") }
-    var showManualEntry by remember { mutableStateOf(false) }
+    var loginMethod by rememberSaveable { mutableStateOf(LoginMethod.NONE) }
+    var manualToken by rememberSaveable { mutableStateOf("") }
+    var showManualEntry by rememberSaveable { mutableStateOf(false) }
 
     when (loginMethod) {
         LoginMethod.WEBVIEW -> {
@@ -317,6 +318,8 @@ private fun Life360SettingsContentInternal(
     onLogout: () -> Unit,
     onClearError: () -> Unit
 ) {
+    // Note: memberToMap is intentionally using remember (not rememberSaveable)
+    // because Life360Member is not Parcelable/Serializable and is ephemeral dialog state
     var memberToMap by remember { mutableStateOf<Life360Member?>(null) }
 
     // Contact picker dialog
@@ -563,7 +566,7 @@ private fun ContactPickerDialog(
     onSelect: (Long) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by rememberSaveable { mutableStateOf("") }
 
     val filteredHandles = remember(handles, searchQuery) {
         if (searchQuery.isBlank()) {

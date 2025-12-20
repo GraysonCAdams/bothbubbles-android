@@ -312,6 +312,7 @@ class PendingMessageRepository @Inject constructor(
                 TimeUnit.SECONDS
             )
             .setInputData(workDataOf(MessageSendWorker.KEY_PENDING_MESSAGE_ID to pendingMessageId))
+            .addTag("message_sending")
             .build()
 
         // Use unique work to prevent duplicate sends

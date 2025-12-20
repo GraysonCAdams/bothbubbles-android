@@ -87,6 +87,11 @@ class BackgroundSyncWorker @AssistedInject constructor(
                 15, TimeUnit.MINUTES // Android minimum for periodic work
             )
                 .setConstraints(constraints)
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    15, TimeUnit.MINUTES
+                )
+                .addTag("background_sync")
                 .build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(

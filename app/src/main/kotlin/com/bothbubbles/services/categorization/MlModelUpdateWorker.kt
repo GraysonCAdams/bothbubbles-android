@@ -55,6 +55,11 @@ class MlModelUpdateWorker @AssistedInject constructor(
                 UPDATE_INTERVAL_DAYS, TimeUnit.DAYS
             )
                 .setConstraints(constraints)
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    1, TimeUnit.DAYS
+                )
+                .addTag("ml_model_update")
                 .build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(

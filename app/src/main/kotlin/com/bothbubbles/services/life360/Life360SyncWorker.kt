@@ -54,6 +54,11 @@ class Life360SyncWorker @AssistedInject constructor(
                 TimeUnit.MINUTES
             )
                 .setConstraints(constraints)
+                .setBackoffCriteria(
+                    androidx.work.BackoffPolicy.EXPONENTIAL,
+                    15, TimeUnit.MINUTES
+                )
+                .addTag("life360_sync")
                 .build()
 
             WorkManager.getInstance(context).enqueueUniquePeriodicWork(

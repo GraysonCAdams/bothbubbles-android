@@ -21,6 +21,7 @@ import com.bothbubbles.ui.chat.details.PlacesScreen
 import com.bothbubbles.ui.chatcreator.ChatCreatorScreen
 import com.bothbubbles.ui.chatcreator.GroupCreatorScreen
 import com.bothbubbles.ui.media.MediaViewerScreen
+import timber.log.Timber
 
 /**
  * Chat-related navigation routes including individual chat, chat details,
@@ -33,39 +34,39 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
 
         // Handle captured photo from camera screen
         val capturedPhotoUri = backStackEntry.savedStateHandle
-            .getStateFlow<String?>("captured_photo_uri", null)
+            .getStateFlow<String?>(NavigationKeys.CAPTURED_PHOTO_URI, null)
             .collectAsStateWithLifecycle()
 
         // Handle shared content from share picker
         val sharedText = backStackEntry.savedStateHandle
-            .getStateFlow<String?>("shared_text", null)
+            .getStateFlow<String?>(NavigationKeys.SHARED_TEXT, null)
             .collectAsStateWithLifecycle()
         val sharedUris = backStackEntry.savedStateHandle
-            .getStateFlow<ArrayList<String>?>("shared_uris", null)
+            .getStateFlow<ArrayList<String>?>(NavigationKeys.SHARED_URIS, null)
             .collectAsStateWithLifecycle()
 
         // Handle search activation from ChatDetails screen
         val activateSearch = backStackEntry.savedStateHandle
-            .getStateFlow("activate_search", false)
+            .getStateFlow(NavigationKeys.ACTIVATE_SEARCH, false)
             .collectAsStateWithLifecycle()
 
         // Handle scroll position restoration
         val restoreScrollPosition = backStackEntry.savedStateHandle
-            .getStateFlow("restore_scroll_position", 0)
+            .getStateFlow(NavigationKeys.RESTORE_SCROLL_POSITION, 0)
             .collectAsStateWithLifecycle()
         val restoreScrollOffset = backStackEntry.savedStateHandle
-            .getStateFlow("restore_scroll_offset", 0)
+            .getStateFlow(NavigationKeys.RESTORE_SCROLL_OFFSET, 0)
             .collectAsStateWithLifecycle()
 
         // Handle edited attachment
         val editedAttachmentUri = backStackEntry.savedStateHandle
-            .getStateFlow<String?>("edited_attachment_uri", null)
+            .getStateFlow<String?>(NavigationKeys.EDITED_ATTACHMENT_URI, null)
             .collectAsStateWithLifecycle()
         val editedAttachmentCaption = backStackEntry.savedStateHandle
-            .getStateFlow<String?>("edited_attachment_caption", null)
+            .getStateFlow<String?>(NavigationKeys.EDITED_ATTACHMENT_CAPTION, null)
             .collectAsStateWithLifecycle()
         val originalAttachmentUri = backStackEntry.savedStateHandle
-            .getStateFlow<String?>("original_attachment_uri", null)
+            .getStateFlow<String?>(NavigationKeys.ORIGINAL_ATTACHMENT_URI, null)
             .collectAsStateWithLifecycle()
 
         ChatScreen(
@@ -79,7 +80,7 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             },
             onEditAttachmentClick = { uri ->
                 // Store original URI to update after edit
-                backStackEntry.savedStateHandle["original_attachment_uri"] = uri.toString()
+                backStackEntry.savedStateHandle[NavigationKeys.ORIGINAL_ATTACHMENT_URI] = uri.toString()
                 navController.navigate(Screen.AttachmentEdit(uri.toString()))
             },
             onLife360MapClick = { participantAddress ->
@@ -87,31 +88,31 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             },
             capturedPhotoUri = capturedPhotoUri.value?.toUri(),
             onCapturedPhotoHandled = {
-                backStackEntry.savedStateHandle.remove<String>("captured_photo_uri")
+                backStackEntry.savedStateHandle.remove<String>(NavigationKeys.CAPTURED_PHOTO_URI)
             },
             editedAttachmentUri = editedAttachmentUri.value?.toUri(),
             editedAttachmentCaption = editedAttachmentCaption.value,
             originalAttachmentUri = originalAttachmentUri.value?.toUri(),
             onEditedAttachmentHandled = {
-                backStackEntry.savedStateHandle.remove<String>("edited_attachment_uri")
-                backStackEntry.savedStateHandle.remove<String>("edited_attachment_caption")
-                backStackEntry.savedStateHandle.remove<String>("original_attachment_uri")
+                backStackEntry.savedStateHandle.remove<String>(NavigationKeys.EDITED_ATTACHMENT_URI)
+                backStackEntry.savedStateHandle.remove<String>(NavigationKeys.EDITED_ATTACHMENT_CAPTION)
+                backStackEntry.savedStateHandle.remove<String>(NavigationKeys.ORIGINAL_ATTACHMENT_URI)
             },
             sharedText = sharedText.value,
             sharedUris = sharedUris.value?.map { it.toUri() } ?: emptyList(),
             onSharedContentHandled = {
-                backStackEntry.savedStateHandle.remove<String>("shared_text")
-                backStackEntry.savedStateHandle.remove<ArrayList<String>>("shared_uris")
+                backStackEntry.savedStateHandle.remove<String>(NavigationKeys.SHARED_TEXT)
+                backStackEntry.savedStateHandle.remove<ArrayList<String>>(NavigationKeys.SHARED_URIS)
             },
             activateSearch = activateSearch.value,
             onSearchActivated = {
-                backStackEntry.savedStateHandle["activate_search"] = false
+                backStackEntry.savedStateHandle[NavigationKeys.ACTIVATE_SEARCH] = false
             },
             initialScrollPosition = restoreScrollPosition.value,
             initialScrollOffset = restoreScrollOffset.value,
             onScrollPositionRestored = {
-                backStackEntry.savedStateHandle.remove<Int>("restore_scroll_position")
-                backStackEntry.savedStateHandle.remove<Int>("restore_scroll_offset")
+                backStackEntry.savedStateHandle.remove<Int>(NavigationKeys.RESTORE_SCROLL_POSITION)
+                backStackEntry.savedStateHandle.remove<Int>(NavigationKeys.RESTORE_SCROLL_OFFSET)
             },
             targetMessageGuid = route.targetMessageGuid
         )
@@ -164,7 +165,7 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             onNavigateBack = { navController.popBackStack() },
             onSearchClick = {
                 // Set activate_search flag on Chat screen and pop back
-                navController.previousBackStackEntry?.savedStateHandle?.set("activate_search", true)
+                navController.previousBackStackEntry?.savedStateHandle?.set(NavigationKeys.ACTIVATE_SEARCH, true)
                 navController.popBackStack()
             },
             onMediaGalleryClick = { mediaType ->
@@ -247,8 +248,17 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             chatGuid = route.chatGuid,
             onNavigateBack = { navController.popBackStack() },
             onLinkClick = { url ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
-                context.startActivity(intent)
+                try {
+                    val uri = Uri.parse(url)
+                    if (uri.scheme in listOf("http", "https", "tel", "mailto")) {
+                        val intent = Intent(Intent.ACTION_VIEW, uri)
+                        context.startActivity(intent)
+                    } else {
+                        Timber.w("Unsupported URI scheme: ${uri.scheme}")
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to parse or open URI: $url")
+                }
             }
         )
     }
@@ -261,8 +271,17 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             chatGuid = route.chatGuid,
             onNavigateBack = { navController.popBackStack() },
             onPlaceClick = { placeUrl ->
-                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(placeUrl))
-                context.startActivity(intent)
+                try {
+                    val uri = Uri.parse(placeUrl)
+                    if (uri.scheme in listOf("http", "https", "geo")) {
+                        val intent = Intent(Intent.ACTION_VIEW, uri)
+                        context.startActivity(intent)
+                    } else {
+                        Timber.w("Unsupported URI scheme: ${uri.scheme}")
+                    }
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to parse or open URI: $placeUrl")
+                }
             }
         )
     }
@@ -275,10 +294,10 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             initialCaption = null,
             onSave = { editedUri, caption ->
                 navController.previousBackStackEntry?.savedStateHandle?.apply {
-                    set("original_attachment_uri", route.uri)
-                    set("edited_attachment_uri", editedUri.toString())
+                    set(NavigationKeys.ORIGINAL_ATTACHMENT_URI, route.uri)
+                    set(NavigationKeys.EDITED_ATTACHMENT_URI, editedUri.toString())
                     if (caption != null) {
-                        set("edited_attachment_caption", caption)
+                        set(NavigationKeys.EDITED_ATTACHMENT_CAPTION, caption)
                     }
                 }
                 navController.popBackStack()

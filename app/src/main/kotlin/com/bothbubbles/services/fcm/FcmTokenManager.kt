@@ -208,6 +208,7 @@ class FcmTokenManager @Inject constructor(
                 FcmTokenRegistrationWorker.KEY_TOKEN to token,
                 FcmTokenRegistrationWorker.KEY_DEVICE_NAME to getDeviceName()
             ))
+            .addTag("fcm_token_registration")
             .build()
 
         WorkManager.getInstance(context)

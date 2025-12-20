@@ -107,12 +107,18 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
             // Calculate delay
             val delay = sendAt - System.currentTimeMillis()
 
-            // Schedule WorkManager job
+            // Schedule WorkManager job with network constraint
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
             val workRequest = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
                 .setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                .setConstraints(constraints)
                 .setInputData(
                     workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_MESSAGE_ID to id)
                 )
+                .addTag("scheduled_message")
                 .build()
 
             workManager.enqueue(workRequest)
@@ -186,11 +192,18 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
 
             // Create new WorkManager job with updated delay
             val delay = newSendAt - System.currentTimeMillis()
+
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
             val workRequest = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
                 .setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                .setConstraints(constraints)
                 .setInputData(
                     workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_MESSAGE_ID to id)
                 )
+                .addTag("scheduled_message")
                 .build()
 
             workManager.enqueue(workRequest)
@@ -265,11 +278,18 @@ class ChatScheduledMessageDelegate @AssistedInject constructor(
 
             // Create new WorkManager job
             val delay = newSendAt - System.currentTimeMillis()
+
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
             val workRequest = OneTimeWorkRequestBuilder<ScheduledMessageWorker>()
                 .setInitialDelay(delay.coerceAtLeast(0), TimeUnit.MILLISECONDS)
+                .setConstraints(constraints)
                 .setInputData(
                     workDataOf(ScheduledMessageWorker.KEY_SCHEDULED_MESSAGE_ID to id)
                 )
+                .addTag("scheduled_message")
                 .build()
 
             workManager.enqueue(workRequest)

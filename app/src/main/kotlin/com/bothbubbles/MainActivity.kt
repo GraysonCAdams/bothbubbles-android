@@ -249,9 +249,15 @@ class MainActivity : ComponentActivity() {
     private fun parseNotificationDeepLink(intent: Intent?): NotificationDeepLinkData? {
         if (intent == null) return null
 
-        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID) ?: return null
+        // Validate chatGuid is not blank
+        val chatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
+            ?.takeIf { it.isNotBlank() } ?: return null
+
+        // Validate optional fields are not blank
         val messageGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_MESSAGE_GUID)
+            ?.takeIf { it.isNotBlank() }
         val mergedGuids = intent.getStringExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS)
+            ?.takeIf { it.isNotBlank() }
 
         return NotificationDeepLinkData(
             chatGuid = chatGuid,
