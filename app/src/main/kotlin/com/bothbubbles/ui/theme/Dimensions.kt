@@ -11,10 +11,10 @@ object MediaSizing {
     val MAX_WIDTH = 250.dp
 
     /** Minimum height to prevent panoramas from being too thin */
-    val MIN_HEIGHT = 100.dp
+    val MIN_HEIGHT = 50.dp
 
-    /** Maximum height to allow tall screenshots without being excessive */
-    val MAX_HEIGHT = 400.dp
+    /** Maximum height - taller images will be cropped */
+    val MAX_HEIGHT = 500.dp
 
     /** Corner radius for media attachments */
     val CORNER_RADIUS = 12.dp

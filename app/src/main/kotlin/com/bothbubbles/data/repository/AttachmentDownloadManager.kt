@@ -2,7 +2,9 @@ package com.bothbubbles.data.repository
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
+import androidx.exifinterface.media.ExifInterface
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.TransferState
@@ -159,6 +161,22 @@ class AttachmentDownloadManager @Inject constructor(
         attachmentDao.updateLocalPath(attachmentGuid, finalFile.absolutePath)
         if (thumbnailPath != null) {
             attachmentDao.updateThumbnailPath(attachmentGuid, thumbnailPath)
+        }
+
+        // Read actual dimensions from the file (accounting for EXIF rotation)
+        // This corrects server-reported dimensions which may not consider rotation
+        if (attachment.isImage) {
+            readImageDimensions(finalFile)?.let { (width, height) ->
+                if (width > 0 && height > 0) {
+                    val serverWidth = attachment.width ?: 0
+                    val serverHeight = attachment.height ?: 0
+                    // Only update if dimensions differ significantly (EXIF rotation case)
+                    if (serverWidth != width || serverHeight != height) {
+                        Timber.d("Correcting dimensions for $attachmentGuid: ${serverWidth}x${serverHeight} -> ${width}x${height}")
+                        attachmentDao.updateDimensions(attachmentGuid, height, width)
+                    }
+                }
+            }
         }
 
         return finalFile
@@ -457,6 +475,58 @@ class AttachmentDownloadManager @Inject constructor(
             mimeType.startsWith("audio/") -> ".m4a"
             mimeType.startsWith("application/pdf") -> ".pdf"
             else -> ""
+        }
+    }
+
+    /**
+     * Read actual image dimensions from file, accounting for EXIF orientation.
+     * Returns (width, height) after applying rotation, or null if unable to read.
+     */
+    private fun readImageDimensions(file: File): Pair<Int, Int>? {
+        if (!file.exists()) return null
+
+        return try {
+            // First, get the raw pixel dimensions
+            val options = BitmapFactory.Options().apply {
+                inJustDecodeBounds = true
+            }
+            BitmapFactory.decodeFile(file.absolutePath, options)
+
+            if (options.outWidth <= 0 || options.outHeight <= 0) {
+                return null
+            }
+
+            var width = options.outWidth
+            var height = options.outHeight
+
+            // Check EXIF orientation and swap dimensions if rotated 90 or 270 degrees
+            try {
+                val exif = ExifInterface(file.absolutePath)
+                val orientation = exif.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+
+                // For 90° or 270° rotation, swap width and height
+                when (orientation) {
+                    ExifInterface.ORIENTATION_ROTATE_90,
+                    ExifInterface.ORIENTATION_ROTATE_270,
+                    ExifInterface.ORIENTATION_TRANSPOSE,
+                    ExifInterface.ORIENTATION_TRANSVERSE -> {
+                        val temp = width
+                        width = height
+                        height = temp
+                        Timber.d("EXIF rotation detected (orientation=$orientation), swapped dimensions to ${width}x${height}")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to read EXIF orientation, using raw dimensions")
+            }
+
+            Pair(width, height)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to read image dimensions")
+            null
         }
     }
 }

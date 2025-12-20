@@ -80,16 +80,20 @@ fun ImageAttachment(
         1f
     }
 
-    // For transparent images, use Fit to preserve content; for regular images, use Crop
+    // For transparent images, use Fit to preserve content
     val isTransparent = attachment.mayHaveTransparency
 
-    // Calculate target size in pixels for memory-efficient loading
+    // Calculate natural height at max width, determine if cropping is needed
     val density = LocalDensity.current
     val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
-    // Calculate natural height based on aspect ratio, clamped to our constraints
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
-    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+
+    // Natural height if we fill max width
+    val naturalHeightAtMaxWidth = MediaSizing.MAX_WIDTH / aspectRatio
+    // Only crop if natural height exceeds max height
+    val needsCropping = naturalHeightAtMaxWidth > MediaSizing.MAX_HEIGHT
+    // Container height: natural height capped at max
+    val containerHeightDp = if (needsCropping) MediaSizing.MAX_HEIGHT else naturalHeightAtMaxWidth
+    val containerHeightPx = with(density) { containerHeightDp.toPx().toInt() }
 
     // DEBUG LOGGING
     SideEffect {
@@ -97,13 +101,13 @@ fun ImageAttachment(
         Timber.tag("AttachmentDebug").d("   RESOLVED imageUrl=$imageUrl")
         Timber.tag("AttachmentDebug").d("   localPath=${attachment.localPath}, webUrl=${attachment.webUrl}")
         Timber.tag("AttachmentDebug").d("   isLoading=$isLoading, isError=$isError")
-        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, size=${maxWidthPx}x$naturalHeightPx")
+        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, size=${maxWidthPx}x$containerHeightPx, needsCropping=$needsCropping")
     }
 
     Box(
         modifier = modifier
-            .widthIn(max = MediaSizing.MAX_WIDTH)
-            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .width(MediaSizing.MAX_WIDTH)
+            .height(containerHeightDp)
             .onSizeChanged { containerHeight = it.height }
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .pointerInput(interactions) {
@@ -130,14 +134,17 @@ fun ImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, containerHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
                 modifier = Modifier.fillMaxSize(),
-                // For transparent images (stickers/PNG), use Fit to preserve content
-                // For regular images, use Crop to fill the container and ensure rounded corners work
-                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
+                // Crop only when height is capped; for transparent images always use Fit
+                contentScale = when {
+                    isTransparent -> ContentScale.Fit
+                    needsCropping -> ContentScale.Crop
+                    else -> ContentScale.FillWidth
+                },
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -287,20 +294,27 @@ fun GifAttachment(
         1f
     }
 
-    // GIFs can have transparency - use Fit to preserve content
-    val isTransparent = attachment.mayHaveTransparency
+    // GIFs CAN have transparency, but most don't - only use Fit for stickers
+    // Regular GIFs should use Crop to avoid letterboxing (matches iMessage behavior)
+    val isTransparent = attachment.isSticker
 
-    // Calculate target size in pixels for memory-efficient loading
+    // Calculate natural height at max width, determine if cropping is needed
     val density = LocalDensity.current
     val maxWidthPx = with(density) { MediaSizing.MAX_WIDTH.toPx().toInt() }
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
     val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+
+    // Natural height if we fill max width
+    val naturalHeightAtMaxWidth = MediaSizing.MAX_WIDTH / aspectRatio
+    // Only crop if natural height exceeds max height
+    val needsCropping = naturalHeightAtMaxWidth > MediaSizing.MAX_HEIGHT
+    // Container height: natural height capped at max
+    val containerHeightDp = if (needsCropping) MediaSizing.MAX_HEIGHT else naturalHeightAtMaxWidth
+    val containerHeightPx = with(density) { containerHeightDp.toPx().toInt() }
 
     Box(
         modifier = modifier
-            .widthIn(max = MediaSizing.MAX_WIDTH)
-            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .width(MediaSizing.MAX_WIDTH)
+            .height(containerHeightDp)
             .onSizeChanged { containerHeight = it.height }
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .pointerInput(interactions) {
@@ -327,13 +341,17 @@ fun GifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, containerHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
                 modifier = Modifier.fillMaxSize(),
-                // For transparent GIFs, use Fit to preserve content; otherwise Crop
-                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
+                // Crop only when height is capped; for stickers always use Fit
+                contentScale = when {
+                    isTransparent -> ContentScale.Fit
+                    needsCropping -> ContentScale.Crop
+                    else -> ContentScale.FillWidth
+                },
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -566,13 +584,18 @@ fun BorderlessImageAttachment(
         0.9f + ((messageGuid.hashCode() and 0xFF) / 255f) * 0.2f
     } else 1f
 
-    // Calculate target size in pixels for memory-efficient loading
+    // Calculate natural height at max width, determine if cropping is needed
     val density = LocalDensity.current
     val effectiveMaxWidth = maxWidth * sizeScale
     val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
-    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+
+    // Natural height if we fill effective max width
+    val naturalHeightAtMaxWidth = effectiveMaxWidth / aspectRatio
+    // Only crop if natural height exceeds max height
+    val needsCropping = naturalHeightAtMaxWidth > MediaSizing.MAX_HEIGHT
+    // Container height: natural height capped at max
+    val containerHeightDp = if (needsCropping) MediaSizing.MAX_HEIGHT else naturalHeightAtMaxWidth
+    val containerHeightPx = with(density) { containerHeightDp.toPx().toInt() }
 
     // DEBUG LOGGING
     SideEffect {
@@ -583,14 +606,14 @@ fun BorderlessImageAttachment(
         Timber.tag("AttachmentDebug").d("   webUrl=${attachment.webUrl}")
         Timber.tag("AttachmentDebug").d("   isSticker=${attachment.isSticker}, isPlacedSticker=$isPlacedSticker")
         Timber.tag("AttachmentDebug").d("   isLoading=$isLoading, isError=$isError")
-        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, maxWidth=$effectiveMaxWidth")
+        Timber.tag("AttachmentDebug").d("   aspectRatio=$aspectRatio, maxWidth=$effectiveMaxWidth, needsCropping=$needsCropping")
         Timber.tag("AttachmentDebug").d("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     }
 
     Box(
         modifier = modifier
-            .widthIn(max = effectiveMaxWidth)
-            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .width(effectiveMaxWidth)
+            .height(containerHeightDp)
             .onSizeChanged { containerHeight = it.height }
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .then(
@@ -622,12 +645,17 @@ fun BorderlessImageAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, containerHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "Image",
                 modifier = Modifier.fillMaxSize(),
-                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
+                // Crop only when height is capped; for transparent images always use Fit
+                contentScale = when {
+                    isTransparent -> ContentScale.Fit
+                    needsCropping -> ContentScale.Crop
+                    else -> ContentScale.FillWidth
+                },
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
@@ -777,8 +805,9 @@ fun BorderlessGifAttachment(
         1f
     }
 
-    // GIFs can have transparency
-    val isTransparent = attachment.mayHaveTransparency
+    // GIFs CAN have transparency, but most don't - only use Fit for stickers
+    // Regular GIFs should use Crop to avoid letterboxing (matches iMessage behavior)
+    val isTransparent = attachment.isSticker
 
     // Deterministic rotation based on guid hash for placed stickers (-15 to +15)
     val rotation = if (isPlacedSticker) {
@@ -792,17 +821,22 @@ fun BorderlessGifAttachment(
 
     val effectiveMaxWidth = maxWidth * sizeScale
 
-    // Calculate target size in pixels for memory-efficient loading
+    // Calculate natural height at max width, determine if cropping is needed
     val density = LocalDensity.current
     val maxWidthPx = with(density) { effectiveMaxWidth.toPx().toInt() }
-    val minHeightPx = with(density) { MediaSizing.MIN_HEIGHT.toPx().toInt() }
-    val maxHeightPx = with(density) { MediaSizing.MAX_HEIGHT.toPx().toInt() }
-    val naturalHeightPx = (maxWidthPx / aspectRatio).toInt().coerceIn(minHeightPx, maxHeightPx)
+
+    // Natural height if we fill effective max width
+    val naturalHeightAtMaxWidth = effectiveMaxWidth / aspectRatio
+    // Only crop if natural height exceeds max height
+    val needsCropping = naturalHeightAtMaxWidth > MediaSizing.MAX_HEIGHT
+    // Container height: natural height capped at max
+    val containerHeightDp = if (needsCropping) MediaSizing.MAX_HEIGHT else naturalHeightAtMaxWidth
+    val containerHeightPx = with(density) { containerHeightDp.toPx().toInt() }
 
     Box(
         modifier = modifier
-            .widthIn(max = effectiveMaxWidth)
-            .heightIn(min = MediaSizing.MIN_HEIGHT, max = MediaSizing.MAX_HEIGHT)
+            .width(effectiveMaxWidth)
+            .height(containerHeightDp)
             .onSizeChanged { containerHeight = it.height }
             .clip(RoundedCornerShape(MediaSizing.CORNER_RADIUS))
             .then(
@@ -834,13 +868,17 @@ fun BorderlessGifAttachment(
                 model = ImageRequest.Builder(LocalContext.current)
                     .data(imageUrl)
                     .crossfade(true)
-                    .size(maxWidthPx, naturalHeightPx)
+                    .size(maxWidthPx, containerHeightPx)
                     .precision(Precision.INEXACT)
                     .build(),
                 contentDescription = attachment.transferName ?: "GIF",
                 modifier = Modifier.fillMaxSize(),
-                // For transparent GIFs, use Fit to preserve content; otherwise Crop
-                contentScale = if (isTransparent) ContentScale.Fit else ContentScale.Crop,
+                // Crop only when height is capped; for stickers always use Fit
+                contentScale = when {
+                    isTransparent -> ContentScale.Fit
+                    needsCropping -> ContentScale.Crop
+                    else -> ContentScale.FillWidth
+                },
                 onState = { state ->
                     isLoading = state is AsyncImagePainter.State.Loading
                     isError = state is AsyncImagePainter.State.Error
