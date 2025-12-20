@@ -374,6 +374,15 @@ fun ConversationsScreen(
                                     coroutineScope.launch {
                                         listState.animateScrollToItem(0)
                                     }
+                                    // Clear any active filters
+                                    viewModel.setConversationFilter(ConversationFilter.ALL.name.lowercase())
+                                },
+                                onUnreadBadgeClick = {
+                                    coroutineScope.launch {
+                                        listState.animateScrollToItem(0)
+                                    }
+                                    // Filter to unread conversations
+                                    viewModel.setConversationFilter(ConversationFilter.UNREAD.name.lowercase())
                                 }
                             )
                         }

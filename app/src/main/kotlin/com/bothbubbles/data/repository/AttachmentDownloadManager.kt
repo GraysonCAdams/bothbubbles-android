@@ -167,7 +167,7 @@ class AttachmentDownloadManager @Inject constructor(
     /**
      * Post-process downloaded file: HEIC conversion and GIF speed fix
      */
-    private fun postProcessDownload(
+    private suspend fun postProcessDownload(
         attachment: AttachmentEntity,
         outputFile: File,
         baseDownloadUrl: String,
@@ -223,7 +223,7 @@ class AttachmentDownloadManager @Inject constructor(
     /**
      * Generate thumbnail for images and videos
      */
-    private fun generateThumbnailIfNeeded(
+    private suspend fun generateThumbnailIfNeeded(
         attachment: AttachmentEntity,
         file: File,
         attachmentGuid: String

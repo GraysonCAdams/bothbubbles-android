@@ -50,7 +50,7 @@ class SmsMessageOperations(
             tombstoneDao.recordDeletedMessage(messageGuid)
 
             // Delete from our database
-            messageDao.deleteMessageByGuid(messageGuid)
+            messageDao.deleteMessage(messageGuid)
 
             // Delete from system SMS/MMS database if it's a local message
             when {

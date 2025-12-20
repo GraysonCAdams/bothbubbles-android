@@ -88,7 +88,7 @@ class ChatCreationDelegate @Inject constructor(
             // Find the best existing chat (prefer ones with messages)
             var bestChat: ChatEntity? = null
             for (guid in possibleGuids) {
-                val chat = chatRepository.getChatByGuid(guid)
+                val chat = chatRepository.getChat(guid)
                 if (chat != null) {
                     // Prefer chats that have messages (lastMessageText is not null)
                     if (chat.lastMessageText != null) {

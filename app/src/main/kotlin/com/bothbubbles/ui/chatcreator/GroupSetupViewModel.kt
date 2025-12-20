@@ -92,7 +92,7 @@ class GroupSetupViewModel @Inject constructor(
                         // Create local MMS group chat
                         val chatGuid = "mms;-;${addresses.sorted().joinToString(",")}"
 
-                        val existingChat = chatRepository.getChatByGuid(chatGuid)
+                        val existingChat = chatRepository.getChat(chatGuid)
                         if (existingChat == null) {
                             // Save custom photo if provided
                             val customAvatarPath = groupPhotoUri?.let { uri ->

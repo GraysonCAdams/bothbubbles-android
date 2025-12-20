@@ -56,6 +56,7 @@ fun ConversationTopBarWrapper(
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onTitleClick: () -> Unit,
+    onUnreadBadgeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val isDarkTheme = isSystemInDarkTheme()
@@ -150,6 +151,13 @@ fun ConversationTopBarWrapper(
                         coroutineScope.launch {
                             listState.animateScrollToItem(0)
                         }
+                        onTitleClick()
+                    },
+                    onUnreadBadgeClick = {
+                        coroutineScope.launch {
+                            listState.animateScrollToItem(0)
+                        }
+                        onUnreadBadgeClick()
                     }
                 )
             }

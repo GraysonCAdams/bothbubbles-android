@@ -324,7 +324,7 @@ class GroupCreatorViewModel @Inject constructor(
                         // Create local MMS group chat
                         val chatGuid = "mms;-;${addresses.joinToString(",")}"
 
-                        val existingChat = chatRepository.getChatByGuid(chatGuid)
+                        val existingChat = chatRepository.getChat(chatGuid)
                         if (existingChat == null) {
                             val newChat = ChatEntity(
                                 guid = chatGuid,

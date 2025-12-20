@@ -37,6 +37,7 @@ import com.bothbubbles.ui.conversations.delegates.BatchAction
 import com.bothbubbles.ui.conversations.delegates.SelectionEvent
 import com.bothbubbles.ui.conversations.delegates.SmsImportState
 import com.bothbubbles.ui.util.toStable
+import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -867,7 +868,7 @@ class ConversationsViewModel @Inject constructor(
         previewsByUrl: Map<String, com.bothbubbles.data.local.db.entity.LinkPreviewEntity>
     ): List<MessageSearchResult> {
         return messages.map { message ->
-            val chat = chatRepository.getChatByGuid(message.chatGuid)
+            val chat = chatRepository.getChat(message.chatGuid)
             // Extract URL from message text to look up link preview
             val messageUrl = message.text?.let { text ->
                 Regex("""https?://[^\s]+""").find(text)?.value
@@ -875,8 +876,8 @@ class ConversationsViewModel @Inject constructor(
             val linkPreview = messageUrl?.let { previewsByUrl[it] }
 
             // Get participants for proper display name resolution (matches ConversationMappers logic)
-            val participants = chat?.let { chatRepository.getParticipantsForChat(it.guid) } ?: emptyList()
-            val primaryParticipant = participants.firstOrNull()
+            val participants: List<HandleEntity> = chat?.let { chatRepository.getParticipantsForChat(it.guid) } ?: emptyList()
+            val primaryParticipant: HandleEntity? = participants.firstOrNull()
             val participantNames = participants.map { it.displayName }
             val isGroup = chat?.isGroup ?: false
 

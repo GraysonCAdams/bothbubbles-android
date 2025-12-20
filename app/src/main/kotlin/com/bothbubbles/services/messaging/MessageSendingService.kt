@@ -89,6 +89,10 @@ data class UploadProgress(
  */
 @Singleton
 class MessageSendingService @Inject constructor(
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    // TEMPORARY BLOCK: Set to true to block ALL outbound messages for testing
+    // REMOVE THIS BEFORE RELEASE
+    // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
@@ -101,6 +105,22 @@ class MessageSendingService @Inject constructor(
     private val chatFallbackTracker: ChatFallbackTracker,
     private val strategies: Set<@JvmSuppressWildcards MessageSenderStrategy>
 ) : MessageSender {
+
+    companion object {
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        // TEMPORARY BLOCK: Set to false to re-enable sending
+        // REMOVE THIS BEFORE RELEASE
+        // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+        private const val BLOCK_ALL_SENDS = true
+    }
+
+    private fun blockIfEnabled(): Result<Nothing>? {
+        return if (BLOCK_ALL_SENDS) {
+            Timber.w("⛔ SEND BLOCKED: BLOCK_ALL_SENDS is enabled in MessageSendingService")
+            Result.failure(IllegalStateException("⛔ SENDING BLOCKED FOR TESTING - Disable BLOCK_ALL_SENDS in MessageSendingService"))
+        } else null
+    }
+
     // ===== Upload Progress Tracking =====
 
     private val _uploadProgress = MutableStateFlow<UploadProgress?>(null)
@@ -145,6 +165,8 @@ class MessageSendingService @Inject constructor(
         tempGuid: String?, // Stable ID for retry idempotency
         attributedBodyJson: String?
     ): Result<MessageEntity> {
+        blockIfEnabled()?.let { return it }
+
         // Determine actual delivery mode
         val actualMode = when (deliveryMode) {
             MessageDeliveryMode.AUTO -> determineDeliveryMode(chatGuid, attachments.isNotEmpty())
@@ -215,7 +237,9 @@ class MessageSendingService @Inject constructor(
         reaction: String, // e.g., "love", "like", "dislike", "laugh", "emphasize", "question"
         selectedMessageText: String?,
         partIndex: Int
-    ): Result<MessageEntity> = safeCall {
+    ): Result<MessageEntity> {
+        blockIfEnabled()?.let { return it }
+        return safeCall {
         Timber.d("sendReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
 
         val response = api.sendReaction(
@@ -246,6 +270,7 @@ class MessageSendingService @Inject constructor(
         messageDao.updateReactionStatus(messageGuid, true)
 
         entity
+        }
     }
 
     /**
@@ -257,7 +282,9 @@ class MessageSendingService @Inject constructor(
         reaction: String,
         selectedMessageText: String?,
         partIndex: Int
-    ): Result<Unit> = safeCall {
+    ): Result<Unit> {
+        blockIfEnabled()?.let { return it }
+        return safeCall {
         Timber.d("removeReaction: chatGuid=$chatGuid, messageGuid=$messageGuid, reaction=$reaction, textLen=${selectedMessageText?.length ?: 0}")
 
         // In iMessage, sending the same reaction again removes it
@@ -272,6 +299,7 @@ class MessageSendingService @Inject constructor(
             )
         )
         Unit
+        }
     }
 
     /**
@@ -282,7 +310,9 @@ class MessageSendingService @Inject constructor(
         messageGuid: String,
         newText: String,
         partIndex: Int
-    ): Result<MessageEntity> = safeCall {
+    ): Result<MessageEntity> {
+        blockIfEnabled()?.let { return it }
+        return safeCall {
         val response = api.editMessage(
             guid = messageGuid,
             request = EditMessageRequest(
@@ -300,6 +330,7 @@ class MessageSendingService @Inject constructor(
         messageDao.updateMessageText(messageGuid, newText, System.currentTimeMillis())
 
         messageDao.getMessageByGuid(messageGuid) ?: throw MessageError.SendFailed(messageGuid, "Message not found")
+        }
     }
 
     /**
@@ -309,7 +340,9 @@ class MessageSendingService @Inject constructor(
         chatGuid: String,
         messageGuid: String,
         partIndex: Int
-    ): Result<Unit> = safeCall {
+    ): Result<Unit> {
+        blockIfEnabled()?.let { return it }
+        return safeCall {
         api.unsendMessage(
             guid = messageGuid,
             request = UnsendMessageRequest(partIndex = partIndex)
@@ -317,12 +350,15 @@ class MessageSendingService @Inject constructor(
 
         // Soft delete locally
         messageDao.softDeleteMessage(messageGuid)
+        }
     }
 
     /**
      * Retry sending a failed message
      */
-    override suspend fun retryMessage(messageGuid: String): Result<MessageEntity> = safeCall {
+    override suspend fun retryMessage(messageGuid: String): Result<MessageEntity> {
+        // Note: retryMessage calls sendUnified which already has the block check
+        return safeCall {
         val message = messageDao.getMessageByGuid(messageGuid)
             ?: throw MessageError.SendFailed(messageGuid, "Message not found")
 
@@ -345,13 +381,16 @@ class MessageSendingService @Inject constructor(
             subject = message.subject,
             deliveryMode = deliveryMode
         ).getOrThrow()
+        }
     }
 
     /**
      * Retry sending a failed iMessage as SMS/MMS.
      * This marks the original message as superseded and sends a new message via SMS.
      */
-    override suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> = safeCall {
+    override suspend fun retryAsSms(messageGuid: String): Result<MessageEntity> {
+        // Note: retryAsSms calls sendUnified which already has the block check
+        return safeCall {
         val message = messageDao.getMessageByGuid(messageGuid)
             ?: throw MessageError.SendFailed(messageGuid, "Message not found")
 
@@ -387,6 +426,7 @@ class MessageSendingService @Inject constructor(
             subject = message.subject,
             deliveryMode = deliveryMode
         ).getOrThrow()
+        }
     }
 
     /**
@@ -431,7 +471,9 @@ class MessageSendingService @Inject constructor(
     override suspend fun forwardMessage(
         messageGuid: String,
         targetChatGuid: String
-    ): Result<MessageEntity> = safeCall {
+    ): Result<MessageEntity> {
+        // Note: forwardMessage calls sendUnified which already has the block check
+        return safeCall {
         val originalMessage = messageDao.getMessageByGuid(messageGuid)
             ?: throw MessageError.SendFailed(messageGuid, "Original message not found")
 
@@ -465,6 +507,7 @@ class MessageSendingService @Inject constructor(
             attachments = attachmentInputs,
             deliveryMode = MessageDeliveryMode.AUTO
         ).getOrThrow()
+        }
     }
 
     // ===== Delivery Mode Determination =====

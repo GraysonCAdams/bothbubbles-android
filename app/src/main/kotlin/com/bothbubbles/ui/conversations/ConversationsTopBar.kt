@@ -64,6 +64,7 @@ internal fun ConversationsTopBar(
     onSearchClick: () -> Unit,
     onSettingsClick: () -> Unit,
     onTitleClick: () -> Unit,
+    onUnreadBadgeClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val haptic = LocalHapticFeedback.current
@@ -73,7 +74,6 @@ internal fun ConversationsTopBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable { onTitleClick() }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -98,7 +98,11 @@ internal fun ConversationsTopBar(
                     fontWeight = FontWeight.Normal,
                     fontSize = 22.sp
                 ),
-                color = MaterialTheme.colorScheme.onSurface
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.clickable {
+                    HapticUtils.onTap(haptic)
+                    onTitleClick()
+                }
             )
 
             // Unread count badge
@@ -107,6 +111,10 @@ internal fun ConversationsTopBar(
                     modifier = Modifier
                         .clip(CircleShape)
                         .background(MaterialTheme.colorScheme.primary)
+                        .clickable {
+                            HapticUtils.onTap(haptic)
+                            onUnreadBadgeClick()
+                        }
                         .defaultMinSize(minHeight = 18.dp)
                         .padding(horizontal = 6.dp, vertical = 1.dp),
                     contentAlignment = Alignment.Center
