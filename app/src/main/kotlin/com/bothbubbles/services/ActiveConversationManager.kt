@@ -42,14 +42,19 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
         clearActiveConversation()
     }
 
-    // The currently active chat GUID (null if no chat is open)
-    @Volatile
-    private var activeChatGuid: String? = null
+    /**
+     * Immutable state holder for active conversation.
+     * Single atomic update prevents race condition where readers see
+     * mismatched chatGuid and mergedGuids.
+     */
+    data class ActiveConversationState(
+        val chatGuid: String,
+        val mergedGuids: Set<String>
+    )
 
-    // Set of merged chat GUIDs that are also considered "active"
-    // (for unified conversations spanning iMessage + SMS)
+    // Single volatile field for atomic state updates
     @Volatile
-    private var activeMergedGuids: Set<String> = emptySet()
+    private var activeConversation: ActiveConversationState? = null
 
     /**
      * Set the active conversation when user enters a chat.
@@ -60,17 +65,20 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
      */
     fun setActiveConversation(chatGuid: String, mergedGuids: Set<String> = emptySet()) {
         Timber.d("Setting active conversation: $chatGuid (merged: ${mergedGuids.size})")
-        activeChatGuid = chatGuid
-        activeMergedGuids = mergedGuids + chatGuid // Include primary in merged set
+        // Single atomic write - prevents readers from seeing inconsistent state
+        activeConversation = ActiveConversationState(
+            chatGuid = chatGuid,
+            mergedGuids = mergedGuids + chatGuid // Include primary in merged set
+        )
     }
 
     /**
      * Clear the active conversation when user leaves a chat.
      */
     fun clearActiveConversation() {
-        Timber.d("Clearing active conversation (was: $activeChatGuid)")
-        activeChatGuid = null
-        activeMergedGuids = emptySet()
+        val previous = activeConversation?.chatGuid
+        Timber.d("Clearing active conversation (was: $previous)")
+        activeConversation = null
     }
 
     /**
@@ -80,14 +88,15 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
      * @return true if this chat is currently being viewed
      */
     fun isConversationActive(chatGuid: String): Boolean {
-        return activeChatGuid == chatGuid || activeMergedGuids.contains(chatGuid)
+        val current = activeConversation ?: return false
+        return current.chatGuid == chatGuid || current.mergedGuids.contains(chatGuid)
     }
 
     /**
      * Get the currently active conversation GUID, if any.
      */
     fun getActiveConversation(): String? {
-        return activeChatGuid
+        return activeConversation?.chatGuid
     }
 
     /**
@@ -95,6 +104,6 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
      * (includes primary and merged GUIDs).
      */
     fun getActiveConversationGuids(): Set<String> {
-        return activeMergedGuids
+        return activeConversation?.mergedGuids ?: emptySet()
     }
 }

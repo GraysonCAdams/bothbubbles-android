@@ -7,11 +7,11 @@
 
 ## High Severity Issues
 
-### 1. runBlocking on Main/Service Threads
+### 1. runBlocking on Main/Service Threads ✅ FIXED
 
 **Locations:**
-- `services/fcm/FirebaseDatabaseService.kt` (Lines 119-122)
-- `services/notifications/NotificationBuilder.kt` (Lines 92-100)
+- `services/fcm/FirebaseDatabaseService.kt` (Lines 119-122) ✅ FIXED
+- `services/notifications/NotificationBuilder.kt` (Lines 92-100) ✅ FIXED
 
 **Issue (FirebaseDatabaseService):**
 ```kotlin
@@ -45,69 +45,55 @@ val mergedGuids: String? = try {
 - Service cleanup can block entire app
 - Violates Android threading guidelines
 
-**Fix (FirebaseDatabaseService):**
+**Fix Applied (FirebaseDatabaseService):**
 ```kotlin
 // Cache the URL when starting
 private var cachedDatabaseUrl: String? = null
 
-fun startRealtimeDatabaseListener(databaseUrl: String) {
-    cachedDatabaseUrl = databaseUrl
-    // ...
+fun startListening() {
+    applicationScope.launch(ioDispatcher) {
+        val databaseUrl = settingsDataStore.firebaseDatabaseUrl.first()
+        cachedDatabaseUrl = databaseUrl.takeIf { it.isNotBlank() }
+        // Start listener...
+    }
 }
 
 fun stopListening() {
-    cachedDatabaseUrl?.let { url ->
-        val database = FirebaseDatabase.getInstance(url)
-        database.getReference(REALTIME_DB_PATH).removeEventListener(realtimeDbListener)
+    realtimeDbListener?.let { listener ->
+        try {
+            // Use cached database URL to avoid blocking
+            if (!cachedDatabaseUrl.isNullOrBlank()) {
+                val database = FirebaseDatabase.getInstance(cachedDatabaseUrl!!)
+                database.getReference(REALTIME_DB_PATH).removeEventListener(listener)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error removing Realtime Database listener")
+        }
+        realtimeDbListener = null
     }
+    // Clear cached URL
+    cachedDatabaseUrl = null
 }
 ```
 
-**Fix (NotificationBuilder):**
-Pre-fetch unified group data asynchronously before building notification.
+**Fix Applied (NotificationBuilder):**
+Implemented caching pattern with background refresh. See `docs/antipatterns/11-CONCURRENCY-ANTI-PATTERNS.md` for full details.
 
 ---
 
-### 2. Memory Leaks from Uncancelled Flow Collectors
+### 2. ~~Memory Leaks from Uncancelled Flow Collectors~~ **[FIXED]**
 
 **Location:** `services/socket/SocketEventHandler.kt` (Lines 92-112)
 
-**Issue:**
-```kotlin
-fun startListening() {
-    if (isListening) return
-    isListening = true
+**Status:** ✅ FIXED - Job references now stored and properly cancelled in stopListening()
 
-    // Job NOT stored - cannot be cancelled!
-    applicationScope.launch(ioDispatcher) {
-        socketService.events.collect { event ->
-            handleEvent(event)
-        }
-    }
+**Previous Issue:**
+- Collector Jobs not stored, couldn't cancel them
+- `stopListening()` didn't actually stop the collectors
+- Multiple calls to `startListening()` created duplicate collectors
+- Memory leak as collectors accumulated
 
-    // Second collector also not stored
-    applicationScope.launch(ioDispatcher) {
-        socketService.connectionState.collect { state ->
-            if (state == ConnectionState.CONNECTED) {
-                handleSocketConnected()
-            }
-        }
-    }
-}
-
-fun stopListening() {
-    isListening = false
-    // No way to cancel the collectors!
-}
-```
-
-**Why Problematic:**
-- Collector Jobs not stored, can't cancel them
-- `stopListening()` doesn't actually stop the collectors
-- Multiple calls to `startListening()` create duplicate collectors
-- Memory leak as collectors accumulate
-
-**Fix:**
+**Fix Applied:**
 ```kotlin
 private var socketEventsJob: Job? = null
 private var connectionStateJob: Job? = null
@@ -178,20 +164,40 @@ Store database reference at registration time, use in cleanup.
 
 ---
 
-### 4. Unsafe Collector Patterns in Singleton Services
+### 4. ~~Unsafe Collector Patterns in Singleton Services~~ **[FIXED]**
 
 **Locations:**
 - `services/messaging/ChatFallbackTracker.kt` (Lines 53-65)
 - `services/imessage/IMessageAvailabilityService.kt`
 - `services/notifications/BadgeManager.kt`
+- `services/developer/ConnectionModeManager.kt`
 
-**Issue:**
+**Status:** ✅ FIXED - All services now store Job references and provide cleanup methods for testing
+
+**Previous Issue:**
+- Collectors launched in `init` couldn't be cancelled
+- Made services harder to test
+- If singleton was ever recreated (testing), collectors would accumulate
+
+**Fix Applied:**
+All affected services now:
+1. Store Job references as private fields
+2. Provide `cleanup()` method for testing scenarios
+3. Cancel and nullify Jobs in cleanup
+
+Example from ChatFallbackTracker:
 ```kotlin
 @Singleton
 class ChatFallbackTracker @Inject constructor(...) {
+    private var restoreJob: Job? = null
+    private var connectionStateJob: Job? = null
+
     init {
-        // Observer launched in init - never stored, can't cancel
-        applicationScope.launch(ioDispatcher) {
+        restoreJob = applicationScope.launch(ioDispatcher) {
+            restorePersistedFallbacks()
+        }
+
+        connectionStateJob = applicationScope.launch(ioDispatcher) {
             socketService.connectionState.collect { state ->
                 if (state == ConnectionState.CONNECTED) {
                     onServerReconnected()
@@ -199,16 +205,22 @@ class ChatFallbackTracker @Inject constructor(...) {
             }
         }
     }
+
+    fun cleanup() {
+        restoreJob?.cancel()
+        connectionStateJob?.cancel()
+        restoreJob = null
+        connectionStateJob = null
+    }
 }
 ```
 
-**Why Problematic:**
-- Collectors launched in `init` can't be cancelled
-- Makes service harder to test
-- If singleton is ever recreated (testing), collectors accumulate
-
-**Fix:**
-Store Jobs as fields, provide cleanup method for testing.
+**Files Fixed:**
+- ✅ ChatFallbackTracker.kt - Added Job storage and cleanup()
+- ✅ IMessageAvailabilityService.kt - Added Job storage and cleanup()
+- ✅ BadgeManager.kt - Added Job storage and cleanup()
+- ✅ ConnectionModeManager.kt - Added Job storage and cleanup()
+- ✅ ShortcutService.kt - Already had proper Job management
 
 ---
 
@@ -512,22 +524,22 @@ fun schedule(context: Context) {
 
 ## Summary Table
 
-| Issue | Severity | File | Lines | Category |
-|-------|----------|------|-------|----------|
-| runBlocking on Main Thread | HIGH | NotificationBuilder.kt | 92-100 | Threading |
-| runBlocking in Service | HIGH | FirebaseDatabaseService.kt | 119-122 | Threading |
-| Uncancelled Collectors | HIGH | SocketEventHandler.kt | 92-112 | Memory Leak |
-| Listener Without Cleanup | MEDIUM | FirebaseDatabaseService.kt | 162-192 | Memory Leak |
-| Singleton Init Collectors | MEDIUM | ChatFallbackTracker.kt | 53-65 | Testing |
-| Missing Handler Interface | MEDIUM | ChatEventHandler.kt | - | Testability |
-| Unlimited Reconnects | MEDIUM | SocketIOConnection.kt | 118-126 | UX |
-| Notification ID Collision | MEDIUM | NotificationChannelManager.kt | 43-50 | Logic |
-| Silent Parse Failures | MEDIUM | SocketEventParser.kt | 31-61 | Error Handling |
-| Large SharedFlow Buffer | MEDIUM | SocketService.kt | 108 | Memory |
-| Unbounded Contact Cache | LOW | MessageEventHandler.kt | 77-79 | Memory |
-| TOCTOU Race Condition | LOW | MessageSendingService.kt | 491-556 | Race Condition |
-| Inefficient Polling | LOW | MessageSendWorker.kt | 304-339 | Performance |
-| Missing Worker Backoff | LOW | BackgroundSyncWorker.kt | 80-98 | Reliability |
+| Issue | Severity | File | Lines | Category | Status |
+|-------|----------|------|-------|----------|--------|
+| runBlocking on Main Thread | HIGH | NotificationBuilder.kt | 92-100 | Threading | 🔴 Open |
+| runBlocking in Service | HIGH | FirebaseDatabaseService.kt | 119-122 | Threading | 🔴 Open |
+| Uncancelled Collectors | HIGH | SocketEventHandler.kt | 92-112 | Memory Leak | ✅ **FIXED** |
+| Listener Without Cleanup | MEDIUM | FirebaseDatabaseService.kt | 162-192 | Memory Leak | 🔴 Open |
+| Singleton Init Collectors | MEDIUM | Multiple files | - | Testing | ✅ **FIXED** |
+| Missing Handler Interface | MEDIUM | ChatEventHandler.kt | - | Testability | 🔴 Open |
+| Unlimited Reconnects | MEDIUM | SocketIOConnection.kt | 118-126 | UX | 🔴 Open |
+| Notification ID Collision | MEDIUM | NotificationChannelManager.kt | 43-50 | Logic | 🔴 Open |
+| Silent Parse Failures | MEDIUM | SocketEventParser.kt | 31-61 | Error Handling | 🔴 Open |
+| Large SharedFlow Buffer | MEDIUM | SocketService.kt | 108 | Memory | 🔴 Open |
+| Unbounded Contact Cache | LOW | MessageEventHandler.kt | 77-79 | Memory | 🔴 Open |
+| TOCTOU Race Condition | LOW | MessageSendingService.kt | 491-556 | Race Condition | 🔴 Open |
+| Inefficient Polling | LOW | MessageSendWorker.kt | 304-339 | Performance | 🔴 Open |
+| Missing Worker Backoff | LOW | BackgroundSyncWorker.kt | 80-98 | Reliability | 🔴 Open |
 
 ---
 

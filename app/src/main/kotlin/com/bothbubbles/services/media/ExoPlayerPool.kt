@@ -55,21 +55,19 @@ class ExoPlayerPool @Inject constructor(
      * @param attachmentGuid Unique identifier for the attachment
      * @return An ExoPlayer instance ready for use
      */
-    fun acquire(attachmentGuid: String): ExoPlayer {
+    fun acquire(attachmentGuid: String): ExoPlayer = synchronized(lock) {
         // Check if we already have an active player for this attachment
         activePlayers[attachmentGuid]?.let { return it }
 
-        val player = synchronized(lock) {
-            // Try to get a player from the pool
-            if (availablePlayers.isNotEmpty()) {
-                val pooled = availablePlayers.removeAt(availablePlayers.size - 1)
-                Timber.d("Reusing pooled player for $attachmentGuid")
-                pooled
-            } else {
-                // Create new player if under limit
-                Timber.d("Creating new player for $attachmentGuid")
-                createPlayer()
-            }
+        // Try to get a player from the pool
+        val player = if (availablePlayers.isNotEmpty()) {
+            val pooled = availablePlayers.removeAt(availablePlayers.size - 1)
+            Timber.d("Reusing pooled player for $attachmentGuid")
+            pooled
+        } else {
+            // Create new player if under limit
+            Timber.d("Creating new player for $attachmentGuid")
+            createPlayer()
         }
 
         // If we have too many active players, evict the oldest one

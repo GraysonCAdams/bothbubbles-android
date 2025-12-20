@@ -14,9 +14,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import javax.inject.Inject
 
@@ -50,6 +51,11 @@ class MediaGalleryViewModel @Inject constructor(
     private val route: Screen.MediaGallery = savedStateHandle.toRoute()
     val chatGuid: String = route.chatGuid
     val mediaType: String = route.mediaType
+
+    companion object {
+        // Thread-safe DateTimeFormatter (replaces SimpleDateFormat)
+        private val MONTH_YEAR_FORMAT = DateTimeFormatter.ofPattern("MMMM yyyy", Locale.getDefault())
+    }
 
     val uiState: StateFlow<MediaGalleryUiState> = attachmentRepository
         .getMediaWithDatesForChat(chatGuid)
@@ -92,7 +98,6 @@ class MediaGalleryViewModel @Inject constructor(
     private fun groupByMonth(items: List<AttachmentWithDate>): List<MediaGroup> {
         if (items.isEmpty()) return emptyList()
 
-        val dateFormat = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
         val calendar = Calendar.getInstance()
         val now = Calendar.getInstance()
 
@@ -106,7 +111,10 @@ class MediaGalleryViewModel @Inject constructor(
                 year == now.get(Calendar.YEAR) && month == now.get(Calendar.MONTH) -> "This Month"
                 year == now.get(Calendar.YEAR) && month == now.get(Calendar.MONTH) - 1 -> "Last Month"
                 year == now.get(Calendar.YEAR) - 1 && now.get(Calendar.MONTH) == 0 && month == 11 -> "Last Month"
-                else -> dateFormat.format(Date(item.dateCreated))
+                else -> {
+                    val instant = Instant.ofEpochMilli(item.dateCreated)
+                    MONTH_YEAR_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
+                }
             }
         }.map { (label, groupItems) ->
             MediaGroup(label = label, items = groupItems)

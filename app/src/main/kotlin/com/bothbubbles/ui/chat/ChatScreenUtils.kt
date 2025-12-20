@@ -8,9 +8,10 @@ import android.util.Log
 import com.bothbubbles.ui.components.message.MessageGroupPosition
 import com.bothbubbles.ui.components.message.MessageUiModel
 import java.io.File
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 
@@ -186,6 +187,11 @@ internal fun shouldShowTimeSeparator(currentTimestamp: Long, previousTimestamp: 
     return gapMinutes >= 15
 }
 
+// Thread-safe DateTimeFormatters (replaces SimpleDateFormat)
+private val TIME_FORMAT = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
+private val DAY_OF_WEEK_FORMAT = DateTimeFormatter.ofPattern("EEEE", Locale.getDefault())
+private val DATE_FORMAT = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
+
 /**
  * Formats a timestamp for the centered time separator.
  * Uses relative formatting like "Today 2:30 PM", "Yesterday", "Monday", or full date.
@@ -196,22 +202,21 @@ internal fun formatTimeSeparator(timestamp: Long): String {
     val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
     val weekAgo = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -7) }
 
-    val timeFormat = SimpleDateFormat("h:mm a", Locale.getDefault())
-    val dayOfWeekFormat = SimpleDateFormat("EEEE", Locale.getDefault())
-    val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
+    val instant = Instant.ofEpochMilli(timestamp)
+    val zonedDateTime = instant.atZone(ZoneId.systemDefault())
 
     return when {
         isSameDay(messageDate, today) -> {
-            "Today ${timeFormat.format(Date(timestamp))}"
+            "Today ${TIME_FORMAT.format(zonedDateTime)}"
         }
         isSameDay(messageDate, yesterday) -> {
-            "Yesterday ${timeFormat.format(Date(timestamp))}"
+            "Yesterday ${TIME_FORMAT.format(zonedDateTime)}"
         }
         messageDate.after(weekAgo) -> {
-            "${dayOfWeekFormat.format(Date(timestamp))} ${timeFormat.format(Date(timestamp))}"
+            "${DAY_OF_WEEK_FORMAT.format(zonedDateTime)} ${TIME_FORMAT.format(zonedDateTime)}"
         }
         else -> {
-            "${dateFormat.format(Date(timestamp))} ${timeFormat.format(Date(timestamp))}"
+            "${DATE_FORMAT.format(zonedDateTime)} ${TIME_FORMAT.format(zonedDateTime)}"
         }
     }
 }

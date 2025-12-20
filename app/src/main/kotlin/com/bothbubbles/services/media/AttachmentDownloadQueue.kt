@@ -134,10 +134,13 @@ class AttachmentDownloadQueue @Inject constructor(
     @Volatile
     private var activeChatGuid: String? = null
 
+    // Lock for setActiveChat to prevent race condition
+    private val activeChatLock = Any()
+
     /**
      * Set the currently active chat for priority boost.
      */
-    fun setActiveChat(chatGuid: String?) {
+    fun setActiveChat(chatGuid: String?) = synchronized(activeChatLock) {
         val previousActive = activeChatGuid
         activeChatGuid = chatGuid
 

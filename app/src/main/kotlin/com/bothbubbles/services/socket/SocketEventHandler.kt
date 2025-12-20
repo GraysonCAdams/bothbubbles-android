@@ -12,6 +12,7 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -78,6 +79,10 @@ class SocketEventHandler @Inject constructor(
 ) {
     private var isListening = false
 
+    // Job references for proper lifecycle management
+    private var socketEventsJob: Job? = null
+    private var connectionStateJob: Job? = null
+
     /**
      * SharedFlow that emits UI refresh events when real-time updates occur.
      * ViewModels can observe this for immediate UI updates, supplementing Room Flow observation.
@@ -94,14 +99,14 @@ class SocketEventHandler @Inject constructor(
         isListening = true
 
         // Listen for socket events (messages, typing, etc.)
-        applicationScope.launch(ioDispatcher) {
+        socketEventsJob = applicationScope.launch(ioDispatcher) {
             socketService.events.collect { event ->
                 handleEvent(event)
             }
         }
 
         // Listen for connection state changes and trigger incremental sync on connect
-        applicationScope.launch(ioDispatcher) {
+        connectionStateJob = applicationScope.launch(ioDispatcher) {
             socketService.connectionState
                 .collect { state ->
                     if (state == ConnectionState.CONNECTED) {
@@ -142,6 +147,10 @@ class SocketEventHandler @Inject constructor(
      */
     fun stopListening() {
         isListening = false
+        socketEventsJob?.cancel()
+        connectionStateJob?.cancel()
+        socketEventsJob = null
+        connectionStateJob = null
     }
 
     private suspend fun handleEvent(event: SocketEvent) {

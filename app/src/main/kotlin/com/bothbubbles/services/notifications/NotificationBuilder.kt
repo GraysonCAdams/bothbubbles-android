@@ -16,7 +16,6 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
-import kotlinx.coroutines.runBlocking
 import com.bothbubbles.ui.call.IncomingCallActivity
 import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -24,6 +23,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -44,6 +45,10 @@ class NotificationBuilder @Inject constructor(
     @Volatile
     private var cachedTemplateChoices: Array<CharSequence> = emptyArray()
 
+    // Cache unified group mappings (chatGuid -> merged guids string)
+    private val unifiedGroupCache = mutableMapOf<String, String?>()
+    private val unifiedGroupCacheMutex = Mutex()
+
     init {
         // Initialize cached values in background
         applicationScope.launch(ioDispatcher) {
@@ -54,6 +59,67 @@ class NotificationBuilder @Inject constructor(
             quickReplyTemplateRepository.observeAllTemplates().collect {
                 cachedTemplateChoices = quickReplyTemplateRepository.getNotificationChoices(maxCount = 3)
             }
+        }
+        // Pre-populate unified group cache
+        applicationScope.launch(ioDispatcher) {
+            refreshUnifiedGroupCache()
+        }
+    }
+
+    /**
+     * Refresh the unified group cache in the background.
+     * Called on initialization and whenever unified groups change.
+     */
+    private suspend fun refreshUnifiedGroupCache() {
+        try {
+            val allGroups = unifiedChatGroupDao.getActiveGroupsPaginated(limit = 1000, offset = 0)
+            val groupIds = allGroups.map { it.id }
+            val allMembers = unifiedChatGroupDao.getChatGuidsForGroups(groupIds)
+
+            // Build map of groupId -> list of chat guids
+            val groupMembersMap = allMembers.groupBy { it.groupId }
+
+            // Build map of chatGuid -> merged guids string
+            val newCache = mutableMapOf<String, String?>()
+            for ((groupId, members) in groupMembersMap) {
+                val chatGuids = members.map { it.chatGuid }
+                if (chatGuids.size > 1) {
+                    val mergedGuidsString = chatGuids.joinToString(",")
+                    // Add entry for each chat in the group
+                    chatGuids.forEach { chatGuid ->
+                        newCache[chatGuid] = mergedGuidsString
+                    }
+                }
+            }
+
+            unifiedGroupCacheMutex.withLock {
+                unifiedGroupCache.clear()
+                unifiedGroupCache.putAll(newCache)
+            }
+
+            Timber.d("Refreshed unified group cache with ${newCache.size} chat mappings")
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to refresh unified group cache")
+        }
+    }
+
+    /**
+     * Get merged guids for a chat from cache.
+     * Returns null if chat is not part of a unified group or cache miss.
+     */
+    private suspend fun getCachedMergedGuids(chatGuid: String): String? {
+        return unifiedGroupCacheMutex.withLock {
+            unifiedGroupCache[chatGuid]
+        }
+    }
+
+    /**
+     * Invalidate the unified group cache and refresh in the background.
+     * Call this when unified groups are created, updated, or deleted.
+     */
+    fun invalidateUnifiedGroupCache() {
+        applicationScope.launch(ioDispatcher) {
+            refreshUnifiedGroupCache()
         }
     }
 
@@ -88,20 +154,8 @@ class NotificationBuilder @Inject constructor(
         val notificationId = chatGuid.hashCode()
 
         // Look up if this chat is part of a unified group (for merged iMessage/SMS navigation)
-        val mergedGuids: String? = try {
-            runBlocking(ioDispatcher) {
-                val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
-                if (group != null) {
-                    val guids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
-                    if (guids.size > 1) guids.joinToString(",") else null
-                } else {
-                    null
-                }
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to lookup unified group for notification deep link")
-            null
-        }
+        // Use cached value to avoid blocking the notification thread
+        val mergedGuids: String? = unifiedGroupCache[chatGuid]
 
         // Create intent to open the chat (with message GUID for deep-link scrolling)
         val contentIntent = Intent(context, MainActivity::class.java).apply {

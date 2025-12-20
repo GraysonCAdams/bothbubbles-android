@@ -1,6 +1,12 @@
 package com.bothbubbles.util.parsing
 
-import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
+import java.time.temporal.TemporalAccessor
 import java.util.*
 
 /**
@@ -55,13 +61,25 @@ internal object AbsoluteDateParser {
     /**
      * Try to parse with a list of formats
      */
-    private fun tryParseWithFormats(dateString: String, formats: List<SimpleDateFormat>): Calendar? {
+    private fun tryParseWithFormats(dateString: String, formats: List<DateTimeFormatter>): Calendar? {
         for (format in formats) {
             try {
-                val date = format.parse(dateString)
-                if (date != null) {
-                    return Calendar.getInstance().apply { time = date }
+                val temporal = format.parse(dateString)
+
+                // Try to extract LocalDateTime if time is present
+                val localDateTime = try {
+                    LocalDateTime.from(temporal)
+                } catch (e: Exception) {
+                    // No time component, just date
+                    val localDate = LocalDate.from(temporal)
+                    localDate.atStartOfDay()
                 }
+
+                return Calendar.getInstance().apply {
+                    timeInMillis = localDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }
+            } catch (_: DateTimeParseException) {
+                // Try next format
             } catch (_: Exception) {
                 // Try next format
             }
@@ -74,29 +92,47 @@ internal object AbsoluteDateParser {
      * Uses smart logic: if the date has passed this year by more than 7 days, use next year
      */
     private fun parseDateWithoutYear(dateString: String): Calendar? {
-        val now = Calendar.getInstance()
-        val currentYear = now.get(Calendar.YEAR)
+        val now = LocalDateTime.now()
+        val currentYear = now.year
 
         for (format in DateFormatters.WITHOUT_YEAR) {
             try {
-                val date = format.parse(dateString)
-                if (date != null) {
-                    val parsedCal = Calendar.getInstance().apply { time = date }
+                val temporal = format.parse(dateString)
 
-                    // Set to current year initially
-                    parsedCal.set(Calendar.YEAR, currentYear)
-
-                    // If the date has already passed this year, use next year
-                    if (parsedCal.before(now)) {
-                        // Check if it's within a reasonable window (don't bump dates from yesterday to next year)
-                        val daysDiff = (now.timeInMillis - parsedCal.timeInMillis) / (1000 * 60 * 60 * 24)
-                        if (daysDiff > 7) {
-                            parsedCal.set(Calendar.YEAR, currentYear + 1)
-                        }
+                // Try to extract LocalDateTime if time is present
+                val parsedDateTime = try {
+                    // Has time component
+                    val time = LocalTime.from(temporal)
+                    val monthDay = try {
+                        java.time.MonthDay.from(temporal)
+                    } catch (e: Exception) {
+                        continue
                     }
-
-                    return parsedCal
+                    LocalDateTime.of(currentYear, monthDay.month, monthDay.dayOfMonth, time.hour, time.minute)
+                } catch (e: Exception) {
+                    // No time component, just date
+                    val monthDay = try {
+                        java.time.MonthDay.from(temporal)
+                    } catch (e: Exception) {
+                        continue
+                    }
+                    LocalDateTime.of(currentYear, monthDay.month, monthDay.dayOfMonth, 0, 0)
                 }
+
+                // If the date has already passed this year by more than 7 days, use next year
+                var finalDateTime = parsedDateTime
+                if (parsedDateTime.isBefore(now)) {
+                    val daysDiff = java.time.Duration.between(parsedDateTime, now).toDays()
+                    if (daysDiff > 7) {
+                        finalDateTime = parsedDateTime.plusYears(1)
+                    }
+                }
+
+                return Calendar.getInstance().apply {
+                    timeInMillis = finalDateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }
+            } catch (_: DateTimeParseException) {
+                // Try next format
             } catch (_: Exception) {
                 // Try next format
             }
@@ -109,29 +145,26 @@ internal object AbsoluteDateParser {
      * If the parsed time is earlier than now, it assumes tomorrow
      */
     private fun parseTimeOnly(timeString: String): Calendar? {
-        val now = Calendar.getInstance()
+        val now = LocalDateTime.now()
 
         for (format in DateFormatters.TIME_ONLY) {
             try {
-                val date = format.parse(timeString)
-                if (date != null) {
-                    val parsedCal = Calendar.getInstance().apply { time = date }
+                val temporal = format.parse(timeString)
+                val time = LocalTime.from(temporal)
 
-                    // Create a calendar for today with the parsed time
-                    val result = Calendar.getInstance().apply {
-                        set(Calendar.HOUR_OF_DAY, parsedCal.get(Calendar.HOUR_OF_DAY))
-                        set(Calendar.MINUTE, parsedCal.get(Calendar.MINUTE))
-                        set(Calendar.SECOND, 0)
-                        set(Calendar.MILLISECOND, 0)
-                    }
+                // Create a datetime for today with the parsed time
+                var result = LocalDateTime.of(now.toLocalDate(), time)
 
-                    // If this time has already passed today, use tomorrow
-                    if (result.before(now)) {
-                        result.add(Calendar.DAY_OF_MONTH, 1)
-                    }
-
-                    return result
+                // If this time has already passed today, use tomorrow
+                if (result.isBefore(now)) {
+                    result = result.plusDays(1)
                 }
+
+                return Calendar.getInstance().apply {
+                    timeInMillis = result.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+                }
+            } catch (_: DateTimeParseException) {
+                // Try next format
             } catch (_: Exception) {
                 // Try next format
             }

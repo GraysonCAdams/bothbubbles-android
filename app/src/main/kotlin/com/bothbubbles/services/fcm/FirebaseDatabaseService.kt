@@ -68,6 +68,9 @@ class FirebaseDatabaseService @Inject constructor(
     private var realtimeDbListener: ValueEventListener? = null
     private var firestoreListener: ListenerRegistration? = null
 
+    // Cache the database URL to avoid runBlocking in stopListening
+    private var cachedDatabaseUrl: String? = null
+
     /**
      * Start listening for server URL changes.
      *
@@ -94,6 +97,7 @@ class FirebaseDatabaseService @Inject constructor(
                 }
 
                 val databaseUrl = settingsDataStore.firebaseDatabaseUrl.first()
+                cachedDatabaseUrl = databaseUrl.takeIf { it.isNotBlank() }
 
                 if (databaseUrl.isNotBlank()) {
                     // Use Realtime Database
@@ -116,14 +120,9 @@ class FirebaseDatabaseService @Inject constructor(
         // Remove Realtime Database listener
         realtimeDbListener?.let { listener ->
             try {
-                val databaseUrl = runCatching {
-                    kotlinx.coroutines.runBlocking {
-                        settingsDataStore.firebaseDatabaseUrl.first()
-                    }
-                }.getOrNull()
-
-                if (!databaseUrl.isNullOrBlank()) {
-                    val database = FirebaseDatabase.getInstance(databaseUrl)
+                // Use cached database URL to avoid blocking
+                if (!cachedDatabaseUrl.isNullOrBlank()) {
+                    val database = FirebaseDatabase.getInstance(cachedDatabaseUrl!!)
                     database.getReference(REALTIME_DB_PATH).removeEventListener(listener)
                 }
             } catch (e: Exception) {
@@ -135,6 +134,9 @@ class FirebaseDatabaseService @Inject constructor(
         // Remove Firestore listener
         firestoreListener?.remove()
         firestoreListener = null
+
+        // Clear cached URL
+        cachedDatabaseUrl = null
 
         _state.value = FirebaseDatabaseState.NotStarted
         Timber.d("Firebase Database listeners stopped")

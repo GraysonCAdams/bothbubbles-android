@@ -68,6 +68,7 @@ class ConnectionModeManager @Inject constructor(
 
     private var isInitialized = false
     private var backgroundDisconnectJob: kotlinx.coroutines.Job? = null
+    private var socketStateObserverJob: kotlinx.coroutines.Job? = null
 
     private val _currentMode = MutableStateFlow(ConnectionMode.DISCONNECTED)
     val currentMode: StateFlow<ConnectionMode> = _currentMode.asStateFlow()
@@ -91,7 +92,7 @@ class ConnectionModeManager @Inject constructor(
         ProcessLifecycleOwner.get().lifecycle.addObserver(this)
 
         // Observe socket connection state
-        applicationScope.launch(mainDispatcher) {
+        socketStateObserverJob = applicationScope.launch(mainDispatcher) {
             socketService.connectionState.collect { state ->
                 updateMode(state)
                 developerEventLog.logConnectionChange(
@@ -231,5 +232,16 @@ class ConnectionModeManager @Inject constructor(
             ConnectionMode.FCM -> "FCM (push)"
             ConnectionMode.DISCONNECTED -> "Disconnected"
         }
+    }
+
+    /**
+     * Cleanup method for testing - cancels all active collectors.
+     * Should only be called in test scenarios.
+     */
+    fun cleanup() {
+        socketStateObserverJob?.cancel()
+        backgroundDisconnectJob?.cancel()
+        socketStateObserverJob = null
+        backgroundDisconnectJob = null
     }
 }

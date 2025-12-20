@@ -3,6 +3,7 @@ package com.bothbubbles.services.notifications
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.di.ApplicationScope
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
@@ -19,13 +20,25 @@ class BadgeManager @Inject constructor(
     private val _totalUnread = MutableStateFlow(0)
     val totalUnread: StateFlow<Int> = _totalUnread
 
+    // Job reference for proper lifecycle management
+    private var unreadCountJob: Job? = null
+
     init {
-        scope.launch {
+        unreadCountJob = scope.launch {
             chatRepository.observeTotalUnreadMessageCount()
                 .collect { count ->
                     _totalUnread.value = count
                     notificationServiceProvider.get().updateAppBadge(count)
                 }
         }
+    }
+
+    /**
+     * Cleanup method for testing - cancels all active collectors.
+     * Should only be called in test scenarios.
+     */
+    fun cleanup() {
+        unreadCountJob?.cancel()
+        unreadCountJob = null
     }
 }

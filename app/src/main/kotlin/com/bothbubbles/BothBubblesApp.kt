@@ -31,6 +31,7 @@ import com.bothbubbles.services.sync.SyncService
 import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
+import com.bothbubbles.core.network.api.AuthInterceptor
 import dagger.hilt.android.HiltAndroidApp
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
@@ -113,6 +114,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     lateinit var notificationMediaUpdater: NotificationMediaUpdater
 
     @Inject
+    lateinit var authInterceptor: AuthInterceptor
+
+    @Inject
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
@@ -162,6 +166,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         PhoneNumberFormatter.init(this)
         createNotificationChannels()
+
+        // Initialize AuthInterceptor credentials cache (must happen before any network requests)
+        initializeAuthInterceptor()
 
         // Initialize active conversation manager (clears active chat when app backgrounds)
         activeConversationManager.initialize()
@@ -494,6 +501,21 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         }
 
         notificationManager.createNotificationChannels(listOf(messagesChannel, serviceChannel))
+    }
+
+    /**
+     * Initialize AuthInterceptor credentials cache.
+     * This must happen before any network requests to avoid runBlocking on OkHttp threads.
+     */
+    private fun initializeAuthInterceptor() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                authInterceptor.preInitialize()
+                Timber.d("AuthInterceptor credentials cache initialized")
+            } catch (e: Exception) {
+                Timber.w(e, "Error initializing AuthInterceptor - network requests will fail until credentials are available")
+            }
+        }
     }
 
     companion object {

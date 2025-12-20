@@ -78,6 +78,9 @@ class MessageEventHandler @Inject constructor(
     private val contactCacheMutex = Mutex()
     private val contactCache = mutableMapOf<String, CachedContactInfo>()
 
+    // Track lookups in progress to prevent duplicate expensive queries
+    private val lookupInProgress = mutableSetOf<String>()
+
     suspend fun handleNewMessage(
         event: SocketEvent.NewMessage,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>,
@@ -282,26 +285,50 @@ class MessageEventHandler @Inject constructor(
 
     /**
      * Look up contact info from Android Contacts with in-memory caching.
+     *
+     * Uses a "lookup in progress" set to prevent multiple threads from
+     * performing expensive Android Contacts queries for the same address
+     * simultaneously (common during message burst after reconnect).
      */
     private suspend fun lookupContactWithCache(address: String): Pair<String?, String?> {
         val now = System.currentTimeMillis()
 
-        // Check in-memory cache first (mutex-protected)
+        // Check in-memory cache first and register lookup intent (mutex-protected)
         contactCacheMutex.withLock {
+            // Check cache
             contactCache[address]?.let { cached ->
                 if (now - cached.timestamp < CONTACT_CACHE_TTL_MS) {
                     return cached.displayName to cached.avatarUri
                 }
                 contactCache.remove(address)
             }
+
+            // Check if another thread is already looking up this address
+            if (address in lookupInProgress) {
+                // Another thread is querying - return null to avoid duplicate work
+                // The other thread will cache the result for future lookups
+                return null to null
+            }
+
+            // Mark lookup as in progress
+            lookupInProgress.add(address)
         }
 
-        // Not in cache - do the Android Contacts lookup
-        val contactName = androidContactsService.getContactDisplayName(address)
-        val photoUri = if (contactName != null) {
-            androidContactsService.getContactPhotoUri(address)
-        } else {
-            null
+        // Perform Android Contacts lookup (expensive I/O operation)
+        val contactName: String?
+        val photoUri: String?
+        try {
+            contactName = androidContactsService.getContactDisplayName(address)
+            photoUri = if (contactName != null) {
+                androidContactsService.getContactPhotoUri(address)
+            } else {
+                null
+            }
+        } finally {
+            // Always clean up lookup-in-progress flag and cache result
+            contactCacheMutex.withLock {
+                lookupInProgress.remove(address)
+            }
         }
 
         // Store result in cache

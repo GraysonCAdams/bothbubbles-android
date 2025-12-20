@@ -6,52 +6,41 @@
 
 ## Critical Issues
 
-### 1. SimpleDateFormat Shared Across Threads
+### 1. SimpleDateFormat Shared Across Threads ✅ FIXED
 
-**Location:** `util/parsing/DateFormatters.kt`
+**Status:** FIXED - All SimpleDateFormat instances replaced with thread-safe DateTimeFormatter
 
-**Issue:**
-```kotlin
-internal object DateFormatters {
-    val WITH_YEAR = listOf(
-        SimpleDateFormat("MMMM d, yyyy 'at' h:mm a", Locale.US),
-        SimpleDateFormat("MMMM d, yyyy 'at' h:mma", Locale.US),
-        // ... 16 more formatters
-    ).onEach { it.isLenient = false }
-}
-```
+**Fixed in files:**
+- `util/parsing/DateFormatters.kt` - Replaced all SimpleDateFormat with DateTimeFormatter
+- `util/parsing/AbsoluteDateParser.kt` - Updated to use java.time APIs (LocalDateTime, LocalDate, LocalTime)
+- `ui/chat/delegates/CursorChatMessageListDelegate.kt` - Added companion object DateTimeFormatters
+- `ui/chat/ChatScreenUtils.kt` - Added companion object DateTimeFormatters
+- `ui/chat/details/MediaGalleryViewModel.kt` - Added companion object DateTimeFormatter
+- `ui/components/common/SnoozeDuration.kt` - Added companion object DateTimeFormatters
 
-**Usage:** `util/parsing/AbsoluteDateParser.kt`:
-```kotlin
-private fun tryParseWithFormats(dateString: String, formats: List<SimpleDateFormat>): Calendar? {
-    for (format in formats) {
-        try {
-            val date = format.parse(dateString)  // NOT THREAD-SAFE!
-```
-
-**Race Condition:** SimpleDateFormat is NOT thread-safe. Two threads calling `.parse()` simultaneously corrupt internal state.
-
-**Symptoms:**
+**Original Issue:**
+SimpleDateFormat was shared across threads and is NOT thread-safe. Two threads calling `.parse()` simultaneously corrupt internal state, causing:
 - Incorrect parsing results
 - ArrayIndexOutOfBoundsException
 - NumberFormatException
 
-**Fix:**
+**Solution Applied:**
+All SimpleDateFormat instances replaced with `java.time.format.DateTimeFormatter`, which is immutable and thread-safe:
 ```kotlin
-// Use java.time.format.DateTimeFormatter (thread-safe)
-val WITH_YEAR = listOf(
-    DateTimeFormatter.ofPattern("MMMM d, yyyy 'at' h:mm a", Locale.US),
-)
+// Before (NOT thread-safe)
+val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
+val date = dateFormat.parse(dateString)
 
-// Or synchronize access
-synchronized(format) {
-    format.parse(dateString)
-}
+// After (thread-safe)
+val DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US)
+    .withResolverStyle(ResolveStyle.STRICT)
+val instant = Instant.ofEpochMilli(timestamp)
+val formatted = DATE_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 ```
 
 ---
 
-### 2. runBlocking in Notification Builder
+### 2. runBlocking in Notification Builder ✅ FIXED
 
 **Location:** `services/notifications/NotificationBuilder.kt` (Lines 92-99)
 
@@ -73,52 +62,44 @@ fun buildMessageNotification(...): android.app.Notification {
 - Can cause deadlock if called from coroutine context
 - Blocks notification thread, delays other notifications
 
-**Fix:**
+**Fix Applied:**
+Implemented caching pattern with background refresh:
 ```kotlin
-suspend fun buildMessageNotification(...): Notification {
-    val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+// Cache unified group mappings (chatGuid -> merged guids string)
+private val unifiedGroupCache = mutableMapOf<String, String?>()
+private val unifiedGroupCacheMutex = Mutex()
+
+init {
+    // Pre-populate unified group cache on initialization
+    applicationScope.launch(ioDispatcher) {
+        refreshUnifiedGroupCache()
+    }
+}
+
+fun buildMessageNotification(...): android.app.Notification {
+    // Use cached value to avoid blocking the notification thread
+    val mergedGuids: String? = unifiedGroupCache[chatGuid]
     // ...
 }
 ```
 
+**Benefits:**
+- No blocking on notification thread
+- Cache is pre-populated on app startup
+- Public `invalidateUnifiedGroupCache()` method for cache refresh when groups change
+- Falls back gracefully if cache miss (null merged guids)
+
 ---
 
-### 3. Race Condition in ExoPlayerPool.acquire()
+### 3. Race Condition in ExoPlayerPool.acquire() ✅ FIXED
 
-**Location:** `services/media/ExoPlayerPool.kt` (Lines 58-81)
+**Location:** `services/media/ExoPlayerPool.kt` (Lines 58-80)
 
 **Issue:**
-```kotlin
-fun acquire(attachmentGuid: String): ExoPlayer {
-    activePlayers[attachmentGuid]?.let { return it }  // CHECK (outside lock)
+Check-then-act pattern outside of synchronization allowed race condition where two threads could acquire different players for the same attachmentGuid, causing memory leak.
 
-    val player = synchronized(lock) {                  // GET FROM POOL
-        if (availablePlayers.isNotEmpty()) {
-            availablePlayers.removeAt(availablePlayers.size - 1)
-        } else {
-            createPlayer()
-        }
-    }
-
-    if (activePlayers.size >= MAX_ACTIVE_PLAYERS) {   // CHECK (stale)
-        evictOldestPlayer()
-    }
-
-    activePlayers[attachmentGuid] = player             // ACT (race!)
-    return player
-}
-```
-
-**Race Scenario:**
-1. Thread A: Gets player from pool (inside synchronized)
-2. Thread B: Calls acquire() with same attachmentGuid
-3. Thread B: Check finds nothing in activePlayers
-4. Thread B: Gets another player from pool
-5. Thread A: Adds player to activePlayers
-6. Thread B: Overwrites with different player
-7. **Result:** Thread A's player is orphaned, memory leak
-
-**Fix:**
+**Fix Applied:**
+Moved entire acquire() logic inside synchronized block for atomic operation:
 ```kotlin
 fun acquire(attachmentGuid: String): ExoPlayer = synchronized(lock) {
     activePlayers[attachmentGuid]?.let { return it }
@@ -138,165 +119,178 @@ fun acquire(attachmentGuid: String): ExoPlayer = synchronized(lock) {
 }
 ```
 
+**Status:** ✅ Fixed - All operations now atomic within synchronized block.
+
 ---
 
-### 4. Duplicate Detection Race in PendingMessageRepository
+### 4. Duplicate Detection Race in PendingMessageRepository ✅ FIXED
 
-**Location:** `data/repository/PendingMessageRepository.kt` (Lines 125-164)
+**Location:** `data/repository/PendingMessageRepository.kt` (Lines 110-148)
 
 **Issue:**
+UUID generated before synchronized block allowed double-tap to create duplicate messages despite duplicate detection logic.
+
+**Fix Applied:**
+Moved UUID generation inside synchronized block and added early return on duplicate detection:
 ```kotlin
-val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
+val clientGuid = synchronized(globalRecentSends) {
+    val guid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
 
-synchronized(globalRecentSends) {
-    globalRecentSends.removeAll { it.timestamp < cutoffTime }
+    val textForHash = text?.trim() ?: ""
+    if (textForHash.isNotBlank()) {
+        val textHash = textForHash.hashCode()
+        val cutoffTime = createdAt - globalDuplicateWindowMs
+        globalRecentSends.removeAll { it.timestamp < cutoffTime }
 
-    val sameChatDuplicate = globalRecentSends.find {
-        it.chatGuid == chatGuid && it.textHash == textHash
+        // Check for duplicate (same chat + same text hash + within window)
+        val duplicate = globalRecentSends.find {
+            it.chatGuid == chatGuid && it.textHash == textHash
+        }
+        if (duplicate != null) {
+            // Return existing localId to prevent duplicate
+            return@runCatching duplicate.localId
+        }
+
+        globalRecentSends.add(GlobalRecentSend(...))
     }
-    if (sameChatDuplicate != null) {
-        // Log warning but CONTINUE (don't prevent sending!)
-    }
 
-    globalRecentSends.add(GlobalRecentSend(...))
+    guid
 }
 ```
 
-**Race Scenario (double-tap):**
-1. User taps send twice rapidly
-2. Two threads call `queueMessage()` simultaneously
-3. Both pass synchronized block at nearly same time
-4. Both create separate UUIDs before synchronization
-5. Both get queued and sent
-6. **Result:** Duplicate messages despite detection code
-
-**Fix:** Generate UUID inside synchronized block, or actually prevent duplicate sends.
+**Status:** ✅ Fixed - UUID generation and duplicate check now atomic. Duplicates prevented by early return.
 
 ---
 
 ## High Priority Issues
 
-### 5. Non-Atomic State Updates in ActiveConversationManager
+### 5. Non-Atomic State Updates in ActiveConversationManager ✅ FIXED
 
-**Location:** `services/ActiveConversationManager.kt` (Lines 46-65)
+**Location:** `services/ActiveConversationManager.kt` (Lines 45-108)
 
 **Issue:**
+Two separate volatile fields updated non-atomically allowed readers to see inconsistent state (old chatGuid with new mergedGuids or vice versa).
+
+**Fix Applied:**
+Replaced two volatile fields with single immutable data class for atomic state updates:
 ```kotlin
-@Volatile
-private var activeChatGuid: String? = null
-
-@Volatile
-private var activeMergedGuids: Set<String> = emptySet()
-
-fun setActiveConversation(chatGuid: String, mergedGuids: Set<String> = emptySet()) {
-    activeChatGuid = chatGuid                    // WRITE 1
-    activeMergedGuids = mergedGuids + chatGuid   // WRITE 2 (not atomic!)
-}
-```
-
-**Problem:** Reader thread could see:
-- Old activeChatGuid with new activeMergedGuids
-- New activeChatGuid with old activeMergedGuids
-
-**Fix:**
-```kotlin
-@Volatile
-private var activeConversation: ActiveConversationState? = null
-
 data class ActiveConversationState(
     val chatGuid: String,
     val mergedGuids: Set<String>
 )
 
-fun setActiveConversation(chatGuid: String, mergedGuids: Set<String>) {
-    activeConversation = ActiveConversationState(chatGuid, mergedGuids + chatGuid)
+@Volatile
+private var activeConversation: ActiveConversationState? = null
+
+fun setActiveConversation(chatGuid: String, mergedGuids: Set<String> = emptySet()) {
+    // Single atomic write - prevents readers from seeing inconsistent state
+    activeConversation = ActiveConversationState(
+        chatGuid = chatGuid,
+        mergedGuids = mergedGuids + chatGuid
+    )
+}
+
+fun isConversationActive(chatGuid: String): Boolean {
+    val current = activeConversation ?: return false
+    return current.chatGuid == chatGuid || current.mergedGuids.contains(chatGuid)
 }
 ```
+
+**Status:** ✅ Fixed - Single volatile reference ensures atomic visibility of both fields.
 
 ---
 
-### 6. Race in AttachmentDownloadQueue.setActiveChat()
+### 6. Race in AttachmentDownloadQueue.setActiveChat() ✅ FIXED
 
-**Location:** `services/media/AttachmentDownloadQueue.kt` (Lines 140-147)
+**Location:** `services/media/AttachmentDownloadQueue.kt` (Lines 133-151)
 
 **Issue:**
+Read-compare-write pattern without synchronization allowed race condition where reprioritization could be skipped or run incorrectly.
+
+**Fix Applied:**
+Added synchronization around entire operation:
 ```kotlin
-@Volatile
-private var activeChatGuid: String? = null
-
-fun setActiveChat(chatGuid: String?) {
-    val previousActive = activeChatGuid   // READ
-    activeChatGuid = chatGuid             // WRITE
-    if (chatGuid != null && chatGuid != previousActive) {
-        reprioritizeForChat(chatGuid)     // ACT
-    }
-}
-```
-
-**Problem:** Between read and comparison, another thread could change activeChatGuid.
-
-**Fix:**
-```kotlin
+// Lock for setActiveChat to prevent race condition
 private val activeChatLock = Any()
 
 fun setActiveChat(chatGuid: String?) = synchronized(activeChatLock) {
     val previousActive = activeChatGuid
     activeChatGuid = chatGuid
+
+    // If changed, reprioritize existing queue items for the new active chat
     if (chatGuid != null && chatGuid != previousActive) {
         reprioritizeForChat(chatGuid)
     }
 }
 ```
 
+**Status:** ✅ Fixed - Read-compare-write now atomic within synchronized block.
+
 ---
 
-### 7. Contact Cache Lookup Race
+### 7. Contact Cache Lookup Race ✅ FIXED
 
-**Location:** `services/socket/handlers/MessageEventHandler.kt` (Lines 286-312)
+**Location:** `services/socket/handlers/MessageEventHandler.kt` (Lines 286-340)
 
 **Issue:**
+Between releasing lock after cache miss and acquiring for update, multiple threads could perform expensive Android Contacts queries for the same address simultaneously (common during message burst after reconnect).
+
+**Fix Applied:**
+Added "lookup in progress" tracking set to prevent duplicate queries:
 ```kotlin
-private suspend fun lookupContactWithCache(address: String): Pair<String?, String?> {
-    contactCacheMutex.withLock {
-        contactCache[address]?.let { cached ->
-            if (now - cached.timestamp < TTL) {
-                return cached.displayName to cached.avatarUri  // EARLY RETURN
-            }
-            contactCache.remove(address)  // CLEANUP
-        }
-    }
-    // LOCK RELEASED HERE
-
-    // Multiple threads could all reach here simultaneously!
-    val contactName = androidContactsService.getContactDisplayName(address)
-
-    contactCacheMutex.withLock {
-        contactCache[address] = CachedContactInfo(...)  // UPDATE
-    }
-}
-```
-
-**Problem:** Between releasing lock after cleanup and acquiring for update, multiple threads perform expensive contact lookup for same address.
-
-**Fix:** Use "lookup in progress" flag:
-```kotlin
+// Track lookups in progress to prevent duplicate expensive queries
 private val lookupInProgress = mutableSetOf<String>()
 
-contactCacheMutex.withLock {
-    if (address in lookupInProgress) {
-        // Wait or return cached
-    }
-    lookupInProgress.add(address)
-}
-try {
-    val result = androidContactsService.getContactDisplayName(address)
-    // ...
-} finally {
+private suspend fun lookupContactWithCache(address: String): Pair<String?, String?> {
+    val now = System.currentTimeMillis()
+
+    // Check in-memory cache first and register lookup intent (mutex-protected)
     contactCacheMutex.withLock {
-        lookupInProgress.remove(address)
+        // Check cache
+        contactCache[address]?.let { cached ->
+            if (now - cached.timestamp < CONTACT_CACHE_TTL_MS) {
+                return cached.displayName to cached.avatarUri
+            }
+            contactCache.remove(address)
+        }
+
+        // Check if another thread is already looking up this address
+        if (address in lookupInProgress) {
+            // Another thread is querying - return null to avoid duplicate work
+            return null to null
+        }
+
+        // Mark lookup as in progress
+        lookupInProgress.add(address)
     }
+
+    // Perform Android Contacts lookup (expensive I/O operation)
+    val contactName: String?
+    val photoUri: String?
+    try {
+        contactName = androidContactsService.getContactDisplayName(address)
+        photoUri = if (contactName != null) {
+            androidContactsService.getContactPhotoUri(address)
+        } else {
+            null
+        }
+    } finally {
+        // Always clean up lookup-in-progress flag
+        contactCacheMutex.withLock {
+            lookupInProgress.remove(address)
+        }
+    }
+
+    // Store result in cache
+    contactCacheMutex.withLock {
+        contactCache[address] = CachedContactInfo(contactName, photoUri, now)
+    }
+
+    return contactName to photoUri
 }
 ```
+
+**Status:** ✅ Fixed - Lookup-in-progress tracking prevents duplicate expensive queries during message bursts.
 
 ---
 
@@ -378,34 +372,40 @@ private val _downloadCompletions = MutableSharedFlow<String>(extraBufferCapacity
 
 ## Summary Table
 
-| Issue | Severity | Type | File |
-|-------|----------|------|------|
-| SimpleDateFormat shared | CRITICAL | Thread-Safety | DateFormatters.kt |
-| runBlocking in notification | CRITICAL | Deadlock | NotificationBuilder.kt |
-| ExoPlayerPool.acquire() race | CRITICAL | Race Condition | ExoPlayerPool.kt |
-| Duplicate detection race | CRITICAL | Race Condition | PendingMessageRepository.kt |
-| Non-atomic state updates | HIGH | Race Condition | ActiveConversationManager.kt |
-| setActiveChat() race | HIGH | Race Condition | AttachmentDownloadQueue.kt |
-| Contact cache lookup race | HIGH | Race Condition | MessageEventHandler.kt |
-| SoundManager init race | MEDIUM | Race Condition | SoundManager.kt |
-| MessageDeduplicator race | MEDIUM | Race Condition | MessageDeduplicator.kt |
-| SharedFlow buffer overflow | MEDIUM | Event Loss | AttachmentDownloadQueue.kt |
+| Issue | Severity | Type | Status | File |
+|-------|----------|------|--------|------|
+| SimpleDateFormat shared | CRITICAL | Thread-Safety | ✅ FIXED | DateFormatters.kt |
+| runBlocking in notification | CRITICAL | Deadlock | ✅ FIXED | NotificationBuilder.kt |
+| ExoPlayerPool.acquire() race | CRITICAL | Race Condition | ✅ FIXED | ExoPlayerPool.kt |
+| Duplicate detection race | CRITICAL | Race Condition | ✅ FIXED | PendingMessageRepository.kt |
+| Non-atomic state updates | HIGH | Race Condition | ✅ FIXED | ActiveConversationManager.kt |
+| setActiveChat() race | HIGH | Race Condition | ✅ FIXED | AttachmentDownloadQueue.kt |
+| Contact cache lookup race | HIGH | Race Condition | ✅ FIXED | MessageEventHandler.kt |
+| SoundManager init race | MEDIUM | Race Condition | ⚠️ Open | SoundManager.kt |
+| MessageDeduplicator race | MEDIUM | Race Condition | ⚠️ Open | MessageDeduplicator.kt |
+| SharedFlow buffer overflow | MEDIUM | Event Loss | ⚠️ Open | AttachmentDownloadQueue.kt |
 
 ---
 
 ## Recommendations
 
-1. **Immediate:**
-   - Fix SimpleDateFormat thread-safety (use java.time)
-   - Fix ExoPlayerPool.acquire() synchronization
-   - Convert runBlocking to suspend
+### Completed ✅
+1. **SimpleDateFormat thread-safety** - All instances replaced with DateTimeFormatter (6 files)
+2. **runBlocking in NotificationBuilder** - Implemented caching pattern with background refresh
+3. **ExoPlayerPool.acquire() race** - Moved all operations inside synchronized block
+4. **PendingMessageRepository duplicate detection** - UUID generation and duplicate check now atomic
+5. **ActiveConversationManager state updates** - Single immutable data class for atomic state
+6. **AttachmentDownloadQueue.setActiveChat()** - Added synchronization for read-compare-write
+7. **MessageEventHandler contact cache** - Added lookup-in-progress tracking to prevent duplicate queries
 
-2. **Short-term:**
-   - Add @ThreadSafe, @GuardedBy annotations
-   - Review all Mutex/Lock usage
-   - Add CAS for compound operations
+### Remaining Work
 
-3. **Long-term:**
-   - Use immutable state patterns
-   - Test concurrent scenarios
-   - Document thread-safety contracts
+1. **Short-term (Medium):**
+   - Fix SoundManager initialization race (use AtomicBoolean or StateFlow)
+   - Fix MessageDeduplicator check-then-act race
+   - Review SharedFlow buffer sizes for high-throughput scenarios
+
+2. **Long-term:**
+   - Add @ThreadSafe, @GuardedBy annotations to document thread-safety contracts
+   - Add concurrency stress tests for critical paths
+   - Consider using kotlin.concurrent.Atomics for lock-free data structures

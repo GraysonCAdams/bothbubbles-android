@@ -8,6 +8,7 @@ import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketService
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,13 +50,17 @@ class ChatFallbackTracker @Inject constructor(
     private val _fallbackStates = MutableStateFlow<Map<String, ChatFallbackEntry>>(emptyMap())
     val fallbackStates: StateFlow<Map<String, ChatFallbackEntry>> = _fallbackStates.asStateFlow()
 
+    // Job references for proper lifecycle management
+    private var restoreJob: Job? = null
+    private var connectionStateJob: Job? = null
+
     init {
-        applicationScope.launch(ioDispatcher) {
+        restoreJob = applicationScope.launch(ioDispatcher) {
             restorePersistedFallbacks()
         }
 
         // Observe server connection state to restore iMessage mode when reconnected
-        applicationScope.launch(ioDispatcher) {
+        connectionStateJob = applicationScope.launch(ioDispatcher) {
             socketService.connectionState
                 .collect { state ->
                     if (state == ConnectionState.CONNECTED) {
@@ -99,6 +104,17 @@ class ChatFallbackTracker @Inject constructor(
      * Get the fallback reason for a chat
      */
     fun getFallbackReason(chatGuid: String): FallbackReason? = fallbackChats[chatGuid]?.reason
+
+    /**
+     * Cleanup method for testing - cancels all active collectors.
+     * Should only be called in test scenarios.
+     */
+    fun cleanup() {
+        restoreJob?.cancel()
+        connectionStateJob?.cancel()
+        restoreJob = null
+        connectionStateJob = null
+    }
 
     /**
      * Called when the BlueBubbles server reconnects.

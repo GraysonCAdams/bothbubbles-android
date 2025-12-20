@@ -103,20 +103,33 @@ class PendingMessageRepository @Inject constructor(
         forcedLocalId: String?,
         attributedBodyJson: String?
     ): Result<String> = runCatching {
-        // Use "temp-" prefix so MessageEntity.isSent correctly returns false
-        val clientGuid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
         val createdAt = System.currentTimeMillis()
 
-        // Track recent sends for potential duplicate detection (debugging)
-        val textForHash = text?.trim() ?: ""
-        if (textForHash.isNotBlank()) {
-            val textHash = textForHash.hashCode()
-            val textPreview = textForHash.take(30)
+        // Generate clientGuid and check for duplicates inside synchronized block
+        // to prevent race condition where two threads send the same message
+        val clientGuid = synchronized(globalRecentSends) {
+            // Use "temp-" prefix so MessageEntity.isSent correctly returns false
+            val guid = forcedLocalId ?: "temp-${UUID.randomUUID()}"
 
-            // Clean up old entries
-            val cutoffTime = createdAt - globalDuplicateWindowMs
-            synchronized(globalRecentSends) {
+            // Track recent sends for potential duplicate detection
+            val textForHash = text?.trim() ?: ""
+            if (textForHash.isNotBlank()) {
+                val textHash = textForHash.hashCode()
+                val textPreview = textForHash.take(30)
+
+                // Clean up old entries
+                val cutoffTime = createdAt - globalDuplicateWindowMs
                 globalRecentSends.removeAll { it.timestamp < cutoffTime }
+
+                // Check for duplicate (same chat + same text hash + within window)
+                val duplicate = globalRecentSends.find {
+                    it.chatGuid == chatGuid && it.textHash == textHash
+                }
+                if (duplicate != null) {
+                    Timber.w("Potential duplicate send detected! chatGuid=$chatGuid, text='$textPreview', existing=${duplicate.localId}")
+                    // Return existing localId to prevent duplicate
+                    return@runCatching duplicate.localId
+                }
 
                 // Record this queue
                 globalRecentSends.add(GlobalRecentSend(
@@ -124,12 +137,14 @@ class PendingMessageRepository @Inject constructor(
                     textHash = textHash,
                     textPreview = textPreview,
                     timestamp = createdAt,
-                    localId = clientGuid
+                    localId = guid
                 ))
                 if (globalRecentSends.size > maxGlobalRecentSends) {
                     globalRecentSends.removeAt(0)
                 }
             }
+
+            guid
         }
 
         // Determine message source based on delivery mode

@@ -61,9 +61,10 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import timber.log.Timber
-import java.text.SimpleDateFormat
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Calendar
-import java.util.Date
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicBoolean
 
@@ -131,6 +132,11 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
         private const val POLL_INTERVAL_MS = 2000L
         private const val SOCKET_QUIET_THRESHOLD_MS = 5000L
         private const val OPTIMISTIC_STALE_THRESHOLD_MS = 30_000L
+
+        // Thread-safe DateTimeFormatter for date separators (replaces SimpleDateFormat)
+        private val DATE_KEY_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd", Locale.US)
+        private val DISPLAY_DATE_FORMAT_MONTH_DAY = DateTimeFormatter.ofPattern("MMMM d", Locale.getDefault())
+        private val DISPLAY_DATE_FORMAT_FULL = DateTimeFormatter.ofPattern("MMMM d, yyyy", Locale.getDefault())
     }
 
     // ============================================================================
@@ -382,10 +388,10 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
 
         val result = mutableListOf<ChatListItem>()
         var lastDateKey: String? = null
-        val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
         for (message in messages) {
-            val dateKey = dateFormat.format(Date(message.dateCreated))
+            val instant = Instant.ofEpochMilli(message.dateCreated)
+            val dateKey = DATE_KEY_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 
             if (dateKey != lastDateKey) {
                 result.add(
@@ -414,10 +420,12 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             isSameDay(messageDate, today) -> "Today"
             isSameDay(messageDate, yesterday) -> "Yesterday"
             messageDate.get(Calendar.YEAR) == today.get(Calendar.YEAR) -> {
-                SimpleDateFormat("MMMM d", Locale.getDefault()).format(Date(timestamp))
+                val instant = Instant.ofEpochMilli(timestamp)
+                DISPLAY_DATE_FORMAT_MONTH_DAY.format(instant.atZone(ZoneId.systemDefault()))
             }
             else -> {
-                SimpleDateFormat("MMMM d, yyyy", Locale.getDefault()).format(Date(timestamp))
+                val instant = Instant.ofEpochMilli(timestamp)
+                DISPLAY_DATE_FORMAT_FULL.format(instant.atZone(ZoneId.systemDefault()))
             }
         }
     }

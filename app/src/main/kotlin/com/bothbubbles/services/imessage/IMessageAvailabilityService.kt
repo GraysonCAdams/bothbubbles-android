@@ -13,6 +13,7 @@ import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -69,9 +70,13 @@ class IMessageAvailabilityService @Inject constructor(
     private val _availabilityStates = MutableStateFlow<Map<String, Boolean?>>(emptyMap())
     val availabilityStates: StateFlow<Map<String, Boolean?>> = _availabilityStates.asStateFlow()
 
+    // Job references for proper lifecycle management
+    private var connectionStateJob: Job? = null
+    private var cleanupJob: Job? = null
+
     init {
         // Listen for server reconnection to re-check unreachable addresses
-        applicationScope.launch(ioDispatcher) {
+        connectionStateJob = applicationScope.launch(ioDispatcher) {
             socketService.connectionState.collect { state ->
                 if (state == ConnectionState.CONNECTED) {
                     onServerReconnected()
@@ -80,7 +85,7 @@ class IMessageAvailabilityService @Inject constructor(
         }
 
         // Cleanup expired entries on startup
-        applicationScope.launch(ioDispatcher) {
+        cleanupJob = applicationScope.launch(ioDispatcher) {
             cleanupExpiredCache()
         }
     }
@@ -155,6 +160,17 @@ class IMessageAvailabilityService @Inject constructor(
         }
         updateObservableState(normalizedAddress, null)
         Timber.d("Invalidated cache")
+    }
+
+    /**
+     * Cleanup method for testing - cancels all active collectors.
+     * Should only be called in test scenarios.
+     */
+    fun cleanup() {
+        connectionStateJob?.cancel()
+        cleanupJob?.cancel()
+        connectionStateJob = null
+        cleanupJob = null
     }
 
     /**

@@ -60,7 +60,7 @@ val certificatePinner = CertificatePinner.Builder()
 
 ## High Severity Issues
 
-### 2. runBlocking on OkHttp Thread
+### 2. runBlocking on OkHttp Thread ✅ FIXED
 
 **Location:** `core/network/src/main/kotlin/com/bothbubbles/core/network/api/AuthInterceptor.kt` (Lines 114-144)
 
@@ -89,30 +89,58 @@ private fun getCredentialsBlocking(): CachedCredentials {
 - Other requests wait while credentials load
 - Can cause cascading delays across the app
 
-**Fix:**
-Pre-initialize credentials before first network request:
+**Fix Applied:**
+Pre-initialize credentials during app startup with fail-fast pattern:
 ```kotlin
 @Singleton
 class AuthInterceptor @Inject constructor(...) {
 
-    // Initialize synchronously on first inject
+    @Volatile
     private var cachedCredentials: CachedCredentials? = null
 
     suspend fun preInitialize() {
+        val serverAddress = credentialsProvider.getServerAddress()
+        val authKey = credentialsProvider.getAuthKey()
+        val customHeaders = credentialsProvider.getCustomHeaders()
+
         cachedCredentials = CachedCredentials(
-            serverAddress = credentialsProvider.getServerAddress(),
-            authKey = credentialsProvider.getAuthKey(),
-            customHeaders = credentialsProvider.getCustomHeaders()
+            serverAddress = serverAddress,
+            authKey = authKey,
+            customHeaders = customHeaders
         )
+        Timber.d("AuthInterceptor initialized with server: ${serverAddress.take(30)}...")
     }
 
     override fun intercept(chain: Interceptor.Chain): Response {
         val credentials = cachedCredentials
-            ?: throw IllegalStateException("AuthInterceptor not initialized")
+            ?: throw IllegalStateException(
+                "AuthInterceptor not initialized. Call preInitialize() before making network requests."
+            )
         // ...
     }
 }
 ```
+
+**Initialization:**
+Called in `BothBubblesApp.onCreate()`:
+```kotlin
+private fun initializeAuthInterceptor() {
+    applicationScope.launch(ioDispatcher) {
+        try {
+            authInterceptor.preInitialize()
+            Timber.d("AuthInterceptor credentials cache initialized")
+        } catch (e: Exception) {
+            Timber.w(e, "Error initializing AuthInterceptor")
+        }
+    }
+}
+```
+
+**Benefits:**
+- No blocking on OkHttp thread pool
+- Credentials loaded once on app startup
+- Fail-fast error if not initialized (helps catch misuse early)
+- `invalidateCache()` method for refreshing when settings change
 
 ---
 

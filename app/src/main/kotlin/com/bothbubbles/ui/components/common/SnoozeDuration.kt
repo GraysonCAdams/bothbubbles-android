@@ -1,5 +1,10 @@
 package com.bothbubbles.ui.components.common
 
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
+
 /**
  * Represents the available snooze durations for conversations.
  * @param label The human-readable label to display in the UI
@@ -13,6 +18,9 @@ enum class SnoozeDuration(val label: String, val durationMs: Long) {
     INDEFINITE("Indefinitely", -1L);
 
     companion object {
+        // Thread-safe DateTimeFormatter (replaces SimpleDateFormat)
+        private val LONG_DURATION_FORMAT = DateTimeFormatter.ofPattern("MMM d 'at' h:mm a", Locale.getDefault())
+
         /**
          * Format the remaining snooze time as a human-readable string.
          * @param snoozeUntil The epoch timestamp when snooze expires, or -1 for indefinite
@@ -37,11 +45,14 @@ enum class SnoozeDuration(val label: String, val durationMs: Long) {
                 remainingDays < 7 -> "$remainingDays day${if (remainingDays != 1L) "s" else ""}"
                 else -> {
                     // Format as absolute date for longer durations
-                    val formatter = java.text.SimpleDateFormat("MMM d 'at' h:mm a", java.util.Locale.getDefault())
-                    "until ${formatter.format(java.util.Date(snoozeUntil))}"
+                    val instant = Instant.ofEpochMilli(snoozeUntil)
+                    "until ${LONG_DURATION_FORMAT.format(instant.atZone(ZoneId.systemDefault()))}"
                 }
             }
         }
+
+        // Thread-safe DateTimeFormatter for time-only display
+        private val TIME_ONLY_FORMAT = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
 
         /**
          * Format the snooze end time as an absolute time.
@@ -51,10 +62,10 @@ enum class SnoozeDuration(val label: String, val durationMs: Long) {
         fun formatEndTime(snoozeUntil: Long): String {
             if (snoozeUntil == -1L) return "Never"
 
-            val now = System.currentTimeMillis()
-            val snoozeDate = java.util.Date(snoozeUntil)
+            val snoozeInstant = Instant.ofEpochMilli(snoozeUntil)
+            val snoozeZoned = snoozeInstant.atZone(ZoneId.systemDefault())
             val today = java.util.Calendar.getInstance()
-            val snoozeDay = java.util.Calendar.getInstance().apply { time = snoozeDate }
+            val snoozeDay = java.util.Calendar.getInstance().apply { timeInMillis = snoozeUntil }
 
             val isSameDay = today.get(java.util.Calendar.YEAR) == snoozeDay.get(java.util.Calendar.YEAR) &&
                     today.get(java.util.Calendar.DAY_OF_YEAR) == snoozeDay.get(java.util.Calendar.DAY_OF_YEAR)
@@ -67,16 +78,13 @@ enum class SnoozeDuration(val label: String, val durationMs: Long) {
 
             return when {
                 isSameDay -> {
-                    val timeFormatter = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
-                    timeFormatter.format(snoozeDate)
+                    TIME_ONLY_FORMAT.format(snoozeZoned)
                 }
                 isTomorrow -> {
-                    val timeFormatter = java.text.SimpleDateFormat("h:mm a", java.util.Locale.getDefault())
-                    "Tomorrow ${timeFormatter.format(snoozeDate)}"
+                    "Tomorrow ${TIME_ONLY_FORMAT.format(snoozeZoned)}"
                 }
                 else -> {
-                    val formatter = java.text.SimpleDateFormat("MMM d 'at' h:mm a", java.util.Locale.getDefault())
-                    formatter.format(snoozeDate)
+                    LONG_DURATION_FORMAT.format(snoozeZoned)
                 }
             }
         }

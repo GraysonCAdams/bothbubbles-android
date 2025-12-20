@@ -2,9 +2,6 @@ package com.bothbubbles.core.network.api
 
 import com.bothbubbles.core.network.AuthCredentialsProvider
 import timber.log.Timber
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.Response
@@ -14,8 +11,8 @@ import javax.inject.Inject
  * OkHttp interceptor that dynamically sets the base URL from settings
  * and adds authentication and custom headers to all requests.
  *
- * Uses cached values with initialization tracking to avoid race conditions
- * on app startup while not blocking OkHttp's network threads unnecessarily.
+ * IMPORTANT: Must call preInitialize() before making any network requests.
+ * Failing to initialize will cause all requests to throw IllegalStateException.
  */
 class AuthInterceptor @Inject constructor(
     private val credentialsProvider: AuthCredentialsProvider
@@ -27,11 +24,10 @@ class AuthInterceptor @Inject constructor(
         val customHeaders: Map<String, String> = emptyMap()
     )
 
-    private val _credentials = MutableStateFlow(CachedCredentials())
-    private val _initialized = MutableStateFlow(false)
+    @Volatile
+    private var cachedCredentials: CachedCredentials? = null
 
     override fun intercept(chain: Interceptor.Chain): Response {
-        val interceptStart = System.currentTimeMillis()
         val originalRequest = chain.request()
         val originalUrl = originalRequest.url
 
@@ -41,13 +37,11 @@ class AuthInterceptor @Inject constructor(
             return chain.proceed(originalRequest)
         }
 
-        // Get credentials (blocking call on OkHttp thread)
-        val credStart = System.currentTimeMillis()
-        val credentials = getCredentialsBlocking()
-        val credTime = System.currentTimeMillis() - credStart
-        if (credTime > 50) {
-            Timber.w("AuthInterceptor getCredentials took ${credTime}ms (slow!)")
-        }
+        // Get credentials from cache (fail fast if not initialized)
+        val credentials = cachedCredentials
+            ?: throw IllegalStateException(
+                "AuthInterceptor not initialized. Call preInitialize() before making network requests."
+            )
         val serverAddress = credentials.serverAddress
         val authKey = credentials.authKey
         val customHeaders = credentials.customHeaders
@@ -105,49 +99,28 @@ class AuthInterceptor @Inject constructor(
     }
 
     /**
-     * Get credentials, refreshing from provider.
-     *
-     * This runBlocking is acceptable because:
-     * 1. We're already on OkHttp's background thread pool
-     * 2. We need synchronous response for the interceptor
-     * 3. We have bounded timeout (3 seconds max)
+     * Pre-initialize credentials from the provider.
+     * MUST be called before making any network requests.
+     * Call this during app initialization or after settings change.
      */
-    private fun getCredentialsBlocking(): CachedCredentials {
-        // Fast path: already initialized
-        if (_initialized.value) {
-            return _credentials.value
-        }
+    suspend fun preInitialize() {
+        val serverAddress = credentialsProvider.getServerAddress()
+        val authKey = credentialsProvider.getAuthKey()
+        val customHeaders = credentialsProvider.getCustomHeaders()
 
-        // Slow path: fetch from provider with timeout
-        return runBlocking {
-            withTimeoutOrNull(INIT_TIMEOUT_MS) {
-                val serverAddress = credentialsProvider.getServerAddress()
-                val authKey = credentialsProvider.getAuthKey()
-                val customHeaders = credentialsProvider.getCustomHeaders()
-
-                val credentials = CachedCredentials(
-                    serverAddress = serverAddress,
-                    authKey = authKey,
-                    customHeaders = customHeaders
-                )
-                _credentials.value = credentials
-                _initialized.value = true
-                credentials
-            } ?: run {
-                Timber.w("Credentials initialization timed out")
-                _credentials.value
-            }
-        }
+        cachedCredentials = CachedCredentials(
+            serverAddress = serverAddress,
+            authKey = authKey,
+            customHeaders = customHeaders
+        )
+        Timber.d("AuthInterceptor initialized with server: ${serverAddress.take(30)}...")
     }
 
     /**
-     * Clear cached credentials (call when settings change)
+     * Clear cached credentials and re-fetch from provider.
+     * Call when settings change (server URL, auth key, custom headers).
      */
-    fun invalidateCache() {
-        _initialized.value = false
-    }
-
-    companion object {
-        private const val INIT_TIMEOUT_MS = 3000L
+    suspend fun invalidateCache() {
+        preInitialize()
     }
 }
