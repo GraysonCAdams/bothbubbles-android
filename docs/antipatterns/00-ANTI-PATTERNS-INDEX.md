@@ -116,9 +116,9 @@ This document indexes all identified anti-patterns across the codebase, organize
 | 16 | ~~108 Debug Traces~~ | `[SEND_TRACE]` in 6 files | ✅ FIXED 2025-12-20 |
 | 17 | ~~15-Parameter Method~~ | `Notifier.kt:35-51` | ✅ FIXED 2025-12-20 |
 | 18 | Non-Idempotent Retry | `RetryHelper.kt:124-171` | ⚠️ OPEN |
-| 19 | Oversized Repositories | `AttachmentRepository.kt` (808 lines) | ⚠️ OPEN (refactoring scope) |
+| 19 | ~~Oversized Repositories~~ | `AttachmentRepository.kt` (808→435 lines) | ✅ FIXED 2025-12-20 |
 | 20 | ~~runBlocking on OkHttp~~ | `AuthInterceptor.kt:114` | ✅ FIXED 2025-12-20 |
-| 21 | Lambda Capturing State | `ChatScreen.kt:505-536` | ⚠️ OPEN (large refactor) |
+| 21 | ~~Lambda Capturing State~~ | `ChatScreen.kt:505-536` | ✅ ALREADY OPTIMIZED (Wave 2/3G) |
 | 22 | ~~android:allowBackup~~ | `AndroidManifest.xml:84` | ✅ FIXED 2025-12-20 |
 | 23 | ~~Exported Components~~ | `AndroidManifest.xml` | ✅ FIXED 2025-12-20 |
 | 24 | Missing Result Handling | Multiple repositories | ⚠️ OPEN |
@@ -170,9 +170,9 @@ This document indexes all identified anti-patterns across the codebase, organize
 - [x] Fix InputStream leaks in `AttachmentEditor.kt` with `.use {}` (FIXED 2025-12-20)
 - [x] Cache Paint objects in `DrawingCanvas.kt` instead of per-frame allocation (FIXED 2025-12-20)
 
-### Sprint 5 - Architecture ✅ PARTIALLY COMPLETE
-- [ ] Decompose AttachmentRepository (808 lines) (large refactoring scope)
-- [ ] Refactor ChatScreen callbacks to method references (large refactoring scope)
+### Sprint 5 - Architecture ✅ MOSTLY COMPLETE
+- [x] Decompose AttachmentRepository (808 → 435 lines) (FIXED 2025-12-20 - extracted AttachmentDownloadManager)
+- [x] Refactor ChatScreen callbacks to method references (ALREADY DONE - Wave 2/3G patterns)
 - [ ] Split AvatarGenerator god object (758 lines) (large refactoring scope)
 - [ ] Add Result<T> error handling to repositories (requires API changes)
 - [x] Refactor `Notifier.showMessageNotification()` (15 params) to use data class (FIXED 2025-12-20)
@@ -239,20 +239,20 @@ This document indexes all identified anti-patterns across the codebase, organize
 
 Files with most issues (consider refactoring priority):
 
-| File | Issues | Lines | Primary Categories |
-|------|--------|-------|-------------------|
-| CursorChatMessageListDelegate.kt | 8 | ~600 | Performance, Collections |
-| SocketIOConnection.kt | 5 | ~200 | Security, Logging, Credentials |
-| ChatRepository.kt | 5 | ~600 | API Design, Duplicates |
-| CoreNetworkModule.kt | 4 | ~120 | Security, Threading |
-| ChatScreen.kt | 4 | ~800 | UI, Compose |
-| FcmMessageHandler.kt | 4 | ~300 | Logging, Debug Code |
-| Notifier.kt | 4 | ~114 | API Design, Interface |
-| AuthInterceptor.kt | 3 | ~150 | Security, Threading |
-| PendingMessageRepository.kt | 3 | ~700 | Concurrency, Data |
-| AttachmentRepository.kt | 3 | 808 | Architecture, Size |
-| DrawingCanvas.kt | 3 | ~250 | Performance, Memory |
-| ConversationDetailsLife360.kt | 3 | ~400 | Error Handling, Crashes |
+| File | Issues | Lines | Primary Categories | Status |
+|------|--------|-------|-------------------|--------|
+| CursorChatMessageListDelegate.kt | 8 | ~600 | Performance, Collections | Open |
+| ~~SocketIOConnection.kt~~ | 5 | ~200 | Security, Logging, Credentials | ✅ FIXED |
+| ~~ChatRepository.kt~~ | 5 | ~600 | API Design, Duplicates | ✅ FIXED |
+| CoreNetworkModule.kt | 4 | ~120 | Security, Threading | Partial |
+| ~~ChatScreen.kt~~ | 4 | ~800 | UI, Compose | ✅ OPTIMIZED |
+| ~~FcmMessageHandler.kt~~ | 4 | ~300 | Logging, Debug Code | ✅ FIXED |
+| ~~Notifier.kt~~ | 4 | ~114 | API Design, Interface | ✅ FIXED |
+| ~~AuthInterceptor.kt~~ | 3 | ~150 | Security, Threading | ✅ FIXED |
+| ~~PendingMessageRepository.kt~~ | 3 | ~700 | Concurrency, Data | ✅ FIXED |
+| ~~AttachmentRepository.kt~~ | 3 | 435 | Architecture, Size | ✅ DECOMPOSED |
+| ~~DrawingCanvas.kt~~ | 3 | ~250 | Performance, Memory | ✅ FIXED |
+| ~~ConversationDetailsLife360.kt~~ | 3 | ~400 | Error Handling, Crashes | ✅ FIXED |
 
 ---
 
