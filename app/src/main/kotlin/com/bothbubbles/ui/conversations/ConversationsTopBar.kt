@@ -142,7 +142,7 @@ internal fun ConversationsTopBar(
                     tint = if (hasActiveFilter) {
                         MaterialTheme.colorScheme.primary
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
+                        MaterialTheme.colorScheme.onSurface
                     }
                 )
             }
@@ -173,7 +173,7 @@ internal fun ConversationsTopBar(
             Icon(
                 Icons.Default.Search,
                 contentDescription = stringResource(R.string.search_conversations),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                tint = MaterialTheme.colorScheme.onSurface
             )
         }
 

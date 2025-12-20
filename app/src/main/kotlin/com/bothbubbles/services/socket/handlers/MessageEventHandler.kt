@@ -14,6 +14,7 @@ import com.bothbubbles.services.messaging.IncomingMessageHandler
 import com.bothbubbles.services.autoresponder.AutoResponderService
 import com.bothbubbles.services.categorization.CategorizationRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.UiRefreshEvent
@@ -22,6 +23,7 @@ import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.util.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.parsing.UrlParsingUtils
+import com.bothbubbles.core.network.api.dto.AttachmentDto
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.launch
@@ -51,7 +53,8 @@ class MessageEventHandler @Inject constructor(
     private val androidContactsService: AndroidContactsService,
     private val messageDeduplicator: MessageDeduplicator,
     private val activeConversationManager: ActiveConversationManager,
-    private val autoResponderService: AutoResponderService
+    private val autoResponderService: AutoResponderService,
+    private val attachmentDownloadQueue: AttachmentDownloadQueue
 ) {
     companion object {
         private const val TAG = "MessageEventHandler"
@@ -105,7 +108,9 @@ class MessageEventHandler @Inject constructor(
 
             val chat = chatDao.getChatByGuid(event.chatGuid)
             val senderAddress = event.message.handle?.address ?: ""
-            val messageText = savedMessage.text ?: ""
+            val messageText = savedMessage.text?.takeIf { it.isNotBlank() }
+                ?: getAttachmentPreviewText(event.message.attachments)
+                ?: ""
 
             // Check if notifications are disabled for this chat
             if (chat?.notificationsEnabled == false) {
@@ -205,6 +210,20 @@ class MessageEventHandler @Inject constructor(
                 participantAvatarPaths = participantAvatarPaths,
                 subject = savedMessage.subject
             )
+
+            // Enqueue first image attachment for download so notification can update with inline preview
+            val firstImageAttachment = event.message.attachments?.firstOrNull { attachment ->
+                val mimeType = attachment.mimeType?.lowercase() ?: ""
+                mimeType.startsWith("image/") && !attachment.isSticker
+            }
+            if (firstImageAttachment != null) {
+                Timber.d("Enqueuing notification attachment download: ${firstImageAttachment.guid}")
+                attachmentDownloadQueue.enqueue(
+                    attachmentGuid = firstImageAttachment.guid,
+                    chatGuid = event.chatGuid,
+                    priority = AttachmentDownloadQueue.Priority.IMMEDIATE
+                )
+            }
         }
     }
 
@@ -344,5 +363,35 @@ class MessageEventHandler @Inject constructor(
         }
 
         return null to null
+    }
+
+    /**
+     * Generate descriptive preview text for attachments in notifications.
+     */
+    private fun getAttachmentPreviewText(attachments: List<AttachmentDto>?): String? {
+        val first = attachments?.firstOrNull() ?: return null
+        val mimeType = first.mimeType?.lowercase() ?: ""
+        val uti = first.uti?.lowercase() ?: ""
+        val name = first.transferName?.lowercase() ?: ""
+        val count = attachments.size
+
+        return when {
+            first.isSticker -> "Sticker"
+            uti == "public.vlocation" || mimeType == "text/x-vlocation" || name.endsWith(".loc.vcf") -> "Location"
+            mimeType == "text/vcard" || mimeType == "text/x-vcard" || (name.endsWith(".vcf") && !name.endsWith(".loc.vcf")) -> "Contact"
+            first.hasLivePhoto && mimeType.startsWith("image/") -> "Live Photo"
+            mimeType == "image/gif" -> "GIF"
+            mimeType.startsWith("image/") -> if (count > 1) "$count Photos" else "Photo"
+            mimeType.startsWith("video/") -> if (count > 1) "$count Videos" else "Video"
+            mimeType.startsWith("audio/") -> {
+                val isVoice = uti.contains("voice") || name.startsWith("audio message") || name.endsWith(".caf")
+                if (isVoice) "Voice message" else "Audio"
+            }
+            mimeType.contains("pdf") -> "PDF"
+            mimeType.contains("document") || mimeType.contains("word") -> "Document"
+            mimeType.contains("spreadsheet") || mimeType.contains("excel") -> "Spreadsheet"
+            mimeType.contains("presentation") || mimeType.contains("powerpoint") -> "Presentation"
+            else -> "File"
+        }
     }
 }

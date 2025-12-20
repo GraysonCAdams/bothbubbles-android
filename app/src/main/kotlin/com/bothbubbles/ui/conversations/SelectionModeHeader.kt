@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
@@ -12,6 +13,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Snooze
 import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -26,7 +28,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.ui.conversations.delegates.SelectionState
 
+/**
+ * Header shown when in selection mode.
+ * Supports Gmail-style "Select All" with total count display.
+ */
 @Composable
 internal fun SelectionModeHeader(
     selectedCount: Int,
@@ -43,9 +50,12 @@ internal fun SelectionModeHeader(
     onBlock: () -> Unit,
     onAddContact: (() -> Unit)? = null,
     isPinEnabled: Boolean = true,
+    isLoadingCount: Boolean = false,
+    isSelectAllMode: Boolean = false,
+    totalMatchingCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
-    val allSelected = selectedCount >= totalSelectableCount && totalSelectableCount > 0
+    val allSelected = isSelectAllMode || (selectedCount >= totalSelectableCount && totalSelectableCount > 0)
     var showMoreMenu by remember { mutableStateOf(false) }
 
     Row(
@@ -63,13 +73,27 @@ internal fun SelectionModeHeader(
             )
         }
 
-        // Selection count
-        Text(
-            text = selectedCount.toString(),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-            modifier = Modifier.padding(start = 8.dp)
-        )
+        // Selection count with loading indicator
+        if (isLoadingCount) {
+            CircularProgressIndicator(
+                modifier = Modifier
+                    .padding(start = 12.dp)
+                    .size(24.dp),
+                strokeWidth = 2.dp
+            )
+        } else {
+            Text(
+                text = if (isSelectAllMode && totalMatchingCount > 0) {
+                    // Show "X of Y" format when in select-all mode
+                    "$selectedCount of $totalMatchingCount"
+                } else {
+                    selectedCount.toString()
+                },
+                style = MaterialTheme.typography.titleLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(start = 8.dp)
+            )
+        }
 
         Spacer(modifier = Modifier.weight(1f))
 
@@ -136,12 +160,19 @@ internal fun SelectionModeHeader(
                     }
                 )
 
-                // Dynamic mark as read/unread based on majority state
                 DropdownMenuItem(
-                    text = { Text(if (majorityUnread) "Mark as read" else "Mark as unread") },
+                    text = { Text("Mark as read") },
                     onClick = {
                         showMoreMenu = false
-                        if (majorityUnread) onMarkAsRead() else onMarkAsUnread()
+                        onMarkAsRead()
+                    }
+                )
+
+                DropdownMenuItem(
+                    text = { Text("Mark as unread") },
+                    onClick = {
+                        showMoreMenu = false
+                        onMarkAsUnread()
                     }
                 )
 

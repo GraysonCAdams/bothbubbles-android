@@ -3,7 +3,6 @@ package com.bothbubbles.ui.settings.life360
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.core.data.prefs.FeaturePreferences
-import com.bothbubbles.core.model.Life360Circle
 import com.bothbubbles.core.model.Life360Member
 import com.bothbubbles.core.model.entity.HandleEntity
 import com.bothbubbles.core.model.entity.displayNameSimple
@@ -41,9 +40,6 @@ class Life360SettingsViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(Life360UiState())
     val uiState: StateFlow<Life360UiState> = _uiState.asStateFlow()
 
-    private val _circles = MutableStateFlow<ImmutableList<Life360Circle>>(persistentListOf())
-    val circles: StateFlow<ImmutableList<Life360Circle>> = _circles.asStateFlow()
-
     val members: StateFlow<ImmutableList<Life360Member>> = life360Repository.observeAllMembers()
         .map { it.toImmutableList() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), persistentListOf())
@@ -53,9 +49,6 @@ class Life360SettingsViewModel @Inject constructor(
 
     val isPaused: StateFlow<Boolean> = featurePreferences.life360PauseSyncing
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
-
-    val defaultCircleId: StateFlow<String?> = featurePreferences.life360DefaultCircleId
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
     /**
      * All available handles (contacts) for mapping.
@@ -78,8 +71,8 @@ class Life360SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Check auth status and sync circles/members if authenticated.
-     * Called when settings screen opens - uses CIRCLES endpoint rate limit (10 min).
+     * Check auth status and sync members if authenticated.
+     * Called when settings screen opens.
      */
     private fun checkAuthStatusAndSync() {
         val isAuth = tokenStorage.isAuthenticated
@@ -87,8 +80,7 @@ class Life360SettingsViewModel @Inject constructor(
 
         // Auto-sync when opening settings if authenticated
         if (isAuth) {
-            Timber.d("Life360 settings opened, syncing circles and members")
-            refreshCircles()
+            Timber.d("Life360 settings opened, syncing members")
             syncMembers()
         }
     }
@@ -98,7 +90,7 @@ class Life360SettingsViewModel @Inject constructor(
             life360Service.storeToken(token)
             _uiState.value = _uiState.value.copy(isAuthenticated = true)
             featurePreferences.setLife360Enabled(true)
-            refreshCircles()
+            syncMembers()
         }
     }
 
@@ -106,34 +98,7 @@ class Life360SettingsViewModel @Inject constructor(
         viewModelScope.launch {
             life360Service.logout()
             featurePreferences.setLife360Enabled(false)
-            featurePreferences.setLife360DefaultCircleId(null)
             _uiState.value = Life360UiState(isAuthenticated = false)
-            _circles.value = persistentListOf()
-        }
-    }
-
-    fun refreshCircles() {
-        viewModelScope.launch {
-            _uiState.value = _uiState.value.copy(isLoading = true, error = null)
-
-            life360Service.fetchCircles().fold(
-                onSuccess = { circleList ->
-                    _circles.value = circleList.toImmutableList()
-                    _uiState.value = _uiState.value.copy(isLoading = false)
-
-                    // Auto-select first circle if none selected
-                    if (defaultCircleId.value == null && circleList.isNotEmpty()) {
-                        featurePreferences.setLife360DefaultCircleId(circleList.first().id)
-                    }
-                },
-                onFailure = { error ->
-                    Timber.e(error, "Failed to fetch circles")
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = formatError(error)
-                    )
-                }
-            )
         }
     }
 
@@ -168,12 +133,6 @@ class Life360SettingsViewModel @Inject constructor(
     fun setPaused(paused: Boolean) {
         viewModelScope.launch {
             featurePreferences.setLife360PauseSyncing(paused)
-        }
-    }
-
-    fun setDefaultCircle(circleId: String) {
-        viewModelScope.launch {
-            featurePreferences.setLife360DefaultCircleId(circleId)
         }
     }
 

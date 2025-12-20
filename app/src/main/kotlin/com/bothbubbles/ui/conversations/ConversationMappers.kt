@@ -62,8 +62,10 @@ suspend fun ChatEntity.toUiModel(
         // Attachment-based types
         firstAttachment != null -> when {
             firstAttachment.isSticker -> MessageType.STICKER
+            isVLocation(firstAttachment) -> MessageType.LOCATION
             firstAttachment.mimeType == "text/vcard" || firstAttachment.mimeType == "text/x-vcard" -> MessageType.CONTACT
             firstAttachment.isImage && firstAttachment.hasLivePhoto -> MessageType.LIVE_PHOTO
+            isGif(firstAttachment) -> MessageType.GIF
             firstAttachment.isImage -> MessageType.IMAGE
             firstAttachment.isVideo -> MessageType.VIDEO
             firstAttachment.isAudio && isVoiceMessage(firstAttachment) -> MessageType.VOICE_MESSAGE
@@ -89,6 +91,7 @@ suspend fun ChatEntity.toUiModel(
         rawMessageText.isNotBlank() -> rawMessageText
         messageType == MessageType.IMAGE -> "Photo"
         messageType == MessageType.LIVE_PHOTO -> "Live Photo"
+        messageType == MessageType.GIF -> "GIF"
         messageType == MessageType.VIDEO -> "Video"
         messageType == MessageType.AUDIO -> "Audio"
         messageType == MessageType.VOICE_MESSAGE -> "Voice message"
@@ -97,13 +100,18 @@ suspend fun ChatEntity.toUiModel(
         messageType == MessageType.DOCUMENT -> "Document"
         messageType == MessageType.LOCATION -> "Location"
         messageType == MessageType.APP_MESSAGE -> "App message"
-        messageType == MessageType.ATTACHMENT -> "Attachment"
+        messageType == MessageType.ATTACHMENT -> "File"
         else -> rawMessageText
     }
 
     // Get document type name if applicable
     val documentType = if (messageType == MessageType.DOCUMENT && firstAttachment != null) {
         getDocumentTypeName(firstAttachment.mimeType, firstAttachment.fileExtension)
+    } else null
+
+    // Get descriptive attachment preview text for generic ATTACHMENT type
+    val attachmentPreviewText = if (messageType == MessageType.ATTACHMENT && firstAttachment != null) {
+        getAttachmentPreviewText(firstAttachment.mimeType, firstAttachment.fileExtension)
     } else null
 
     // Get reaction preview data if this is a reaction
@@ -230,7 +238,8 @@ suspend fun ChatEntity.toUiModel(
         reactionPreviewData = reactionPreviewData,
         groupEventText = groupEventText,
         documentType = documentType,
-        attachmentCount = if (attachmentCount > 0) attachmentCount else 1
+        attachmentCount = if (attachmentCount > 0) attachmentCount else 1,
+        attachmentPreviewText = attachmentPreviewText
     )
 }
 

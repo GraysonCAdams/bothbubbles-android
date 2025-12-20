@@ -120,13 +120,6 @@ class FeaturePreferences @Inject constructor(
     }
 
     /**
-     * Default circle ID to display (if user has multiple circles).
-     */
-    val life360DefaultCircleId: Flow<String?> = dataStore.data.map { prefs ->
-        prefs[Keys.LIFE360_DEFAULT_CIRCLE_ID]
-    }
-
-    /**
      * How often to poll for location updates (in minutes).
      * Default is 10 minutes.
      */
@@ -277,16 +270,6 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
-    suspend fun setLife360DefaultCircleId(circleId: String?) {
-        dataStore.edit { prefs ->
-            if (circleId != null) {
-                prefs[Keys.LIFE360_DEFAULT_CIRCLE_ID] = circleId
-            } else {
-                prefs.remove(Keys.LIFE360_DEFAULT_CIRCLE_ID)
-            }
-        }
-    }
-
     suspend fun setLife360PollInterval(minutes: Int) {
         dataStore.edit { prefs ->
             prefs[Keys.LIFE360_POLL_INTERVAL] = minutes.coerceIn(5, 30)
@@ -360,7 +343,6 @@ class FeaturePreferences @Inject constructor(
 
         // Life360 Integration
         val LIFE360_ENABLED = booleanPreferencesKey("life360_enabled")
-        val LIFE360_DEFAULT_CIRCLE_ID = stringPreferencesKey("life360_default_circle_id")
         val LIFE360_POLL_INTERVAL = intPreferencesKey("life360_poll_interval")
         val LIFE360_PAUSE_SYNCING = booleanPreferencesKey("life360_pause_syncing")
     }

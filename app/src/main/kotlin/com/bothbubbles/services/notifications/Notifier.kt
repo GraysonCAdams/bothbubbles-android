@@ -29,6 +29,8 @@ interface Notifier {
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
+     * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
+     * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
     fun showMessageNotification(
         chatGuid: String,
@@ -43,7 +45,9 @@ interface Notifier {
         linkPreviewDomain: String? = null,
         participantNames: List<String> = emptyList(),
         participantAvatarPaths: List<String?> = emptyList(),
-        subject: String? = null
+        subject: String? = null,
+        attachmentUri: android.net.Uri? = null,
+        attachmentMimeType: String? = null
     )
 
     /**
@@ -96,7 +100,15 @@ interface Notifier {
     fun dismissFaceTimeCallNotification(callUuid: String)
 
     /**
-     * Update the app badge count on supported launchers.
+     * Update the app badge count.
+     *
+     * On Android 8.0+, badge counts are derived from notifications.
+     * This method updates a group summary notification with setNumber(count)
+     * which is the most reliable cross-device way to set badge counts.
+     *
+     * Also sends manufacturer-specific broadcasts for Samsung/Sony devices.
+     *
+     * @param count The total unread message count to display on the app badge
      */
     fun updateAppBadge(count: Int)
 }

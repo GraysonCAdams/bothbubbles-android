@@ -55,4 +55,57 @@ interface ChatGroupDao {
         WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
     """)
     fun observeGroupChatCount(): Flow<Int>
+
+    // ===== Filtered Queries for Select All Feature =====
+
+    /**
+     * Get count of group chats matching filter criteria.
+     * Used for Gmail-style "Select All" to count all matching conversations.
+     * Group chats are always considered "known senders".
+     * Includes both pinned and non-pinned group chats.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM chats
+        WHERE date_deleted IS NULL
+        AND is_group = 1
+        AND is_archived = 0
+        AND (
+            (:includeSpam = 1 AND is_spam = 1)
+            OR (:includeSpam = 0 AND is_spam = 0)
+        )
+        AND (:unreadOnly = 0 OR unread_count > 0)
+        AND (:category IS NULL OR category = :category)
+    """)
+    suspend fun getFilteredGroupChatCount(
+        includeSpam: Boolean,
+        unreadOnly: Boolean,
+        category: String?
+    ): Int
+
+    /**
+     * Get GUIDs of group chats matching filter criteria (paginated).
+     * Used for batch operations in Gmail-style "Select All".
+     * Includes both pinned and non-pinned group chats.
+     */
+    @Query("""
+        SELECT guid FROM chats
+        WHERE date_deleted IS NULL
+        AND is_group = 1
+        AND is_archived = 0
+        AND (
+            (:includeSpam = 1 AND is_spam = 1)
+            OR (:includeSpam = 0 AND is_spam = 0)
+        )
+        AND (:unreadOnly = 0 OR unread_count > 0)
+        AND (:category IS NULL OR category = :category)
+        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getFilteredGroupChatGuids(
+        includeSpam: Boolean,
+        unreadOnly: Boolean,
+        category: String?,
+        limit: Int,
+        offset: Int
+    ): List<String>
 }

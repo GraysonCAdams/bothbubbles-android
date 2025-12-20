@@ -42,6 +42,7 @@ class NotificationChannelManager @Inject constructor(
 
         // Notification IDs
         const val GROUP_MESSAGES = "messages_group"
+        const val SUMMARY_NOTIFICATION_ID = 0  // Summary notification for message group badge
         const val FACETIME_NOTIFICATION_ID_PREFIX = 1000000
         const val SYNC_COMPLETE_NOTIFICATION_ID = 2000001
         const val SMS_IMPORT_COMPLETE_NOTIFICATION_ID = 2000002
@@ -64,6 +65,8 @@ class NotificationChannelManager @Inject constructor(
             description = context.getString(R.string.notification_channel_messages_desc)
             enableVibration(true)
             enableLights(true)
+            // Enable app icon badge for unread messages
+            setShowBadge(true)
             // Enable conversation bubbles for this channel
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 setAllowBubbles(true)

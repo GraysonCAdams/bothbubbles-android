@@ -204,9 +204,16 @@ class SmsRepository @Inject constructor(
      * Mark all messages in a thread as read (both SMS and MMS)
      */
     suspend fun markThreadAsRead(chatGuid: String): Result<Unit> {
-        return messageOperations.markThreadAsRead(chatGuid) { guid ->
+        val result = messageOperations.markThreadAsRead(chatGuid) { guid ->
             getThreadIdForChat(guid)
         }
+        // Also update the unified group's unread count for badge sync
+        if (result.isSuccess) {
+            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
+                unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+            }
+        }
+        return result
     }
 
     /**

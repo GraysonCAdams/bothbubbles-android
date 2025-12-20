@@ -79,6 +79,17 @@ class ConversationObserverDelegate @AssistedInject constructor(
     private val _connectionState = MutableStateFlow(ConnectionState.DISCONNECTED)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
+    // Reconnecting indicator state (shown after 5 seconds of disconnection)
+    private val _showReconnectingIndicator = MutableStateFlow(false)
+    val showReconnectingIndicator: StateFlow<Boolean> = _showReconnectingIndicator.asStateFlow()
+
+    // Job for the disconnection timer
+    private var disconnectionTimerJob: kotlinx.coroutines.Job? = null
+
+    companion object {
+        private const val RECONNECTING_INDICATOR_DELAY_MS = 5000L
+    }
+
     // Unified sync progress (combines iMessage sync, SMS import, and categorization)
     private val _unifiedSyncProgress = MutableStateFlow<UnifiedSyncProgress?>(null)
     val unifiedSyncProgress: StateFlow<UnifiedSyncProgress?> = _unifiedSyncProgress.asStateFlow()
@@ -140,13 +151,39 @@ class ConversationObserverDelegate @AssistedInject constructor(
 
     /**
      * Observe connection state changes.
+     * Manages the reconnecting indicator timer - shows after 5 seconds of disconnection.
+     * Only shows when iMessage is enabled (not in SMS-only mode).
      */
     private fun observeConnectionState() {
         scope.launch {
-            socketConnection.connectionState.collect { state ->
+            // Combine connection state with smsOnlyMode to determine if indicator should show
+            combine(
+                socketConnection.connectionState,
+                settingsDataStore.smsOnlyMode
+            ) { state, smsOnlyMode ->
+                state to smsOnlyMode
+            }.collect { (state, smsOnlyMode) ->
                 // Track if we ever connected (for banner logic)
                 if (state == ConnectionState.CONNECTED) {
                     wasEverConnected = true
+                    // Cancel any pending timer and hide indicator immediately
+                    disconnectionTimerJob?.cancel()
+                    disconnectionTimerJob = null
+                    _showReconnectingIndicator.value = false
+                } else if (state != ConnectionState.NOT_CONFIGURED && !smsOnlyMode) {
+                    // Start timer if disconnected, server is configured, and not in SMS-only mode
+                    // Only start if not already running
+                    if (disconnectionTimerJob == null) {
+                        disconnectionTimerJob = scope.launch {
+                            delay(RECONNECTING_INDICATOR_DELAY_MS)
+                            _showReconnectingIndicator.value = true
+                        }
+                    }
+                } else {
+                    // NOT_CONFIGURED or SMS-only mode - no iMessage, don't show indicator
+                    disconnectionTimerJob?.cancel()
+                    disconnectionTimerJob = null
+                    _showReconnectingIndicator.value = false
                 }
 
                 _isConnected.value = state == ConnectionState.CONNECTED

@@ -7,20 +7,25 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.Navigation
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -30,18 +35,21 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import coil.compose.AsyncImage
-import coil.request.ImageRequest
+import androidx.compose.ui.viewinterop.AndroidView
 import com.bothbubbles.ui.components.message.AttachmentUiModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import org.osmdroid.config.Configuration
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.CustomZoomButtonsController
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker
 import timber.log.Timber
 import java.io.File
-import java.net.URLEncoder
 
 /**
  * Renders an Apple vLocation attachment as a map preview.
@@ -127,16 +135,15 @@ fun LocationAttachment(
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
             .clickable(enabled = coords != null) {
-                // Open in maps app
+                // Open in default maps app using geo: URI
+                // This lets the user's preferred maps app handle it
                 coords?.let { (lat, lng) ->
-                    val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng")
-                    val mapIntent = Intent(Intent.ACTION_VIEW, geoUri)
-                    if (mapIntent.resolveActivity(context.packageManager) != null) {
+                    try {
+                        val geoUri = Uri.parse("geo:$lat,$lng?q=$lat,$lng(Shared Location)")
+                        val mapIntent = Intent(Intent.ACTION_VIEW, geoUri)
                         context.startActivity(mapIntent)
-                    } else {
-                        // Fallback to Google Maps web
-                        val webUri = Uri.parse("https://maps.google.com/?q=$lat,$lng")
-                        context.startActivity(Intent(Intent.ACTION_VIEW, webUri))
+                    } catch (e: Exception) {
+                        Timber.e(e, "Failed to open maps app")
                     }
                 }
             },
@@ -145,58 +152,67 @@ fun LocationAttachment(
     ) {
         Column {
             when {
-                // Case 1: We have coordinates - show the map
+                // Case 1: We have coordinates - show OSMDroid map preview
                 coords != null -> {
                     val (lat, lng) = coords
-                    val mapUrl = buildStaticMapUrl(lat, lng)
+                    val isDarkTheme = isSystemInDarkTheme()
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(140.dp)
-                            .background(MaterialTheme.colorScheme.surfaceContainerLow)
-                    ) {
-                        AsyncImage(
-                            model = ImageRequest.Builder(context)
-                                .data(mapUrl)
-                                .crossfade(true)
-                                .build(),
-                            contentDescription = "Location map",
-                            contentScale = ContentScale.Crop,
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        // OSMDroid map preview (same as Life360)
+                        Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(140.dp)
-                        )
+                                .height(120.dp)
+                                .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerLow)
+                        ) {
+                            LocationMapView(
+                                latitude = lat,
+                                longitude = lng,
+                                isDarkTheme = isDarkTheme,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
 
-                        // Location pin overlay
-                        Icon(
-                            imageVector = Icons.Filled.LocationOn,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.error,
+                        // Location info footer
+                        Row(
                             modifier = Modifier
-                                .align(Alignment.Center)
-                                .size(32.dp)
-                        )
-                    }
-
-                    // Location info
-                    Column(
-                        modifier = Modifier.padding(12.dp)
-                    ) {
-                        Text(
-                            text = "Shared Location",
-                            style = MaterialTheme.typography.titleSmall,
-                            color = contentColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = formatCoordinates(lat, lng),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = secondaryContentColor,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // Left side: title and coordinates
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Shared Location",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = contentColor
+                                )
+                                Text(
+                                    text = formatCoordinates(lat, lng),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = secondaryContentColor
+                                )
+                            }
+                            // Round navigate button - vertically centered
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .background(
+                                        color = MaterialTheme.colorScheme.primary,
+                                        shape = CircleShape
+                                    ),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Navigation,
+                                    contentDescription = "Navigate",
+                                    tint = MaterialTheme.colorScheme.onPrimary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -333,26 +349,104 @@ private fun parseVLocationCoordinates(vcfContent: String): Pair<Double, Double>?
 }
 
 /**
- * Builds a static map URL from OpenStreetMap.
- */
-private fun buildStaticMapUrl(lat: Double, lng: Double): String {
-    // Use OpenStreetMap static map service (no API key required)
-    val zoom = 15
-    val width = 400
-    val height = 200
-    val marker = URLEncoder.encode("$lat,$lng", "UTF-8")
-    return "https://staticmap.openstreetmap.de/staticmap.php" +
-            "?center=$lat,$lng" +
-            "&zoom=$zoom" +
-            "&size=${width}x${height}" +
-            "&markers=$lat,$lng,red-pushpin"
-}
-
-/**
  * Formats coordinates for display.
  */
 private fun formatCoordinates(lat: Double, lng: Double): String {
     val latDir = if (lat >= 0) "N" else "S"
     val lngDir = if (lng >= 0) "E" else "W"
     return "%.4f°$latDir, %.4f°$lngDir".format(kotlin.math.abs(lat), kotlin.math.abs(lng))
+}
+
+/**
+ * Dark tile source using CartoDB Voyager (muted, softer dark mode alternative).
+ */
+private val DARK_TILE_SOURCE = XYTileSource(
+    "CartoDB_Voyager",
+    0, 19, 256, ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/"
+    )
+)
+
+/**
+ * OSMDroid map view for location preview.
+ * Supports dark mode with CartoDB Dark Matter tiles.
+ */
+@Composable
+private fun LocationMapView(
+    latitude: Double,
+    longitude: Double,
+    isDarkTheme: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    AndroidView(
+        factory = { ctx ->
+            Configuration.getInstance().userAgentValue = ctx.packageName
+            MapView(ctx).apply {
+                setTileSource(if (isDarkTheme) DARK_TILE_SOURCE else TileSourceFactory.MAPNIK)
+                zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
+                setMultiTouchControls(false)
+                isFocusable = false
+                isClickable = false
+
+                val geoPoint = GeoPoint(latitude, longitude)
+                controller.setZoom(16.0)
+
+                // Offset center slightly south so pin appears visually centered
+                // Pin height is roughly 0.0003 degrees at zoom 16
+                val centeredPoint = GeoPoint(latitude - 0.0003, longitude)
+                controller.setCenter(centeredPoint)
+
+                // Add red location marker
+                val marker = Marker(this).apply {
+                    position = geoPoint
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    icon = createRedPinDrawable(ctx)
+                }
+                overlays.add(marker)
+            }
+        },
+        modifier = modifier
+    )
+}
+
+/**
+ * Creates a red map pin drawable for the location marker.
+ */
+private fun createRedPinDrawable(context: android.content.Context): android.graphics.drawable.Drawable {
+    val size = 72
+    val bitmap = android.graphics.Bitmap.createBitmap(size, size, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
+    val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+
+    val cx = size / 2f
+    val pinRadius = size * 0.28f
+    val pinCenterY = size * 0.32f
+
+    // Shadow
+    paint.color = 0x40000000
+    canvas.drawCircle(cx + 2, pinCenterY + 2, pinRadius, paint)
+
+    // Red pin body (circle)
+    paint.color = 0xFFE53935.toInt() // MD3 Red 600
+    paint.style = android.graphics.Paint.Style.FILL
+    canvas.drawCircle(cx, pinCenterY, pinRadius, paint)
+
+    // Pin point (triangle pointing down)
+    val path = android.graphics.Path()
+    path.moveTo(cx - pinRadius * 0.5f, pinCenterY + pinRadius * 0.7f)
+    path.lineTo(cx, size * 0.85f)
+    path.lineTo(cx + pinRadius * 0.5f, pinCenterY + pinRadius * 0.7f)
+    path.close()
+    canvas.drawPath(path, paint)
+
+    // White inner circle
+    paint.color = 0xFFFFFFFF.toInt()
+    canvas.drawCircle(cx, pinCenterY, pinRadius * 0.4f, paint)
+
+    return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
 }

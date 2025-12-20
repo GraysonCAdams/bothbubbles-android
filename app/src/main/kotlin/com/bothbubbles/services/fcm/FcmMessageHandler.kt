@@ -12,6 +12,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.developer.DeveloperEventLog
+import com.bothbubbles.services.media.AttachmentDownloadQueue
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.effects.MessageEffect
@@ -51,6 +52,7 @@ class FcmMessageHandler @Inject constructor(
     private val messageDeduplicator: MessageDeduplicator,
     private val activeConversationManager: ActiveConversationManager,
     private val developerEventLog: Lazy<DeveloperEventLog>,
+    private val attachmentDownloadQueue: AttachmentDownloadQueue,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -258,6 +260,9 @@ class FcmMessageHandler @Inject constructor(
         )
         Timber.d("DEBUG: Notification shown successfully!")
 
+        // Enqueue first image attachment for download so notification can update with inline preview
+        enqueueFirstImageAttachment(messageJson, chatGuid)
+
         // Sync this chat to ensure message is saved (heals any gaps from stale socket)
         triggerChatSync(chatGuid)
     }
@@ -388,5 +393,38 @@ class FcmMessageHandler @Inject constructor(
             }
         }
         return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
+    }
+
+    /**
+     * Enqueue first image attachment for download so notification can update with inline preview.
+     * This allows NotificationMediaUpdater to add the image to the notification once downloaded.
+     */
+    private fun enqueueFirstImageAttachment(messageJson: JSONObject, chatGuid: String) {
+        try {
+            val attachments = messageJson.optJSONArray("attachments") ?: return
+            if (attachments.length() == 0) return
+
+            // Find first image attachment (not sticker)
+            for (i in 0 until attachments.length()) {
+                val attachment = attachments.optJSONObject(i) ?: continue
+                val mimeType = attachment.optString("mimeType", "").lowercase()
+                val isSticker = attachment.optBoolean("isSticker", false)
+
+                if (mimeType.startsWith("image/") && !isSticker) {
+                    val guid = attachment.optString("guid", "")
+                    if (guid.isNotBlank()) {
+                        Timber.d("Enqueuing FCM notification attachment download: $guid")
+                        attachmentDownloadQueue.enqueue(
+                            attachmentGuid = guid,
+                            chatGuid = chatGuid,
+                            priority = AttachmentDownloadQueue.Priority.IMMEDIATE
+                        )
+                    }
+                    return // Only enqueue first image
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Error enqueuing notification attachment")
+        }
     }
 }

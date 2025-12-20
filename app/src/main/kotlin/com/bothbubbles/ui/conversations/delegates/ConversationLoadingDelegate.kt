@@ -330,12 +330,37 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         }
 
         // Sort: pinned first, then by last message time
-        return conversations
+        val sortedConversations = conversations
             .distinctBy { it.guid }
             .sortedWith(
                 compareByDescending<ConversationUiModel> { it.isPinned }
                     .thenByDescending { it.lastMessageTimestamp }
             )
+
+        // For non-group 1:1 chats, deduplicate by contactKey
+        // This catches cases where unified group membership is broken
+        // (same contact appears as separate iMessage/SMS chats)
+        val (groupChats, individualChats) = sortedConversations.partition {
+            it.isGroup || it.contactKey.isBlank()
+        }
+
+        val deduplicatedIndividualChats = individualChats
+            .groupBy { it.contactKey }
+            .map { (contactKey, duplicates) ->
+                // Log if we're deduplicating - this indicates broken unified group membership
+                if (duplicates.size > 1) {
+                    Timber.w("Deduplicating ${duplicates.size} chats with same contactKey '$contactKey': ${duplicates.map { it.guid }}")
+                }
+                // Prefer merged unified entries, then most recent
+                duplicates.firstOrNull { it.isMerged }
+                    ?: duplicates.maxByOrNull { it.lastMessageTimestamp }
+                    ?: duplicates.first()
+            }
+
+        return (groupChats + deduplicatedIndividualChats).sortedWith(
+            compareByDescending<ConversationUiModel> { it.isPinned }
+                .thenByDescending { it.lastMessageTimestamp }
+        )
     }
 
     private suspend fun ChatEntity.toUiModelWithContext(typingChats: Set<String>): ConversationUiModel {

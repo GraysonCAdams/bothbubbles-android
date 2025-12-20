@@ -29,21 +29,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.ExposedDropdownMenuBox
-import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SearchBar
-import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.Snackbar
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
@@ -63,7 +57,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import coil.compose.AsyncImage
-import com.bothbubbles.core.model.Life360Circle
 import com.bothbubbles.core.model.Life360Member
 import com.bothbubbles.core.model.entity.HandleEntity
 import com.bothbubbles.core.model.entity.displayNameSimple
@@ -80,11 +73,9 @@ fun Life360SettingsScreen(
     viewModel: Life360SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val circles by viewModel.circles.collectAsState()
     val members by viewModel.members.collectAsState()
     val isEnabled by viewModel.isEnabled.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
-    val defaultCircleId by viewModel.defaultCircleId.collectAsState()
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
 
@@ -125,16 +116,13 @@ fun Life360SettingsScreen(
             } else {
                 Life360SettingsContentInternal(
                     uiState = uiState,
-                    circles = circles,
                     members = members,
                     isEnabled = isEnabled,
                     isPaused = isPaused,
-                    defaultCircleId = defaultCircleId,
                     availableHandles = availableHandles,
                     handleDisplayNames = handleDisplayNames,
                     onSetEnabled = viewModel::setEnabled,
                     onSetPaused = viewModel::setPaused,
-                    onSetDefaultCircle = viewModel::setDefaultCircle,
                     onMapMember = viewModel::mapMemberToContact,
                     onUnmapMember = viewModel::unmapMember,
                     onLogout = viewModel::logout,
@@ -156,11 +144,9 @@ fun Life360SettingsContent(
     viewModel: Life360SettingsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
-    val circles by viewModel.circles.collectAsState()
     val members by viewModel.members.collectAsState()
     val isEnabled by viewModel.isEnabled.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
-    val defaultCircleId by viewModel.defaultCircleId.collectAsState()
     val availableHandles by viewModel.availableHandles.collectAsState()
     val handleDisplayNames by viewModel.handleDisplayNames.collectAsState()
 
@@ -172,16 +158,13 @@ fun Life360SettingsContent(
         } else {
             Life360SettingsContentInternal(
                 uiState = uiState,
-                circles = circles,
                 members = members,
                 isEnabled = isEnabled,
                 isPaused = isPaused,
-                defaultCircleId = defaultCircleId,
                 availableHandles = availableHandles,
                 handleDisplayNames = handleDisplayNames,
                 onSetEnabled = viewModel::setEnabled,
                 onSetPaused = viewModel::setPaused,
-                onSetDefaultCircle = viewModel::setDefaultCircle,
                 onMapMember = viewModel::mapMemberToContact,
                 onUnmapMember = viewModel::unmapMember,
                 onLogout = viewModel::logout,
@@ -319,26 +302,21 @@ private fun TokenEntryScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun Life360SettingsContentInternal(
     uiState: Life360UiState,
-    circles: ImmutableList<Life360Circle>,
     members: ImmutableList<Life360Member>,
     isEnabled: Boolean,
     isPaused: Boolean,
-    defaultCircleId: String?,
     availableHandles: ImmutableList<HandleEntity>,
     handleDisplayNames: ImmutableMap<Long, String>,
     onSetEnabled: (Boolean) -> Unit,
     onSetPaused: (Boolean) -> Unit,
-    onSetDefaultCircle: (String) -> Unit,
     onMapMember: (String, Long) -> Unit,
     onUnmapMember: (String) -> Unit,
     onLogout: () -> Unit,
     onClearError: () -> Unit
 ) {
-    var circleExpanded by remember { mutableStateOf(false) }
     var memberToMap by remember { mutableStateOf<Life360Member?>(null) }
 
     // Contact picker dialog
@@ -395,46 +373,6 @@ private fun Life360SettingsContentInternal(
                 subtitle = "Temporarily stop updating locations"
             ) {
                 Switch(checked = isPaused, onCheckedChange = onSetPaused)
-            }
-        }
-
-        // Circle selector
-        if (circles.isNotEmpty()) {
-            item {
-                val selectedCircle = circles.find { it.id == defaultCircleId }
-
-                ExposedDropdownMenuBox(
-                    expanded = circleExpanded,
-                    onExpandedChange = { circleExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = selectedCircle?.name ?: "Select circle",
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("Default Circle") },
-                        trailingIcon = {
-                            ExposedDropdownMenuDefaults.TrailingIcon(expanded = circleExpanded)
-                        },
-                        modifier = Modifier
-                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                            .fillMaxWidth()
-                    )
-
-                    ExposedDropdownMenu(
-                        expanded = circleExpanded,
-                        onDismissRequest = { circleExpanded = false }
-                    ) {
-                        circles.forEach { circle ->
-                            DropdownMenuItem(
-                                text = { Text("${circle.name} (${circle.memberCount} members)") },
-                                onClick = {
-                                    onSetDefaultCircle(circle.id)
-                                    circleExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
             }
         }
 

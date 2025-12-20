@@ -31,6 +31,8 @@ class NotificationService @Inject constructor(
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
+     * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
+     * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
     override fun showMessageNotification(
         chatGuid: String,
@@ -45,7 +47,9 @@ class NotificationService @Inject constructor(
         linkPreviewDomain: String?,
         participantNames: List<String>,
         participantAvatarPaths: List<String?>,
-        subject: String?
+        subject: String?,
+        attachmentUri: android.net.Uri?,
+        attachmentMimeType: String?
     ) {
         if (!hasNotificationPermission()) return
 
@@ -63,7 +67,9 @@ class NotificationService @Inject constructor(
             participantNames = participantNames,
             participantAvatarPaths = participantAvatarPaths,
             subject = subject,
-            totalUnreadCount = badgeManager.totalUnread.value
+            totalUnreadCount = badgeManager.totalUnread.value,
+            attachmentUri = attachmentUri,
+            attachmentMimeType = attachmentMimeType
         )
 
         notificationManager.notify(chatGuid.hashCode(), notification)
@@ -167,32 +173,38 @@ class NotificationService @Inject constructor(
     }
 
     /**
-     * Update the app badge count on supported launchers.
-     * This uses ShortcutManager badges on Android O+ and falls back to
-     * ShortcutBadger-style intents for older devices.
+     * Update the app badge count.
      *
-     * Note: This does NOT affect push notifications, only the badge count.
+     * On Android 8.0+, badge counts are derived from notifications.
+     * This method posts a group summary notification with setNumber(count)
+     * which is the most reliable cross-device way to set badge counts.
      *
-     * @param count The number to show on the app icon badge
+     * Also sends manufacturer-specific broadcasts for Samsung/Sony devices
+     * as a fallback for launchers that support direct badge APIs.
+     *
+     * @param count The total unread message count to display on the app badge
      */
     override fun updateAppBadge(count: Int) {
-        // On Android 8+, badges are tied to notification channels
-        // We use a silent notification with setNumber to update the badge
-        // This won't show a visible notification but will update the badge count
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            // Some launchers support direct badge update via shortcut
-            try {
-                val shortcutManager = context.getSystemService(ShortcutManager::class.java)
-                // Note: Standard Android doesn't support direct badge setting
-                // The badge count comes from notification count
-                // For Samsung/Huawei launchers, we'd need specific intents
-            } catch (e: Exception) {
-                // Ignore if shortcut manager is not available
+        // Primary approach: Use a group summary notification with setNumber()
+        // This works on most Android 8.0+ launchers (Pixel, OnePlus, Xiaomi, etc.)
+        if (hasNotificationPermission()) {
+            val summaryNotification = notificationBuilder.buildBadgeSummaryNotification(count)
+            if (summaryNotification != null) {
+                // Post the summary notification to update badge
+                notificationManager.notify(
+                    NotificationChannelManager.SUMMARY_NOTIFICATION_ID,
+                    summaryNotification
+                )
+            } else {
+                // Count is 0, cancel the summary notification to clear badge
+                notificationManager.cancel(NotificationChannelManager.SUMMARY_NOTIFICATION_ID)
             }
         }
 
-        // Try Samsung badge API (only on Samsung devices)
+        // Fallback: Try manufacturer-specific badge APIs
+        // These work on Samsung OneUI and Sony launchers even without notifications
+
+        // Samsung badge API
         if (Build.MANUFACTURER.equals("samsung", ignoreCase = true)) {
             try {
                 val intent = Intent("android.intent.action.BADGE_COUNT_UPDATE")
@@ -205,7 +217,7 @@ class NotificationService @Inject constructor(
             }
         }
 
-        // Try Sony badge API (only on Sony devices)
+        // Sony badge API
         if (Build.MANUFACTURER.equals("sony", ignoreCase = true)) {
             try {
                 val contentValues = android.content.ContentValues()

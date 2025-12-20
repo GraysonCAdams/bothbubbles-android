@@ -244,8 +244,10 @@ class ChatInfoDelegate @AssistedInject constructor(
 
                     val placeName = location?.placeName
                     val shortAddress = location?.shortAddress
+                    // When location is unavailable, set null to hide from chat header
+                    // (details screen shows the reason separately)
                     val subtext = when {
-                        isStale -> "Location unavailable"
+                        isStale -> null
                         placeName != null -> placeName
                         shortAddress != null -> shortAddress
                         else -> null

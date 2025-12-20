@@ -40,6 +40,7 @@ import com.bothbubbles.ui.conversations.EmptyCategoryState
 import com.bothbubbles.ui.conversations.EmptyConversationsState
 import com.bothbubbles.ui.conversations.EmptyFilterState
 import com.bothbubbles.ui.conversations.PinnedDragOverlay
+import com.bothbubbles.ui.conversations.delegates.SelectionState
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 
 /**
@@ -57,11 +58,12 @@ fun ConversationMainContent(
     conversations: List<ConversationUiModel>,
     isLoading: Boolean,
     isLoadingMore: Boolean,
+    showReconnectingIndicator: Boolean,
     searchQuery: String,
     conversationFilter: ConversationFilter,
     categoryFilter: MessageCategory?,
     swipeConfig: SwipeConfig,
-    selectedConversations: Set<String>,
+    selectionState: SelectionState,
     isSelectionMode: Boolean,
     listState: LazyListState,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
@@ -179,9 +181,10 @@ fun ConversationMainContent(
                                     regularConversations = regularConversations,
                                     listState = listState,
                                     swipeConfig = swipeConfig,
-                                    selectedConversations = selectedConversations,
+                                    selectionState = selectionState,
                                     isSelectionMode = isSelectionMode,
                                     isLoadingMore = isLoadingMore,
+                                    showReconnectingIndicator = showReconnectingIndicator,
                                     onConversationClick = onConversationClick,
                                     onConversationLongClick = onConversationLongClick,
                                     onAvatarClick = onAvatarClick,

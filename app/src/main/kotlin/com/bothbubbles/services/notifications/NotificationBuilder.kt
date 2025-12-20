@@ -64,6 +64,8 @@ class NotificationBuilder @Inject constructor(
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
+     * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
+     * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
      */
     fun buildMessageNotification(
         chatGuid: String,
@@ -79,7 +81,9 @@ class NotificationBuilder @Inject constructor(
         participantNames: List<String>,
         participantAvatarPaths: List<String?> = emptyList(),
         subject: String? = null,
-        totalUnreadCount: Int
+        totalUnreadCount: Int,
+        attachmentUri: android.net.Uri? = null,
+        attachmentMimeType: String? = null
     ): android.app.Notification {
         val notificationId = chatGuid.hashCode()
 
@@ -221,10 +225,23 @@ class NotificationBuilder @Inject constructor(
             .setKey("me")
             .build()
 
+        // Create message with optional inline media attachment
+        val message = NotificationCompat.MessagingStyle.Message(
+            displayText,
+            System.currentTimeMillis(),
+            sender
+        ).apply {
+            // Add inline image/video preview if attachment is available
+            if (attachmentUri != null && attachmentMimeType != null) {
+                setData(attachmentMimeType, attachmentUri)
+                Timber.d("Set notification attachment data: $attachmentMimeType, $attachmentUri")
+            }
+        }
+
         val messagingStyle = NotificationCompat.MessagingStyle(deviceUser)
             .setConversationTitle(if (isGroup) chatTitle else null)
             .setGroupConversation(isGroup)
-            .addMessage(displayText, System.currentTimeMillis(), sender)
+            .addMessage(message)
 
         // Create conversation shortcut for bubble support
         // Pass participant names and avatar paths for group collages with actual contact photos
@@ -313,6 +330,55 @@ class NotificationBuilder @Inject constructor(
             .setGroup(NotificationChannelManager.GROUP_MESSAGES)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+    }
+
+    /**
+     * Build a group summary notification that controls the app badge count.
+     *
+     * On Android 8.0+, the app badge count is derived from notifications.
+     * This silent summary notification sets the correct badge count via setNumber().
+     * It groups all message notifications and displays the total unread count.
+     *
+     * @param totalUnreadCount The total number of unread messages across all chats
+     * @return The summary notification, or null if count is 0 (to clear badge)
+     */
+    fun buildBadgeSummaryNotification(totalUnreadCount: Int): android.app.Notification? {
+        // When count is 0, return null to signal that summary should be cancelled
+        if (totalUnreadCount <= 0) return null
+
+        // Create intent to open the app (conversations list)
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            NotificationChannelManager.SUMMARY_NOTIFICATION_ID,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        return NotificationCompat.Builder(context, NotificationChannelManager.CHANNEL_MESSAGES)
+            .setSmallIcon(android.R.drawable.sym_action_chat)
+            // This is the key for badge count on most launchers
+            .setNumber(totalUnreadCount)
+            .setContentTitle(context.getString(R.string.app_name))
+            .setContentText("$totalUnreadCount unread message${if (totalUnreadCount != 1) "s" else ""}")
+            .setContentIntent(contentPendingIntent)
+            // Mark as group summary - this makes it the "parent" of grouped notifications
+            .setGroup(NotificationChannelManager.GROUP_MESSAGES)
+            .setGroupSummary(true)
+            // Use inbox style to show a summary of conversations
+            .setStyle(NotificationCompat.InboxStyle()
+                .setSummaryText("$totalUnreadCount unread"))
+            // Low priority so it doesn't make sound/vibrate, but still shows badge
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            // Don't alert for summary updates
+            .setOnlyAlertOnce(true)
+            // Auto-cancel when tapped
+            .setAutoCancel(true)
+            // Show in lock screen but don't reveal content
+            .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
             .build()
     }
 

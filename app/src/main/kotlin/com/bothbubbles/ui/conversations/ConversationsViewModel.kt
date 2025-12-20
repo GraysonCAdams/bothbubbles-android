@@ -19,6 +19,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.services.sync.UnifiedSyncProgress
 import com.bothbubbles.ui.components.common.ConnectionBannerState
 import com.bothbubbles.ui.components.common.SmsBannerState
 import com.bothbubbles.ui.components.common.determineConnectionBannerState
@@ -30,6 +31,10 @@ import com.bothbubbles.ui.conversations.delegates.ConversationActionsDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationEvent
 import com.bothbubbles.ui.conversations.delegates.ConversationLoadingDelegate
 import com.bothbubbles.ui.conversations.delegates.ConversationObserverDelegate
+import com.bothbubbles.ui.conversations.delegates.ConversationSelectionDelegate
+import com.bothbubbles.ui.conversations.delegates.SelectionState
+import com.bothbubbles.ui.conversations.delegates.BatchAction
+import com.bothbubbles.ui.conversations.delegates.SelectionEvent
 import com.bothbubbles.ui.conversations.delegates.SmsImportState
 import com.bothbubbles.ui.util.toStable
 import com.bothbubbles.data.local.db.entity.displayName
@@ -69,7 +74,8 @@ class ConversationsViewModel @Inject constructor(
     // Phase 8: Delegate factories instead of direct delegates
     private val loadingDelegateFactory: ConversationLoadingDelegate.Factory,
     private val observerDelegateFactory: ConversationObserverDelegate.Factory,
-    private val actionsDelegateFactory: ConversationActionsDelegate.Factory
+    private val actionsDelegateFactory: ConversationActionsDelegate.Factory,
+    private val selectionDelegateFactory: ConversationSelectionDelegate.Factory
 ) : ViewModel() {
 
     // ============================================================================
@@ -84,6 +90,16 @@ class ConversationsViewModel @Inject constructor(
 
     private val actionsDelegate: ConversationActionsDelegate =
         actionsDelegateFactory.create(viewModelScope)
+
+    private val selectionDelegate: ConversationSelectionDelegate =
+        selectionDelegateFactory.create(viewModelScope)
+
+    // ============================================================================
+    // Selection State (Gmail-style Select All)
+    // ============================================================================
+
+    /** Selection state for multi-select operations */
+    val selectionState: StateFlow<SelectionState> = selectionDelegate.selectionState
 
     // ============================================================================
     // UI State
@@ -234,14 +250,22 @@ class ConversationsViewModel @Inject constructor(
                 observerDelegate.isConnected,
                 observerDelegate.connectionState,
                 observerDelegate.unifiedSyncProgress,
-                observerDelegate.totalUnreadCount
-            ) { isConnected, connectionState, unifiedSyncProgress, totalUnreadCount ->
+                observerDelegate.totalUnreadCount,
+                observerDelegate.showReconnectingIndicator
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                val isConnected = values[0] as? Boolean ?: false
+                val connectionState = values[1] as? ConnectionState ?: ConnectionState.DISCONNECTED
+                val unifiedSyncProgress = values[2] as? UnifiedSyncProgress
+                val totalUnreadCount = values[3] as? Int ?: 0
+                val showReconnectingIndicator = values[4] as? Boolean ?: false
                 _uiState.update {
                     it.copy(
                         isConnected = isConnected,
                         connectionState = connectionState,
                         unifiedSyncProgress = unifiedSyncProgress,
-                        totalUnreadCount = totalUnreadCount
+                        totalUnreadCount = totalUnreadCount,
+                        showReconnectingIndicator = showReconnectingIndicator
                     )
                 }
             }.collect()
@@ -1035,5 +1059,78 @@ class ConversationsViewModel @Inject constructor(
 
     fun refreshContactInfo(address: String) {
         actionsDelegate.refreshContactInfo(address)
+    }
+
+    // ============================================================================
+    // Selection Operations (Gmail-style Select All)
+    // ============================================================================
+
+    /**
+     * Toggle selection for a single conversation.
+     * Pinned items can now be selected in selection mode.
+     */
+    fun toggleSelection(guid: String) {
+        selectionDelegate.toggleSelection(guid)
+    }
+
+    /**
+     * Clear all selections and exit selection mode.
+     */
+    fun clearSelection() {
+        selectionDelegate.clearSelection()
+    }
+
+    /**
+     * Trigger "Select All" for current filter.
+     * Queries the database for total count and enters select-all mode.
+     */
+    fun selectAll() {
+        val currentFilterString = _uiState.value.conversationFilter
+        val currentFilter = ConversationFilter.entries.find {
+            it.name.lowercase() == currentFilterString.lowercase()
+        } ?: ConversationFilter.ALL
+        val categoryFilter = _uiState.value.categoryFilter
+        val visibleConversations = _uiState.value.conversations
+        selectionDelegate.selectAll(currentFilter, categoryFilter, visibleConversations)
+    }
+
+    /**
+     * Check if a conversation should be displayed as selected.
+     * Used for newly loaded items in select-all mode.
+     */
+    fun isConversationSelected(guid: String): Boolean {
+        return selectionState.value.isSelected(guid)
+    }
+
+    /**
+     * Apply a batch action to all selected conversations.
+     */
+    fun applyBatchAction(action: BatchAction) {
+        selectionDelegate.applyBatchAction(
+            action = action,
+            conversations = _uiState.value.conversations
+        ) { guids ->
+            when (action) {
+                BatchAction.MARK_READ -> actionsDelegate.markChatsAsRead(guids, _uiState.value.conversations)
+                BatchAction.MARK_UNREAD -> actionsDelegate.markChatsAsUnread(guids, _uiState.value.conversations)
+                BatchAction.ARCHIVE -> guids.forEach { actionsDelegate.archiveChat(it, _uiState.value.conversations) }
+                BatchAction.DELETE -> guids.forEach { actionsDelegate.deleteChat(it, _uiState.value.conversations) }
+                BatchAction.BLOCK -> actionsDelegate.blockChats(guids, _uiState.value.conversations)
+                BatchAction.SNOOZE -> { /* TODO: Implement batch snooze */ }
+            }
+        }
+    }
+
+    /**
+     * Update selection filter context when filter changes.
+     * Clears selection if filter changes while in select-all mode.
+     */
+    private fun updateSelectionFilterContext() {
+        val currentFilterString = _uiState.value.conversationFilter
+        val currentFilter = ConversationFilter.entries.find {
+            it.name.lowercase() == currentFilterString.lowercase()
+        } ?: ConversationFilter.ALL
+        val categoryFilter = _uiState.value.categoryFilter
+        selectionDelegate.updateFilterContext(currentFilter, categoryFilter)
     }
 }

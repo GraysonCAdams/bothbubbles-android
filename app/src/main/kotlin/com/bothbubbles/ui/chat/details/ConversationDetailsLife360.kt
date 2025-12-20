@@ -44,6 +44,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -66,6 +67,7 @@ import com.bothbubbles.core.model.NoLocationReason
 import com.bothbubbles.util.AvatarGenerator
 import org.osmdroid.config.Configuration
 import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.tileprovider.tilesource.XYTileSource
 import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.CustomZoomButtonsController
 import org.osmdroid.views.MapView
@@ -79,6 +81,19 @@ import java.util.Locale
  * After this threshold, we show "Location unavailable" instead of potentially outdated data.
  */
 private const val LOCATION_STALE_THRESHOLD_MS = 30 * 60 * 1000L // 30 minutes
+
+/**
+ * Dark tile source using CartoDB Voyager (muted, softer dark mode alternative).
+ */
+private val DARK_TILE_SOURCE = XYTileSource(
+    "CartoDB_Voyager",
+    0, 19, 256, ".png",
+    arrayOf(
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://b.basemaps.cartocdn.com/rastertiles/voyager/",
+        "https://c.basemaps.cartocdn.com/rastertiles/voyager/"
+    )
+)
 
 /**
  * Section showing Life360 member location on a map.
@@ -103,6 +118,7 @@ fun Life360LocationSection(
 ) {
     val location = life360Member.location
     val now = System.currentTimeMillis()
+    val isDarkTheme = isSystemInDarkTheme()
 
     // Location is unavailable if:
     // 1. No location data at all, OR
@@ -166,6 +182,7 @@ fun Life360LocationSection(
                             displayName = life360Member.displayName,
                             avatarPath = avatarPath,
                             accentColor = primaryColor.toArgb(),
+                            isDarkTheme = isDarkTheme,
                             modifier = Modifier.fillMaxSize()
                         )
                         // Transparent overlay to capture clicks (MapView consumes touch events)
@@ -379,6 +396,7 @@ private fun Life360MapView(
     displayName: String,
     avatarPath: String?,
     accentColor: Int,
+    isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -392,7 +410,7 @@ private fun Life360MapView(
         factory = { ctx ->
             Configuration.getInstance().userAgentValue = ctx.packageName
             MapView(ctx).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
+                setTileSource(if (isDarkTheme) DARK_TILE_SOURCE else TileSourceFactory.MAPNIK)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 setMultiTouchControls(false)
                 isFocusable = false
@@ -400,7 +418,11 @@ private fun Life360MapView(
 
                 val geoPoint = GeoPoint(latitude, longitude)
                 controller.setZoom(16.0)
-                controller.setCenter(geoPoint)
+
+                // Offset center slightly south so pin appears visually centered
+                // Avatar pin is ~108px, so offset slightly more than location pin
+                val centeredPoint = GeoPoint(latitude - 0.00035, longitude)
+                controller.setCenter(centeredPoint)
 
                 // Add marker with avatar pin
                 val marker = Marker(this).apply {
@@ -686,6 +708,7 @@ fun Life360LocationsSection(
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val now = System.currentTimeMillis()
+    val isDarkTheme = isSystemInDarkTheme()
 
     // Filter members with valid (non-stale) locations for the map
     val membersWithValidLocations = members.filter { (member, _) ->
@@ -752,6 +775,7 @@ fun Life360LocationsSection(
                         Life360MultiPinMapView(
                             members = membersWithValidLocations,
                             accentColor = primaryColor.toArgb(),
+                            isDarkTheme = isDarkTheme,
                             modifier = Modifier.fillMaxSize()
                         )
                         // Transparent overlay to capture clicks
@@ -893,6 +917,7 @@ private fun RefreshIcon(
 private fun Life360MultiPinMapView(
     members: List<Life360MemberWithAvatar>,
     accentColor: Int,
+    isDarkTheme: Boolean,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -913,7 +938,7 @@ private fun Life360MultiPinMapView(
         factory = { ctx ->
             Configuration.getInstance().userAgentValue = ctx.packageName
             MapView(ctx).apply {
-                setTileSource(TileSourceFactory.MAPNIK)
+                setTileSource(if (isDarkTheme) DARK_TILE_SOURCE else TileSourceFactory.MAPNIK)
                 zoomController.setVisibility(CustomZoomButtonsController.Visibility.NEVER)
                 setMultiTouchControls(false)
                 isFocusable = false

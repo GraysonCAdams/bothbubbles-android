@@ -83,6 +83,77 @@ class ChatRepository @Inject constructor(
 
     fun getRecentGroupChats(): Flow<List<ChatEntity>> = chatDao.getRecentGroupChats()
 
+    // ===== Filtered Queries for Select All Feature =====
+
+    /**
+     * Get count of group chats matching filter criteria.
+     * Used for Gmail-style "Select All" to count all matching conversations.
+     *
+     * @param filter The conversation filter to apply
+     * @param categoryFilter Optional category filter
+     * @return Count of matching group chats (excluding pinned)
+     */
+    suspend fun getFilteredGroupChatCount(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?
+    ): Int {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return chatDao.getFilteredGroupChatCount(includeSpam, unreadOnly, categoryFilter)
+    }
+
+    /**
+     * Get count of non-group chats matching filter criteria.
+     */
+    suspend fun getFilteredNonGroupChatCount(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?
+    ): Int {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return chatDao.getFilteredNonGroupChatCount(includeSpam, unreadOnly, categoryFilter)
+    }
+
+    /**
+     * Get GUIDs of group chats matching filter criteria (paginated).
+     */
+    suspend fun getFilteredGroupChatGuids(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?,
+        limit: Int,
+        offset: Int
+    ): List<String> {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return chatDao.getFilteredGroupChatGuids(includeSpam, unreadOnly, categoryFilter, limit, offset)
+    }
+
+    /**
+     * Get GUIDs of non-group chats matching filter criteria (paginated).
+     */
+    suspend fun getFilteredNonGroupChatGuids(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?,
+        limit: Int,
+        offset: Int
+    ): List<String> {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return chatDao.getFilteredNonGroupChatGuids(includeSpam, unreadOnly, categoryFilter, limit, offset)
+    }
+
+    /**
+     * Convert ConversationFilter to database query parameters.
+     * Note: UNKNOWN_SENDERS and KNOWN_SENDERS filters are handled at the UI layer
+     * since they require contact resolution that can't be done in SQL.
+     */
+    private fun filterToParams(filter: com.bothbubbles.ui.conversations.ConversationFilter): Pair<Boolean, Boolean> {
+        return when (filter) {
+            com.bothbubbles.ui.conversations.ConversationFilter.ALL -> false to false
+            com.bothbubbles.ui.conversations.ConversationFilter.UNREAD -> false to true
+            com.bothbubbles.ui.conversations.ConversationFilter.SPAM -> true to false
+            // For unknown/known senders, we filter on the UI side
+            com.bothbubbles.ui.conversations.ConversationFilter.UNKNOWN_SENDERS -> false to false
+            com.bothbubbles.ui.conversations.ConversationFilter.KNOWN_SENDERS -> false to false
+        }
+    }
+
     // ===== Participant Operations (delegated) =====
 
     suspend fun getParticipantsForChat(chatGuid: String): List<HandleEntity> =

@@ -2,7 +2,9 @@ package com.bothbubbles.services.socket.handlers
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.UiRefreshEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -19,7 +21,9 @@ import javax.inject.Singleton
 @Singleton
 class ChatEventHandler @Inject constructor(
     private val chatRepository: ChatRepository,
-    private val chatDao: ChatDao
+    private val chatDao: ChatDao,
+    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val notifier: Notifier
 ) {
     fun handleTypingIndicator(event: SocketEvent.TypingIndicator) {
         // Typing indicators are typically handled at the UI layer via a shared flow
@@ -33,6 +37,14 @@ class ChatEventHandler @Inject constructor(
     ) {
         Timber.d("Chat read: ${event.chatGuid}")
         chatDao.updateUnreadCount(event.chatGuid, 0)
+
+        // Also update the unified group's unread count for badge sync
+        unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
+            unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+        }
+
+        // Cancel notification for this chat since it was read (possibly on another device)
+        notifier.cancelNotification(event.chatGuid)
 
         // Emit UI refresh event for immediate unread badge update
         uiRefreshEvents.tryEmit(UiRefreshEvent.ChatRead(event.chatGuid))

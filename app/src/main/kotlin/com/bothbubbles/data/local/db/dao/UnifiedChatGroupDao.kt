@@ -327,4 +327,56 @@ interface UnifiedChatGroupDao {
            OR display_name LIKE '%(ft%)%'
     """)
     suspend fun clearInvalidDisplayNames(): Int
+
+    // ===== Filtered Queries for Select All Feature =====
+
+    /**
+     * Get count of unified groups matching filter criteria.
+     * Used for Gmail-style "Select All" to count all matching conversations.
+     * Joins with the primary chat to get spam/category status.
+     * Includes both pinned and non-pinned unified groups.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM unified_chat_groups ucg
+        INNER JOIN chats c ON ucg.primary_chat_guid = c.guid
+        WHERE ucg.is_archived = 0
+        AND (
+            (:includeSpam = 1 AND c.is_spam = 1)
+            OR (:includeSpam = 0 AND c.is_spam = 0)
+        )
+        AND (:unreadOnly = 0 OR ucg.unread_count > 0)
+        AND (:category IS NULL OR c.category = :category)
+    """)
+    suspend fun getFilteredGroupCount(
+        includeSpam: Boolean,
+        unreadOnly: Boolean,
+        category: String?
+    ): Int
+
+    /**
+     * Get primary GUIDs of unified groups matching filter criteria (paginated).
+     * Returns the primary_chat_guid which is used as the conversation identifier.
+     * Used for batch operations in Gmail-style "Select All".
+     * Includes both pinned and non-pinned unified groups.
+     */
+    @Query("""
+        SELECT ucg.primary_chat_guid FROM unified_chat_groups ucg
+        INNER JOIN chats c ON ucg.primary_chat_guid = c.guid
+        WHERE ucg.is_archived = 0
+        AND (
+            (:includeSpam = 1 AND c.is_spam = 1)
+            OR (:includeSpam = 0 AND c.is_spam = 0)
+        )
+        AND (:unreadOnly = 0 OR ucg.unread_count > 0)
+        AND (:category IS NULL OR c.category = :category)
+        ORDER BY ucg.is_pinned DESC, ucg.pin_index ASC, ucg.latest_message_date DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getFilteredGroupGuids(
+        includeSpam: Boolean,
+        unreadOnly: Boolean,
+        category: String?,
+        limit: Int,
+        offset: Int
+    ): List<String>
 }

@@ -86,7 +86,8 @@ object MessageTransformationUtils {
                     // Use message.isFromMe for UI purposes - if I sent this message, treat attachment as "mine"
                     // This handles Mac-to-self messages where server reports isOutgoing=false for both copies
                     isOutgoing = isFromMe,
-                    uti = attachment.uti
+                    uti = attachment.uti,
+                    hasLivePhoto = attachment.hasLivePhoto
                 )
             }
 

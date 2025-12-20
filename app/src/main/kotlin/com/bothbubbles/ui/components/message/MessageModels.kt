@@ -249,7 +249,9 @@ data class AttachmentUiModel(
     // Caption text displayed below the attachment
     val caption: String? = null,
     // UTI (Uniform Type Identifier) from server - used for type detection
-    val uti: String? = null
+    val uti: String? = null,
+    // Whether this is a Live Photo
+    val hasLivePhoto: Boolean = false
 ) {
     /**
      * True if the attachment needs to be downloaded (inbound, no local file available).
@@ -348,4 +350,57 @@ data class AttachmentUiModel(
         get() = isSticker || mimeType?.lowercase() in listOf(
             "image/png", "image/gif", "image/webp", "image/apng"
         )
+
+    /** True if this is a voice message (audio with voice-related UTI or filename) */
+    val isVoiceMessage: Boolean
+        get() {
+            if (!isAudio) return false
+            val utiLower = uti?.lowercase() ?: ""
+            val nameLower = transferName?.lowercase() ?: ""
+            return utiLower.contains("voice") ||
+                   nameLower.startsWith("audio message") ||
+                   nameLower.endsWith(".caf")
+        }
+
+    /** True if this is a document type (PDF, Office docs, etc.) */
+    val isDocument: Boolean
+        get() {
+            val type = mimeType?.lowercase() ?: return false
+            return type.startsWith("application/pdf") ||
+                   type.contains("document") ||
+                   type.contains("spreadsheet") ||
+                   type.contains("presentation") ||
+                   type.startsWith("application/msword") ||
+                   type.startsWith("application/vnd.ms-") ||
+                   type.startsWith("application/vnd.openxmlformats")
+        }
+
+    /** User-friendly type name for display in previews */
+    val friendlyTypeName: String
+        get() {
+            val type = mimeType?.lowercase() ?: ""
+            val ext = fileExtension?.lowercase() ?: ""
+            return when {
+                isDocument -> when {
+                    type.contains("pdf") -> "PDF"
+                    type.contains("word") || ext == "doc" || ext == "docx" -> "Document"
+                    type.contains("excel") || type.contains("spreadsheet") -> "Spreadsheet"
+                    type.contains("powerpoint") || type.contains("presentation") -> "Presentation"
+                    else -> "Document"
+                }
+                type.contains("zip") || ext == "zip" -> "Zip file"
+                type.contains("rar") || ext == "rar" -> "RAR archive"
+                type.contains("7z") || ext == "7z" -> "7z archive"
+                type.contains("tar") || ext == "tar" || type.contains("gzip") || ext == "gz" -> "Archive"
+                type == "application/vnd.android.package-archive" || ext == "apk" -> "Android app"
+                type == "text/plain" || ext == "txt" -> "Text file"
+                type == "text/html" || ext == "html" || ext == "htm" -> "HTML file"
+                type == "text/csv" || ext == "csv" -> "CSV file"
+                type.contains("json") || ext == "json" -> "JSON file"
+                type.contains("xml") || ext == "xml" -> "XML file"
+                type.contains("font") || ext in listOf("ttf", "otf", "woff", "woff2") -> "Font file"
+                ext.isNotEmpty() -> "${ext.uppercase()} file"
+                else -> "File"
+            }
+        }
 }

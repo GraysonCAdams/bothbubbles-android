@@ -14,7 +14,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import com.bothbubbles.ui.conversations.components.ReconnectingIndicator
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -25,6 +27,7 @@ import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.components.conversation.SwipeConfig
 import com.bothbubbles.ui.components.conversation.SwipeableConversationTile
 import com.bothbubbles.ui.components.dialogs.ContactInfo
+import com.bothbubbles.ui.conversations.delegates.SelectionState
 import com.bothbubbles.util.HapticUtils
 
 /**
@@ -40,11 +43,12 @@ internal fun ConversationsList(
     regularConversations: List<ConversationUiModel>,
     listState: LazyListState,
     swipeConfig: SwipeConfig,
-    selectedConversations: Set<String>,
+    selectionState: SelectionState,
     isSelectionMode: Boolean,
     isLoadingMore: Boolean,
+    showReconnectingIndicator: Boolean,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
-    onConversationLongClick: (String) -> Unit,
+    onConversationLongClick: (guid: String) -> Unit,
     onAvatarClick: (ContactInfo) -> Unit,
     onSwipeAction: (chatGuid: String, action: SwipeActionType) -> Unit,
     onPinReorder: (List<String>) -> Unit,
@@ -62,20 +66,30 @@ internal fun ConversationsList(
         contentPadding = PaddingValues(bottom = 88.dp) // FAB clearance only
     ) {
         // Pinned section (iOS-style horizontal row)
-        // Always show pinned at top - in selection mode they are view-only (not selectable)
+        // Pinned items can be selected in selection mode
         if (pinnedConversations.isNotEmpty()) {
             item(key = "pinned_section") {
+                // Derive selected GUIDs set for pinned items (inside composable context)
+                val pinnedSelectedGuids = remember(selectionState, pinnedConversations) {
+                    pinnedConversations
+                        .filter { selectionState.isSelected(it.guid) }
+                        .map { it.guid }
+                        .toSet()
+                }
+
                 PinnedConversationsRow(
                     conversations = pinnedConversations,
                     onConversationClick = { conversation ->
-                        // In selection mode, pinned items just navigate (not selectable)
-                        onConversationClick(conversation.guid, conversation.mergedChatGuids)
+                        if (isSelectionMode) {
+                            // Toggle selection in selection mode
+                            onConversationLongClick(conversation.guid)
+                        } else {
+                            onConversationClick(conversation.guid, conversation.mergedChatGuids)
+                        }
                     },
                     onConversationLongClick = { guid ->
-                        // Disable long-click selection in selection mode for pinned items
-                        if (!isSelectionMode) {
-                            onConversationLongClick(guid)
-                        }
+                        // Long-click to toggle selection (enters selection mode if not already)
+                        onConversationLongClick(guid)
                     },
                     onUnpin = { guid ->
                         // Disable unpin action in selection mode
@@ -95,7 +109,7 @@ internal fun ConversationsList(
                             onAvatarClick(conversation.toContactInfo())
                         }
                     },
-                    selectedConversations = emptySet(), // Never show selection state for pinned items
+                    selectedConversations = pinnedSelectedGuids,
                     isSelectionMode = isSelectionMode,
                     onDragOverlayStart = onDragOverlayStart,
                     onDragOverlayMove = onDragOverlayMove,
@@ -159,7 +173,7 @@ internal fun ConversationsList(
             ) { hasRoundedCorners ->
                 GoogleStyleConversationTile(
                     conversation = conversation,
-                    isSelected = conversation.guid in selectedConversations,
+                    isSelected = selectionState.isSelected(conversation.guid),
                     isSelectionMode = isSelectionMode,
                     hasRoundedCorners = hasRoundedCorners,
                     onClick = {
@@ -197,6 +211,26 @@ internal fun ConversationsList(
                     )
                 }
             }
+        }
+
+        // Reconnecting indicator at the bottom (shows after 5s of disconnection)
+        item(key = "reconnecting_indicator") {
+            ReconnectingIndicator(
+                visible = showReconnectingIndicator,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+
+    // Auto-scroll to reveal reconnecting indicator when it appears and user is near bottom
+    val totalItems = listState.layoutInfo.totalItemsCount
+    val lastVisibleItem = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+    val isNearBottom = totalItems > 0 && lastVisibleItem >= totalItems - 3
+
+    LaunchedEffect(showReconnectingIndicator, isNearBottom) {
+        if (showReconnectingIndicator && isNearBottom && totalItems > 0) {
+            // Scroll to reveal the indicator
+            listState.animateScrollToItem(totalItems - 1)
         }
     }
 }

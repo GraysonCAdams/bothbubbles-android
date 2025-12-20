@@ -58,6 +58,7 @@ import com.bothbubbles.ui.conversations.components.ConversationTopBarWrapper
 import com.bothbubbles.ui.conversations.components.CorruptionDetectedDialog
 import com.bothbubbles.ui.conversations.components.ScrollToTopButton
 import com.bothbubbles.ui.conversations.components.SwipeActionConfirmationDialog
+import com.bothbubbles.ui.conversations.delegates.SelectionState
 import com.bothbubbles.ui.settings.SettingsPanel
 
 
@@ -75,6 +76,7 @@ fun ConversationsScreen(
     viewModel: ConversationsViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val selectionState by viewModel.selectionState.collectAsStateWithLifecycle()
     val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     val context = LocalContext.current
 
@@ -231,9 +233,8 @@ fun ConversationsScreen(
 
     val density = LocalDensity.current
 
-    // Selection mode state
-    var selectedConversations by remember { mutableStateOf(setOf<String>()) }
-    val isSelectionMode = selectedConversations.isNotEmpty()
+    // Selection mode state (from ViewModel for Gmail-style Select All)
+    val isSelectionMode = selectionState.isSelectionMode
     var showBatchSnoozeDialog by remember { mutableStateOf(false) }
 
     // Contact quick actions popup state
@@ -297,8 +298,11 @@ fun ConversationsScreen(
                         if (isSelectionMode) {
                             // Determine if "Add contact" should be shown
                             // Only show for single non-group conversation without existing contact
-                            val selectedConversation = if (selectedConversations.size == 1) {
-                                uiState.conversations.find { it.guid == selectedConversations.first() }
+                            val selectedConversation = if (selectionState.selectedCount == 1 && !selectionState.isSelectAllMode) {
+                                val firstSelectedGuid = selectionState.selectedIds.firstOrNull()
+                                firstSelectedGuid?.let { guid ->
+                                    uiState.conversations.find { it.guid == guid }
+                                }
                             } else null
                             val showAddContact = selectedConversation != null &&
                                 !selectedConversation.isGroup &&
@@ -306,52 +310,48 @@ fun ConversationsScreen(
 
                             // Check if any selected conversation can be pinned
                             // A conversation can be pinned if it has a saved contact, or unpinned if already pinned
-                            val selectedConvos = uiState.conversations.filter { it.guid in selectedConversations }
+                            val selectedConvos = if (selectionState.isSelectAllMode) {
+                                // In select-all mode, check visible conversations (minus deselected)
+                                uiState.conversations.filter {
+                                    it.guid !in selectionState.deselectedFromAll
+                                }
+                            } else {
+                                uiState.conversations.filter { it.guid in selectionState.selectedIds }
+                            }
                             val canPinAny = selectedConvos.any { it.hasContact || it.isPinned }
 
-                            // Calculate total selectable count (only non-pinned conversations are selectable)
-                            val selectableConversations = uiState.conversations.filter { !it.isPinned }
-                            val totalSelectableCount = selectableConversations.size
+                            // Calculate total selectable count (all conversations including pinned)
+                            val totalSelectableCount = uiState.conversations.size
 
                             // Determine if majority of selected conversations are unread
                             val unreadCount = selectedConvos.count { it.unreadCount > 0 }
                             val majorityUnread = unreadCount > selectedConvos.size / 2
 
-                            val context = LocalContext.current
+                            val headerContext = LocalContext.current
 
-                            // Selection mode header
+                            // Selection mode header with Gmail-style Select All support
                             SelectionModeHeader(
-                                selectedCount = selectedConversations.size,
+                                selectedCount = selectionState.selectedCount,
                                 totalSelectableCount = totalSelectableCount,
                                 majorityUnread = majorityUnread,
-                                onClose = { selectedConversations = emptySet() },
-                                onSelectAll = {
-                                    // Toggle between select all and deselect all
-                                    val allSelectableGuids = selectableConversations.map { it.guid }.toSet()
-                                    selectedConversations = if (selectedConversations.size >= totalSelectableCount) {
-                                        emptySet() // Deselect all
-                                    } else {
-                                        allSelectableGuids // Select all
-                                    }
-                                },
+                                onClose = { viewModel.clearSelection() },
+                                onSelectAll = { viewModel.selectAll() },
                                 onPin = {
-                                    selectedConversations.forEach { viewModel.togglePin(it) }
-                                    selectedConversations = emptySet()
+                                    // Apply to visible selected conversations
+                                    selectedConvos.forEach { viewModel.togglePin(it.guid) }
+                                    viewModel.clearSelection()
                                 },
                                 onSnooze = { showBatchSnoozeDialog = true },
                                 onArchive = { pendingBatchAction = SwipeActionType.ARCHIVE },
                                 onDelete = { pendingBatchAction = SwipeActionType.DELETE },
                                 onMarkAsRead = {
-                                    viewModel.markChatsAsRead(selectedConversations)
-                                    selectedConversations = emptySet()
+                                    viewModel.applyBatchAction(com.bothbubbles.ui.conversations.delegates.BatchAction.MARK_READ)
                                 },
                                 onMarkAsUnread = {
-                                    viewModel.markChatsAsUnread(selectedConversations)
-                                    selectedConversations = emptySet()
+                                    viewModel.applyBatchAction(com.bothbubbles.ui.conversations.delegates.BatchAction.MARK_UNREAD)
                                 },
                                 onBlock = {
-                                    viewModel.blockChats(selectedConversations)
-                                    selectedConversations = emptySet()
+                                    viewModel.applyBatchAction(com.bothbubbles.ui.conversations.delegates.BatchAction.BLOCK)
                                 },
                                 onAddContact = if (showAddContact && selectedConversation != null) {
                                     {
@@ -365,11 +365,14 @@ fun ConversationsScreen(
                                                 selectedConversation.address
                                             )
                                         }
-                                        context.startActivity(intent)
-                                        selectedConversations = emptySet()
+                                        headerContext.startActivity(intent)
+                                        viewModel.clearSelection()
                                     }
                                 } else null,
-                                isPinEnabled = canPinAny
+                                isPinEnabled = canPinAny,
+                                isLoadingCount = selectionState.isLoadingCount,
+                                isSelectAllMode = selectionState.isSelectAllMode,
+                                totalMatchingCount = selectionState.totalMatchingCount
                             )
                         } else {
                             ConversationsTopBar(
@@ -417,20 +420,17 @@ fun ConversationsScreen(
                 conversations = uiState.conversations,
                 isLoading = uiState.isLoading,
                 isLoadingMore = uiState.isLoadingMore,
+                showReconnectingIndicator = uiState.showReconnectingIndicator,
                 searchQuery = uiState.searchQuery,
                 conversationFilter = conversationFilter,
                 categoryFilter = categoryFilter,
                 swipeConfig = uiState.swipeConfig,
-                selectedConversations = selectedConversations,
+                selectionState = selectionState,
                 isSelectionMode = isSelectionMode,
                 listState = listState,
                 onConversationClick = onConversationClick,
                 onConversationLongClick = { guid ->
-                    selectedConversations = if (guid in selectedConversations) {
-                        selectedConversations - guid
-                    } else {
-                        selectedConversations + guid
-                    }
+                    viewModel.toggleSelection(guid)
                 },
                 onAvatarClick = { contactInfo ->
                     quickActionsContact = contactInfo
@@ -527,11 +527,20 @@ fun ConversationsScreen(
             currentSnoozeUntil = null,
             onDismiss = { showBatchSnoozeDialog = false },
             onDurationSelected = { duration ->
-                selectedConversations.forEach { guid ->
-                    viewModel.snoozeChat(guid, duration.durationMs)
+                // Snooze visible selected conversations (including pinned)
+                // TODO: For full select-all mode, use batch action through delegate
+                if (selectionState.isSelectAllMode) {
+                    // For now, snooze visible conversations in select-all mode
+                    uiState.conversations
+                        .filter { it.guid !in selectionState.deselectedFromAll }
+                        .forEach { viewModel.snoozeChat(it.guid, duration.durationMs) }
+                } else {
+                    selectionState.selectedIds.forEach { guid ->
+                        viewModel.snoozeChat(guid, duration.durationMs)
+                    }
                 }
                 showBatchSnoozeDialog = false
-                selectedConversations = emptySet()
+                viewModel.clearSelection()
             },
             onUnsnooze = { }
         )
@@ -564,14 +573,13 @@ fun ConversationsScreen(
         pendingBatchAction?.let { action ->
             BatchActionConfirmationDialog(
                 action = action,
-                count = selectedConversations.size,
+                count = selectionState.selectedCount,
                 onConfirm = {
                     if (action == SwipeActionType.DELETE) {
-                        selectedConversations.forEach { viewModel.deleteChat(it) }
+                        viewModel.applyBatchAction(com.bothbubbles.ui.conversations.delegates.BatchAction.DELETE)
                     } else {
-                        selectedConversations.forEach { viewModel.archiveChat(it) }
+                        viewModel.applyBatchAction(com.bothbubbles.ui.conversations.delegates.BatchAction.ARCHIVE)
                     }
-                    selectedConversations = emptySet()
                     pendingBatchAction = null
                 },
                 onDismiss = { pendingBatchAction = null }

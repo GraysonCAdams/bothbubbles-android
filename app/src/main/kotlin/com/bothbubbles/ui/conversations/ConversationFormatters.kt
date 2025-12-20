@@ -40,10 +40,11 @@ internal fun formatMessagePreview(conversation: ConversationUiModel): String {
         MessageType.LOCATION -> "Location"
         MessageType.APP_MESSAGE -> "App message"
         MessageType.IMAGE -> formatAttachmentCount(conversation.attachmentCount, "Photo")
+        MessageType.GIF -> "GIF"
         MessageType.VIDEO -> formatAttachmentCount(conversation.attachmentCount, "Video")
         MessageType.AUDIO -> "Audio"
         MessageType.LINK -> formatLinkPreview(conversation)
-        MessageType.ATTACHMENT -> "Attachment"
+        MessageType.ATTACHMENT -> conversation.attachmentPreviewText ?: "File"
         MessageType.TEXT -> conversation.lastMessageText
     }
 
@@ -245,6 +246,64 @@ fun isVoiceMessage(attachment: AttachmentEntity): Boolean {
     return uti.contains("voice") ||
            name.startsWith("audio message") ||
            name.endsWith(".caf") // Voice memos are often .caf format
+}
+
+/**
+ * Check if attachment is a GIF
+ */
+fun isGif(attachment: AttachmentEntity): Boolean {
+    return attachment.mimeType?.lowercase() == "image/gif"
+}
+
+/**
+ * Check if attachment is a vLocation (shared location)
+ */
+fun isVLocation(attachment: AttachmentEntity): Boolean {
+    val uti = attachment.uti?.lowercase() ?: ""
+    val mimeType = attachment.mimeType?.lowercase() ?: ""
+    val name = attachment.transferName?.lowercase() ?: ""
+    return uti == "public.vlocation" ||
+           mimeType == "text/x-vlocation" ||
+           name.endsWith(".loc.vcf")
+}
+
+/**
+ * Get descriptive preview text for an attachment based on its MIME type and extension.
+ * Used as fallback when the attachment doesn't match known categories.
+ */
+fun getAttachmentPreviewText(mimeType: String?, extension: String?): String {
+    val type = mimeType?.lowercase() ?: ""
+    val ext = extension?.lowercase() ?: ""
+
+    return when {
+        // Archive types
+        type.contains("zip") || ext == "zip" -> "Zip file"
+        type.contains("rar") || ext == "rar" -> "RAR archive"
+        type.contains("7z") || ext == "7z" -> "7z archive"
+        type.contains("tar") || ext == "tar" -> "Archive"
+        type.contains("gzip") || ext == "gz" -> "Archive"
+
+        // Android app
+        type == "application/vnd.android.package-archive" || ext == "apk" -> "Android app"
+
+        // Text types
+        type == "text/plain" || ext == "txt" -> "Text file"
+        type == "text/html" || ext == "html" || ext == "htm" -> "HTML file"
+        type == "text/css" || ext == "css" -> "CSS file"
+        type == "text/csv" || ext == "csv" -> "CSV file"
+        type.contains("json") || ext == "json" -> "JSON file"
+        type.contains("xml") || ext == "xml" -> "XML file"
+        type.contains("javascript") || ext == "js" -> "JavaScript file"
+
+        // Font types
+        type.contains("font") || ext in listOf("ttf", "otf", "woff", "woff2") -> "Font file"
+
+        // Other application types with extension
+        ext.isNotEmpty() -> "${ext.uppercase()} file"
+
+        // Final fallback
+        else -> "File"
+    }
 }
 
 /**

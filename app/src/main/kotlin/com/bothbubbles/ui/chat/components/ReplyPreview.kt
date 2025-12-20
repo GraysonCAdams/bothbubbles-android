@@ -51,12 +51,20 @@ fun ReplyPreview(
         it.thumbnailPath ?: it.localPath ?: it.webUrl
     }
 
+    // Get first attachment for type detection
+    val firstAttachment = message.attachments.firstOrNull()
+
     // Build preview text - show attachment type if no text
     val previewText = when {
         !message.text.isNullOrBlank() -> message.text
-        mediaAttachment?.isVideo == true -> "Video"
-        mediaAttachment?.isImage == true -> "Photo"
-        message.attachments.isNotEmpty() -> "Attachment"
+        firstAttachment?.isSticker == true -> "Sticker"
+        firstAttachment?.isVLocation == true -> "Location"
+        firstAttachment?.isVCard == true -> "Contact"
+        firstAttachment?.isVideo == true -> "Video"
+        firstAttachment?.isGif == true -> "GIF"
+        firstAttachment?.isImage == true -> if (firstAttachment.hasLivePhoto) "Live Photo" else "Photo"
+        firstAttachment?.isAudio == true -> if (firstAttachment.isVoiceMessage) "Voice message" else "Audio"
+        firstAttachment != null -> firstAttachment.friendlyTypeName
         else -> ""
     }
 

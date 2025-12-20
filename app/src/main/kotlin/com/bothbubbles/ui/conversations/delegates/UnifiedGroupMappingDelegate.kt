@@ -18,8 +18,11 @@ import com.bothbubbles.ui.conversations.ReactionPreviewData
 import com.bothbubbles.ui.conversations.containsLocation
 import com.bothbubbles.ui.conversations.formatGroupEvent
 import com.bothbubbles.ui.conversations.formatRelativeTime
+import com.bothbubbles.ui.conversations.getAttachmentPreviewText
 import com.bothbubbles.ui.conversations.getDocumentTypeName
 import com.bothbubbles.ui.conversations.isDocumentType
+import com.bothbubbles.ui.conversations.isGif
+import com.bothbubbles.ui.conversations.isVLocation
 import com.bothbubbles.ui.conversations.isVoiceMessage
 import com.bothbubbles.ui.conversations.parseTapbackType
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -144,6 +147,11 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             getDocumentTypeName(firstAttachment.mimeType, firstAttachment.fileExtension)
         } else null
 
+        // Get descriptive attachment preview text for generic ATTACHMENT type
+        val attachmentPreviewText = if (messageType == MessageType.ATTACHMENT && firstAttachment != null) {
+            getAttachmentPreviewText(firstAttachment.mimeType, firstAttachment.fileExtension)
+        } else null
+
         // Get reaction preview data
         val reactionPreviewData = if (messageType == MessageType.REACTION && latestMessage != null) {
             getReactionPreviewData(latestMessage)
@@ -201,7 +209,8 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             reactionPreviewData = reactionPreviewData,
             groupEventText = groupEventText,
             documentType = documentType,
-            attachmentCount = if (attachmentCount > 0) attachmentCount else 1
+            attachmentCount = if (attachmentCount > 0) attachmentCount else 1,
+            attachmentPreviewText = attachmentPreviewText
         )
     }
 
@@ -219,8 +228,10 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             message?.isGroupEvent == true -> MessageType.GROUP_EVENT
             firstAttachment != null -> when {
                 firstAttachment.isSticker -> MessageType.STICKER
+                isVLocation(firstAttachment) -> MessageType.LOCATION
                 firstAttachment.mimeType == "text/vcard" || firstAttachment.mimeType == "text/x-vcard" -> MessageType.CONTACT
                 firstAttachment.isImage && firstAttachment.hasLivePhoto -> MessageType.LIVE_PHOTO
+                isGif(firstAttachment) -> MessageType.GIF
                 firstAttachment.isImage -> MessageType.IMAGE
                 firstAttachment.isVideo -> MessageType.VIDEO
                 firstAttachment.isAudio && isVoiceMessage(firstAttachment) -> MessageType.VOICE_MESSAGE
@@ -243,6 +254,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             rawMessageText.isNotBlank() -> rawMessageText
             messageType == MessageType.IMAGE -> "Photo"
             messageType == MessageType.LIVE_PHOTO -> "Live Photo"
+            messageType == MessageType.GIF -> "GIF"
             messageType == MessageType.VIDEO -> "Video"
             messageType == MessageType.AUDIO -> "Audio"
             messageType == MessageType.VOICE_MESSAGE -> "Voice message"
@@ -251,7 +263,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             messageType == MessageType.DOCUMENT -> "Document"
             messageType == MessageType.LOCATION -> "Location"
             messageType == MessageType.APP_MESSAGE -> "App message"
-            messageType == MessageType.ATTACHMENT -> "Attachment"
+            messageType == MessageType.ATTACHMENT -> "File"
             else -> rawMessageText
         }
     }

@@ -109,6 +109,51 @@ class UnifiedChatGroupRepository @Inject constructor(
     fun observeChatGuidsForGroup(groupId: Long): Flow<List<String>> =
         unifiedChatGroupDao.observeChatGuidsForGroup(groupId)
 
+    // ===== Filtered Queries for Select All Feature =====
+
+    /**
+     * Get count of unified groups matching filter criteria.
+     * Used for Gmail-style "Select All" to count all matching conversations.
+     *
+     * @param filter The conversation filter to apply
+     * @param categoryFilter Optional category filter
+     * @return Count of matching unified groups (excluding pinned)
+     */
+    suspend fun getFilteredGroupCount(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?
+    ): Int {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return unifiedChatGroupDao.getFilteredGroupCount(includeSpam, unreadOnly, categoryFilter)
+    }
+
+    /**
+     * Get primary GUIDs of unified groups matching filter criteria (paginated).
+     */
+    suspend fun getFilteredGroupGuids(
+        filter: com.bothbubbles.ui.conversations.ConversationFilter,
+        categoryFilter: String?,
+        limit: Int,
+        offset: Int
+    ): List<String> {
+        val (includeSpam, unreadOnly) = filterToParams(filter)
+        return unifiedChatGroupDao.getFilteredGroupGuids(includeSpam, unreadOnly, categoryFilter, limit, offset)
+    }
+
+    /**
+     * Convert ConversationFilter to database query parameters.
+     */
+    private fun filterToParams(filter: com.bothbubbles.ui.conversations.ConversationFilter): Pair<Boolean, Boolean> {
+        return when (filter) {
+            com.bothbubbles.ui.conversations.ConversationFilter.ALL -> false to false
+            com.bothbubbles.ui.conversations.ConversationFilter.UNREAD -> false to true
+            com.bothbubbles.ui.conversations.ConversationFilter.SPAM -> true to false
+            // For unknown/known senders, we filter on the UI side
+            com.bothbubbles.ui.conversations.ConversationFilter.UNKNOWN_SENDERS -> false to false
+            com.bothbubbles.ui.conversations.ConversationFilter.KNOWN_SENDERS -> false to false
+        }
+    }
+
     // ===== Mutation Operations =====
 
     /**

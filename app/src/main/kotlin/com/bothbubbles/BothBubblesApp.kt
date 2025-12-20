@@ -23,6 +23,7 @@ import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.fcm.FirebaseDatabaseService
 import com.bothbubbles.services.notifications.BadgeManager
+import com.bothbubbles.services.notifications.NotificationMediaUpdater
 import com.bothbubbles.services.life360.Life360SyncWorker
 import com.bothbubbles.services.life360.Life360TokenStorage
 import com.bothbubbles.services.sync.BackgroundSyncWorker
@@ -107,6 +108,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var life360TokenStorage: Life360TokenStorage
+
+    @Inject
+    lateinit var notificationMediaUpdater: NotificationMediaUpdater
 
     @Inject
     @ApplicationScope
@@ -196,6 +200,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Start Firebase Database listener for dynamic server URL sync
         initializeFirebaseDatabaseListener()
+
+        // Initialize notification media updater for inline image previews
+        initializeNotificationMediaUpdater()
 
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
@@ -419,6 +426,16 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 Timber.w(e, "Error initializing repair sync")
             }
         }
+    }
+
+    /**
+     * Initialize notification media updater to add inline image previews to notifications.
+     *
+     * When an image/video attachment downloads after the initial notification is shown,
+     * this updates the notification with the actual media preview.
+     */
+    private fun initializeNotificationMediaUpdater() {
+        notificationMediaUpdater.initialize()
     }
 
     /**

@@ -23,6 +23,8 @@ data class ConversationsUiState(
     // Connection state
     val isConnected: Boolean = false,
     val connectionState: ConnectionState = ConnectionState.DISCONNECTED,
+    // Reconnecting indicator (shown after 5 seconds of disconnection for iMessage-capable chats)
+    val showReconnectingIndicator: Boolean = false,
     val connectionBannerState: ConnectionBannerState = ConnectionBannerState.Dismissed,
     val smsBannerState: SmsBannerState = SmsBannerState.Disabled,
     // SMS capability state (for settings warning badge, independent of banner dismissal)
@@ -188,7 +190,8 @@ data class ConversationUiModel(
     val reactionPreviewData: ReactionPreviewData? = null, // Data for reaction preview formatting
     val groupEventText: String? = null, // Formatted group event text (e.g., "John left the group")
     val documentType: String? = null, // Document type name (e.g., "PDF", "Document")
-    val attachmentCount: Int = 1 // Number of attachments for "2 Photos" style preview
+    val attachmentCount: Int = 1, // Number of attachments for "2 Photos" style preview
+    val attachmentPreviewText: String? = null // Descriptive preview for ATTACHMENT type (e.g., "Zip file", "PNG file")
 ) {
     /**
      * Returns true if this conversation has a saved contact.
@@ -210,6 +213,7 @@ data class ConversationUiModel(
 enum class MessageType {
     TEXT,
     IMAGE,
+    GIF,
     VIDEO,
     AUDIO,
     VOICE_MESSAGE,

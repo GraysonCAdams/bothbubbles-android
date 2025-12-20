@@ -111,8 +111,11 @@ internal fun PinnedConversationsRow(
         }
     }
 
-    // Map guid to conversation for lookup
-    val conversationMap = remember(conversations) { conversations.associateBy { it.guid } }
+    // Map guid to conversation for lookup - don't use remember so updates are always reflected
+    val conversationMap = conversations.associateBy { it.guid }
+
+    // Build ordered list of actual conversations (not just GUIDs) so LazyRow detects data changes
+    val orderedConversations = currentOrder.mapNotNull { guid -> conversationMap[guid] }
 
     LazyRow(
         modifier = modifier.fillMaxWidth(),
@@ -121,10 +124,10 @@ internal fun PinnedConversationsRow(
         userScrollEnabled = !isDragging
     ) {
         itemsIndexed(
-            items = currentOrder,
-            key = { _, guid -> guid }
-        ) { index, guid ->
-            val conversation = conversationMap[guid] ?: return@itemsIndexed
+            items = orderedConversations,
+            key = { _, conv -> conv.guid }
+        ) { index, conversation ->
+            val guid = conversation.guid
 
             val isBeingDragged = index == draggedItemIndex && isDragging
 
