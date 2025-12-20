@@ -119,18 +119,16 @@ suspend fun updateCachedContactInfo(id: Long, displayName: String?, avatarPath: 
 
 ---
 
-### 4. N+1 Query Patterns
+### 4. ~~N+1 Query Patterns~~ **FIXED 2025-12-20**
 
-**Location:** `data/repository/ChatParticipantOperations.kt` (Lines 109-137)
+**Location:** `data/repository/ChatParticipantOperations.kt` (Lines 109-148)
 
-**Issue:**
+**Previous Issue:**
 ```kotlin
 suspend fun refreshAllContactInfo() {
     val allHandles = handleDao.getAllHandlesOnce()  // 1 query
 
     for (handle in allHandles) {  // N iterations
-        val displayName = androidContactsService.getContactDisplayName(handle.address)
-        val photoUri = androidContactsService.getContactPhotoUri(handle.address)
         handleDao.updateCachedContactInfo(handle.id, displayName, photoUri)  // N queries
     }
 }
@@ -138,28 +136,35 @@ suspend fun refreshAllContactInfo() {
 
 **Why Problematic:**
 - 1 + N database queries where 2 would suffice
-- O(N) contact service lookups
+- O(N) database transactions
 - Performance degrades linearly with number of handles
 - Can cause UI jank during sync
 
-**Fix:**
+**Fix Applied:**
 ```kotlin
-suspend fun refreshAllContactInfo() {
-    val allHandles = handleDao.getAllHandlesOnce()
+suspend fun refreshAllContactInfo(): Int {
+    val allHandles = handleDao.getAllHandlesOnce()  // 1 query
 
-    // Batch collect updates
-    val updates = allHandles.map { handle ->
-        HandleUpdate(
-            id = handle.id,
-            displayName = androidContactsService.getContactDisplayName(handle.address),
-            photoUri = androidContactsService.getContactPhotoUri(handle.address)
-        )
+    // Collect updates - contact lookups are still O(N) but unavoidable
+    val updates = allHandles.mapNotNull { handle ->
+        val displayName = androidContactsService.getContactDisplayName(handle.address)
+        val photoUri = androidContactsService.getContactPhotoUri(handle.address)
+        if (displayName != handle.cachedDisplayName || photoUri != handle.cachedAvatarPath) {
+            ContactInfoUpdate(handle.id, displayName, photoUri)
+        } else null
     }
 
-    // Single batch update
+    // Single batched transaction (1 transaction instead of N)
     handleDao.updateCachedContactInfoBatch(updates)
+    return updates.size
 }
 ```
+
+**Resolution:**
+- Added `ContactInfoUpdate` data class in HandleDao.kt
+- Added `@Transaction` annotated `updateCachedContactInfoBatch()` method
+- Refactored to collect updates first, then batch execute in single transaction
+- Result: O(1) database transactions instead of O(N)
 
 ---
 

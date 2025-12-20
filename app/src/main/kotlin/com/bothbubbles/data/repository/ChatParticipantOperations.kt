@@ -1,9 +1,10 @@
 package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
-import timber.log.Timber
+import com.bothbubbles.data.local.db.dao.ContactInfoUpdate
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import timber.log.Timber
 import com.bothbubbles.core.network.api.dto.ChatDto
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -105,6 +106,10 @@ class ChatParticipantOperations @Inject constructor(
      * - READ_CONTACTS permission is newly granted
      * - App starts with permission already granted (to catch contact changes)
      * Returns the number of handles updated.
+     *
+     * PERF: Uses batch update to avoid N+1 query pattern.
+     * Previously: 1 query + N updates = O(N) database operations
+     * Now: 1 query + 1 batched transaction = O(1) database transactions
      */
     suspend fun refreshAllContactInfo(): Int {
         if (!androidContactsService.hasReadPermission()) {
@@ -112,28 +117,34 @@ class ChatParticipantOperations @Inject constructor(
             return 0
         }
 
-        var updatedCount = 0
-        try {
+        return try {
             val allHandles = handleDao.getAllHandlesOnce()
             Timber.d("refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
 
-            for (handle in allHandles) {
+            // Collect updates - contact lookups are still O(N) but unavoidable
+            val updates = allHandles.mapNotNull { handle ->
                 val displayName = androidContactsService.getContactDisplayName(handle.address)
                 val photoUri = androidContactsService.getContactPhotoUri(handle.address)
 
-                // Only update if we found contact info or if there's existing cached info to clear
+                // Only include if contact info changed
                 if (displayName != handle.cachedDisplayName || photoUri != handle.cachedAvatarPath) {
-                    handleDao.updateCachedContactInfo(handle.id, displayName, photoUri)
-                    updatedCount++
+                    ContactInfoUpdate(handle.id, displayName, photoUri)
+                } else {
+                    null
                 }
             }
 
-            Timber.d("refreshAllContactInfo: Updated $updatedCount handles")
+            // Batch update in single transaction
+            if (updates.isNotEmpty()) {
+                handleDao.updateCachedContactInfoBatch(updates)
+            }
+
+            Timber.d("refreshAllContactInfo: Updated ${updates.size} handles")
+            updates.size
         } catch (e: Exception) {
             Timber.e(e, "refreshAllContactInfo: Error refreshing contact info")
+            0
         }
-
-        return updatedCount
     }
 
     /**

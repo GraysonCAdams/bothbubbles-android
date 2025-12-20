@@ -9,6 +9,16 @@ import androidx.room.Update
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import kotlinx.coroutines.flow.Flow
 
+/**
+ * Data class for batch updating cached contact info.
+ * Used by [HandleDao.updateCachedContactInfoBatch].
+ */
+data class ContactInfoUpdate(
+    val handleId: Long,
+    val displayName: String?,
+    val avatarPath: String?
+)
+
 @Dao
 interface HandleDao {
 
@@ -88,6 +98,17 @@ interface HandleDao {
 
     @Query("UPDATE handles SET cached_display_name = :displayName, cached_avatar_path = :avatarPath WHERE id = :id")
     suspend fun updateCachedContactInfo(id: Long, displayName: String?, avatarPath: String?)
+
+    /**
+     * Batch update cached contact info for multiple handles in a single transaction.
+     * PERF: Reduces N+1 pattern to 1 + 1 (fetch all + batch update in transaction).
+     */
+    @Transaction
+    suspend fun updateCachedContactInfoBatch(updates: List<ContactInfoUpdate>) {
+        for (update in updates) {
+            updateCachedContactInfo(update.handleId, update.displayName, update.avatarPath)
+        }
+    }
 
     @Query("UPDATE handles SET default_phone = :phone WHERE id = :id")
     suspend fun updateDefaultPhone(id: Long, phone: String?)

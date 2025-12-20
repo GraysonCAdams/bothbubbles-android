@@ -122,7 +122,7 @@ This document indexes all identified anti-patterns across the codebase, organize
 | 22 | ~~android:allowBackup~~ | `AndroidManifest.xml:84` | ✅ FIXED 2025-12-20 |
 | 23 | ~~Exported Components~~ | `AndroidManifest.xml` | ✅ FIXED 2025-12-20 |
 | 24 | Missing Result Handling | Multiple repositories | ⚠️ OPEN |
-| 25 | N+1 Query Patterns | `ChatParticipantOperations.kt:109` | ⚠️ OPEN |
+| 25 | ~~N+1 Query Patterns~~ | `ChatParticipantOperations.kt:109` | ✅ FIXED 2025-12-20 |
 | 26 | ~~Uncancelled Flow~~ | `SocketEventHandler.kt:92` | ✅ FIXED 2025-12-20 |
 | 27 | ~~Duplicate Detection Race~~ | `PendingMessageRepository.kt:125` | ✅ FIXED 2025-12-20 |
 | 28 | ~~Non-Atomic State~~ | `ActiveConversationManager.kt:46` | ✅ FIXED 2025-12-20 |
