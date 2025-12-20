@@ -43,7 +43,8 @@ class ChatEtaSharingDelegate @AssistedInject constructor(
         val isNavigationActive: Boolean = false,
         val isCurrentlySharing: Boolean = false,
         val isBannerDismissed: Boolean = false,
-        val currentEtaMinutes: Int = 0
+        val currentEtaMinutes: Int = 0,
+        val currentDestination: String? = null
     )
 
     // Banner dismiss state - resets when navigation restarts
@@ -60,8 +61,9 @@ class ChatEtaSharingDelegate @AssistedInject constructor(
         settingsDataStore.etaSharingEnabled,
         etaSharingManager.isNavigationActive,
         etaSharingManager.state,
+        etaSharingManager.detectedDestination,
         _bannerDismissed
-    ) { enabled, navActive, state, dismissed ->
+    ) { enabled, navActive, state, detectedDestination, dismissed ->
         // Reset dismiss state when navigation restarts (was inactive, now active)
         if (navActive && !wasNavigationActive) {
             // Navigation just started - reset dismiss state
@@ -71,12 +73,16 @@ class ChatEtaSharingDelegate @AssistedInject constructor(
         }
         wasNavigationActive = navActive
 
+        // Get destination from accessibility detection or ETA data
+        val destination = detectedDestination?.destination ?: state.currentEta?.destination
+
         EtaSharingUiState(
             isEnabled = enabled,
             isNavigationActive = navActive,
             isCurrentlySharing = state.isSharing,
             isBannerDismissed = dismissed,
-            currentEtaMinutes = state.currentEta?.etaMinutes ?: 0
+            currentEtaMinutes = state.currentEta?.etaMinutes ?: 0,
+            currentDestination = destination
         )
     }.stateIn(
         scope = scope,

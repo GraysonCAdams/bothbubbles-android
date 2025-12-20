@@ -13,6 +13,7 @@ import com.bothbubbles.data.repository.AutoShareContactRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.PhoneContact
 import com.bothbubbles.services.eta.EtaSharingManager
+import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +28,7 @@ import javax.inject.Inject
 data class EtaSharingSettingsUiState(
     val enabled: Boolean = false,
     val hasNotificationAccess: Boolean = false,
+    val hasAccessibilityAccess: Boolean = false,
     val changeNotificationsEnabled: Boolean = true,
     val minimumEtaMinutes: Int = 5,
     val isNavigationActive: Boolean = false,
@@ -44,7 +46,8 @@ class EtaSharingSettingsViewModel @Inject constructor(
     private val featurePreferences: FeaturePreferences,
     private val etaSharingManager: EtaSharingManager,
     private val autoShareContactRepository: AutoShareContactRepository,
-    private val contactsService: AndroidContactsService
+    private val contactsService: AndroidContactsService,
+    private val permissionStateMonitor: PermissionStateMonitor
 ) : ViewModel() {
 
     companion object {
@@ -53,6 +56,7 @@ class EtaSharingSettingsViewModel @Inject constructor(
 
     private var lastNotificationAccessCheck = 0L
     private val _hasNotificationAccess = MutableStateFlow(checkNotificationAccess())
+    private val _hasAccessibilityAccess = MutableStateFlow(permissionStateMonitor.hasAccessibilityServiceEnabled())
 
     // Available contacts for auto-share selection
     private val _availableContacts = MutableStateFlow<List<PhoneContact>>(emptyList())
@@ -66,23 +70,25 @@ class EtaSharingSettingsViewModel @Inject constructor(
         featurePreferences.etaChangeNotificationsEnabled,
         featurePreferences.autoShareMinimumEtaMinutes,
         _hasNotificationAccess,
+        _hasAccessibilityAccess,
         etaSharingManager.isNavigationActive,
         etaSharingManager.state,
         settingsDataStore.developerModeEnabled,
         autoShareContactRepository.observeAll()
     ) { values: Array<Any?> ->
         @Suppress("UNCHECKED_CAST")
-        val etaState = values[5] as? com.bothbubbles.services.eta.EtaState
-        val contacts = values[7] as? List<AutoShareContact> ?: emptyList()
+        val etaState = values[6] as? com.bothbubbles.services.eta.EtaState
+        val contacts = values[8] as? List<AutoShareContact> ?: emptyList()
         EtaSharingSettingsUiState(
             enabled = values[0] as? Boolean ?: false,
             changeNotificationsEnabled = values[1] as? Boolean ?: true,
             minimumEtaMinutes = values[2] as? Int ?: 5,
             hasNotificationAccess = values[3] as? Boolean ?: false,
-            isNavigationActive = values[4] as? Boolean ?: false,
+            hasAccessibilityAccess = values[4] as? Boolean ?: false,
+            isNavigationActive = values[5] as? Boolean ?: false,
             isCurrentlySharing = etaState?.isSharing ?: false,
             currentEtaMinutes = etaState?.currentEta?.etaMinutes ?: 0,
-            isDeveloperMode = values[6] as? Boolean ?: false,
+            isDeveloperMode = values[7] as? Boolean ?: false,
             autoShareContacts = contacts,
             canAddMoreContacts = contacts.size < AutoShareContactRepository.MAX_CONTACTS
         )
@@ -119,6 +125,14 @@ class EtaSharingSettingsViewModel @Inject constructor(
         lastNotificationAccessCheck = now
         Timber.tag("EtaSettings").d("refreshNotificationAccess() called")
         _hasNotificationAccess.value = checkNotificationAccess()
+    }
+
+    fun refreshAccessibilityAccess() {
+        _hasAccessibilityAccess.value = permissionStateMonitor.hasAccessibilityServiceEnabled()
+    }
+
+    fun getAccessibilitySettingsIntent(): android.content.Intent {
+        return permissionStateMonitor.getAccessibilitySettingsIntent()
     }
 
     private fun checkNotificationAccess(): Boolean {

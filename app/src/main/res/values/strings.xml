@@ -149,6 +149,14 @@
     <string name="eta_sharing_service_label">ETA Sharing</string>
     <string name="picker_eta">Share ETA</string>
 
+    <!-- Accessibility Service for ETA Destination Detection -->
+    <string name="accessibility_service_label">ETA Destination Detection</string>
+    <string name="accessibility_service_description">Detects your navigation destination when using Google Maps or Waze. This allows BothBubbles to include your destination when sharing your ETA with contacts. This service only reads navigation-related content.</string>
+    <string name="accessibility_permission_title">Accessibility access (optional)</string>
+    <string name="accessibility_permission_subtitle">Enables destination detection and more reliable ETA for some navigation apps</string>
+    <string name="accessibility_permission_granted">Accessibility access granted</string>
+    <string name="accessibility_permission_enable">Enable</string>
+
     <!-- Send Mode Toggle Tutorial -->
     <string name="tutorial_send_mode_step1_title">Switch messaging modes</string>
     <string name="tutorial_send_mode_step1_description">Swipe up or down on the send button to switch between iMessage and SMS</string>

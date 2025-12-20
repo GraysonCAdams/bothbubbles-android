@@ -70,3 +70,26 @@ sealed class EtaUnavailableReason {
     data object PermissionNotGranted : EtaUnavailableReason()
     data object ServiceNotRunning : EtaUnavailableReason()
 }
+
+/**
+ * Parsed destination data from accessibility events.
+ * Extracted from navigation app UI via AccessibilityService.
+ */
+data class ParsedDestinationData(
+    val destination: String,
+    val address: String? = null,
+    val navigationApp: NavigationApp,
+    val isAndroidAutoMode: Boolean = false,
+    val confidence: DestinationConfidence,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+/**
+ * Confidence level for destination extraction.
+ * Higher confidence means more reliable extraction method.
+ */
+enum class DestinationConfidence {
+    HIGH,    // Found via content description or explicit "Navigate to" pattern
+    MEDIUM,  // Found via text pattern matching
+    LOW      // Found via positional heuristics or fallback
+}

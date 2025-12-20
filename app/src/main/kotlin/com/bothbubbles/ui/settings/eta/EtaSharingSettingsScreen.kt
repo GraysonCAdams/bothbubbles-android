@@ -114,6 +114,7 @@ fun EtaSharingSettingsContent(
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 viewModel.refreshNotificationAccess()
+                viewModel.refreshAccessibilityAccess()
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
@@ -130,13 +131,18 @@ fun EtaSharingSettingsContent(
         // Info card
         InfoCard()
 
-        // Disclaimer about destination limitation
-        DestinationDisclaimerCard()
-
         // Permission status card
         PermissionStatusCard(
             hasNotificationAccess = uiState.hasNotificationAccess,
             onOpenSettings = resolvedOnOpenNotificationSettings
+        )
+
+        // Accessibility permission card (optional - for destination detection)
+        AccessibilityPermissionCard(
+            hasAccessibilityAccess = uiState.hasAccessibilityAccess,
+            onOpenSettings = {
+                context.startActivity(viewModel.getAccessibilitySettingsIntent())
+            }
         )
 
         // Battery optimization card (Samsung/Xiaomi devices aggressively kill background services)
@@ -291,36 +297,6 @@ private fun InfoCard() {
 }
 
 @Composable
-private fun DestinationDisclaimerCard() {
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f)
-    ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.Top
-        ) {
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = "We can only share your ETA (arrival time), not your destination. " +
-                    "Navigation apps don't expose this information.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
 private fun PermissionStatusCard(
     hasNotificationAccess: Boolean,
     onOpenSettings: () -> Unit
@@ -377,6 +353,71 @@ private fun PermissionStatusCard(
                 }
             }
             if (!hasNotificationAccess) {
+                TextButton(onClick = onOpenSettings) {
+                    Text("Enable")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccessibilityPermissionCard(
+    hasAccessibilityAccess: Boolean,
+    onOpenSettings: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(12.dp),
+        color = if (hasAccessibilityAccess) {
+            MaterialTheme.colorScheme.secondaryContainer
+        } else {
+            MaterialTheme.colorScheme.surfaceVariant
+        }
+    ) {
+        Row(
+            modifier = Modifier
+                .clickable(enabled = !hasAccessibilityAccess, onClick = onOpenSettings)
+                .padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (hasAccessibilityAccess) Icons.Default.Check else Icons.Default.Info,
+                contentDescription = null,
+                tint = if (hasAccessibilityAccess) {
+                    MaterialTheme.colorScheme.onSecondaryContainer
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (hasAccessibilityAccess) {
+                        "Accessibility access granted"
+                    } else {
+                        "Accessibility access (optional)"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (hasAccessibilityAccess) {
+                        MaterialTheme.colorScheme.onSecondaryContainer
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+                )
+                if (!hasAccessibilityAccess) {
+                    Text(
+                        text = "Enables destination detection and more reliable ETA for some navigation apps",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                    )
+                }
+            }
+            if (!hasAccessibilityAccess) {
                 TextButton(onClick = onOpenSettings) {
                     Text("Enable")
                 }

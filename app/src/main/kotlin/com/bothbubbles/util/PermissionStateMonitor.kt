@@ -1,9 +1,14 @@
 package com.bothbubbles.util
 
 import android.Manifest
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
+import android.text.TextUtils
 import androidx.core.content.ContextCompat
+import com.bothbubbles.services.eta.NavigationAccessibilityService
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import javax.inject.Inject
@@ -119,5 +124,47 @@ class PermissionStateMonitor @Inject constructor(
         Timber.d("  - SMS Read: ${hasSmsReadPermission()}")
         Timber.d("  - SMS Send: ${hasSmsSendPermission()}")
         Timber.d("  - Notifications: ${hasNotificationPermission()}")
+        Timber.d("  - Accessibility Service: ${hasAccessibilityServiceEnabled()}")
+    }
+
+    // ===== Accessibility Service =====
+
+    /**
+     * Check if the NavigationAccessibilityService is enabled.
+     * This service is used for ETA destination detection from Google Maps/Waze.
+     * @return true if the accessibility service is enabled in system settings
+     */
+    fun hasAccessibilityServiceEnabled(): Boolean {
+        val enabledServices = Settings.Secure.getString(
+            context.contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ) ?: return false
+
+        val serviceName = ComponentName(
+            context,
+            NavigationAccessibilityService::class.java
+        ).flattenToString()
+
+        val colonSplitter = TextUtils.SimpleStringSplitter(':')
+        colonSplitter.setString(enabledServices)
+
+        while (colonSplitter.hasNext()) {
+            val componentName = colonSplitter.next()
+            if (componentName.equals(serviceName, ignoreCase = true)) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    /**
+     * Get an intent to open system accessibility settings.
+     * User must manually enable the accessibility service from there.
+     */
+    fun getAccessibilitySettingsIntent(): Intent {
+        return Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
     }
 }

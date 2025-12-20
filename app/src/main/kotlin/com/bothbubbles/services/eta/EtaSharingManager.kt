@@ -68,6 +68,10 @@ class EtaSharingManager @Inject constructor(
     private val _autoShareState = MutableStateFlow<AutoShareState>(AutoShareState.Inactive)
     val autoShareState: StateFlow<AutoShareState> = _autoShareState.asStateFlow()
 
+    // Destination tracking (from AccessibilityService)
+    private val _detectedDestination = MutableStateFlow<ParsedDestinationData?>(null)
+    val detectedDestination: StateFlow<ParsedDestinationData?> = _detectedDestination.asStateFlow()
+
     /**
      * Start sharing ETA with a recipient
      */
@@ -285,6 +289,9 @@ class EtaSharingManager @Inject constructor(
         arrivingSoonSentForSession = false
         arrivingSoonSentAtEta = 0
 
+        // Clear destination tracking
+        _detectedDestination.value = null
+
         // Handle auto-share sessions - just clear them
         if (activeAutoShareSessions.isNotEmpty()) {
             handleAutoShareNavigationStopped()
@@ -295,6 +302,34 @@ class EtaSharingManager @Inject constructor(
             Timber.d("Navigation stopped - ending session silently")
             stopSharing()
         }
+    }
+
+    // ===== Destination Detection (from AccessibilityService) =====
+
+    /**
+     * Called by NavigationAccessibilityService when destination is detected.
+     * Updates current navigation state with destination information.
+     */
+    fun onDestinationDetected(destination: ParsedDestinationData) {
+        Timber.d("Destination detected: ${destination.destination} (confidence: ${destination.confidence})")
+        _detectedDestination.value = destination
+
+        // If we have current ETA data without destination, merge it
+        val currentEta = _state.value.currentEta
+        if (currentEta != null && currentEta.destination == null) {
+            val updatedEta = currentEta.copy(destination = destination.destination)
+            _state.value = _state.value.copy(currentEta = updatedEta)
+            Timber.d("Merged destination into ETA data: ${destination.destination}")
+        }
+    }
+
+    /**
+     * Get the current destination (from accessibility or notification parsing).
+     */
+    fun getCurrentDestination(): String? {
+        // Prefer accessibility-detected destination (more reliable)
+        return _detectedDestination.value?.destination
+            ?: _state.value.currentEta?.destination
     }
 
     // ===== Auto-Share Logic =====
@@ -502,8 +537,11 @@ class EtaSharingManager @Inject constructor(
     // ===== Message Builders =====
 
     private fun buildInitialMessage(eta: ParsedEtaData): String {
+        val destination = getCurrentDestination() ?: eta.destination
         return buildString {
-            append("📍 On my way! ETA: ${formatEtaTime(eta.etaMinutes)}")
+            append("📍 On my way")
+            destination?.let { append(" to $it") }
+            append("! ETA: ${formatEtaTime(eta.etaMinutes)}")
             eta.arrivalTimeText?.let { append(" (arriving ~$it)") }
         }
     }

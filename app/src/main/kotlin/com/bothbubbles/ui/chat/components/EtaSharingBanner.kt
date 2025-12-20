@@ -12,6 +12,7 @@ import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -40,6 +41,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate.EtaSharingUiState
@@ -67,6 +69,7 @@ fun EtaSharingBanner(
         isCurrentlySharing = etaState.isCurrentlySharing,
         isDismissed = etaState.isBannerDismissed,
         currentEtaMinutes = etaState.currentEtaMinutes,
+        currentDestination = etaState.currentDestination,
         onStartSharing = onStartSharing,
         onDismiss = onDismiss,
         modifier = modifier
@@ -79,7 +82,7 @@ fun EtaSharingBanner(
  * Key features:
  * - Flat design using primaryContainer color (no gradient)
  * - Swipe-to-dismiss in any direction (safe for driving)
- * - Shows just "ETA: X min" + "Share ETA" button
+ * - Shows destination (if available) + "ETA: X min" + "Share ETA" button
  * - Only shown when not currently sharing (when sharing, use EtaStopSharingLink instead)
  *
  * @deprecated Use the overload accepting EtaSharingUiState for better state isolation.
@@ -90,6 +93,7 @@ fun EtaSharingBanner(
     isCurrentlySharing: Boolean,
     isDismissed: Boolean,
     currentEtaMinutes: Int,
+    currentDestination: String? = null,
     onStartSharing: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -99,6 +103,7 @@ fun EtaSharingBanner(
         isCurrentlySharing = isCurrentlySharing,
         isDismissed = isDismissed,
         currentEtaMinutes = currentEtaMinutes,
+        currentDestination = currentDestination,
         onStartSharing = onStartSharing,
         onDismiss = onDismiss,
         modifier = modifier
@@ -114,6 +119,7 @@ private fun EtaSharingBannerContent(
     isCurrentlySharing: Boolean,
     isDismissed: Boolean,
     currentEtaMinutes: Int,
+    currentDestination: String? = null,
     onStartSharing: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -133,6 +139,7 @@ private fun EtaSharingBannerContent(
     ) {
         SwipeableBannerContent(
             etaMinutes = currentEtaMinutes,
+            destination = currentDestination,
             onStartSharing = onStartSharing,
             onDismiss = onDismiss
         )
@@ -145,6 +152,7 @@ private fun EtaSharingBannerContent(
 @Composable
 private fun SwipeableBannerContent(
     etaMinutes: Int,
+    destination: String? = null,
     onStartSharing: () -> Unit,
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier
@@ -206,7 +214,7 @@ private fun SwipeableBannerContent(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ETA info
+            // ETA info with optional destination
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.weight(1f)
@@ -218,16 +226,36 @@ private fun SwipeableBannerContent(
                     modifier = Modifier.size(24.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = if (etaMinutes > 0) {
-                        "ETA: ${formatEta(etaMinutes)}"
-                    } else {
-                        "Navigation active"
-                    },
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                )
+                Column {
+                    // Show destination if available
+                    if (!destination.isNullOrBlank()) {
+                        Text(
+                            text = destination,
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    // ETA time
+                    Text(
+                        text = if (etaMinutes > 0) {
+                            "ETA: ${formatEta(etaMinutes)}"
+                        } else {
+                            "Navigation active"
+                        },
+                        style = if (destination != null) {
+                            MaterialTheme.typography.bodySmall
+                        } else {
+                            MaterialTheme.typography.bodyLarge
+                        },
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(
+                            alpha = if (destination != null) 0.8f else 1f
+                        )
+                    )
+                }
             }
 
             // Share button (large touch target - min 48dp)

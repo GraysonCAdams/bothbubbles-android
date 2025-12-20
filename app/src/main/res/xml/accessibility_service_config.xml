@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Accessibility Service configuration for navigation destination detection.
+
+    This service monitors Google Maps and Waze ONLY to extract destination
+    information for the ETA sharing feature. It does not monitor other apps.
+
+    Privacy Note: Window content is accessed only when navigation is active
+    and only for the purpose of extracting destination and ETA information.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowContentChanged|typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
+    android:canRetrieveWindowContent="true"
+    android:packageNames="com.google.android.apps.maps,com.waze"
+    android:notificationTimeout="500"
+    android:description="@string/accessibility_service_description" />
