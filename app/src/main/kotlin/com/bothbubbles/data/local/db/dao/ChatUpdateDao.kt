@@ -73,7 +73,7 @@ interface ChatUpdateDao {
     @Query("UPDATE chats SET unread_count = unread_count + 1 WHERE guid = :guid")
     suspend fun incrementUnreadCount(guid: String)
 
-    @Query("UPDATE chats SET has_unread_message = 0, unread_count = 0 WHERE has_unread_message = 1")
+    @Query("UPDATE chats SET has_unread_message = 0, unread_count = 0 WHERE has_unread_message = 1 OR unread_count > 0")
     suspend fun markAllChatsAsRead(): Int
 
     @Query("""

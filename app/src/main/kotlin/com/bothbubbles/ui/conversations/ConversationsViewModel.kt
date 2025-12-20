@@ -368,6 +368,8 @@ class ConversationsViewModel @Inject constructor(
     fun setConversationFilter(filter: String) {
         viewModelScope.launch {
             settingsDataStore.setConversationFilter(filter)
+            // Scroll to top when filter changes
+            _scrollToIndexEvent.emit(0)
         }
     }
 
@@ -375,6 +377,8 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             val filterValue = category?.let { "category:$it" } ?: "all"
             settingsDataStore.setConversationFilter(filterValue)
+            // Scroll to top when filter changes
+            _scrollToIndexEvent.emit(0)
         }
     }
 
@@ -527,9 +531,20 @@ class ConversationsViewModel @Inject constructor(
         // Skip refresh while loading more to avoid items popping in during scroll
         if (_uiState.value.isLoadingMore) return
 
+        Timber.d("refreshAllLoadedPages: Starting refresh...")
         val typingChats = observerDelegate.typingChats.value
         val query = _searchQuery.value
         val conversations = loadingDelegate.refreshAllLoadedPages(typingChats, query)
+        Timber.d("refreshAllLoadedPages: Got ${conversations.size} conversations")
+
+        // Log any potential duplicates by contactKey
+        val byContactKey = conversations.filter { !it.isGroup && it.contactKey.isNotBlank() }
+            .groupBy { it.contactKey }
+            .filter { it.value.size > 1 }
+        if (byContactKey.isNotEmpty()) {
+            Timber.w("refreshAllLoadedPages: DUPLICATES detected by contactKey: ${byContactKey.map { (key, convs) -> "$key -> ${convs.map { it.guid }}" }}")
+        }
+
         _uiState.update { it.copy(conversations = conversations.toStable()) }
     }
 

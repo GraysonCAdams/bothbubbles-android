@@ -296,9 +296,13 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         val participantsByChatMap = chatRepository.getParticipantsGroupedByChat(allGroupChatGuids)
         PerformanceProfiler.end(batchParticipantsId, "${participantsByChatMap.values.sumOf { it.size }} participants")
 
+        Timber.d("buildConversationList: Processing ${unifiedGroups.size} unified groups, ${groupChats.size} group chats, ${nonGroupChats.size} non-group chats")
+        Timber.d("buildConversationList: handledChatGuids after unified members: ${allGroupChatGuids.take(5)}...")
+
         // Process unified chat groups with pre-fetched data
         for (group in unifiedGroups) {
             val chatGuids = groupIdToGuids[group.id] ?: continue
+            Timber.d("buildConversationList: Unified group ${group.id} (${group.identifier}) has members: $chatGuids, primaryChatGuid=${group.primaryChatGuid}")
 
             val uiModel = unifiedGroupMappingDelegate.unifiedGroupToUiModel(
                 group = group,
@@ -322,12 +326,17 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         }
 
         // Add orphan 1:1 chats not in unified groups
+        var orphanCount = 0
         for (chat in nonGroupChats) {
             if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
-                conversations.add(chat.toUiModelWithContext(typingChats))
+                val uiModel = chat.toUiModelWithContext(typingChats)
+                Timber.d("buildConversationList: Adding ORPHAN chat ${chat.guid} (contactKey=${uiModel.contactKey}, displayName=${uiModel.displayName})")
+                conversations.add(uiModel)
                 handledChatGuids.add(chat.guid)
+                orphanCount++
             }
         }
+        Timber.d("buildConversationList: Added $orphanCount orphan chats. Total before dedup: ${conversations.size}")
 
         // Sort: pinned first, then by last message time
         val sortedConversations = conversations

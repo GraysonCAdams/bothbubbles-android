@@ -396,21 +396,21 @@ class FcmMessageHandler @Inject constructor(
     }
 
     /**
-     * Enqueue first image attachment for download so notification can update with inline preview.
-     * This allows NotificationMediaUpdater to add the image to the notification once downloaded.
+     * Enqueue first image/video attachment for download so notification can update with inline preview.
+     * This allows NotificationMediaUpdater to add the media to the notification once downloaded.
      */
     private fun enqueueFirstImageAttachment(messageJson: JSONObject, chatGuid: String) {
         try {
             val attachments = messageJson.optJSONArray("attachments") ?: return
             if (attachments.length() == 0) return
 
-            // Find first image attachment (not sticker)
+            // Find first image/video attachment (not sticker)
             for (i in 0 until attachments.length()) {
                 val attachment = attachments.optJSONObject(i) ?: continue
                 val mimeType = attachment.optString("mimeType", "").lowercase()
                 val isSticker = attachment.optBoolean("isSticker", false)
 
-                if (mimeType.startsWith("image/") && !isSticker) {
+                if ((mimeType.startsWith("image/") || mimeType.startsWith("video/")) && !isSticker) {
                     val guid = attachment.optString("guid", "")
                     if (guid.isNotBlank()) {
                         Timber.d("Enqueuing FCM notification attachment download: $guid")
@@ -420,7 +420,7 @@ class FcmMessageHandler @Inject constructor(
                             priority = AttachmentDownloadQueue.Priority.IMMEDIATE
                         )
                     }
-                    return // Only enqueue first image
+                    return // Only enqueue first media attachment
                 }
             }
         } catch (e: Exception) {

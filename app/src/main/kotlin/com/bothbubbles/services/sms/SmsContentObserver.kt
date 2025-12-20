@@ -359,6 +359,12 @@ class SmsContentObserver @Inject constructor(
                             val senderName = androidContactsService.getContactDisplayName(primaryAddress)
                             val senderAvatarUri = androidContactsService.getContactPhotoUri(primaryAddress)
 
+                            // Get first image/video attachment for inline preview
+                            val firstMediaAttachment = mmsMessage.imageParts.firstOrNull { part ->
+                                val mimeType = part.contentType.lowercase()
+                                mimeType.startsWith("image/") || mimeType.startsWith("video/")
+                            }
+
                             notificationService.showMessageNotification(
                                 chatGuid = chatGuid,
                                 chatTitle = chat?.displayName ?: senderName ?: primaryAddress,
@@ -372,7 +378,9 @@ class SmsContentObserver @Inject constructor(
                                 linkPreviewDomain = null,
                                 participantNames = emptyList(),
                                 participantAvatarPaths = emptyList(),
-                                subject = null
+                                subject = null,
+                                attachmentUri = firstMediaAttachment?.dataUri,
+                                attachmentMimeType = firstMediaAttachment?.contentType
                             )
                         }
                     }

@@ -10,8 +10,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.Snooze
-import androidx.compose.material.icons.outlined.Archive
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -97,7 +95,7 @@ internal fun SelectionModeHeader(
 
         Spacer(modifier = Modifier.weight(1f))
 
-        // Action buttons
+        // Pin button
         IconButton(
             onClick = onPin,
             enabled = isPinEnabled
@@ -113,22 +111,7 @@ internal fun SelectionModeHeader(
             )
         }
 
-        IconButton(onClick = onSnooze) {
-            Icon(
-                Icons.Default.Snooze,
-                contentDescription = "Snooze",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
-        IconButton(onClick = onArchive) {
-            Icon(
-                Icons.Outlined.Archive,
-                contentDescription = "Archive",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-
+        // Delete button
         IconButton(onClick = onDelete) {
             Icon(
                 Icons.Outlined.Delete,
@@ -137,7 +120,7 @@ internal fun SelectionModeHeader(
             )
         }
 
-        // More options with dropdown
+        // More options with dropdown (all other actions)
         Box {
             IconButton(onClick = { showMoreMenu = true }) {
                 Icon(
@@ -157,6 +140,22 @@ internal fun SelectionModeHeader(
                     onClick = {
                         showMoreMenu = false
                         onSelectAll()
+                    }
+                )
+
+                DropdownMenuItem(
+                    text = { Text("Archive") },
+                    onClick = {
+                        showMoreMenu = false
+                        onArchive()
+                    }
+                )
+
+                DropdownMenuItem(
+                    text = { Text("Snooze") },
+                    onClick = {
+                        showMoreMenu = false
+                        onSnooze()
                     }
                 )
 

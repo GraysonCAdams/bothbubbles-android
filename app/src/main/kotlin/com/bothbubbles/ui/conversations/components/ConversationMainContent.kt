@@ -42,6 +42,7 @@ import com.bothbubbles.ui.conversations.EmptyFilterState
 import com.bothbubbles.ui.conversations.PinnedDragOverlay
 import com.bothbubbles.ui.conversations.delegates.SelectionState
 import com.bothbubbles.ui.components.conversation.SwipeConfig
+import timber.log.Timber
 
 /**
  * Main content area for conversations list.
@@ -115,6 +116,19 @@ fun ConversationMainContent(
                     )
                 }
                 ConversationScreenState.CONTENT -> {
+                    // Log incoming conversations for debugging
+                    Timber.d("ConversationMainContent: Received ${conversations.size} conversations, filter=$conversationFilter")
+
+                    // Check for duplicates by contactKey BEFORE filtering
+                    val duplicatesByContactKey = conversations.filter { !it.isGroup && it.contactKey.isNotBlank() }
+                        .groupBy { it.contactKey }
+                        .filter { it.value.size > 1 }
+                    if (duplicatesByContactKey.isNotEmpty()) {
+                        Timber.e("ConversationMainContent: DUPLICATES IN INPUT: ${duplicatesByContactKey.map { (key, convs) ->
+                            "$key -> ${convs.map { "${it.guid} (${it.displayName})" }}"
+                        }}")
+                    }
+
                     // Apply conversation filter
                     val filteredConversations = conversations.filter { conv ->
                         // Apply status filter first
@@ -133,6 +147,8 @@ fun ConversationMainContent(
 
                         matchesStatus && matchesCategory
                     }
+
+                    Timber.d("ConversationMainContent: After filter: ${filteredConversations.size} conversations")
 
                     // Show empty state if filter returns no results
                     val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null

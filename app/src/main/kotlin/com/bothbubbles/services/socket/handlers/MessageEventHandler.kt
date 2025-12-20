@@ -211,15 +211,15 @@ class MessageEventHandler @Inject constructor(
                 subject = savedMessage.subject
             )
 
-            // Enqueue first image attachment for download so notification can update with inline preview
-            val firstImageAttachment = event.message.attachments?.firstOrNull { attachment ->
+            // Enqueue first image/video attachment for download so notification can update with inline preview
+            val firstMediaAttachment = event.message.attachments?.firstOrNull { attachment ->
                 val mimeType = attachment.mimeType?.lowercase() ?: ""
-                mimeType.startsWith("image/") && !attachment.isSticker
+                (mimeType.startsWith("image/") || mimeType.startsWith("video/")) && !attachment.isSticker
             }
-            if (firstImageAttachment != null) {
-                Timber.d("Enqueuing notification attachment download: ${firstImageAttachment.guid}")
+            if (firstMediaAttachment != null) {
+                Timber.d("Enqueuing notification attachment download: ${firstMediaAttachment.guid}")
                 attachmentDownloadQueue.enqueue(
-                    attachmentGuid = firstImageAttachment.guid,
+                    attachmentGuid = firstMediaAttachment.guid,
                     chatGuid = event.chatGuid,
                     priority = AttachmentDownloadQueue.Priority.IMMEDIATE
                 )
