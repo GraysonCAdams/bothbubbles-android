@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Contacts data kind configuration for BothBubbles group chats.
+    Defines how group chat entries appear in the system Contacts app.
+-->
+<ContactsAccountType
+    xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <ContactsDataKind
+        android:mimeType="vnd.android.cursor.item/vnd.com.bothbubbles.group"
+        android:icon="@mipmap/ic_launcher"
+        android:summaryColumn="data2"
+        android:detailColumn="data3"
+        android:detailSocialSummary="true" />
+
+</ContactsAccountType>

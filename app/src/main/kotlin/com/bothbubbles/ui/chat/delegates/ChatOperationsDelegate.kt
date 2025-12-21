@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.chat.delegates
 
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -9,6 +10,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.contacts.ContactBlocker
 import com.bothbubbles.services.contacts.DiscordContactService
+import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.spam.SpamReportingService
 import com.bothbubbles.services.spam.SpamRepository
@@ -38,6 +40,7 @@ import kotlinx.coroutines.launch
  * for improved testability.
  */
 class ChatOperationsDelegate @AssistedInject constructor(
+    private val application: Application,
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val spamRepository: SpamRepository,
@@ -161,6 +164,8 @@ class ChatOperationsDelegate @AssistedInject constructor(
             chatRepository.deleteChat(chatGuid).handle(
                 onSuccess = {
                     _state.update { it.copy(chatDeleted = true) }
+                    // Sync group contacts (in case deleted chat was a group)
+                    GroupContactSyncManager.triggerSync(application)
                 },
                 onError = { appError ->
                     _state.update { it.copy(operationError = appError) }

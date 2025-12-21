@@ -24,6 +24,9 @@
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <uses-permission android:name="android.permission.WRITE_CONTACTS" />
     <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
 
     <!-- Storage for attachments -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -292,6 +295,48 @@
         <service
             android:name=".services.voice.VoiceMessageService"
             android:exported="false" />
+
+        <!-- BothBubbles Account Authenticator Service -->
+        <!-- Provides stub account for contact sync (group chat voice commands) -->
+        <service
+            android:name=".services.contacts.sync.BothBubblesAuthenticatorService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/authenticator" />
+        </service>
+
+        <!-- Group Contact Sync Service -->
+        <!-- Syncs group chats to system contacts for Google Assistant integration -->
+        <service
+            android:name=".services.contacts.sync.GroupContactSyncService"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/sync_adapter" />
+            <meta-data
+                android:name="android.provider.CONTACTS_STRUCTURE"
+                android:resource="@xml/contacts" />
+        </service>
+
+        <!-- Group Contact Intent Handler -->
+        <!-- Handles taps on BothBubbles group contacts to open the chat -->
+        <activity
+            android:name=".services.contacts.sync.GroupContactIntentActivity"
+            android:exported="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="vnd.android.cursor.item/vnd.com.bothbubbles.group" />
+            </intent-filter>
+        </activity>
 
         <!-- SMS Status Receiver (sent/delivered callbacks) -->
         <receiver

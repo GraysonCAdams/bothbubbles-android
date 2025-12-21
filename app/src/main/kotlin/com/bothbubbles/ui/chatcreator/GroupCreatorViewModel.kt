@@ -1,5 +1,7 @@
 package com.bothbubbles.ui.chatcreator
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -13,6 +15,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.PhoneContact
+import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.util.PhoneNumberFormatter
@@ -27,6 +30,7 @@ import javax.inject.Inject
 @HiltViewModel
 class GroupCreatorViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
+    @ApplicationContext private val context: Context,
     private val handleRepository: HandleRepository,
     private val chatRepository: ChatRepository,
     private val api: BothBubblesApi,
@@ -339,6 +343,9 @@ class GroupCreatorViewModel @Inject constructor(
                                 lastMessageText = null
                             )
                             chatRepository.insertChat(newChat)
+
+                            // Sync group contacts (new group created)
+                            GroupContactSyncManager.triggerSync(context)
                         }
 
                         _uiState.update {
@@ -361,6 +368,9 @@ class GroupCreatorViewModel @Inject constructor(
                         val body = response.body()
                         val chatData = body?.data
                         if (response.isSuccessful && chatData != null) {
+                            // Sync group contacts (new group created)
+                            GroupContactSyncManager.triggerSync(context)
+
                             _uiState.update {
                                 it.copy(
                                     isLoading = false,

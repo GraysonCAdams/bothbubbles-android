@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Sync adapter configuration for group contact synchronization.
+    Syncs group chats to system contacts so Google Assistant can recognize them.
+-->
+<sync-adapter
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accountType="com.bothbubbles.account"
+    android:contentAuthority="com.android.contacts"
+    android:supportsUploading="false"
+    android:userVisible="false"
+    android:isAlwaysSyncable="true"
+    android:allowParallelSyncs="false" />

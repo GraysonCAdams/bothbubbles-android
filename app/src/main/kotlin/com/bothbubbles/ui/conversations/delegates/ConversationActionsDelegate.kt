@@ -13,6 +13,7 @@ import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.repository.UnifiedChatGroupRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.ui.components.conversation.SwipeActionType
 import com.bothbubbles.ui.conversations.ConversationUiModel
 import dagger.assisted.Assisted
@@ -312,12 +313,21 @@ class ConversationActionsDelegate @AssistedInject constructor(
      */
     fun deleteChat(chatGuid: String, conversations: List<ConversationUiModel>) {
         scope.launch {
+            // Check if this is a group chat before deletion
+            val conversation = conversations.find { it.guid == chatGuid }
+            val isGroup = conversation?.isGroup == true
+
             // Optimistically remove from list immediately for instant feedback
             val updated = conversations.filter { it.guid != chatGuid }
             _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
             // Persist to database in background
             chatRepository.deleteChat(chatGuid)
+
+            // Sync group contacts if a group chat was deleted
+            if (isGroup) {
+                GroupContactSyncManager.triggerSync(application)
+            }
         }
     }
 

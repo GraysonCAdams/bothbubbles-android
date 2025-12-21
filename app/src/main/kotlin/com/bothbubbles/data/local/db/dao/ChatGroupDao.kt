@@ -14,6 +14,13 @@ interface ChatGroupDao {
 
     @Query("""
         SELECT * FROM chats
+        WHERE date_deleted IS NULL AND is_group = 1
+        ORDER BY latest_message_date DESC
+    """)
+    suspend fun getAllGroupChats(): List<ChatEntity>
+
+    @Query("""
+        SELECT * FROM chats
         WHERE date_deleted IS NULL AND is_group = 0
         ORDER BY latest_message_date DESC
     """)

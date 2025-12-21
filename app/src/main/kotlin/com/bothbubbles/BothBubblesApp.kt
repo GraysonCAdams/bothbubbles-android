@@ -30,6 +30,7 @@ import com.bothbubbles.services.life360.Life360TokenStorage
 import com.bothbubbles.services.socket.SocketEventHandler
 import com.bothbubbles.services.sync.BackgroundSyncWorker
 import com.bothbubbles.services.sync.SyncService
+import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.util.PhoneNumberFormatter
 import com.bothbubbles.util.PerformanceProfiler
@@ -224,6 +225,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Initialize notification media updater for inline image previews
         initializeNotificationMediaUpdater()
+
+        // Sync group chats to system contacts for Google Assistant voice commands
+        initializeGroupContactSync()
 
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
@@ -496,6 +500,33 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
      */
     private fun initializeNotificationMediaUpdater() {
         notificationMediaUpdater.initialize()
+    }
+
+    /**
+     * Sync group chats to system contacts for Google Assistant integration.
+     *
+     * This allows users to say "Send a message to [Group Name]" and have
+     * Google Assistant recognize the group. Group chats appear as contacts
+     * named "Group Name (BothBubbles)" in the system contacts.
+     *
+     * Features:
+     * - Syncs on app launch to ensure contacts are always up-to-date
+     * - Recreates any contacts the user may have deleted
+     * - Uses our generated group avatars for contact photos
+     */
+    private fun initializeGroupContactSync() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Sync group chats to system contacts
+                GroupContactSyncManager.performSyncSuspend(this@BothBubblesApp)
+                Timber.d("Group contact sync completed")
+            } catch (e: Exception) {
+                Timber.w(e, "Error syncing group contacts")
+            }
+        }
     }
 
     /**

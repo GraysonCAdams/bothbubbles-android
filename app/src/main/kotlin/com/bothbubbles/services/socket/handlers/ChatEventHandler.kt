@@ -1,10 +1,13 @@
 package com.bothbubbles.services.socket.handlers
 
+import android.content.Context
+import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.ActiveConversationManager
+import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.UiRefreshEvent
@@ -21,6 +24,7 @@ import javax.inject.Singleton
  */
 @Singleton
 class ChatEventHandler @Inject constructor(
+    @ApplicationContext private val context: Context,
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
@@ -82,6 +86,9 @@ class ChatEventHandler @Inject constructor(
         // Emit UI refresh event
         uiRefreshEvents.tryEmit(UiRefreshEvent.GroupChatUpdated(event.chatGuid))
         uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("participant_added"))
+
+        // Sync group contacts (participants changed = avatar may change)
+        GroupContactSyncManager.triggerSync(context)
     }
 
     suspend fun handleParticipantRemoved(
@@ -95,6 +102,9 @@ class ChatEventHandler @Inject constructor(
         // Emit UI refresh event
         uiRefreshEvents.tryEmit(UiRefreshEvent.GroupChatUpdated(event.chatGuid))
         uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("participant_removed"))
+
+        // Sync group contacts (participants changed = avatar may change)
+        GroupContactSyncManager.triggerSync(context)
     }
 
     suspend fun handleParticipantLeft(
@@ -108,6 +118,9 @@ class ChatEventHandler @Inject constructor(
         // Emit UI refresh event
         uiRefreshEvents.tryEmit(UiRefreshEvent.GroupChatUpdated(event.chatGuid))
         uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("participant_left"))
+
+        // Sync group contacts (participants changed = avatar may change)
+        GroupContactSyncManager.triggerSync(context)
     }
 
     suspend fun handleGroupNameChanged(
@@ -120,6 +133,9 @@ class ChatEventHandler @Inject constructor(
         // Emit UI refresh event
         uiRefreshEvents.tryEmit(UiRefreshEvent.GroupChatUpdated(event.chatGuid))
         uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("group_name_changed"))
+
+        // Sync group contacts (name changed)
+        GroupContactSyncManager.triggerSync(context)
     }
 
     suspend fun handleGroupIconChanged(
