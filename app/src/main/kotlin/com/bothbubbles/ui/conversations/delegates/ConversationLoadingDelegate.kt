@@ -211,12 +211,28 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 typingChats = typingChats
             )
 
-            // Merge with existing, deduplicate, and sort
+            // Merge with existing, deduplicate by guid first
             val existingGuids = currentConversations.map { it.guid }.toSet()
             val uniqueNew = newConversations.filter { it.guid !in existingGuids }
+            val combined = (currentConversations + uniqueNew).distinctBy { it.guid }
 
-            val merged = (currentConversations + uniqueNew)
-                .distinctBy { it.guid }
+            // Deduplicate by contactKey for 1:1 chats (catches cross-page duplicates)
+            val (groupChats, individualChats) = combined.partition {
+                it.isGroup || it.contactKey.isBlank()
+            }
+
+            val deduplicatedIndividuals = individualChats
+                .groupBy { it.contactKey }
+                .map { (contactKey, duplicates) ->
+                    if (duplicates.size > 1) {
+                        Timber.w("loadMoreConversations: Deduplicating ${duplicates.size} chats with contactKey '$contactKey'")
+                    }
+                    duplicates.firstOrNull { it.isMerged }
+                        ?: duplicates.maxByOrNull { it.lastMessageTimestamp }
+                        ?: duplicates.first()
+                }
+
+            val merged = (groupChats + deduplicatedIndividuals)
                 .sortedWith(
                     compareByDescending<ConversationUiModel> { it.isPinned }
                         .thenByDescending { it.lastMessageTimestamp }
@@ -278,9 +294,28 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 allConversations.addAll(uniqueNew)
             }
 
-            // Sort final result
-            val sorted = allConversations
-                .distinctBy { it.guid }
+            // Sort and deduplicate final result
+            val uniqueByGuid = allConversations.distinctBy { it.guid }
+
+            // Deduplicate by contactKey for 1:1 chats (same logic as buildConversationList)
+            // This catches cross-page duplicates that guid-only dedup misses
+            val (groupChats, individualChats) = uniqueByGuid.partition {
+                it.isGroup || it.contactKey.isBlank()
+            }
+
+            val deduplicatedIndividuals = individualChats
+                .groupBy { it.contactKey }
+                .map { (contactKey, duplicates) ->
+                    if (duplicates.size > 1) {
+                        Timber.w("loadAllRemainingPages: Deduplicating ${duplicates.size} chats with contactKey '$contactKey': ${duplicates.map { it.guid }}")
+                    }
+                    // Prefer merged unified entries, then most recent
+                    duplicates.firstOrNull { it.isMerged }
+                        ?: duplicates.maxByOrNull { it.lastMessageTimestamp }
+                        ?: duplicates.first()
+                }
+
+            val sorted = (groupChats + deduplicatedIndividuals)
                 .sortedWith(
                     compareByDescending<ConversationUiModel> { it.isPinned }
                         .thenByDescending { it.lastMessageTimestamp }
@@ -290,7 +325,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             _currentPage.value = page
             _canLoadMore.value = false
 
-            Timber.d("loadAllRemainingPages: Loaded all ${sorted.size} conversations")
+            Timber.d("loadAllRemainingPages: Loaded all ${sorted.size} conversations (deduplicated from ${uniqueByGuid.size})")
             return LoadResult.Success(sorted, false, page)
         } catch (e: Exception) {
             Timber.e(e, "Failed to load all remaining conversations")

@@ -9,6 +9,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Contacts
@@ -533,6 +534,225 @@ fun ContactsPermissionCard(
             ) {
                 Text("Enable Contacts")
             }
+        }
+    }
+}
+
+/**
+ * A list item for displaying a popular chat in the vertical Popular section.
+ * Shows avatar, display name, and indicates if it's a group or 1:1 chat.
+ * Groups show a group icon badge, 1:1 chats show iMessage/SMS service badge.
+ */
+@Composable
+fun PopularChatListItem(
+    popularChat: PopularChatUiModel,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val isIMessage = popularChat.service.equals("iMessage", ignoreCase = true)
+    val containerColor = if (isIMessage) {
+        MaterialTheme.colorScheme.primaryContainer
+    } else {
+        MaterialTheme.colorScheme.secondaryContainer
+    }
+    val contentColor = if (isIMessage) {
+        MaterialTheme.colorScheme.onPrimaryContainer
+    } else {
+        MaterialTheme.colorScheme.onSecondaryContainer
+    }
+
+    ListItem(
+        headlineContent = {
+            Text(
+                text = popularChat.displayName,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        },
+        supportingContent = if (!popularChat.isGroup && popularChat.identifier != null) {
+            {
+                Text(
+                    text = popularChat.identifier,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        } else null,
+        leadingContent = {
+            Box(modifier = Modifier.size(48.dp)) {
+                Avatar(
+                    name = popularChat.displayName,
+                    avatarPath = popularChat.avatarPath,
+                    size = 48.dp
+                )
+
+                // Badge for group indicator
+                if (popularChat.isGroup) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.tertiaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.GroupAdd,
+                            contentDescription = "Group",
+                            tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                            modifier = Modifier.size(12.dp)
+                        )
+                    }
+                }
+            }
+        },
+        trailingContent = {
+            // Service badge for 1:1 chats
+            if (!popularChat.isGroup && popularChat.service.isNotEmpty()) {
+                Surface(
+                    color = containerColor,
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text(
+                        text = if (isIMessage) "iMessage" else "SMS",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        },
+        colors = ListItemDefaults.colors(
+            containerColor = MaterialTheme.colorScheme.surface
+        ),
+        modifier = modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+    )
+}
+
+/**
+ * A section displaying a preview of the conversation with selected recipients.
+ * Shows recent message bubbles in a scrollable mini-chat view.
+ */
+@Composable
+fun ConversationPreviewSection(
+    previewState: ConversationPreviewState,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp, max = 200.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLow,
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        when (previewState) {
+            is ConversationPreviewState.Loading -> {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        strokeWidth = 2.dp
+                    )
+                }
+            }
+
+            is ConversationPreviewState.NewConversation -> {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Chat,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "New Conversation",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            }
+
+            is ConversationPreviewState.Existing -> {
+                // Display messages in a scrollable column (newest at bottom)
+                val messages = previewState.messages.reversed()  // Oldest first for display
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    messages.forEach { message ->
+                        MessagePreviewBubble(
+                            message = message,
+                            modifier = Modifier.padding(vertical = 2.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A compact message bubble for the conversation preview.
+ */
+@Composable
+private fun MessagePreviewBubble(
+    message: MessagePreview,
+    modifier: Modifier = Modifier
+) {
+    val isFromMe = message.isFromMe
+    val bubbleColor = if (isFromMe) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceContainerHighest
+    }
+    val textColor = if (isFromMe) {
+        MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+
+    val displayText = message.text
+        ?: message.attachmentPreviewText
+        ?: ""
+
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start
+    ) {
+        Surface(
+            color = bubbleColor,
+            shape = RoundedCornerShape(
+                topStart = 12.dp,
+                topEnd = 12.dp,
+                bottomStart = if (isFromMe) 12.dp else 4.dp,
+                bottomEnd = if (isFromMe) 4.dp else 12.dp
+            ),
+            modifier = Modifier.widthIn(max = 240.dp)
+        ) {
+            Text(
+                text = displayText,
+                style = MaterialTheme.typography.bodySmall,
+                color = textColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+            )
         }
     }
 }

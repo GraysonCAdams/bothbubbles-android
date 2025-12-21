@@ -189,7 +189,14 @@ data class MessageUiModel(
     val groupEventText: String? = null,
     // Mentions (from attributedBody)
     /** Parsed mentions from the message's attributedBody (if any) */
-    val mentions: StableList<MentionUiModel> = emptyList<MentionUiModel>().toStable()
+    val mentions: StableList<MentionUiModel> = emptyList<MentionUiModel>().toStable(),
+    // Split batch grouping
+    /**
+     * Groups related messages that were composed together (e.g., text + attachments).
+     * When a user sends a message with both text and attachments, they are split into
+     * separate messages (like native iMessage). This ID links them for visual grouping.
+     */
+    val splitBatchId: String? = null
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean

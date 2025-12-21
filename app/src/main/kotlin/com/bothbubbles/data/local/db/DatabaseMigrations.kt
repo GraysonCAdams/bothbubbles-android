@@ -1145,6 +1145,64 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 45 to 46: Add depends_on_local_id column to pending_messages.
+     *
+     * This column enables message ordering within a chat:
+     * - When a message is queued while another message is PENDING/SENDING, it depends on that message
+     * - The MessageSendWorker waits for the dependency to reach SENT status before sending
+     * - If the dependency fails, all dependent messages are cascade-failed
+     *
+     * This prevents messages from arriving out of order and enables grouped failure notifications.
+     */
+    val MIGRATION_45_46 = object : Migration(45, 46) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE pending_messages ADD COLUMN depends_on_local_id TEXT DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_messages_depends_on_local_id ON pending_messages(depends_on_local_id)")
+        }
+    }
+
+    /**
+     * Migration from version 46 to 47: Add server group photo columns to chats.
+     *
+     * iMessage groups can have custom group photos set by participants. The BlueBubbles
+     * server exposes this via the groupPhotoGuid field, which is an attachment GUID.
+     *
+     * New columns:
+     * - server_group_photo_guid: The attachment GUID from the server (used to detect changes)
+     * - server_group_photo_path: Local path to the downloaded group photo
+     *
+     * These are separate from custom_avatar_path which is user-set on the Android device.
+     * Priority: custom_avatar_path > server_group_photo_path > participant collage
+     */
+    val MIGRATION_46_47 = object : Migration(46, 47) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_guid TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_path TEXT DEFAULT NULL")
+        }
+    }
+
+    /**
+     * Migration from version 47 to 48: Add split_batch_id column to messages and pending_messages.
+     *
+     * When sending a message with both text and attachments, they are now split into separate
+     * messages (matching native iMessage behavior). This column links related messages for:
+     * - Visual grouping in the UI (tighter spacing, connected bubbles)
+     * - Understanding which messages were composed together
+     * - Independent retry per message (the main fix this enables)
+     *
+     * Format: "batch-{UUID}" or null for single messages.
+     */
+    val MIGRATION_47_48 = object : Migration(47, 48) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Add split_batch_id to messages table
+            db.execSQL("ALTER TABLE messages ADD COLUMN split_batch_id TEXT DEFAULT NULL")
+
+            // Add split_batch_id to pending_messages table
+            db.execSQL("ALTER TABLE pending_messages ADD COLUMN split_batch_id TEXT DEFAULT NULL")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1194,6 +1252,9 @@ object DatabaseMigrations {
         MIGRATION_41_42,
         MIGRATION_42_43,
         MIGRATION_43_44,
-        MIGRATION_44_45
+        MIGRATION_44_45,
+        MIGRATION_45_46,
+        MIGRATION_46_47,
+        MIGRATION_47_48
     )
 }

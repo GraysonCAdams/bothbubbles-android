@@ -132,4 +132,20 @@ interface Notifier {
         messagePreview: String?,
         errorMessage: String
     )
+
+    /**
+     * Show grouped notification when multiple messages fail to deliver in the same chat.
+     * This prevents notification spam when a message fails and cascades to dependent messages.
+     *
+     * @param chatGuid The chat where messages failed
+     * @param chatTitle Display name of the conversation
+     * @param failedCount Total number of failed messages
+     * @param errorMessage The original error reason
+     */
+    fun showMessagesFailedNotification(
+        chatGuid: String,
+        chatTitle: String,
+        failedCount: Int,
+        errorMessage: String
+    )
 }

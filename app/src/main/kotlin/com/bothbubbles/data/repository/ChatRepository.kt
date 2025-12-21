@@ -90,6 +90,29 @@ class ChatRepository @Inject constructor(
 
     fun getRecentGroupChats(): Flow<List<ChatEntity>> = chatDao.getRecentGroupChats()
 
+    /**
+     * Get the last message date for each chat identifier (phone/email).
+     * Used for contact deduplication - determines which handle was most recently used.
+     *
+     * @return Map of normalized address to last message timestamp
+     */
+    suspend fun getLastMessageDatePerAddress(): Map<String, Long> {
+        return chatDao.getLastMessageDatePerAddress().associate {
+            normalizeAddress(it.chatIdentifier) to it.latestMessageDate
+        }
+    }
+
+    /**
+     * Normalize an address for lookup purposes.
+     */
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            address.lowercase()
+        } else {
+            address.replace(Regex("[^0-9+]"), "")
+        }
+    }
+
     // ===== Filtered Queries for Select All Feature =====
 
     /**
@@ -265,6 +288,18 @@ class ChatRepository @Inject constructor(
      */
     suspend fun getUnifiedGroupForChat(chatGuid: String) =
         unifiedChatGroupDao.getGroupForChat(chatGuid)
+
+    /**
+     * Find the primary chat GUID for a 1:1 conversation with the given address.
+     * Uses the unified chat group system to find existing conversations.
+     *
+     * @param normalizedAddress The normalized phone number or email address
+     * @return The primary chat GUID if a conversation exists, null otherwise
+     */
+    suspend fun findChatGuidByAddress(normalizedAddress: String): String? {
+        val group = unifiedChatGroupDao.getGroupByIdentifier(normalizedAddress)
+        return group?.primaryChatGuid
+    }
 
     // ===== Local Mutation Operations =====
 

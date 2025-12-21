@@ -259,6 +259,9 @@ class MainActivity : ComponentActivity() {
         val mergedGuids = intent.getStringExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS)
             ?.takeIf { it.isNotBlank() }
 
+        // Debug: Log notification deep link data to diagnose wrong-chat-navigation issues
+        Timber.d("NOTIFICATION_DEBUG: Parsed deep link - chatGuid=$chatGuid, messageGuid=$messageGuid, mergedGuids=$mergedGuids")
+
         return NotificationDeepLinkData(
             chatGuid = chatGuid,
             messageGuid = messageGuid,

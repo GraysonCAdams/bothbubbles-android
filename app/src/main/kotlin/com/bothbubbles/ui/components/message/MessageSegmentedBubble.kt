@@ -497,7 +497,11 @@ internal fun SegmentedMessageBubble(
                                                         isDownloading = progress != null,
                                                         downloadProgress = progress ?: 0f,
                                                         isPlacedSticker = message.isPlacedSticker,
-                                                        messageGuid = message.guid
+                                                        messageGuid = message.guid,
+                                                        onLongPress = {
+                                                            HapticUtils.onLongPress(hapticFeedback)
+                                                            onLongPress()
+                                                        }
                                                     )
                                                 }
                                             }
@@ -514,7 +518,11 @@ internal fun SegmentedMessageBubble(
                                             isDownloading = progress != null,
                                             downloadProgress = progress ?: 0f,
                                             isPlacedSticker = message.isPlacedSticker,
-                                            messageGuid = message.guid
+                                            messageGuid = message.guid,
+                                            onLongPress = {
+                                                HapticUtils.onLongPress(hapticFeedback)
+                                                onLongPress()
+                                            }
                                         )
                                     }
                                 }
@@ -573,7 +581,11 @@ internal fun SegmentedMessageBubble(
                                         onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
                                         onDownloadClick = onDownloadClick,
                                         isDownloading = progress != null,
-                                        downloadProgress = progress ?: 0f
+                                        downloadProgress = progress ?: 0f,
+                                        onLongPress = {
+                                            HapticUtils.onLongPress(hapticFeedback)
+                                            onLongPress()
+                                        }
                                     )
                                 }
                             }

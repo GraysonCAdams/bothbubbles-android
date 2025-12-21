@@ -94,6 +94,8 @@ class ExoPlayerPool @Inject constructor(
             // Stop playback and clear media
             player.stop()
             player.clearMediaItems()
+            // Clear any attached SurfaceView to prevent Activity leak
+            player.clearVideoSurface()
 
             if (availablePlayers.size < MAX_POOL_SIZE) {
                 availablePlayers.add(player)

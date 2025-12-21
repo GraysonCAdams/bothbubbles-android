@@ -228,6 +228,7 @@ class ShortcutService @Inject constructor(
             .setIcon(avatarIcon)
             .setIntent(intent)
             .setLongLived(true)
+            .setIsConversation()
             .setLocusId(LocusIdCompat(conversation.chatGuid))
             .setPerson(person)
             .setCategories(setOf(SHARE_TARGET_CATEGORY))

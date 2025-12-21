@@ -68,6 +68,27 @@ interface UnifiedChatGroupDao {
     @Query("SELECT * FROM unified_chat_groups WHERE primary_chat_guid = :chatGuid LIMIT 1")
     suspend fun getGroupByPrimaryChatGuid(chatGuid: String): UnifiedChatGroupEntity?
 
+    /**
+     * Search unified groups by display name, identifier, or handle nickname.
+     * Used by the compose screen to find existing conversations with nicknames.
+     * Only returns non-archived groups.
+     *
+     * Joins with handles table to search cached_display_name (e.g., "💛 Liz").
+     */
+    @Query("""
+        SELECT DISTINCT ucg.* FROM unified_chat_groups ucg
+        LEFT JOIN handles h ON ucg.identifier = h.address
+        WHERE ucg.is_archived = 0
+        AND (
+            ucg.display_name LIKE '%' || :query || '%' COLLATE NOCASE
+            OR ucg.identifier LIKE '%' || :query || '%' COLLATE NOCASE
+            OR h.cached_display_name LIKE '%' || :query || '%' COLLATE NOCASE
+        )
+        ORDER BY ucg.latest_message_date DESC
+        LIMIT :limit
+    """)
+    suspend fun searchGroups(query: String, limit: Int = 10): List<UnifiedChatGroupEntity>
+
     // ===== Member Queries =====
 
     @Query("""

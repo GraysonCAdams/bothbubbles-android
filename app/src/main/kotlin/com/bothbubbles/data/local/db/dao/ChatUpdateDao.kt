@@ -64,6 +64,14 @@ interface ChatUpdateDao {
     @Query("UPDATE chats SET custom_avatar_path = :avatarPath WHERE guid = :guid")
     suspend fun updateCustomAvatarPath(guid: String, avatarPath: String?)
 
+    @Query("""
+        UPDATE chats
+        SET server_group_photo_guid = :photoGuid,
+            server_group_photo_path = :photoPath
+        WHERE guid = :guid
+    """)
+    suspend fun updateServerGroupPhoto(guid: String, photoGuid: String?, photoPath: String?)
+
     @Query("UPDATE chats SET text_field_text = :text WHERE guid = :guid")
     suspend fun updateDraftText(guid: String, text: String?)
 

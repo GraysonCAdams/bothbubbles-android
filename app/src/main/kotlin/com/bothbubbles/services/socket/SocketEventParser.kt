@@ -46,6 +46,12 @@ class SocketEventParser(
             // Get chatGuid from the message's chats array
             val chatGuid = message.chats?.firstOrNull()?.guid ?: ""
 
+            // Debug: Log all chats in the message to diagnose wrong-chat-navigation issues
+            val allChatGuids = message.chats?.map { it.guid } ?: emptyList()
+            if (allChatGuids.size > 1) {
+                Timber.w("NOTIFICATION_DEBUG: Message ${message.guid} has multiple chats: $allChatGuids, using first: $chatGuid")
+            }
+
             Timber.d("New message received: ${message.guid} for chat: $chatGuid")
             events.tryEmit(SocketEvent.NewMessage(message, chatGuid))
             developerEventLog.get().logSocketEvent("new-message", "guid: ${message.guid?.take(20)}...")

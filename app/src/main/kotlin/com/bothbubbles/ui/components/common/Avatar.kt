@@ -71,7 +71,7 @@ fun Avatar(
         modifier = modifier
             .size(size)
             .clip(CircleShape)
-            .background(backgroundColor),
+            .background(backgroundColor.copy(alpha = 0.85f)),
         contentAlignment = Alignment.Center
     ) {
         // Show placeholder (initials, person icon, or building icon)

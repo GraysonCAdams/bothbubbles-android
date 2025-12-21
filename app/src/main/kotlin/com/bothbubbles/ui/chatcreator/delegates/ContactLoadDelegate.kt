@@ -4,10 +4,12 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.data.repository.PopularChatsRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.PhoneContact
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.GroupChatUiModel
+import com.bothbubbles.ui.chatcreator.PopularChatUiModel
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
@@ -25,23 +27,33 @@ import javax.inject.Inject
  * This delegate handles:
  * - Loading contacts from Android contacts service
  * - Enriching contacts with iMessage availability from cached handles
- * - Marking recent and favorite contacts
+ * - Marking recent, popular, and favorite contacts
  * - Loading and filtering group chats
+ *
+ * Popular contacts are determined by message frequency in the last 30 days,
+ * using the [PopularChatsRepository] for engagement-based suggestions.
  */
 class ContactLoadDelegate @Inject constructor(
     private val handleRepository: HandleRepository,
     private val chatRepository: ChatRepository,
+    private val popularChatsRepository: PopularChatsRepository,
     private val androidContactsService: AndroidContactsService
 ) {
     /**
      * Data class containing loaded contacts data
      */
     data class ContactsData(
-        val recent: List<ContactUiModel>,
+        /** Top 5 popular chats (1:1 + groups mixed) based on message engagement */
+        val popularChats: List<PopularChatUiModel>,
+        /** Alphabetically grouped contacts */
         val grouped: Map<String, List<ContactUiModel>>,
+        /** Starred/favorite contacts */
         val favorites: List<ContactUiModel>,
+        /** Group chats available to join */
         val groupChats: List<GroupChatUiModel>,
+        /** Current search query */
         val query: String,
+        /** Whether app has contacts permission */
         val hasContactsPermission: Boolean
     )
 
@@ -53,6 +65,14 @@ class ContactLoadDelegate @Inject constructor(
     /**
      * Load all contacts and observe search query changes.
      * Returns a Flow that emits ContactsData whenever the search query changes.
+     *
+     * The "popular" section shows the top 5 chats (1:1 and groups) based on
+     * message engagement in the last 30 days.
+     *
+     * Deduplication behavior:
+     * - When NOT searching: Show one row per contact (Android contactId), using the
+     *   most recently used handle based on last message date
+     * - When searching: Show all handles for matching contacts (phone, email, etc.)
      */
     fun observeContacts(
         searchQueryFlow: Flow<String>,
@@ -74,9 +94,11 @@ class ContactLoadDelegate @Inject constructor(
             }
         }
 
-        // Get recent addresses from handle cross-references
-        val recentHandles = handleRepository.getRecentContacts().first()
-        val recentAddresses = recentHandles.map { normalizeAddress(it.address) }.toSet()
+        // Get last message dates per address for deduplication
+        val lastMessageDates = chatRepository.getLastMessageDatePerAddress()
+
+        // Get popular chats (1:1 + groups, top 5)
+        val popularChats = popularChatsRepository.getPopularChats(limit = MAX_POPULAR_CHATS)
 
         // Convert phone contacts to ContactUiModel entries
         // Each contact can have multiple phone numbers and emails
@@ -86,7 +108,6 @@ class ContactLoadDelegate @Inject constructor(
             for (phone in contact.phoneNumbers) {
                 val normalized = normalizeAddress(phone)
                 val service = handleServiceMap[normalized] ?: "SMS"
-                val isRecent = recentAddresses.contains(normalized)
                 allContacts.add(
                     ContactUiModel(
                         address = phone,
@@ -96,14 +117,16 @@ class ContactLoadDelegate @Inject constructor(
                         service = service,
                         avatarPath = contact.photoUri,
                         isFavorite = contact.isStarred,
-                        isRecent = isRecent
+                        isRecent = false,
+                        isPopular = false,
+                        contactId = contact.contactId,
+                        lastMessageDate = lastMessageDates[normalized]
                     )
                 )
             }
             // Add emails
             for (email in contact.emails) {
                 val normalized = normalizeAddress(email)
-                val isRecent = recentAddresses.contains(normalized)
                 allContacts.add(
                     ContactUiModel(
                         address = email,
@@ -113,17 +136,20 @@ class ContactLoadDelegate @Inject constructor(
                         service = "iMessage", // Emails are always iMessage
                         avatarPath = contact.photoUri,
                         isFavorite = contact.isStarred,
-                        isRecent = isRecent
+                        isRecent = false,
+                        isPopular = false,
+                        contactId = contact.contactId,
+                        lastMessageDate = lastMessageDates[normalized]
                     )
                 )
             }
         }
 
-        // De-duplicate by normalized address
-        val deduped = allContacts
+        // De-duplicate by normalized address (for same-address duplicates)
+        val addressDeduped = allContacts
             .groupBy { it.normalizedAddress }
             .map { (_, group) ->
-                // Prefer iMessage handle when both exist
+                // Prefer iMessage handle when both exist for same address
                 group.find { it.service == "iMessage" } ?: group.first()
             }
 
@@ -138,28 +164,44 @@ class ContactLoadDelegate @Inject constructor(
             },
             searchQueryFlow
         ) { groupChats, query ->
-            // Filter by search query
+            // Deduplication strategy depends on whether user is searching
             val filtered = if (query.isNotBlank()) {
-                deduped.filter { contact ->
+                // SEARCHING: Show all handles for matching contacts (not deduplicated by contact)
+                // This allows users to choose specific phone numbers/emails
+                addressDeduped.filter { contact ->
                     contact.displayName.contains(query, ignoreCase = true) ||
                         contact.address.contains(query, ignoreCase = true) ||
                         contact.formattedAddress.contains(query, ignoreCase = true)
                 }
             } else {
-                deduped
+                // NOT SEARCHING: Deduplicate by contactId, pick most recently used handle
+                // This shows one row per person using the handle they last messaged with
+                deduplicateByContact(addressDeduped)
             }
 
-            // Split into recent (up to 4) and rest
-            val recent = filtered
-                .filter { it.isRecent }
-                .take(4)
-            val recentNormalizedAddresses = recent.map { it.normalizedAddress }.toSet()
+            // Convert popular chats to UI models (only show when not searching)
+            val popularChatModels = if (query.isBlank()) {
+                popularChats.map { chat ->
+                    val service = if (!chat.isGroup && chat.identifier != null) {
+                        handleServiceMap[normalizeAddress(chat.identifier)] ?: "SMS"
+                    } else {
+                        ""  // Groups don't have a service indicator
+                    }
+                    PopularChatUiModel(
+                        chatGuid = chat.chatGuid,
+                        displayName = chat.displayName,
+                        isGroup = chat.isGroup,
+                        avatarPath = chat.avatarPath,
+                        service = service,
+                        identifier = chat.identifier
+                    )
+                }
+            } else {
+                emptyList()
+            }
 
-            // Rest excludes the recent ones we're showing at the top
-            val rest = filtered.filter { !recentNormalizedAddresses.contains(it.normalizedAddress) }
-
-            // Group rest by first letter of display name (excluding favorites)
-            val grouped = rest
+            // Group all contacts by first letter of display name (excluding favorites)
+            val grouped = filtered
                 .filter { !it.isFavorite }
                 .sortedBy { it.displayName.uppercase() }
                 .groupBy { contact ->
@@ -168,16 +210,41 @@ class ContactLoadDelegate @Inject constructor(
                 }
                 .toSortedMap()
 
-            val favorites = rest.filter { it.isFavorite }.sortedBy { it.displayName.uppercase() }
+            val favorites = filtered.filter { it.isFavorite }.sortedBy { it.displayName.uppercase() }
 
             // Convert group chats to UI model
             val groupChatModels = groupChats.map { it.toGroupChatUiModel() }
 
             // Return all data
-            ContactsData(recent, grouped, favorites, groupChatModels, query, hasPermission)
+            ContactsData(popularChatModels, grouped, favorites, groupChatModels, query, hasPermission)
         }.collect { data ->
             emit(data)
         }
+    }
+
+    /**
+     * Deduplicate contacts by Android contactId.
+     * For each contact (person), picks the handle (phone/email) that was most recently used.
+     * Falls back to iMessage preference, then first in list if no message history.
+     */
+    private fun deduplicateByContact(contacts: List<ContactUiModel>): List<ContactUiModel> {
+        return contacts
+            .groupBy { it.contactId ?: it.normalizedAddress.hashCode().toLong() }
+            .map { (_, group) ->
+                // Pick the handle with the most recent message date
+                val withMessages = group.filter { it.lastMessageDate != null }
+                if (withMessages.isNotEmpty()) {
+                    withMessages.maxByOrNull { it.lastMessageDate!! }!!
+                } else {
+                    // No message history - prefer iMessage, then first
+                    group.find { it.service == "iMessage" } ?: group.first()
+                }
+            }
+    }
+
+    companion object {
+        /** Maximum number of popular chats (1:1 + groups) to show */
+        private const val MAX_POPULAR_CHATS = 5
     }
 
     /**
@@ -226,7 +293,7 @@ class ContactLoadDelegate @Inject constructor(
             displayName = displayName ?: chatIdentifier ?: "Group Chat",
             lastMessage = lastMessageText,
             lastMessageTime = formattedTime,
-            avatarPath = customAvatarPath,
+            avatarPath = customAvatarPath ?: serverGroupPhotoPath,
             participantCount = 0 // Could be populated from cross-ref count
         )
     }

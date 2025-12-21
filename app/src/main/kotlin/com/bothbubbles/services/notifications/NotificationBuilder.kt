@@ -161,6 +161,9 @@ class NotificationBuilder @Inject constructor(
         // Use cached value to avoid blocking the notification thread
         val mergedGuids: String? = unifiedGroupCache[chatGuid]
 
+        // Debug: Log notification intent data to diagnose wrong-chat-navigation issues
+        Timber.d("NOTIFICATION_DEBUG: Building notification - chatGuid=$chatGuid, isGroup=$isGroup, mergedGuids=$mergedGuids, messageGuid=$messageGuid")
+
         // Create intent to open the chat (with message GUID for deep-link scrolling)
         val contentIntent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -229,19 +232,24 @@ class NotificationBuilder @Inject constructor(
 
         // Format display text - subject takes priority, then link preview, then message body
         // When subject is present, show ONLY the subject (like iOS does)
+        // IMPORTANT: Android Auto crashes if message text is empty, so ensure a fallback
         val displayText = when {
             subject != null -> if (subject.isBlank()) "(no subject)" else subject
             linkPreviewTitle != null && linkPreviewDomain != null -> "$linkPreviewTitle ($linkPreviewDomain)"
             linkPreviewTitle != null -> linkPreviewTitle
             linkPreviewDomain != null -> linkPreviewDomain
-            else -> messageText
+            messageText.isNotBlank() -> messageText
+            else -> "\uD83D\uDCCE Attachment" // Paperclip emoji + "Attachment" as fallback for empty text
         }
 
         // Create messaging style for conversation-like appearance
         // Android Auto requires MessagingStyle with proper sender info
+        // IMPORTANT: Android Auto crashes (NPE in NotificationListenerService) if Person name is empty
+        val senderDisplayName = (senderName ?: chatTitle).ifBlank { "Unknown" }
+        val senderKey = (senderAddress ?: chatGuid).ifBlank { "unknown-sender" }
         val senderBuilder = Person.Builder()
-            .setName(senderName ?: chatTitle)
-            .setKey(senderAddress ?: chatGuid)
+            .setName(senderDisplayName)
+            .setKey(senderKey)
 
         // Add avatar to sender Person - load contact photo as bitmap or generate one
         // Note: content:// URIs can't be passed directly to notifications because the
@@ -256,8 +264,7 @@ class NotificationBuilder @Inject constructor(
             } else {
                 // Photo load failed, generate fallback avatar
                 try {
-                    val displayName = senderName ?: chatTitle
-                    AvatarGenerator.generateAdaptiveIconCompat(context, displayName, 128)
+                    AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128)
                 } catch (e: Exception) {
                     Timber.w(e, "Failed to generate avatar bitmap")
                     null
@@ -266,8 +273,7 @@ class NotificationBuilder @Inject constructor(
         } else {
             // No contact photo available, generate avatar
             try {
-                val displayName = senderName ?: chatTitle
-                AvatarGenerator.generateAdaptiveIconCompat(context, displayName, 128)
+                AvatarGenerator.generateAdaptiveIconCompat(context, senderDisplayName, 128)
             } catch (e: Exception) {
                 Timber.w(e, "Failed to generate avatar bitmap")
                 null
@@ -296,8 +302,10 @@ class NotificationBuilder @Inject constructor(
             }
         }
 
+        // Ensure group conversation title is never empty (Android Auto compatibility)
+        val safeConversationTitle = if (isGroup && chatTitle.isNotBlank()) chatTitle else null
         val messagingStyle = NotificationCompat.MessagingStyle(deviceUser)
-            .setConversationTitle(if (isGroup) chatTitle else null)
+            .setConversationTitle(safeConversationTitle)
             .setGroupConversation(isGroup)
             .addMessage(message)
 
@@ -679,6 +687,54 @@ class NotificationBuilder @Inject constructor(
         return NotificationCompat.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.stat_notify_error)
             .setContentTitle("Message not delivered to $chatTitle")
+            .setContentText(contentText)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("$contentText\n\n$errorMessage")
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
+            .build()
+    }
+
+    /**
+     * Build grouped notification for multiple failed message deliveries.
+     * Used when a message fails and cascades to dependent messages, to prevent notification spam.
+     */
+    fun buildMessagesFailedNotification(
+        channelId: String,
+        chatGuid: String,
+        chatTitle: String,
+        failedCount: Int,
+        errorMessage: String
+    ): android.app.Notification {
+        // Look up if this chat is part of a unified group (for merged iMessage/SMS navigation)
+        val mergedGuids: String? = unifiedGroupCache[chatGuid]
+
+        // Create intent to open the chat
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, chatGuid)
+            if (mergedGuids != null) {
+                putExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS, mergedGuids)
+            }
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            chatGuid.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val title = "$failedCount messages not delivered to $chatTitle"
+        val contentText = "Tap to view failed messages"
+
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle(title)
             .setContentText(contentText)
             .setStyle(
                 NotificationCompat.BigTextStyle()

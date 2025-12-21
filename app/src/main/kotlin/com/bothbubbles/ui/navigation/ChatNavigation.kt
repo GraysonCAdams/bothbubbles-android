@@ -20,6 +20,7 @@ import com.bothbubbles.ui.chat.details.MediaLinksScreen
 import com.bothbubbles.ui.chat.details.PlacesScreen
 import com.bothbubbles.ui.chatcreator.ChatCreatorScreen
 import com.bothbubbles.ui.chatcreator.GroupCreatorScreen
+import com.bothbubbles.ui.compose.ComposeScreen
 import com.bothbubbles.ui.media.MediaViewerScreen
 import timber.log.Timber
 
@@ -118,7 +119,7 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         )
     }
 
-    // New chat creator
+    // New chat creator (legacy - kept for backwards compatibility)
     composable<Screen.ChatCreator> { backStackEntry ->
         val route: Screen.ChatCreator = backStackEntry.toRoute()
         ChatCreatorScreen(
@@ -130,6 +131,18 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             },
             onNavigateToGroupSetup = { participantsJson, groupService ->
                 navController.navigate(Screen.GroupSetup(participantsJson, groupService))
+            }
+        )
+    }
+
+    // Apple-style compose screen (new)
+    composable<Screen.Compose> {
+        ComposeScreen(
+            onNavigateBack = { navController.popBackStack() },
+            onNavigateToChat = { chatGuid ->
+                navController.navigate(Screen.Chat(chatGuid)) {
+                    popUpTo(Screen.Conversations) { inclusive = false }
+                }
             }
         )
     }

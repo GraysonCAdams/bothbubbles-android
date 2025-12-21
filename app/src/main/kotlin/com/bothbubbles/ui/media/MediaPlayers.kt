@@ -2,6 +2,7 @@ package com.bothbubbles.ui.media
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -59,12 +60,26 @@ internal fun ZoomableImage(
                         val zoom = event.calculateZoom()
                         val pan = event.calculatePan()
 
-                        // Always handle zoom
+                        // Handle zoom - anchor to pinch centroid so it feels natural
                         if (zoom != 1f) {
-                            scale = (scale * zoom).coerceIn(0.5f, 5f)
-                            if (scale <= 1f) {
+                            val oldScale = scale
+                            val newScale = (scale * zoom).coerceIn(0.5f, 5f)
+
+                            if (newScale <= 1f) {
+                                // Reset when zoomed out to 1x or below
                                 offset = Offset.Zero
+                            } else {
+                                // Calculate effective zoom after clamping
+                                val effectiveZoom = newScale / oldScale
+
+                                // Anchor zoom to pinch centroid:
+                                // Adjust offset so the point under the centroid stays fixed
+                                val centroid = event.calculateCentroid(useCurrent = false)
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                offset = offset * effectiveZoom + (centroid - center) * (1 - effectiveZoom)
                             }
+
+                            scale = newScale
                             event.changes.forEach { it.consume() }
                         }
 
@@ -82,13 +97,17 @@ internal fun ZoomableImage(
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { onTap() },
-                    onDoubleTap = {
-                        // Double tap to toggle zoom
+                    onDoubleTap = { tapOffset ->
+                        // Double tap to toggle zoom, centered on tap location
                         if (scale > 1f) {
                             scale = 1f
                             offset = Offset.Zero
                         } else {
-                            scale = 2.5f
+                            val targetScale = 2.5f
+                            val center = Offset(size.width / 2f, size.height / 2f)
+                            // Zoom in centered on the tap point
+                            offset = (tapOffset - center) * (1 - targetScale)
+                            scale = targetScale
                         }
                     }
                 )

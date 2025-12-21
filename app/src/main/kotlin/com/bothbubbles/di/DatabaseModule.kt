@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.Life360Dao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.PopularChatsDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
@@ -185,5 +186,11 @@ object DatabaseModule {
     @Singleton
     fun provideLife360Dao(database: BothBubblesDatabase): Life360Dao {
         return database.life360Dao()
+    }
+
+    @Provides
+    @Singleton
+    fun providePopularChatsDao(database: BothBubblesDatabase): PopularChatsDao {
+        return database.popularChatsDao()
     }
 }

@@ -345,6 +345,13 @@ class ChatComposerDelegate @AssistedInject constructor(
                 null
             }
 
+            // [DICTATION_DEBUG] Log ComposerState emissions (text changes flow through here)
+            if (text.isNotEmpty()) {
+                Timber.tag("DICTATION_DEBUG").d(
+                    "ComposerState emit: text='${text.takeLast(10)}' len=${text.length}, panel=$panel, focused=$textFieldFocused"
+                )
+            }
+
             ComposerState(
                 text = text,
                 isTextFieldFocused = textFieldFocused,
@@ -417,7 +424,7 @@ class ChatComposerDelegate @AssistedInject constructor(
         when (event) {
             is ComposerEvent.TextChanged -> {
                 // [DICTATION_DEBUG] Normal text change from UI - this is the expected path
-                Timber.tag("DICTATION_DEBUG").v(
+                Timber.tag("DICTATION_DEBUG").d(
                     "TextChanged event: len=${event.text.length}, last15='${event.text.takeLast(15)}'"
                 )
                 _draftText.value = event.text

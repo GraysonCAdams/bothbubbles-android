@@ -103,7 +103,8 @@ class PendingMessageRepository @Inject constructor(
         attachments: List<PendingAttachmentInput>,
         deliveryMode: MessageDeliveryMode,
         forcedLocalId: String?,
-        attributedBodyJson: String?
+        attributedBodyJson: String?,
+        splitBatchId: String?
     ): Result<String> = runCatching {
         val createdAt = System.currentTimeMillis()
 
@@ -152,6 +153,11 @@ class PendingMessageRepository @Inject constructor(
         // Determine message source based on delivery mode
         val messageSource = inferMessageSource(chatGuid, deliveryMode)
 
+        // Check for existing pending/sending messages in this chat for dependency ordering
+        // This must be done BEFORE the transaction to avoid deadlocks
+        val latestPending = pendingMessageDao.getLatestPendingOrSending(chatGuid)
+        val dependsOnLocalId = latestPending?.localId
+
         // Persist attachments to internal storage first (outside transaction for I/O)
         val persistedAttachments = if (attachments.isNotEmpty()) {
             attachments.mapIndexedNotNull { index, input ->
@@ -192,7 +198,9 @@ class PendingMessageRepository @Inject constructor(
                 deliveryMode = deliveryMode.name,
                 syncStatus = PendingSyncStatus.PENDING.name,
                 createdAt = createdAt,
-                attributedBodyJson = attributedBodyJson
+                attributedBodyJson = attributedBodyJson,
+                dependsOnLocalId = dependsOnLocalId,
+                splitBatchId = splitBatchId
             )
             val pendingId = pendingMessageDao.insert(pendingMessage)
 
@@ -225,7 +233,8 @@ class PendingMessageRepository @Inject constructor(
                 hasAttachments = persistedAttachments.isNotEmpty(),
                 threadOriginatorGuid = replyToGuid,
                 expressiveSendStyleId = effectId,
-                messageSource = messageSource.name
+                messageSource = messageSource.name,
+                splitBatchId = splitBatchId
             )
             messageDao.insertMessage(localEcho)
 
@@ -478,7 +487,7 @@ class PendingMessageRepository @Inject constructor(
     override suspend fun getUnsentCount(): Int = pendingMessageDao.getUnsentCount()
 
     /**
-     * Verify stuck SENDING messages with the server on app startup.
+     * Verify stuck SENDING/PENDING messages with the server on app startup.
      * Also syncs FAILED pending messages where the MessageEntity error wasn't set.
      *
      * For each message in SENDING state:
@@ -486,15 +495,22 @@ class PendingMessageRepository @Inject constructor(
      * - If delivered (error = 0) → mark as SENT
      * - If not delivered or no serverGuid → mark as FAILED
      *
+     * For each message in PENDING state:
+     * - Mark as FAILED (app was killed before send started)
+     *
      * For each message in FAILED state:
      * - Ensure the MessageEntity error field is set (sync from pending to messages table)
+     * - Cascade failure to dependent messages
      *
      * This prevents messages from being stuck in "sending" state forever after app kill.
      * Does NOT re-attempt sending - just verifies and marks appropriately.
+     *
+     * @return StartupFailureResult containing count and grouped failure info for notifications
      */
     override suspend fun verifyAndFailStuckMessages(): Int {
         try {
             var verifiedCount = 0
+            val failedMessagesByChat = mutableMapOf<String, MutableList<String>>()
 
             // 1. Handle SENDING messages - verify with server
             val sendingMessages = pendingMessageDao.getByStatus(PendingSyncStatus.SENDING.name)
@@ -535,7 +551,7 @@ class PendingMessageRepository @Inject constructor(
                         "Message not confirmed delivered by server"
                     }
 
-                    Timber.w("Marking stuck message as FAILED: $localId (serverGuid=$serverGuid)")
+                    Timber.w("Marking stuck SENDING message as FAILED: $localId (serverGuid=$serverGuid)")
                     pendingMessageDao.updateStatusWithError(
                         message.id,
                         PendingSyncStatus.FAILED.name,
@@ -544,11 +560,39 @@ class PendingMessageRepository @Inject constructor(
                     )
                     // Update MessageEntity so UI shows as failed
                     messageDao.updateMessageError(localId, 1, errorMessage)
+
+                    // Track for grouped notification
+                    failedMessagesByChat.getOrPut(message.chatGuid) { mutableListOf() }.add(localId)
                     verifiedCount++
                 }
             }
 
-            // 2. Sync FAILED pending messages - ensure MessageEntity error is set
+            // 2. Handle PENDING messages - mark as failed (app killed before send started)
+            val pendingMessages = pendingMessageDao.getByStatus(PendingSyncStatus.PENDING.name)
+            if (pendingMessages.isNotEmpty()) {
+                Timber.i("Found ${pendingMessages.size} stuck PENDING messages, marking as failed...")
+
+                for (message in pendingMessages) {
+                    val localId = message.localId
+                    val errorMessage = "App was closed before message could be sent"
+
+                    Timber.w("Marking stuck PENDING message as FAILED: $localId")
+                    pendingMessageDao.updateStatusWithError(
+                        message.id,
+                        PendingSyncStatus.FAILED.name,
+                        errorMessage,
+                        System.currentTimeMillis()
+                    )
+                    // Update MessageEntity so UI shows as failed
+                    messageDao.updateMessageError(localId, 1, errorMessage)
+
+                    // Track for grouped notification
+                    failedMessagesByChat.getOrPut(message.chatGuid) { mutableListOf() }.add(localId)
+                    verifiedCount++
+                }
+            }
+
+            // 3. Sync FAILED pending messages - ensure MessageEntity error is set
             // This handles messages that failed before the fix was installed
             val failedMessages = pendingMessageDao.getByStatus(PendingSyncStatus.FAILED.name)
             if (failedMessages.isNotEmpty()) {
@@ -570,10 +614,129 @@ class PendingMessageRepository @Inject constructor(
             if (verifiedCount > 0) {
                 Timber.i("Verified/synced $verifiedCount stuck messages")
             }
+
+            // Log grouped failure info for debugging
+            if (failedMessagesByChat.isNotEmpty()) {
+                for ((chatGuid, localIds) in failedMessagesByChat) {
+                    Timber.i("Chat $chatGuid: ${localIds.size} messages failed at startup")
+                }
+            }
+
             return verifiedCount
         } catch (e: Exception) {
             Timber.e(e, "Error verifying stuck messages")
             return 0
         }
     }
+
+    /**
+     * Cascade failure to all messages that depend on a failed message.
+     *
+     * When a message fails, all subsequent messages in the same chat that were queued
+     * after it (and depend on it) should also fail. This prevents out-of-order delivery.
+     *
+     * This method:
+     * 1. Finds all messages that directly or transitively depend on the failed message
+     * 2. Marks them all as FAILED
+     * 3. Updates their corresponding MessageEntity error fields
+     * 4. Returns the list of failed messages for grouped notification
+     *
+     * @param failedLocalId The localId of the message that failed
+     * @param errorMessage The error message to apply to dependent messages
+     * @return List of all cascade-failed messages (not including the original)
+     */
+    suspend fun cascadeFailureToDependents(
+        failedLocalId: String,
+        errorMessage: String
+    ): List<PendingMessageEntity> {
+        val cascadedMessages = mutableListOf<PendingMessageEntity>()
+        val processedIds = mutableSetOf<String>()
+        val toProcess = mutableListOf(failedLocalId)
+
+        // Iteratively find all transitive dependents
+        while (toProcess.isNotEmpty()) {
+            val currentLocalId = toProcess.removeAt(0)
+            if (currentLocalId in processedIds) continue
+            processedIds.add(currentLocalId)
+
+            val dependents = pendingMessageDao.getDirectDependents(currentLocalId)
+            for (dependent in dependents) {
+                if (dependent.localId !in processedIds) {
+                    // Mark this dependent as failed
+                    pendingMessageDao.updateStatusWithError(
+                        dependent.id,
+                        PendingSyncStatus.FAILED.name,
+                        "Blocked by failed message: $errorMessage",
+                        System.currentTimeMillis()
+                    )
+
+                    // Update the MessageEntity so UI shows as failed
+                    messageDao.updateMessageError(
+                        dependent.localId,
+                        1,
+                        "Blocked by failed message"
+                    )
+
+                    cascadedMessages.add(dependent)
+                    toProcess.add(dependent.localId)
+                }
+            }
+        }
+
+        if (cascadedMessages.isNotEmpty()) {
+            Timber.i("Cascade failed ${cascadedMessages.size} dependent messages from $failedLocalId")
+        }
+
+        return cascadedMessages
+    }
+
+    /**
+     * Get dependency status for a pending message.
+     * Used by MessageSendWorker to check if dependencies are satisfied.
+     *
+     * @return Triple of (dependsOnLocalId, dependencyStatus, dependencyErrorMessage)
+     *         Returns null if no dependency exists
+     */
+    suspend fun getDependencyStatus(localId: String): DependencyStatus? {
+        val pending = pendingMessageDao.getByLocalId(localId) ?: return null
+        val dependsOn = pending.dependsOnLocalId ?: return null
+
+        val dependency = pendingMessageDao.getByLocalId(dependsOn)
+            ?: return DependencyStatus(dependsOn, DependencyState.NOT_FOUND, null)
+
+        val state = when (dependency.syncStatus) {
+            PendingSyncStatus.SENT.name -> DependencyState.SENT
+            PendingSyncStatus.FAILED.name -> DependencyState.FAILED
+            PendingSyncStatus.SENDING.name -> DependencyState.SENDING
+            PendingSyncStatus.PENDING.name -> DependencyState.PENDING
+            else -> DependencyState.NOT_FOUND
+        }
+
+        return DependencyStatus(dependsOn, state, dependency.errorMessage)
+    }
+}
+
+/**
+ * Result of checking a message's dependency status.
+ */
+data class DependencyStatus(
+    val dependsOnLocalId: String,
+    val state: DependencyState,
+    val errorMessage: String?
+)
+
+/**
+ * Possible states of a dependency message.
+ */
+enum class DependencyState {
+    /** Dependency was sent successfully - this message can proceed */
+    SENT,
+    /** Dependency failed - this message should also fail */
+    FAILED,
+    /** Dependency is currently being sent - wait and re-check */
+    SENDING,
+    /** Dependency is queued but not started - wait and re-check */
+    PENDING,
+    /** Dependency message not found (was deleted or cleaned up) - proceed anyway */
+    NOT_FOUND
 }

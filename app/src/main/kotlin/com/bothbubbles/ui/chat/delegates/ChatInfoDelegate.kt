@@ -10,6 +10,7 @@ import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.Life360Repository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
+import com.bothbubbles.services.life360.Life360Service
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.sms.SmsPermissionHelper
 import com.bothbubbles.ui.chat.state.ChatInfoState
@@ -25,8 +26,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -42,7 +45,6 @@ import kotlinx.coroutines.launch
  * Uses AssistedInject to receive runtime parameters at construction time,
  * eliminating the need for a separate initialize() call.
  */
-@OptIn(ExperimentalCoroutinesApi::class)
 class ChatInfoDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
@@ -51,6 +53,7 @@ class ChatInfoDelegate @AssistedInject constructor(
     private val smsPermissionHelper: SmsPermissionHelper,
     private val discordContactService: DiscordContactService,
     private val life360Repository: Life360Repository,
+    private val life360Service: Life360Service,
     private val featurePreferences: FeaturePreferences,
     @Assisted private val chatGuid: String,
     @Assisted private val scope: CoroutineScope,
@@ -217,26 +220,48 @@ class ChatInfoDelegate @AssistedInject constructor(
     /**
      * Observe Life360 location for the first participant (1:1 chats only).
      * Updates locationSubtext with place name, address, or "Location unavailable" if stale.
+     * Also triggers a sync when a linked member is first detected.
+     *
+     * Uses Life360Repository.observeMembersByPhoneNumbers for phoneNumber matching,
+     * which works reliably even before autoMapContacts runs.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeLife360Location() {
+        // Track if we've already synced this member to avoid repeated API calls
+        var hasSyncedMember = false
+
         scope.launch {
+            // Get participant addresses, then observe matching Life360 members
             chatRepository.observeParticipantsForChat(chatGuid)
                 .flatMapLatest { participants ->
                     // Only for 1:1 chats
                     if (_state.value.isGroup) return@flatMapLatest flowOf(null)
 
-                    // Use address-based lookup to work across iMessage/SMS handles
-                    val address = participants.firstOrNull()?.address
-                    if (!address.isNullOrBlank()) {
-                        life360Repository.observeMemberByLinkedAddress(address)
-                    } else {
-                        flowOf(null)
-                    }
+                    val addresses = participants.map { it.address }.toSet()
+                    if (addresses.isEmpty()) return@flatMapLatest flowOf(null)
+
+                    // Use shared repository function for phoneNumber matching
+                    life360Repository.observeMembersByPhoneNumbers(addresses)
+                        .map { members -> members.firstOrNull() }
                 }
                 .collect { member ->
                     if (member == null) {
                         _state.update { it.copy(locationSubtext = null, life360Member = null) }
+                        hasSyncedMember = false
                         return@collect
+                    }
+
+                    // Trigger a sync on first detection to get fresh location data
+                    if (!hasSyncedMember && featurePreferences.life360Enabled.first()) {
+                        hasSyncedMember = true
+                        scope.launch {
+                            try {
+                                life360Service.syncMember(member.circleId, member.memberId)
+                                Timber.d("$TAG: Synced Life360 member ${member.memberId} for chat $chatGuid")
+                            } catch (e: Exception) {
+                                Timber.w(e, "$TAG: Failed to sync Life360 member")
+                            }
+                        }
                     }
 
                     val location = member.location

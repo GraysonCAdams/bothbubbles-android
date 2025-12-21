@@ -46,7 +46,8 @@ data class ChatDto(
     @Json(name = "style") val style: Int? = null,
     @Json(name = "isArchived") val isArchived: Boolean = false,
     @Json(name = "isPinned") val isPinned: Boolean = false,
-    @Json(name = "hasUnreadMessage") val hasUnreadMessage: Boolean = false
+    @Json(name = "hasUnreadMessage") val hasUnreadMessage: Boolean = false,
+    @Json(name = "groupPhotoGuid") val groupPhotoGuid: String? = null
 )
 
 /**

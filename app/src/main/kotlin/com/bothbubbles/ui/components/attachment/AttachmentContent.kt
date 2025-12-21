@@ -35,6 +35,8 @@ import timber.log.Timber
  * @param uploadProgress Upload progress (0.0 to 1.0) for outbound attachments being uploaded
  * @param onRetryClick Optional callback for retrying failed downloads
  * @param isRetrying Whether a retry is currently in progress
+ * @param onLongPress Optional callback for long press on images/GIFs (e.g., for tapback menu).
+ *                    If null, long press will open the media viewer.
  */
 @Composable
 fun AttachmentContent(
@@ -48,7 +50,8 @@ fun AttachmentContent(
     downloadProgress: Float = 0f,
     uploadProgress: Float = 0f,
     onRetryClick: ((String) -> Unit)? = null,
-    isRetrying: Boolean = false
+    isRetrying: Boolean = false,
+    onLongPress: (() -> Unit)? = null
 ) {
     // Show error overlay for failed attachments with error details
     val showError = attachment.hasError && !isDownloading && !isRetrying
@@ -114,7 +117,7 @@ fun AttachmentContent(
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) },
                     onTimestampAreaClick = onTimestampToggle,
-                    onLongPress = { onMediaClick(attachment.guid) },
+                    onLongPress = onLongPress ?: { onMediaClick(attachment.guid) },
                     isUploading = isUploading,
                     uploadProgress = effectiveUploadProgress
                 )
@@ -124,7 +127,7 @@ fun AttachmentContent(
                 interactions = AttachmentInteractions(
                     onClick = { onMediaClick(attachment.guid) },
                     onTimestampAreaClick = onTimestampToggle,
-                    onLongPress = { onMediaClick(attachment.guid) },
+                    onLongPress = onLongPress ?: { onMediaClick(attachment.guid) },
                     isUploading = isUploading,
                     uploadProgress = effectiveUploadProgress
                 )
@@ -211,6 +214,8 @@ fun AttachmentContent(
  * @param messageGuid The message GUID (used for deterministic sticker rotation)
  * @param onRetryClick Optional callback for retrying failed downloads
  * @param isRetrying Whether a retry is currently in progress
+ * @param onLongPress Optional callback for long press on images/GIFs (e.g., for tapback menu).
+ *                    If null, long press will open the media viewer.
  */
 @Composable
 fun BorderlessMediaContent(
@@ -226,7 +231,8 @@ fun BorderlessMediaContent(
     isPlacedSticker: Boolean = false,
     messageGuid: String = "",
     onRetryClick: ((String) -> Unit)? = null,
-    isRetrying: Boolean = false
+    isRetrying: Boolean = false,
+    onLongPress: (() -> Unit)? = null
 ) {
     // Show error overlay for failed attachments with error details
     val showError = attachment.hasError && !isDownloading && !isRetrying
@@ -284,7 +290,7 @@ fun BorderlessMediaContent(
             interactions = AttachmentInteractions(
                 onClick = { onMediaClick(attachment.guid) },
                 onTimestampAreaClick = onTimestampToggle,
-                onLongPress = { onMediaClick(attachment.guid) }
+                onLongPress = onLongPress ?: { onMediaClick(attachment.guid) }
             ),
             maxWidth = effectiveMaxWidth,
             modifier = modifier,
@@ -296,7 +302,7 @@ fun BorderlessMediaContent(
             interactions = AttachmentInteractions(
                 onClick = { onMediaClick(attachment.guid) },
                 onTimestampAreaClick = onTimestampToggle,
-                onLongPress = { onMediaClick(attachment.guid) }
+                onLongPress = onLongPress ?: { onMediaClick(attachment.guid) }
             ),
             maxWidth = effectiveMaxWidth,
             modifier = modifier,

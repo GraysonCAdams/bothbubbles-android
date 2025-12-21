@@ -1,5 +1,6 @@
 package com.bothbubbles.data.local.db.dao
 
+import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Query
 import com.bothbubbles.data.local.db.entity.ChatEntity
@@ -11,6 +12,15 @@ import kotlinx.coroutines.flow.Flow
  */
 @Dao
 interface ChatQueryDao {
+
+    /**
+     * Data class for address -> last message date mapping.
+     * Used for contact deduplication - determines which handle was most recently used.
+     */
+    data class AddressLastMessageDate(
+        @ColumnInfo(name = "chat_identifier") val chatIdentifier: String,
+        @ColumnInfo(name = "latest_message_date") val latestMessageDate: Long
+    )
 
     @Query("""
         SELECT * FROM chats
@@ -226,4 +236,19 @@ interface ChatQueryDao {
         limit: Int,
         offset: Int
     ): List<String>
+
+    /**
+     * Get the most recent message date for each chat identifier (phone/email).
+     * Used for contact deduplication - determines which handle was most recently used.
+     * Only returns non-group chats with a chat_identifier.
+     */
+    @Query("""
+        SELECT chat_identifier, latest_message_date
+        FROM chats
+        WHERE date_deleted IS NULL
+        AND is_group = 0
+        AND chat_identifier IS NOT NULL
+        AND latest_message_date IS NOT NULL
+    """)
+    suspend fun getLastMessageDatePerAddress(): List<AddressLastMessageDate>
 }

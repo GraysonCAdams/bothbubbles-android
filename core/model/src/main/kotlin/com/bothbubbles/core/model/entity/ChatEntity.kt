@@ -69,6 +69,14 @@ data class ChatEntity(
     @ColumnInfo(name = "custom_avatar_path")
     val customAvatarPath: String? = null,
 
+    // Server-provided group photo (from iMessage group settings)
+    // The guid is used to detect changes, the path is the local downloaded file
+    @ColumnInfo(name = "server_group_photo_guid")
+    val serverGroupPhotoGuid: String? = null,
+
+    @ColumnInfo(name = "server_group_photo_path")
+    val serverGroupPhotoPath: String? = null,
+
     // App-level notification mute toggle (independent of Android channel settings)
     @ColumnInfo(name = "notifications_enabled", defaultValue = "1")
     val notificationsEnabled: Boolean = true,

@@ -33,6 +33,7 @@ interface PendingMessageSource {
      * @param deliveryMode Delivery mode (AUTO, IMESSAGE, LOCAL_SMS, LOCAL_MMS)
      * @param forcedLocalId Optional local ID (for retry scenarios)
      * @param attributedBodyJson JSON representation of attributedBody for mentions
+     * @param splitBatchId Groups related messages composed together (text + attachments split)
      * @return Local ID (temp GUID) of the queued message for UI tracking
      */
     suspend fun queueMessage(
@@ -44,7 +45,8 @@ interface PendingMessageSource {
         attachments: List<PendingAttachmentInput> = emptyList(),
         deliveryMode: MessageDeliveryMode = MessageDeliveryMode.AUTO,
         forcedLocalId: String? = null,
-        attributedBodyJson: String? = null
+        attributedBodyJson: String? = null,
+        splitBatchId: String? = null
     ): Result<String>
 
     /**
@@ -113,12 +115,15 @@ interface PendingMessageSource {
     suspend fun getUnsentCount(): Int
 
     /**
-     * Verify stuck SENDING messages with the server on app startup.
+     * Verify stuck SENDING/PENDING messages with the server on app startup.
      *
      * For each message in SENDING state:
      * - If serverGuid exists, check with server if it was delivered
      * - If delivered → mark as SENT
      * - If not delivered or no serverGuid → mark as FAILED
+     *
+     * For each message in PENDING state:
+     * - Mark as FAILED (app was killed before send started)
      *
      * This prevents messages from being stuck in "sending" state forever after app kill.
      * Does NOT re-attempt sending - just verifies and marks appropriately.

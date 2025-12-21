@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.bothbubbles.ui.chatcreator.delegates.ChatCreationDelegate
 import com.bothbubbles.ui.chatcreator.delegates.ContactLoadDelegate
 import com.bothbubbles.ui.chatcreator.delegates.ContactSearchDelegate
+import com.bothbubbles.ui.chatcreator.delegates.ConversationPreviewDelegate
 import com.bothbubbles.ui.chatcreator.delegates.RecipientSelectionDelegate
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -20,13 +21,15 @@ import javax.inject.Inject
  * - ContactSearchDelegate: Search functionality and address validation
  * - RecipientSelectionDelegate: Managing selected recipients
  * - ChatCreationDelegate: Creating chats and handling navigation
+ * - ConversationPreviewDelegate: Loading conversation previews for selected recipients
  */
 @HiltViewModel
 class ChatCreatorViewModel @Inject constructor(
     private val contactLoadDelegate: ContactLoadDelegate,
     private val contactSearchDelegate: ContactSearchDelegate,
     private val recipientSelectionDelegate: RecipientSelectionDelegate,
-    private val chatCreationDelegate: ChatCreationDelegate
+    private val chatCreationDelegate: ChatCreationDelegate,
+    private val conversationPreviewDelegate: ConversationPreviewDelegate
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ChatCreatorUiState())
@@ -52,7 +55,7 @@ class ChatCreatorViewModel @Inject constructor(
                 _uiState.update { currentState ->
                     currentState.copy(
                         searchQuery = contactsData.query,
-                        recentContacts = contactsData.recent,
+                        popularChats = contactsData.popularChats,
                         groupedContacts = contactsData.grouped,
                         favoriteContacts = contactsData.favorites,
                         groupChats = contactsData.groupChats,
@@ -86,9 +89,18 @@ class ChatCreatorViewModel @Inject constructor(
      */
     private fun observeDelegateStates() {
         viewModelScope.launch {
-            // Observe selected recipients
+            // Observe selected recipients and load conversation preview
             recipientSelectionDelegate.selectedRecipients.collect { recipients ->
                 _uiState.update { it.copy(selectedRecipients = recipients) }
+                // Load conversation preview for selected recipients
+                conversationPreviewDelegate.loadPreviewForRecipients(recipients, viewModelScope)
+            }
+        }
+
+        viewModelScope.launch {
+            // Observe conversation preview state
+            conversationPreviewDelegate.conversationPreview.collect { preview ->
+                _uiState.update { it.copy(conversationPreview = preview) }
             }
         }
 
@@ -291,6 +303,28 @@ class ChatCreatorViewModel @Inject constructor(
      */
     fun selectGroupChat(groupChat: GroupChatUiModel) {
         chatCreationDelegate.selectGroupChat(groupChat)
+    }
+
+    /**
+     * Select a popular chat from the Popular section.
+     * - For group chats: Navigate directly to the chat
+     * - For 1:1 chats: Add as a recipient chip (allowing user to add more people)
+     */
+    fun selectPopularChat(popularChat: PopularChatUiModel) {
+        if (popularChat.isGroup) {
+            // Navigate directly to group chat
+            chatCreationDelegate.selectGroupChatByGuid(popularChat.chatGuid)
+        } else {
+            // Add as recipient chip for 1:1 chat
+            val recipient = SelectedRecipient(
+                address = popularChat.identifier ?: return,
+                displayName = popularChat.displayName,
+                service = popularChat.service,
+                avatarPath = popularChat.avatarPath,
+                isManualEntry = false
+            )
+            recipientSelectionDelegate.addSelectedRecipient(recipient)
+        }
     }
 
     /**

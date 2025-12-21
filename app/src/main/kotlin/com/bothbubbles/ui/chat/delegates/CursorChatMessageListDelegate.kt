@@ -267,6 +267,9 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
     // ============================================================================
 
     init {
+        // Debug: Log the chat identifiers to diagnose wrong-chat-navigation issues
+        Timber.d("NOTIFICATION_DEBUG: CursorChatMessageListDelegate init - chatGuid=$chatGuid, mergedChatGuids=$mergedChatGuids")
+
         // Persist queryLimit to SavedStateHandle on changes
         scope.launch {
             _queryLimit.collect { limit ->
@@ -335,6 +338,14 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             .map { messages -> insertDateSeparators(messages) }
             .flowOn(Dispatchers.Default)
             .collect { items ->
+                // [DICTATION_DEBUG] Log when messages Flow emits (could trigger recomposition)
+                val msgCount = items.filterIsInstance<ChatListItem.Message>().size
+                val newestGuid = items.filterIsInstance<ChatListItem.Message>()
+                    .firstOrNull()?.message?.guid?.takeLast(8)
+                Timber.tag("DICTATION_DEBUG").d(
+                    "Messages Flow emitted: $msgCount messages, newest=$newestGuid"
+                )
+
                 _chatListItems.value = items
                 _messagesState.value = items
                     .filterIsInstance<ChatListItem.Message>()
@@ -730,7 +741,8 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             senderAvatarPath = null,
             messageSource = queuedInfo.messageSource,
             expressiveSendStyleId = queuedInfo.effectId,
-            threadOriginatorGuid = queuedInfo.replyToGuid
+            threadOriginatorGuid = queuedInfo.replyToGuid,
+            splitBatchId = queuedInfo.splitBatchId
         )
 
         _optimisticMessages.update { current ->
@@ -884,6 +896,12 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             return false
         }
 
+        // Debug: Log message details to diagnose wrong-chat-navigation issues
+        Timber.d("NOTIFICATION_DEBUG: jumpToMessage - targetGuid=$targetGuid, message.chatGuid=${message.chatGuid}, delegate.chatGuid=$chatGuid, delegate.mergedChatGuids=$mergedChatGuids")
+        if (message.chatGuid != chatGuid && message.chatGuid !in mergedChatGuids) {
+            Timber.w("NOTIFICATION_DEBUG: Message chatGuid (${message.chatGuid}) doesn't match delegate chatGuids! This will cause wrong messages to display.")
+        }
+
         _viewMode.value = ChatViewMode.Archive(
             targetGuid = targetGuid,
             targetTimestamp = message.dateCreated,
@@ -1020,6 +1038,11 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                 val newestMessage = _messagesState.value.firstOrNull()
                 val afterTimestamp = newestMessage?.dateCreated
 
+                // [DICTATION_DEBUG] Log polling parameters
+                Timber.tag("DICTATION_DEBUG").d(
+                    "Adaptive poll: afterTimestamp=$afterTimestamp, newestGuid=${newestMessage?.guid?.takeLast(8)}"
+                )
+
                 try {
                     val result = messageRepository.syncMessagesForChat(
                         chatGuid = chatGuid,
@@ -1029,9 +1052,12 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                     result.onSuccess { messages ->
                         if (messages.isNotEmpty()) {
                             Timber.tag(TAG).d("Adaptive polling found ${messages.size} missed messages")
-                            // [DICTATION_DEBUG] New messages may trigger UI updates
-                            Timber.tag("DICTATION_DEBUG").d(
-                                "Adaptive poll found ${messages.size} new messages - may trigger recomposition"
+                            // [DICTATION_DEBUG] Log details about found messages
+                            val msgDetails = messages.take(3).joinToString { m ->
+                                "guid=${m.guid.takeLast(8)},date=${m.dateCreated}"
+                            }
+                            Timber.tag("DICTATION_DEBUG").w(
+                                "Adaptive poll found ${messages.size} msgs (afterTs=$afterTimestamp): $msgDetails"
                             )
                         }
                     }

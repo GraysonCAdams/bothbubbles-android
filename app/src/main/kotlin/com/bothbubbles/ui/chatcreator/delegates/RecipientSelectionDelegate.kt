@@ -140,6 +140,13 @@ class RecipientSelectionDelegate @Inject constructor(
     }
 
     /**
+     * Add a pre-built SelectedRecipient (e.g., from popular chat selection)
+     */
+    fun addSelectedRecipient(recipient: SelectedRecipient) {
+        addRecipientInternal(recipient)
+    }
+
+    /**
      * Internal method to add a recipient to the list
      */
     private fun addRecipientInternal(recipient: SelectedRecipient) {

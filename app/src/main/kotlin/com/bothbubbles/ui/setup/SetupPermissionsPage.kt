@@ -24,7 +24,6 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Contacts
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material3.Button
 import androidx.compose.material3.FilledTonalButton
@@ -44,7 +43,14 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 
+/**
+ * Permissions page for notifications and battery optimization.
+ * Contacts permission is handled separately in ContactsPage (shown earlier in setup).
+ */
 @Composable
 internal fun PermissionsPage(
     uiState: SetupUiState,
@@ -53,12 +59,12 @@ internal fun PermissionsPage(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // Re-check permissions when screen resumes (after returning from settings)
     DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
                 onPermissionsChecked()
             }
         }
@@ -72,10 +78,6 @@ internal fun PermissionsPage(
         ActivityResultContracts.RequestPermission()
     ) { onPermissionsChecked() }
 
-    val contactsPermissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { onPermissionsChecked() }
-
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -84,7 +86,7 @@ internal fun PermissionsPage(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
-            text = "Permissions",
+            text = "Notifications",
             style = MaterialTheme.typography.headlineMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
@@ -94,7 +96,7 @@ internal fun PermissionsPage(
         Spacer(modifier = Modifier.height(8.dp))
 
         Text(
-            text = "BothBubbles needs a few permissions to work properly",
+            text = "Enable notifications and battery settings to stay connected",
             style = MaterialTheme.typography.bodyLarge,
             textAlign = TextAlign.Center,
             color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
@@ -114,17 +116,6 @@ internal fun PermissionsPage(
                 }
             )
         }
-
-        // Contacts permission
-        PermissionItem(
-            icon = Icons.Default.Contacts,
-            title = "Contacts",
-            description = "See your contacts here and show names in conversations",
-            isGranted = uiState.hasContactsPermission,
-            onRequest = {
-                contactsPermissionLauncher.launch(Manifest.permission.READ_CONTACTS)
-            }
-        )
 
         // Battery optimization
         PermissionItem(

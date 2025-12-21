@@ -132,21 +132,15 @@ class ConversationDetailsViewModel @Inject constructor(
     // Life360 automatic polling job (foreground-only)
     private var life360PollingJob: Job? = null
 
-    // Observe Life360 members linked to ALL participants (by address, not handle ID)
-    // Using address is more reliable because the same phone number can have multiple handle IDs
-    // (one for iMessage, one for SMS, etc.)
+    // Observe Life360 members linked to ALL participants (by phoneNumber match).
+    // Using phoneNumber is more reliable because the same phone number can have multiple handle IDs
+    // (one for iMessage, one for SMS, etc.), and works before autoMapContacts runs.
     // For group chats, this returns all members linked to any participant.
-    private val life360MembersFlow = combine(
-        chatRepository.observeParticipantsForChat(chatGuid),
-        life360Repository.observeAllMembers()
-    ) { participants, allMembers ->
-        val participantAddresses = participants.map { it.address }.toSet()
-        val linkedMembers = allMembers.filter { member ->
-            member.phoneNumber?.let { it in participantAddresses } == true
+    private val life360MembersFlow = chatRepository.observeParticipantsForChat(chatGuid)
+        .flatMapLatest { participants ->
+            val addresses = participants.map { it.address }.toSet()
+            life360Repository.observeMembersByPhoneNumbers(addresses)
         }
-        timber.log.Timber.d("Life360 lookup: chatGuid=$chatGuid, participants=${participantAddresses.size}, linked=${linkedMembers.size}")
-        linkedMembers
-    }
 
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),

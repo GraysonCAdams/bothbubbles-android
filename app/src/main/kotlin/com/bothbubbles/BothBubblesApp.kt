@@ -18,6 +18,7 @@ import com.bothbubbles.data.repository.SmsRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.AppLifecycleTracker
 import com.bothbubbles.services.contacts.ContactsContentObserver
+import com.bothbubbles.services.shortcut.AppShortcutManager
 import com.bothbubbles.services.shortcut.ShortcutService
 import com.bothbubbles.services.developer.ConnectionModeManager
 import com.bothbubbles.services.developer.DeveloperEventLog
@@ -95,6 +96,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
     @Inject
     lateinit var shortcutService: ShortcutService
+
+    @Inject
+    lateinit var appShortcutManager: AppShortcutManager
 
     @Inject
     lateinit var pendingMessageSource: PendingMessageSource
@@ -199,6 +203,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Initialize sharing shortcuts for share sheet integration
         initializeShortcutService()
+
+        // Initialize launcher app shortcuts (popular chats in long-press menu)
+        initializeAppShortcutManager()
 
         // Re-enqueue any pending messages from previous session
         initializePendingMessageQueue()
@@ -364,6 +371,26 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 Timber.d("Shortcut service started")
             } catch (e: Exception) {
                 Timber.w(e, "Error initializing shortcut service")
+            }
+        }
+    }
+
+    /**
+     * Start app shortcut manager if setup is complete.
+     * This publishes the top 3 most popular chats as launcher shortcuts
+     * (visible when long-pressing the app icon).
+     */
+    private fun initializeAppShortcutManager() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Start observing popular chats for launcher shortcuts
+                appShortcutManager.startObserving()
+                Timber.d("App shortcut manager started")
+            } catch (e: Exception) {
+                Timber.w(e, "Error initializing app shortcut manager")
             }
         }
     }

@@ -125,7 +125,9 @@ object MessageTransformationUtils {
             threadOriginatorGuid = threadOriginatorGuid,
             replyPreview = replyPreview,
             // Pre-compute emoji analysis to avoid recalculating on every composition
-            emojiAnalysis = analyzeEmojis(text)
+            emojiAnalysis = analyzeEmojis(text),
+            // Split batch grouping for messages composed together (text + attachments)
+            splitBatchId = splitBatchId
         )
     }
 

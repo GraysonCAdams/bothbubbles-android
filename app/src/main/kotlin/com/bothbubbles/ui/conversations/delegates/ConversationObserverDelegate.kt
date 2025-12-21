@@ -132,7 +132,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
 
     /**
      * Observe data changes to refresh loaded conversations reactively.
-     * Triggers on any change to unified groups, chats, or typing indicators.
+     * Triggers on any change to unified groups, chats, typing indicators, or read status.
      */
     private fun observeDataChanges() {
         scope.launch {
@@ -140,8 +140,9 @@ class ConversationObserverDelegate @AssistedInject constructor(
                 unifiedChatGroupRepository.observeActiveGroupCount(),
                 chatRepository.observeGroupChatCount(),
                 chatRepository.observeNonGroupChatCount(),
+                chatRepository.observeUnreadChatCount(),  // Triggers on mark as read
                 _typingChats
-            ) { _, _, _, _ -> Unit }
+            ) { _, _, _, _, _ -> Unit }
                 .debounce(100) // Reduced debounce for faster UI updates
                 .collect {
                     _events.emit(ConversationEvent.DataChanged)

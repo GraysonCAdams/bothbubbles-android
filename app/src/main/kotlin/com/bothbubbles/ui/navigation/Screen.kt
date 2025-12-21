@@ -31,6 +31,12 @@ sealed interface Screen {
         val initialAttachments: List<String> = emptyList()
     ) : Screen
 
+    /**
+     * Apple-style compose screen with recipient field and inline conversation.
+     */
+    @Serializable
+    data object Compose : Screen
+
     @Serializable
     data class GroupCreator(
         val preSelectedAddress: String? = null,

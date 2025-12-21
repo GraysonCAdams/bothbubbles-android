@@ -907,7 +907,9 @@ fun ChatScreen(
         visible = state.showCaptureTypeSheet,
         onTakePhoto = {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(context.cacheDir, "IMG_$timestamp.jpg")
+            // Use attachments subdirectory to match FileProvider configuration
+            val attachmentsDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+            val file = File(attachmentsDir, "IMG_$timestamp.jpg")
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             takePhotoUri = uri
             takePhotoLauncher.launch(uri)
@@ -915,7 +917,9 @@ fun ChatScreen(
         },
         onRecordVideo = {
             val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
-            val file = File(context.cacheDir, "VID_$timestamp.mp4")
+            // Use attachments subdirectory to match FileProvider configuration
+            val attachmentsDir = File(context.cacheDir, "attachments").apply { mkdirs() }
+            val file = File(attachmentsDir, "VID_$timestamp.mp4")
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
             takeVideoUri = uri
             takeVideoLauncher.launch(uri)

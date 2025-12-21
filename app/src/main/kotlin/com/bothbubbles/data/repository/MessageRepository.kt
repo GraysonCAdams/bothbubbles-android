@@ -64,6 +64,20 @@ class MessageRepository @Inject constructor(
     }
 
     /**
+     * Get recent messages for a chat preview (one-shot, non-reactive).
+     * Automatically resolves unified groups to include all merged chats.
+     * Returns messages sorted newest-first for display in preview.
+     *
+     * @param chatGuid Any chat GUID that may be part of a unified group
+     * @param limit Maximum number of messages to return (default 10)
+     * @return List of messages sorted by date (newest first)
+     */
+    suspend fun getRecentMessagesForPreview(chatGuid: String, limit: Int = 10): List<MessageEntity> {
+        val mergedGuids = resolveUnifiedChatGuids(chatGuid)
+        return messageDao.getMessagesByPosition(mergedGuids, limit, 0)
+    }
+
+    /**
      * Resolve all chat GUIDs for a unified group containing the given chat.
      *
      * @return List of all chat GUIDs in the unified group, or just [chatGuid] if not in a group
@@ -317,6 +331,16 @@ class MessageRepository @Inject constructor(
             }
 
             val allMessages = body.data.orEmpty().map { it.toEntity(chatGuid) }
+
+            // [DICTATION_DEBUG] Log what the API returned
+            if (allMessages.isNotEmpty()) {
+                val msgInfo = allMessages.take(3).joinToString {
+                    "guid=${it.guid.takeLast(8)},date=${it.dateCreated}"
+                }
+                Timber.tag("DICTATION_DEBUG").d(
+                    "syncMessagesForChat API returned ${allMessages.size} msgs (after=$after): $msgInfo"
+                )
+            }
 
             // Filter out tombstoned messages (user deleted, should not resurrect)
             val tombstonedGuids = tombstoneDao.findTombstoned(allMessages.map { it.guid })

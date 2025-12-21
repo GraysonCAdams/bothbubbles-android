@@ -39,15 +39,17 @@ fun SetupScreen(
     val coroutineScope = rememberCoroutineScope()
 
     // Calculate start page based on mode and permissions state
-    val startPage = remember(skipWelcome, uiState.allPermissionsGranted) {
+    // Page indices: 0=Welcome, 1=Contacts, 2=Permissions, 3=Server, 4=SMS, 5=Categorization, 6=AutoResponder, 7=Sync
+    val startPage = remember(skipWelcome, uiState.allPermissionsGranted, uiState.hasContactsPermission) {
         when {
             !skipWelcome -> 0  // Full onboarding starts at Welcome
-            uiState.allPermissionsGranted -> 2  // Skip to Server Connection
-            else -> 1  // Start at Permissions
+            uiState.allPermissionsGranted -> 3  // Skip to Server Connection
+            !uiState.hasContactsPermission -> 1  // Start at Contacts if not granted
+            else -> 2  // Start at Permissions
         }
     }
 
-    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 7 })
+    val pagerState = rememberPagerState(initialPage = startPage, pageCount = { 8 })
 
     // Sync pager state with viewmodel
     LaunchedEffect(uiState.currentPage) {
@@ -75,15 +77,17 @@ fun SetupScreen(
             .background(MaterialTheme.colorScheme.surface)
     ) {
         // Calculate visible pages based on mode
-        val visiblePages = remember(skipWelcome, skipSmsSetup, uiState.allPermissionsGranted, uiState.isConnectionSuccessful) {
+        // Page indices: 0=Welcome, 1=Contacts, 2=Permissions, 3=Server, 4=SMS, 5=Categorization, 6=AutoResponder, 7=Sync
+        val visiblePages = remember(skipWelcome, skipSmsSetup, uiState.allPermissionsGranted, uiState.hasContactsPermission, uiState.isConnectionSuccessful) {
             buildList {
                 if (!skipWelcome) add(0)  // Welcome
-                if (!skipWelcome || !uiState.allPermissionsGranted) add(1)  // Permissions
-                add(2)  // Server Connection (always shown)
-                if (!skipSmsSetup) add(3)  // SMS Setup
-                if (!skipSmsSetup) add(4)  // Categorization
-                if (!skipSmsSetup && uiState.isConnectionSuccessful) add(5)  // Auto-Responder (only if server connected)
-                add(6)  // Sync (always shown when server connected)
+                if (!skipWelcome || !uiState.hasContactsPermission) add(1)  // Contacts (first permission, always shown if not granted)
+                if (!skipWelcome || !uiState.allPermissionsGranted) add(2)  // Permissions (notifications + battery)
+                add(3)  // Server Connection (always shown)
+                if (!skipSmsSetup) add(4)  // SMS Setup
+                if (!skipSmsSetup) add(5)  // Categorization
+                if (!skipSmsSetup && uiState.isConnectionSuccessful) add(6)  // Auto-Responder (only if server connected)
+                add(7)  // Sync (always shown when server connected)
             }
         }
 
@@ -112,6 +116,7 @@ fun SetupScreen(
         }
 
         // Pages
+        // Page indices: 0=Welcome, 1=Contacts, 2=Permissions, 3=Server, 4=SMS, 5=Categorization, 6=AutoResponder, 7=Sync
         HorizontalPager(
             state = pagerState,
             modifier = Modifier.weight(1f),
@@ -121,15 +126,21 @@ fun SetupScreen(
                 0 -> WelcomePage(
                     onNext = { coroutineScope.launch { pagerState.animateScrollToPage(1) } }
                 )
-                1 -> PermissionsPage(
-                    uiState = uiState,
+                1 -> ContactsPage(
+                    hasContactsPermission = uiState.hasContactsPermission,
                     onPermissionsChecked = { viewModel.checkPermissions() },
                     onNext = { coroutineScope.launch { pagerState.animateScrollToPage(2) }; Unit },
                     onBack = if (skipWelcome) onSetupComplete else {
                         { coroutineScope.launch { pagerState.animateScrollToPage(0) }; Unit }
                     }
                 )
-                2 -> ServerConnectionPage(
+                2 -> PermissionsPage(
+                    uiState = uiState,
+                    onPermissionsChecked = { viewModel.checkPermissions() },
+                    onNext = { coroutineScope.launch { pagerState.animateScrollToPage(3) }; Unit },
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(1) }; Unit }
+                )
+                3 -> ServerConnectionPage(
                     uiState = uiState,
                     onServerUrlChange = viewModel::updateServerUrl,
                     onPasswordChange = viewModel::updatePassword,
@@ -138,22 +149,22 @@ fun SetupScreen(
                     onNext = {
                         coroutineScope.launch {
                             // Skip SMS setup page if in reconnect mode
-                            pagerState.animateScrollToPage(if (skipSmsSetup) 6 else 3)
+                            pagerState.animateScrollToPage(if (skipSmsSetup) 7 else 4)
                         }
                         Unit
                     },
                     onSkip = if (skipSmsSetup) null else {
                         {
                             viewModel.skipServerSetup()
-                            coroutineScope.launch { pagerState.animateScrollToPage(3) }
+                            coroutineScope.launch { pagerState.animateScrollToPage(4) }
                             Unit
                         }
                     },
                     onBack = if (skipWelcome && uiState.allPermissionsGranted) onSetupComplete else {
-                        { coroutineScope.launch { pagerState.animateScrollToPage(1) }; Unit }
+                        { coroutineScope.launch { pagerState.animateScrollToPage(2) }; Unit }
                     }
                 )
-                3 -> SmsSetupPage(
+                4 -> SmsSetupPage(
                     uiState = uiState,
                     onSmsEnabledChange = viewModel::updateSmsEnabled,
                     getMissingSmsPermissions = viewModel::getMissingSmsPermissions,
@@ -162,49 +173,49 @@ fun SetupScreen(
                     onDefaultSmsAppResult = viewModel::onDefaultSmsAppResult,
                     onNext = {
                         viewModel.finalizeSmsSettings()
-                        coroutineScope.launch { pagerState.animateScrollToPage(4) }
+                        coroutineScope.launch { pagerState.animateScrollToPage(5) }
                     },
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(2) } },
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(3) } },
                     onFinish = {
                         viewModel.finalizeSmsSettings()
                         viewModel.completeSetupWithoutSync()
                         onSetupComplete()
                     }
                 )
-                4 -> CategorizationPage(
+                5 -> CategorizationPage(
                     uiState = uiState,
                     onDownloadMlModel = viewModel::downloadMlModel,
                     onSkip = {
                         viewModel.skipMlDownload()
                         // Go to Auto-Responder if server connected, else Sync
                         coroutineScope.launch {
-                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 5 else 6)
+                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 6 else 7)
                         }
                     },
                     onMlCellularUpdateChange = viewModel::updateMlCellularAutoUpdate,
                     onNext = {
                         // Go to Auto-Responder if server connected, else Sync
                         coroutineScope.launch {
-                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 5 else 6)
+                            pagerState.animateScrollToPage(if (uiState.isConnectionSuccessful) 6 else 7)
                         }
                     },
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(3) } }
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(4) } }
                 )
-                5 -> AutoResponderSetupPage(
+                6 -> AutoResponderSetupPage(
                     uiState = uiState,
                     onFilterModeChange = viewModel::updateAutoResponderFilter,
                     onEnable = {
                         viewModel.enableAutoResponder()
-                        coroutineScope.launch { pagerState.animateScrollToPage(6) }
+                        coroutineScope.launch { pagerState.animateScrollToPage(7) }
                     },
                     onSkip = {
                         viewModel.skipAutoResponder()
-                        coroutineScope.launch { pagerState.animateScrollToPage(6) }
+                        coroutineScope.launch { pagerState.animateScrollToPage(7) }
                     },
-                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(4) } },
+                    onBack = { coroutineScope.launch { pagerState.animateScrollToPage(5) } },
                     onLoadPhoneNumber = viewModel::loadUserPhoneNumber
                 )
-                6 -> SyncPage(
+                7 -> SyncPage(
                     uiState = uiState,
                     onSkipEmptyChatsChange = viewModel::updateSkipEmptyChats,
                     onStartSync = viewModel::startSync,
@@ -212,9 +223,9 @@ fun SetupScreen(
                         coroutineScope.launch {
                             // Go back to Auto-Responder if server connected, Categorization if not skipped, else Server
                             val targetPage = when {
-                                uiState.isConnectionSuccessful && !skipSmsSetup -> 5  // Auto-Responder
-                                !skipSmsSetup -> 4  // Categorization
-                                else -> 2  // Server Connection
+                                uiState.isConnectionSuccessful && !skipSmsSetup -> 6  // Auto-Responder
+                                !skipSmsSetup -> 5  // Categorization
+                                else -> 3  // Server Connection
                             }
                             pagerState.animateScrollToPage(targetPage)
                         }

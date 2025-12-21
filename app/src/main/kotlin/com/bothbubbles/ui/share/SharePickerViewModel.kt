@@ -50,7 +50,7 @@ class SharePickerViewModel @Inject constructor(
                             ShareConversationUiModel(
                                 guid = chat.guid,
                                 displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
-                                avatarPath = chat.customAvatarPath,
+                                avatarPath = chat.customAvatarPath ?: chat.serverGroupPhotoPath,
                                 isGroup = chat.isGroup,
                                 participantNames = emptyList() // Could be populated from join table
                             )

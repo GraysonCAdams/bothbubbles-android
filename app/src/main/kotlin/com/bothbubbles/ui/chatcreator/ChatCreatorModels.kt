@@ -22,7 +22,10 @@ data class ContactUiModel(
     val service: String,
     val avatarPath: String? = null,
     val isFavorite: Boolean = false,
-    val isRecent: Boolean = false  // Whether this contact has recent conversations
+    val isRecent: Boolean = false,  // Whether this contact has recent conversations
+    val isPopular: Boolean = false,  // Whether this contact has high message engagement
+    val contactId: Long? = null,  // Android contact ID for grouping multiple handles
+    val lastMessageDate: Long? = null  // Last message timestamp for this handle
 )
 
 /**
@@ -31,11 +34,12 @@ data class ContactUiModel(
 data class ChatCreatorUiState(
     val mode: ChatCreatorMode = ChatCreatorMode.SINGLE,
     val searchQuery: String = "",
-    val recentContacts: List<ContactUiModel> = emptyList(),  // Recent conversations (up to 4)
+    val popularChats: List<PopularChatUiModel> = emptyList(),  // Top 5 popular chats (1:1 + groups)
     val groupedContacts: Map<String, List<ContactUiModel>> = emptyMap(),
     val favoriteContacts: List<ContactUiModel> = emptyList(),
     val groupChats: List<GroupChatUiModel> = emptyList(),
     val selectedRecipients: List<SelectedRecipient> = emptyList(),
+    val conversationPreview: ConversationPreviewState? = null,  // Preview of existing conversation
     val isLoading: Boolean = false,
     val isCheckingAvailability: Boolean = false,
     val hasContactsPermission: Boolean = true,  // Assume granted until checked
@@ -84,6 +88,47 @@ data class GroupChatUiModel(
     val lastMessageTime: String?,
     val avatarPath: String? = null,
     val participantCount: Int = 0
+)
+
+/**
+ * UI model for displaying a popular chat (1:1 or group) in the Popular section
+ */
+data class PopularChatUiModel(
+    val chatGuid: String,
+    val displayName: String,
+    val isGroup: Boolean,
+    val avatarPath: String?,
+    val service: String,  // "iMessage" or "SMS" for 1:1, empty for groups
+    val identifier: String?  // Phone/email for 1:1, null for groups
+)
+
+/**
+ * Represents the state of the conversation preview section
+ */
+sealed class ConversationPreviewState {
+    /** Loading the conversation preview */
+    data object Loading : ConversationPreviewState()
+
+    /** No existing conversation - will be a new chat */
+    data object NewConversation : ConversationPreviewState()
+
+    /** Existing conversation with message previews */
+    data class Existing(
+        val chatGuid: String,
+        val messages: List<MessagePreview>
+    ) : ConversationPreviewState()
+}
+
+/**
+ * A single message preview for the conversation preview section
+ */
+data class MessagePreview(
+    val guid: String,
+    val text: String?,
+    val isFromMe: Boolean,
+    val timestamp: Long,
+    val hasAttachments: Boolean = false,
+    val attachmentPreviewText: String? = null  // e.g., "Photo", "Video", "Audio"
 )
 
 /**

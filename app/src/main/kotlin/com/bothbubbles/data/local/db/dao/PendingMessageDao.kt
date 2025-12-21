@@ -152,4 +152,71 @@ interface PendingMessageDao {
      */
     @Query("SELECT * FROM pending_messages WHERE sync_status = 'SENDING' AND last_attempt_at < :olderThan")
     suspend fun getStaleSending(olderThan: Long): List<PendingMessageEntity>
+
+    // ============================================================================
+    // MESSAGE ORDERING / DEPENDENCY QUERIES
+    // ============================================================================
+
+    /**
+     * Get the latest pending or sending message in a chat.
+     * Used when queueing a new message to set its depends_on_local_id.
+     * Returns null if no pending/sending messages exist in the chat.
+     */
+    @Query("""
+        SELECT * FROM pending_messages
+        WHERE chat_guid = :chatGuid
+        AND sync_status IN ('PENDING', 'SENDING')
+        ORDER BY created_at DESC
+        LIMIT 1
+    """)
+    suspend fun getLatestPendingOrSending(chatGuid: String): PendingMessageEntity?
+
+    /**
+     * Get all messages that directly depend on a given message.
+     * Used for cascade failure when a message fails.
+     */
+    @Query("SELECT * FROM pending_messages WHERE depends_on_local_id = :localId")
+    suspend fun getDependentMessages(localId: String): List<PendingMessageEntity>
+
+    /**
+     * Get all messages in a dependency chain starting from a given localId.
+     * This recursively finds all messages that depend on the given message,
+     * plus all messages that depend on those, etc.
+     *
+     * Note: SQLite doesn't support true recursive CTEs in all versions,
+     * so we'll handle this iteratively in the repository.
+     */
+    @Query("""
+        SELECT * FROM pending_messages
+        WHERE depends_on_local_id = :localId
+        AND sync_status IN ('PENDING', 'SENDING')
+        ORDER BY created_at ASC
+    """)
+    suspend fun getDirectDependents(localId: String): List<PendingMessageEntity>
+
+    /**
+     * Update dependency reference when marking a message as failed.
+     * Clears the depends_on_local_id for dependent messages.
+     */
+    @Query("UPDATE pending_messages SET depends_on_local_id = NULL WHERE depends_on_local_id = :localId")
+    suspend fun clearDependency(localId: String)
+
+    /**
+     * Count messages that depend on a given localId.
+     * Used to determine if cascade failure notification should be grouped.
+     */
+    @Query("SELECT COUNT(*) FROM pending_messages WHERE depends_on_local_id = :localId AND sync_status IN ('PENDING', 'SENDING')")
+    suspend fun countDependentMessages(localId: String): Int
+
+    /**
+     * Get all pending/sending messages in a chat, ordered by creation time.
+     * Used for verifying dependency chain integrity.
+     */
+    @Query("""
+        SELECT * FROM pending_messages
+        WHERE chat_guid = :chatGuid
+        AND sync_status IN ('PENDING', 'SENDING')
+        ORDER BY created_at ASC
+    """)
+    suspend fun getPendingOrSendingForChat(chatGuid: String): List<PendingMessageEntity>
 }

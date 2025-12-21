@@ -207,6 +207,38 @@ class NotificationService @Inject constructor(
         notificationManager.notify(notificationId, notification)
     }
 
+    /**
+     * Show grouped notification when multiple messages fail to deliver.
+     * This replaces individual notifications when a message fails and cascades to dependents.
+     */
+    override fun showMessagesFailedNotification(
+        chatGuid: String,
+        chatTitle: String,
+        failedCount: Int,
+        errorMessage: String
+    ) {
+        if (!hasNotificationPermission()) return
+
+        // Get or create per-conversation channel
+        val channelId = notificationChannelManager.getOrCreateConversationChannel(
+            chatGuid = chatGuid,
+            chatTitle = chatTitle
+        )
+
+        val notification = notificationBuilder.buildMessagesFailedNotification(
+            channelId = channelId,
+            chatGuid = chatGuid,
+            chatTitle = chatTitle,
+            failedCount = failedCount,
+            errorMessage = errorMessage
+        )
+
+        // Use a stable ID based on chat so this notification replaces previous failure notifications
+        // for the same chat (prevents spam when multiple messages fail together)
+        val notificationId = ("failed-group-$chatGuid").hashCode()
+        notificationManager.notify(notificationId, notification)
+    }
+
     private fun hasNotificationPermission(): Boolean {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             ContextCompat.checkSelfPermission(

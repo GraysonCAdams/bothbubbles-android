@@ -18,6 +18,9 @@ import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.DependencyState
+import com.bothbubbles.data.repository.PendingMessageRepository
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.services.messaging.sender.MessageAlreadyInTransitException
 import com.bothbubbles.services.notifications.Notifier
@@ -55,10 +58,12 @@ class MessageSendWorker @AssistedInject constructor(
     private val attachmentDao: com.bothbubbles.data.local.db.dao.AttachmentDao,
     private val messageDao: MessageDao,
     private val chatDao: com.bothbubbles.data.local.db.dao.ChatDao,
+    private val chatRepository: ChatRepository,
     private val messageSendingService: MessageSendingService,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
     private val settingsDataStore: SettingsDataStore,
-    private val notifier: Notifier
+    private val notifier: Notifier,
+    private val pendingMessageRepository: PendingMessageRepository
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -155,6 +160,34 @@ class MessageSendWorker @AssistedInject constructor(
         if (pendingMessage.syncStatus == PendingSyncStatus.SENT.name) {
             Timber.d("Message already sent: ${pendingMessage.localId}")
             return Result.success()
+        }
+
+        // ═══════════════════════════════════════════════════════════════════════════
+        // DEPENDENCY CHECK: Ensure previous messages in this chat have been sent.
+        // This prevents out-of-order message delivery.
+        // ═══════════════════════════════════════════════════════════════════════════
+        val dependencyStatus = pendingMessageRepository.getDependencyStatus(pendingMessage.localId)
+        if (dependencyStatus != null) {
+            when (dependencyStatus.state) {
+                DependencyState.SENT, DependencyState.NOT_FOUND -> {
+                    // Dependency satisfied or no longer exists - proceed with sending
+                    Timber.d("Dependency ${dependencyStatus.dependsOnLocalId} satisfied, proceeding")
+                }
+                DependencyState.FAILED -> {
+                    // Dependency failed - cascade failure to this message
+                    Timber.w("Dependency ${dependencyStatus.dependsOnLocalId} failed, cascade failing this message")
+                    return handleDependencyFailure(
+                        pendingMessageId,
+                        pendingMessage.chatGuid,
+                        dependencyStatus.errorMessage ?: "Previous message failed to send"
+                    )
+                }
+                DependencyState.PENDING, DependencyState.SENDING -> {
+                    // Dependency still in progress - retry later
+                    Timber.d("Dependency ${dependencyStatus.dependsOnLocalId} still ${dependencyStatus.state}, retrying later")
+                    return Result.retry()
+                }
+            }
         }
 
         // ═══════════════════════════════════════════════════════════════════════════
@@ -397,6 +430,9 @@ class MessageSendWorker @AssistedInject constructor(
     /**
      * Mark message as FAILED.
      * Users can manually retry as SMS using the "Retry as SMS" button.
+     *
+     * Also cascades failure to any dependent messages (messages queued after this one
+     * in the same chat) and shows a grouped notification if multiple messages failed.
      */
     private suspend fun markFailedAndTriggerSmsFallback(
         pendingMessageId: Long,
@@ -423,16 +459,41 @@ class MessageSendWorker @AssistedInject constructor(
             Timber.d("Updated MessageEntity error for $localId: code=$errorCode")
         }
 
-        // Show notification that message failed to deliver
+        // Cascade failure to dependent messages and show appropriate notification
         try {
             val chat = chatDao.getChatByGuid(chatGuid)
-            val chatTitle = chat?.displayName ?: chat?.chatIdentifier ?: "Unknown"
-            notifier.showMessageFailedNotification(
-                chatGuid = chatGuid,
-                chatTitle = chatTitle,
-                messagePreview = messagePreview,
-                errorMessage = errorMessage
-            )
+            val chatTitle = if (chat != null) {
+                val participants = chatRepository.getParticipantsForChat(chatGuid)
+                chatRepository.resolveChatTitle(chat, participants)
+            } else {
+                "Unknown"
+            }
+
+            // Cascade failure to all dependent messages
+            val cascadedMessages = if (localId != null) {
+                pendingMessageRepository.cascadeFailureToDependents(localId, errorMessage)
+            } else {
+                emptyList()
+            }
+
+            if (cascadedMessages.isNotEmpty()) {
+                // Multiple messages failed - show grouped notification
+                val totalFailed = 1 + cascadedMessages.size
+                notifier.showMessagesFailedNotification(
+                    chatGuid = chatGuid,
+                    chatTitle = chatTitle,
+                    failedCount = totalFailed,
+                    errorMessage = errorMessage
+                )
+            } else {
+                // Single message failed - show individual notification
+                notifier.showMessageFailedNotification(
+                    chatGuid = chatGuid,
+                    chatTitle = chatTitle,
+                    messagePreview = messagePreview,
+                    errorMessage = errorMessage
+                )
+            }
         } catch (e: Exception) {
             Timber.w(e, "Failed to show failure notification")
         }
@@ -463,5 +524,38 @@ class MessageSendWorker @AssistedInject constructor(
         } catch (e: Exception) {
             Timber.e(e, "Failed to sync attachment errors")
         }
+    }
+
+    /**
+     * Handle failure when a dependency message failed.
+     * This cascades the failure to this message without attempting to send.
+     */
+    private suspend fun handleDependencyFailure(
+        pendingMessageId: Long,
+        chatGuid: String,
+        dependencyErrorMessage: String
+    ): Result {
+        val pendingMessage = pendingMessageDao.getById(pendingMessageId)
+        val localId = pendingMessage?.localId
+        val errorMessage = "Blocked by failed message: $dependencyErrorMessage"
+
+        // Mark as FAILED
+        pendingMessageDao.updateStatusWithError(
+            pendingMessageId,
+            PendingSyncStatus.FAILED.name,
+            errorMessage,
+            System.currentTimeMillis()
+        )
+
+        // Update MessageEntity so UI shows as failed
+        if (localId != null) {
+            messageDao.updateMessageError(localId, 1, "Previous message failed")
+        }
+
+        // Note: We don't show individual notifications for cascade failures.
+        // The grouped notification is shown by the original failure handler.
+        // This prevents notification spam for cascaded failures.
+
+        return Result.failure()
     }
 }

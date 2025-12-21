@@ -1,14 +1,13 @@
 package com.bothbubbles.ui.conversations
 
-import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.EaseInOutSine
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -47,6 +45,7 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -56,8 +55,6 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -129,57 +126,159 @@ internal fun PinnedConversationsRow(
     // Scroll state for tracking visible items
     val listState = rememberLazyListState()
 
+    // Pre-compute which indices have unread messages (stable for derivedStateOf)
+    val unreadIndices = remember(orderedConversations) {
+        orderedConversations.mapIndexedNotNull { index, conv ->
+            if (conv.unreadCount > 0) index else null
+        }.toSet()
+    }
+
     // Calculate which unread items are off-screen on each side
-    val hasUnreadOffscreenLeft by remember {
+    val hasUnreadOffscreenLeft by remember(unreadIndices) {
         derivedStateOf {
-            val firstVisibleIndex = listState.firstVisibleItemIndex
-            // Check if any items before first visible have unread messages
-            orderedConversations.take(firstVisibleIndex).any { it.unreadCount > 0 }
-        }
-    }
-
-    val hasUnreadOffscreenRight by remember {
-        derivedStateOf {
-            val visibleItemsInfo = listState.layoutInfo.visibleItemsInfo
+            val layoutInfo = listState.layoutInfo
+            val visibleItemsInfo = layoutInfo.visibleItemsInfo
             if (visibleItemsInfo.isEmpty()) return@derivedStateOf false
-            val lastVisibleIndex = visibleItemsInfo.lastOrNull()?.index ?: 0
-            // Check if any items after last visible have unread messages
-            if (lastVisibleIndex < orderedConversations.lastIndex) {
-                orderedConversations.drop(lastVisibleIndex + 1).any { it.unreadCount > 0 }
-            } else {
-                false
-            }
+
+            val firstVisibleItem = visibleItemsInfo.firstOrNull() ?: return@derivedStateOf false
+            val firstVisibleIndex = firstVisibleItem.index
+
+            // Check if any unread items are completely off-screen to the left
+            val hasUnreadCompletelyOffscreen = unreadIndices.any { it < firstVisibleIndex }
+
+            // Check if the first visible item is only partially visible (clipped on left)
+            // and has unread messages
+            val viewportStart = layoutInfo.viewportStartOffset
+            val firstItemIsClipped = firstVisibleItem.offset < viewportStart
+            val firstItemHasUnread = firstVisibleIndex in unreadIndices
+
+            hasUnreadCompletelyOffscreen || (firstItemIsClipped && firstItemHasUnread)
         }
     }
 
-    // Pulsing animation for edge glow
-    val infiniteTransition = rememberInfiniteTransition(label = "unreadGlowPulse")
-    val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.3f,
-        targetValue = 0.7f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1000),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseAlpha"
-    )
+    val hasUnreadOffscreenRight by remember(unreadIndices) {
+        derivedStateOf {
+            val layoutInfo = listState.layoutInfo
+            val visibleItemsInfo = layoutInfo.visibleItemsInfo
+            if (visibleItemsInfo.isEmpty()) return@derivedStateOf false
 
-    // Animated visibility for the glow
-    val leftGlowAlpha by animateFloatAsState(
-        targetValue = if (hasUnreadOffscreenLeft) pulseAlpha else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "leftGlowAlpha"
-    )
-    val rightGlowAlpha by animateFloatAsState(
-        targetValue = if (hasUnreadOffscreenRight) pulseAlpha else 0f,
-        animationSpec = tween(durationMillis = 300),
-        label = "rightGlowAlpha"
-    )
+            val lastVisibleItem = visibleItemsInfo.lastOrNull() ?: return@derivedStateOf false
+            val lastVisibleIndex = lastVisibleItem.index
 
-    // Glow color based on theme (use primary or error color for attention)
-    val glowColor = MaterialTheme.colorScheme.primary
+            // Check if any unread items are completely off-screen to the right
+            val hasUnreadCompletelyOffscreen = unreadIndices.any { it > lastVisibleIndex }
 
-    Box(modifier = modifier.fillMaxWidth()) {
+            // Check if the last visible item is only partially visible (clipped on right)
+            // and has unread messages
+            val viewportEnd = layoutInfo.viewportEndOffset
+            val lastItemEnd = lastVisibleItem.offset + lastVisibleItem.size
+            val lastItemIsClipped = lastItemEnd > viewportEnd
+            val lastItemHasUnread = lastVisibleIndex in unreadIndices
+
+            hasUnreadCompletelyOffscreen || (lastItemIsClipped && lastItemHasUnread)
+        }
+    }
+
+    // Scroll bump animation state
+    var bumpAnimationShown by remember { mutableStateOf(false) }
+    var userHasScrolledAway by remember { mutableStateOf(false) }
+
+    // Track if user has scrolled significantly (to reset bump animation trigger)
+    val hasScrolledAway by remember {
+        derivedStateOf {
+            // Consider "scrolled away" if scrolled more than 2 items from start
+            listState.firstVisibleItemIndex >= 2 ||
+                (listState.firstVisibleItemIndex >= 1 && listState.firstVisibleItemScrollOffset > itemWidthPx * 0.5f)
+        }
+    }
+
+    // Update userHasScrolledAway when they scroll away
+    LaunchedEffect(hasScrolledAway) {
+        if (hasScrolledAway) {
+            userHasScrolledAway = true
+        }
+    }
+
+    // Reset bump animation when user scrolls back to top after scrolling away
+    LaunchedEffect(hasScrolledAway, userHasScrolledAway) {
+        if (!hasScrolledAway && userHasScrolledAway) {
+            // User scrolled back to the start after scrolling away - reset the bump trigger
+            bumpAnimationShown = false
+            userHasScrolledAway = false
+        }
+    }
+
+    // Bump animation parameters
+    val bumpDistance = itemWidthPx * 0.4f // Bump by ~40% of item width
+    val bumpDuration = 200 // ms for each bump direction
+    val pauseBetweenBumps = 400L // ms pause between alternating bumps
+
+    // Perform scroll bump animation when there are unread items offscreen
+    LaunchedEffect(hasUnreadOffscreenLeft, hasUnreadOffscreenRight, bumpAnimationShown, isDragging) {
+        if (bumpAnimationShown || isDragging) return@LaunchedEffect
+        if (!hasUnreadOffscreenLeft && !hasUnreadOffscreenRight) return@LaunchedEffect
+
+        // Small delay to let the UI settle after initial render
+        delay(300)
+
+        // Double-check conditions haven't changed
+        if (bumpAnimationShown || isDragging) return@LaunchedEffect
+
+        bumpAnimationShown = true
+
+        // Determine which directions need bumps
+        val bumpLeft = hasUnreadOffscreenLeft
+        val bumpRight = hasUnreadOffscreenRight
+
+        if (bumpLeft && bumpRight) {
+            // Both directions have unread - alternate with pauses
+            // First bump right (to show there's more to the right)
+            listState.animateScrollBy(
+                bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+            listState.animateScrollBy(
+                -bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+
+            delay(pauseBetweenBumps)
+
+            // Then bump left (to show there's more to the left)
+            listState.animateScrollBy(
+                -bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+            listState.animateScrollBy(
+                bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+        } else if (bumpRight) {
+            // Only right has unread - bump right then back
+            listState.animateScrollBy(
+                bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+            listState.animateScrollBy(
+                -bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+        } else if (bumpLeft) {
+            // Only left has unread - bump left then back
+            listState.animateScrollBy(
+                -bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+            listState.animateScrollBy(
+                bumpDistance,
+                tween(bumpDuration, easing = EaseInOutSine)
+            )
+        }
+    }
+
+    Box(
+        modifier = modifier.fillMaxWidth()
+    ) {
         LazyRow(
             state = listState,
             modifier = Modifier.fillMaxWidth(),
@@ -321,42 +420,6 @@ internal fun PinnedConversationsRow(
                 )
             }
         }
-        }
-
-        // Left edge glow for unread pins off-screen to the left
-        if (leftGlowAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .width(32.dp)
-                    .height(100.dp)
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                glowColor.copy(alpha = leftGlowAlpha),
-                                Color.Transparent
-                            )
-                        )
-                    )
-            )
-        }
-
-        // Right edge glow for unread pins off-screen to the right
-        if (rightGlowAlpha > 0f) {
-            Box(
-                modifier = Modifier
-                    .align(Alignment.CenterEnd)
-                    .width(32.dp)
-                    .height(100.dp)
-                    .background(
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                glowColor.copy(alpha = rightGlowAlpha)
-                            )
-                        )
-                    )
-            )
         }
     }
 }

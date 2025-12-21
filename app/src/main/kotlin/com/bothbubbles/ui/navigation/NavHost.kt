@@ -177,7 +177,7 @@ fun BothBubblesNavHost(
                     navController.navigate(Screen.Chat(chatGuid, mergedGuidsStr))
                 },
                 onNewMessageClick = {
-                    navController.navigate(Screen.ChatCreator())
+                    navController.navigate(Screen.Compose)
                 },
                 onSettingsClick = {
                     // No longer used - settings panel slides in from right

@@ -165,10 +165,11 @@ class SetupViewModel @Inject constructor(
     fun skipAutoResponder() = autoResponderDelegate.skipAutoResponder()
 
     // ===== Navigation =====
+    // Page indices: 0=Welcome, 1=Contacts, 2=Permissions, 3=Server, 4=SMS, 5=Categorization, 6=AutoResponder, 7=Sync
 
     fun nextPage() {
         _currentPage.update { current ->
-            if (current < 6) current + 1 else current
+            if (current < 7) current + 1 else current
         }
     }
 
@@ -179,7 +180,7 @@ class SetupViewModel @Inject constructor(
     }
 
     fun setPage(page: Int) {
-        _currentPage.value = page.coerceIn(0, 6)
+        _currentPage.value = page.coerceIn(0, 7)
     }
 }
 

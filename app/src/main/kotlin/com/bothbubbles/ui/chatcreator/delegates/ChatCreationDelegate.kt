@@ -190,6 +190,13 @@ class ChatCreationDelegate @Inject constructor(
     }
 
     /**
+     * Select a group chat by its GUID directly
+     */
+    fun selectGroupChatByGuid(chatGuid: String) {
+        _createdChatGuid.value = chatGuid
+    }
+
+    /**
      * Reset the created chat GUID
      */
     fun resetCreatedChatGuid() {

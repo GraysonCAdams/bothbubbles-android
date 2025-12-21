@@ -232,8 +232,8 @@ internal fun isSameDay(cal1: Calendar, cal2: Calendar): Boolean {
 /**
  * Calculates the group position for a message based on adjacent messages.
  * Messages are grouped when they:
- * - Are from the same sender (isFromMe matches)
- * - Are within the time threshold
+ * - Share the same splitBatchId (composed together, e.g. text + attachments)
+ * - OR are from the same sender AND within the time threshold
  * - Are not reaction messages
  *
  * In reversed layout (newest at index 0):
@@ -256,19 +256,26 @@ internal fun calculateGroupPosition(
     val previousMessage = messages.getOrNull(index - 1)?.takeIf { !it.isReaction }
     val nextMessage = messages.getOrNull(index + 1)?.takeIf { !it.isReaction }
 
+    // Check if messages share a splitBatchId (composed together as text + attachments)
+    val sameBatchAsBelow = message.splitBatchId != null &&
+            previousMessage?.splitBatchId == message.splitBatchId
+    val sameBatchAsAbove = message.splitBatchId != null &&
+            nextMessage?.splitBatchId == message.splitBatchId
+
     // Check if this message groups with the message below it (visually)
     // In reversed layout, index - 1 is the newer message that appears below
-    val groupsWithBelow = previousMessage?.let { prev ->
+    // Split batch messages are ALWAYS grouped together regardless of time
+    val groupsWithBelow = sameBatchAsBelow || (previousMessage?.let { prev ->
         prev.isFromMe == message.isFromMe &&
                 kotlin.math.abs(message.dateCreated - prev.dateCreated) <= GROUP_TIME_THRESHOLD_MS
-    } ?: false
+    } ?: false)
 
     // Check if this message groups with the message above it (visually)
     // In reversed layout, index + 1 is the older message that appears above
-    val groupsWithAbove = nextMessage?.let { next ->
+    val groupsWithAbove = sameBatchAsAbove || (nextMessage?.let { next ->
         next.isFromMe == message.isFromMe &&
                 kotlin.math.abs(next.dateCreated - message.dateCreated) <= GROUP_TIME_THRESHOLD_MS
-    } ?: false
+    } ?: false)
 
     return when {
         !groupsWithAbove && !groupsWithBelow -> MessageGroupPosition.SINGLE

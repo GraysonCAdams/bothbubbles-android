@@ -70,6 +70,25 @@ class Life360Repository @Inject constructor(
             entities.map { it.toDomain() }
         }
 
+    /**
+     * Observe Life360 members matching any of the given addresses by phoneNumber.
+     *
+     * This is the primary method for finding Life360 members in conversations.
+     * Matches by phoneNumber (case-insensitive) rather than linked_address,
+     * so it works immediately without requiring autoMapContacts to run first.
+     *
+     * @param addresses Set of participant addresses (phone numbers/emails) to match
+     * @return Flow of members whose phoneNumber matches any of the addresses
+     */
+    fun observeMembersByPhoneNumbers(addresses: Set<String>): Flow<List<Life360Member>> =
+        observeAllMembers().map { allMembers ->
+            allMembers.filter { member ->
+                member.phoneNumber?.let { phone ->
+                    addresses.any { addr -> phone.equals(addr, ignoreCase = true) }
+                } == true
+            }
+        }
+
     // ===== Getters =====
 
     /**

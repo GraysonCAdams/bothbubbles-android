@@ -163,7 +163,21 @@ data class MessageEntity(
      * This enables efficient filtering in SQL queries without complex pattern matching.
      */
     @ColumnInfo(name = "is_reaction", defaultValue = "0")
-    val isReactionDb: Boolean = false
+    val isReactionDb: Boolean = false,
+
+    /**
+     * Groups related messages that were composed together (e.g., text + attachments).
+     *
+     * When a user sends a message with both text and attachments, they are split into
+     * separate messages (like native iMessage). This ID links them for:
+     * - Visual grouping in the UI (tighter spacing, connected bubbles)
+     * - Understanding which messages were sent as a unit
+     *
+     * Format: "batch-{UUID}" or null for single messages.
+     * Only set on outgoing messages created locally.
+     */
+    @ColumnInfo(name = "split_batch_id")
+    val splitBatchId: String? = null
 ) {
     /**
      * Whether this message has been sent (no error, not pending)

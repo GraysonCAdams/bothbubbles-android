@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.Life360Dao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
+import com.bothbubbles.data.local.db.dao.PopularChatsDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
@@ -78,7 +79,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         TombstoneEntity::class,
         Life360MemberEntity::class
     ],
-    version = 45,
+    version = 48,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -103,6 +104,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun autoShareContactDao(): AutoShareContactDao
     abstract fun tombstoneDao(): TombstoneDao
     abstract fun life360Dao(): Life360Dao
+    abstract fun popularChatsDao(): PopularChatsDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

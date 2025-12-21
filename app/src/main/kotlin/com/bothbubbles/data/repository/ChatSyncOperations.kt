@@ -22,7 +22,8 @@ class ChatSyncOperations @Inject constructor(
     private val chatDao: ChatDao,
     private val api: BothBubblesApi,
     private val participantOps: ChatParticipantOperations,
-    private val unifiedGroupOps: UnifiedGroupOperations
+    private val unifiedGroupOps: UnifiedGroupOperations,
+    private val groupPhotoSyncManager: GroupPhotoSyncManager
 ) {
     companion object {
         private const val TAG = "ChatSyncOperations"
@@ -75,6 +76,14 @@ class ChatSyncOperations @Inject constructor(
                 unifiedGroupOps.linkChatToUnifiedGroupIfNeeded(chatDto)
             }
 
+            // Sync group photos for group chats that have them
+            val groupPhotos = chatDtos
+                .filter { it.groupPhotoGuid != null }
+                .associate { it.guid to it.groupPhotoGuid }
+            if (groupPhotos.isNotEmpty()) {
+                groupPhotoSyncManager.syncGroupPhotos(groupPhotos)
+            }
+
             chats
         }
     }
@@ -104,6 +113,9 @@ class ChatSyncOperations @Inject constructor(
 
             // Atomically sync chat with participants
             syncChatParticipants(chatDto, chat)
+
+            // Sync group photo if available
+            groupPhotoSyncManager.syncGroupPhoto(chatDto.guid, chatDto.groupPhotoGuid)
 
             chat
         }

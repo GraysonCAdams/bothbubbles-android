@@ -221,6 +221,14 @@ fun ChatCreatorScreen(
                 addMorePlaceholder = if (isGroupMode) "Add more participants..." else "Add another recipient..."
             )
 
+            // Conversation preview (show when recipients selected)
+            uiState.conversationPreview?.let { previewState ->
+                ConversationPreviewSection(
+                    previewState = previewState,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
+
             Spacer(modifier = Modifier.height(8.dp))
 
             // Loading indicator
@@ -264,21 +272,17 @@ fun ChatCreatorScreen(
             }
 
             // Build section index map for fast scrolling
-            val sectionIndexMap = remember(uiState.recentContacts, uiState.favoriteContacts, uiState.groupedContacts, uiState.searchQuery, isGroupMode) {
+            val sectionIndexMap = remember(uiState.popularChats, uiState.favoriteContacts, uiState.groupedContacts, uiState.searchQuery, isGroupMode) {
                 buildMap {
                     var index = 0
                     // Create group row (only in single mode, not searching)
                     if (!isGroupMode && uiState.searchQuery.isEmpty()) index++
                     // Manual entry item
                     if (uiState.manualAddressEntry != null) index++
-                    // Recent section
-                    if (uiState.recentContacts.isNotEmpty() && uiState.searchQuery.isEmpty()) {
-                        index++ // header
-                        index += uiState.recentContacts.size
-                    }
-                    // All Contacts header
-                    if ((uiState.groupedContacts.isNotEmpty() || uiState.favoriteContacts.isNotEmpty()) && uiState.searchQuery.isEmpty()) {
-                        index++
+                    // Popular section (header + each chat item)
+                    if (uiState.popularChats.isNotEmpty() && uiState.searchQuery.isEmpty()) {
+                        index++  // Popular header
+                        index += uiState.popularChats.size  // Each popular chat is a list item
                     }
                     // Favorites - mark with star
                     if (uiState.favoriteContacts.isNotEmpty()) {
@@ -334,47 +338,26 @@ fun ChatCreatorScreen(
                         }
                     }
 
-                    // Recent section (up to 4 contacts with recent conversations)
-                    if (uiState.recentContacts.isNotEmpty() && uiState.searchQuery.isEmpty()) {
-                        item(key = "recent_header") {
+                    // Popular section (vertical list, hidden when searching)
+                    if (uiState.popularChats.isNotEmpty() && uiState.searchQuery.isEmpty()) {
+                        // Popular header
+                        item(key = "popular_header") {
                             Text(
-                                text = "Recent",
+                                text = "Popular",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
                             )
                         }
 
+                        // Popular chat items
                         items(
-                            items = uiState.recentContacts,
-                            key = { "${it.address}_recent" }
-                        ) { contact ->
-                            val isSelected = uiState.selectedRecipients.any { it.address == contact.address }
-                            ContactTile(
-                                contact = contact,
-                                isSelected = isSelected,
-                                showCheckbox = isGroupMode,
-                                onClick = {
-                                    if (isGroupMode) {
-                                        viewModel.toggleRecipient(contact)
-                                    } else {
-                                        // In single mode, directly start conversation
-                                        viewModel.selectContact(contact)
-                                    }
-                                }
-                            )
-                        }
-                    }
-
-                    // "All Contacts" divider before alphabetical list
-                    val hasMoreContacts = uiState.groupedContacts.isNotEmpty() || uiState.favoriteContacts.isNotEmpty()
-                    if (hasMoreContacts && uiState.searchQuery.isEmpty()) {
-                        item(key = "all_contacts_header") {
-                            Text(
-                                text = "All Contacts",
-                                style = MaterialTheme.typography.labelMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                            items = uiState.popularChats,
+                            key = { "popular_${it.chatGuid}" }
+                        ) { popularChat ->
+                            PopularChatListItem(
+                                popularChat = popularChat,
+                                onClick = { viewModel.selectPopularChat(popularChat) }
                             )
                         }
                     }
@@ -394,7 +377,8 @@ fun ChatCreatorScreen(
                                     if (isGroupMode) {
                                         viewModel.toggleRecipient(contact)
                                     } else {
-                                        viewModel.selectContact(contact)
+                                        // Add as chip instead of navigating directly
+                                        viewModel.addRecipient(contact)
                                     }
                                 }
                             )
@@ -425,7 +409,8 @@ fun ChatCreatorScreen(
                                     if (isGroupMode) {
                                         viewModel.toggleRecipient(contact)
                                     } else {
-                                        viewModel.selectContact(contact)
+                                        // Add as chip instead of navigating directly
+                                        viewModel.addRecipient(contact)
                                     }
                                 }
                             )
@@ -433,7 +418,7 @@ fun ChatCreatorScreen(
                     }
 
                     // Empty state
-                    if (uiState.recentContacts.isEmpty() && uiState.groupedContacts.isEmpty() && uiState.favoriteContacts.isEmpty() && !uiState.isLoading) {
+                    if (uiState.popularChats.isEmpty() && uiState.groupedContacts.isEmpty() && uiState.favoriteContacts.isEmpty() && !uiState.isLoading) {
                         item {
                             Box(
                                 modifier = Modifier

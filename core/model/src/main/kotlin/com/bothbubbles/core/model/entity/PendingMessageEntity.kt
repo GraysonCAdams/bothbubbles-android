@@ -102,7 +102,34 @@ data class PendingMessageEntity(
      * Format: {"string": "...", "runs": [...]}
      */
     @ColumnInfo(name = "attributed_body_json")
-    val attributedBodyJson: String? = null
+    val attributedBodyJson: String? = null,
+
+    /**
+     * Local ID of the message that must complete (SENT status) before this message can be sent.
+     * Used to ensure messages in the same chat are delivered in order.
+     *
+     * When a message is queued while another message in the same chat is PENDING or SENDING,
+     * this field is set to that message's localId. The MessageSendWorker will wait for the
+     * dependency to reach SENT status before attempting to send this message.
+     *
+     * If the dependency fails (reaches FAILED status), this message is also marked as FAILED
+     * via cascade failure logic.
+     */
+    @ColumnInfo(name = "depends_on_local_id")
+    val dependsOnLocalId: String? = null,
+
+    /**
+     * Groups related messages that were composed together (e.g., text + attachments).
+     *
+     * When a user sends a message with both text and attachments, they are split into
+     * separate messages (like native iMessage). This ID links them for:
+     * - Visual grouping in the UI (tighter spacing, connected bubbles)
+     * - Understanding which messages were sent as a unit
+     *
+     * Format: "batch-{UUID}" or null for single messages.
+     */
+    @ColumnInfo(name = "split_batch_id")
+    val splitBatchId: String? = null
 )
 
 /**

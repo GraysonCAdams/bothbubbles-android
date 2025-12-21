@@ -38,7 +38,9 @@ data class QueuedMessageInfo(
     val hasAttachments: Boolean,
     val replyToGuid: String?,
     val effectId: String?,
-    val messageSource: String = "IMESSAGE"
+    val messageSource: String = "IMESSAGE",
+    /** Groups related messages composed together (text + attachments split) */
+    val splitBatchId: String? = null
 )
 
 /**
@@ -259,6 +261,13 @@ class ChatSendDelegate @AssistedInject constructor(
     /**
      * Send a message with optional attachments.
      *
+     * When both text AND attachments are present, they are split into separate messages
+     * (like native iMessage):
+     * - Each attachment becomes its own message (sent first)
+     * - Text becomes its own message (sent last)
+     * - All share a splitBatchId for visual grouping
+     * - Each can succeed/fail independently
+     *
      * @param text Message text
      * @param attachments List of attachments to send
      * @param effectId Optional effect ID (e.g. "invisible ink")
@@ -307,55 +316,148 @@ class ChatSendDelegate @AssistedInject constructor(
                 hasAttachments = attachments.isNotEmpty()
             )
 
-            // OPTIMISTIC INSERTION (Phase 1):
-            // Generate GUID and insert into UI *before* touching the database.
-            // This eliminates the ~50ms DB write latency from the visual feedback loop.
-            val tempGuid = "temp-${java.util.UUID.randomUUID()}"
-            val creationTime = System.currentTimeMillis()
+            // Determine message source for optimistic models
+            val messageSource = when {
+                isLocalSmsChat -> MessageSource.LOCAL_SMS.name
+                currentSendMode == ChatSendMode.SMS -> MessageSource.LOCAL_SMS.name
+                else -> MessageSource.IMESSAGE.name
+            }
 
-            Timber.d("⏱️ [DELEGATE] calling onQueued callback (OPTIMISTIC): +${System.currentTimeMillis() - sendStartTime}ms")
-            onQueued?.invoke(
-                QueuedMessageInfo(
-                    guid = tempGuid,
-                    text = trimmedText.ifBlank { null },
-                    dateCreated = creationTime,
-                    hasAttachments = attachments.isNotEmpty(),
-                    replyToGuid = replyToGuid,
-                    effectId = effectId
-                )
-            )
-            Timber.d("⏱️ [DELEGATE] onQueued callback returned: +${System.currentTimeMillis() - sendStartTime}ms")
+            // =====================================================
+            // SPLIT LOGIC: Separate text and attachments into independent messages
+            // (like native iMessage behavior)
+            // =====================================================
 
-            // Queue message for offline-first delivery via WorkManager
-            // CRITICAL: Run on IO dispatcher to prevent blocking the main thread (which delays UI rendering)
+            // Generate batch ID only if we have BOTH text AND attachments
+            val splitBatchId = if (trimmedText.isNotBlank() && attachments.isNotEmpty()) {
+                "batch-${java.util.UUID.randomUUID()}"
+            } else {
+                null
+            }
+
+            // Extract captions from attachments - they stay WITH their attachment
+            // The main text is sent as its own message (not duplicated as caption)
+            val attachmentsWithoutTextAsCaption = attachments.map { attachment ->
+                // If caption equals the main text, clear it (avoid duplication)
+                if (attachment.caption == trimmedText) {
+                    attachment.copy(caption = null)
+                } else {
+                    attachment
+                }
+            }
+
+            val baseTime = System.currentTimeMillis()
+            var timestampOffset = 0L
+            var isFirstMessage = true
+            val queuedGuids = mutableListOf<String>()
+
+            Timber.d("⏱️ [DELEGATE] Split: ${attachments.size} attachments + ${if (trimmedText.isNotBlank()) "text" else "no text"}, batchId=$splitBatchId")
+
+            // Queue on IO dispatcher
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-                val queueStart = System.currentTimeMillis()
-                Timber.d("⏱️ [DELEGATE] calling queueMessage (IO): +${System.currentTimeMillis() - sendStartTime}ms")
-                pendingMessageSource.queueMessage(
-                    chatGuid = chatGuid,
-                    text = trimmedText,
-                    replyToGuid = replyToGuid,
-                    effectId = effectId,
-                    attachments = attachments,
-                    deliveryMode = deliveryMode,
-                    forcedLocalId = tempGuid // Pass the GUID we already displayed
-                ).fold(
-                    onSuccess = { localId ->
-                        Timber.d("⏱️ [DELEGATE] queueMessage returned: +${System.currentTimeMillis() - queueStart}ms (total: ${System.currentTimeMillis() - sendStartTime}ms)")
-                        Timber.d("Message queued successfully: $localId")
-                        PerformanceProfiler.end(sendId, "queued")
+                // 1. Queue each attachment as a separate message (attachments first)
+                for ((index, attachment) in attachmentsWithoutTextAsCaption.withIndex()) {
+                    val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+                    val creationTime = baseTime + timestampOffset
+                    timestampOffset++ // Ensure ordering
 
-                        // Play send sound for all message types (iMessage and SMS)
-                        soundPlayer.playSendSound()
-                    },
-                    onFailure = { e ->
-                        Timber.e(e, "Failed to queue message")
-                        _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
-                        PerformanceProfiler.end(sendId, "queue-failed: ${e.message}")
-                        // Remove the optimistic message from UI since DB insertion failed
-                        onRemoveOptimistic?.invoke(tempGuid)
+                    // Create optimistic UI model for this attachment
+                    val queuedInfo = QueuedMessageInfo(
+                        guid = tempGuid,
+                        text = attachment.caption, // Caption stays with attachment
+                        dateCreated = creationTime,
+                        hasAttachments = true,
+                        replyToGuid = if (isFirstMessage) replyToGuid else null, // Only first gets reply
+                        effectId = null, // Effects go on text message
+                        messageSource = messageSource,
+                        splitBatchId = splitBatchId
+                    )
+
+                    // Invoke optimistic callback on main thread
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        onQueued?.invoke(queuedInfo)
                     }
-                )
+
+                    // Queue the attachment message
+                    pendingMessageSource.queueMessage(
+                        chatGuid = chatGuid,
+                        text = attachment.caption, // Caption as text
+                        replyToGuid = if (isFirstMessage) replyToGuid else null,
+                        effectId = null,
+                        attachments = listOf(attachment.copy(caption = null)), // Clear caption since it's now text
+                        deliveryMode = deliveryMode,
+                        forcedLocalId = tempGuid,
+                        splitBatchId = splitBatchId
+                    ).fold(
+                        onSuccess = { localId ->
+                            Timber.d("Attachment $index queued: $localId")
+                            queuedGuids.add(tempGuid)
+                        },
+                        onFailure = { e ->
+                            Timber.e(e, "Failed to queue attachment $index")
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                onRemoveOptimistic?.invoke(tempGuid)
+                            }
+                        }
+                    )
+
+                    isFirstMessage = false
+                }
+
+                // 2. Queue text as a separate message (text last, like native iMessage)
+                if (trimmedText.isNotBlank()) {
+                    val tempGuid = "temp-${java.util.UUID.randomUUID()}"
+                    val creationTime = baseTime + timestampOffset
+
+                    // Create optimistic UI model for text
+                    val queuedInfo = QueuedMessageInfo(
+                        guid = tempGuid,
+                        text = trimmedText,
+                        dateCreated = creationTime,
+                        hasAttachments = false,
+                        replyToGuid = if (isFirstMessage) replyToGuid else null, // Only if no attachments
+                        effectId = effectId, // Effects go on text message
+                        messageSource = messageSource,
+                        splitBatchId = splitBatchId
+                    )
+
+                    // Invoke optimistic callback on main thread
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                        onQueued?.invoke(queuedInfo)
+                    }
+
+                    // Queue the text message
+                    pendingMessageSource.queueMessage(
+                        chatGuid = chatGuid,
+                        text = trimmedText,
+                        replyToGuid = if (isFirstMessage) replyToGuid else null,
+                        effectId = effectId,
+                        attachments = emptyList(),
+                        deliveryMode = deliveryMode,
+                        forcedLocalId = tempGuid,
+                        splitBatchId = splitBatchId
+                    ).fold(
+                        onSuccess = { localId ->
+                            Timber.d("Text message queued: $localId")
+                            queuedGuids.add(tempGuid)
+                        },
+                        onFailure = { e ->
+                            Timber.e(e, "Failed to queue text message")
+                            _state.update { it.copy(sendError = "Failed to queue message: ${e.message}") }
+                            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                                onRemoveOptimistic?.invoke(tempGuid)
+                            }
+                        }
+                    )
+                }
+
+                // Play sound if at least one message was queued
+                if (queuedGuids.isNotEmpty()) {
+                    PerformanceProfiler.end(sendId, "queued ${queuedGuids.size} messages")
+                    soundPlayer.playSendSound()
+                } else {
+                    PerformanceProfiler.end(sendId, "queue-failed: no messages queued")
+                }
             }
         }
     }
