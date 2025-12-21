@@ -25,6 +25,11 @@ import javax.inject.Singleton
 class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver {
 
     private var isInitialized = false
+    
+    // Track if app is in foreground
+    @Volatile
+    var isAppForeground: Boolean = false
+        private set
 
     /**
      * Initialize lifecycle observation. Should be called once from Application.onCreate()
@@ -36,7 +41,13 @@ class ActiveConversationManager @Inject constructor() : DefaultLifecycleObserver
         Timber.d("Initialized with ProcessLifecycleOwner")
     }
 
+    override fun onStart(owner: LifecycleOwner) {
+        isAppForeground = true
+        Timber.d("App foregrounded")
+    }
+
     override fun onStop(owner: LifecycleOwner) {
+        isAppForeground = false
         // App went to background - clear active conversation so notifications show
         Timber.d("App backgrounded - clearing active conversation")
         clearActiveConversation()

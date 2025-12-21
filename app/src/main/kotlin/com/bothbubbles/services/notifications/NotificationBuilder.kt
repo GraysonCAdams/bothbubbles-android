@@ -16,6 +16,7 @@ import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.ui.call.IncomingCallActivity
 import com.bothbubbles.util.AvatarGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -38,6 +39,7 @@ class NotificationBuilder @Inject constructor(
     private val bubbleMetadataHelper: BubbleMetadataHelper,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val activeConversationManager: ActiveConversationManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -312,9 +314,13 @@ class NotificationBuilder @Inject constructor(
         )
 
         // Create bubble metadata if bubbles are enabled for this conversation
+        // AND the app is not in the foreground (to avoid "interface inception")
         val shouldBubble = bubbleMetadataHelper.shouldShowBubble(chatGuid, senderAddress)
-        Timber.d("Bubble check: shouldBubble=$shouldBubble, chatGuid=$chatGuid")
-        val bubbleMetadata = if (shouldBubble) {
+        val isAppForeground = activeConversationManager.isAppForeground
+        
+        Timber.d("Bubble check: shouldBubble=$shouldBubble, isAppForeground=$isAppForeground, chatGuid=$chatGuid")
+        
+        val bubbleMetadata = if (shouldBubble && !isAppForeground) {
             bubbleMetadataHelper.createBubbleMetadata(
                 chatGuid = chatGuid,
                 chatTitle = chatTitle,
@@ -633,6 +639,56 @@ class NotificationBuilder @Inject constructor(
             .setOngoing(true)
             .setAutoCancel(false)
             .setTimeoutAfter(60000) // Auto-dismiss after 60 seconds
+            .build()
+    }
+
+    /**
+     * Build notification for a failed message delivery.
+     */
+    fun buildMessageFailedNotification(
+        channelId: String,
+        chatGuid: String,
+        chatTitle: String,
+        messagePreview: String?,
+        errorMessage: String
+    ): android.app.Notification {
+        // Look up if this chat is part of a unified group (for merged iMessage/SMS navigation)
+        val mergedGuids: String? = unifiedGroupCache[chatGuid]
+
+        // Create intent to open the chat
+        val intent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, chatGuid)
+            if (mergedGuids != null) {
+                putExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS, mergedGuids)
+            }
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            chatGuid.hashCode(),
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val contentText = if (messagePreview.isNullOrBlank()) {
+            "Message failed to send"
+        } else {
+            "Failed: ${messagePreview.take(50)}${if (messagePreview.length > 50) "..." else ""}"
+        }
+
+        return NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.stat_notify_error)
+            .setContentTitle("Message not delivered to $chatTitle")
+            .setContentText(contentText)
+            .setStyle(
+                NotificationCompat.BigTextStyle()
+                    .bigText("$contentText\n\n$errorMessage")
+            )
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_ERROR)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
     }
 }

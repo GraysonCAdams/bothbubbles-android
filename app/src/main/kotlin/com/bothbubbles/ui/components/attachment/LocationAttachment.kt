@@ -393,9 +393,10 @@ private fun LocationMapView(
                 val geoPoint = GeoPoint(latitude, longitude)
                 controller.setZoom(16.0)
 
-                // Offset center slightly south so pin appears visually centered
-                // Pin height is roughly 0.0003 degrees at zoom 16
-                val centeredPoint = GeoPoint(latitude - 0.0003, longitude)
+                // Offset center north so pin's visual center (red circle) appears centered
+                // The marker anchor is at the bottom, so we shift the viewport center north
+                // to compensate for the pin extending upward from the GPS point
+                val centeredPoint = GeoPoint(latitude + 0.0004, longitude)
                 controller.setCenter(centeredPoint)
 
                 // Add red location marker

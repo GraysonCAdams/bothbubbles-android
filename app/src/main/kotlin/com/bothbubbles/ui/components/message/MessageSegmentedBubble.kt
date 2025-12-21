@@ -32,6 +32,7 @@ import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -399,6 +400,9 @@ internal fun SegmentedMessageBubble(
                 val hasReactions = message.reactions.isNotEmpty()
                 val reactionOverflowPx = with(LocalDensity.current) { 17.dp.toPx().toInt() }
 
+                // Check if first segment is media - if so, reply preview becomes a card header
+                val firstSegmentIsMedia = segments.firstOrNull() is MessageSegment.MediaSegment
+
                 Box(
                     modifier = Modifier
                         .layout { measurable, constraints ->
@@ -417,8 +421,8 @@ internal fun SegmentedMessageBubble(
                     Column(
                         verticalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        // Inline reply quote at the top (wrapped in a bubble-like surface)
-                        replyPreview?.let { preview ->
+                        // Reply quote as standalone bubble when first segment is NOT media
+                        if (replyPreview != null && !firstSegmentIsMedia) {
                             val quoteBubbleColor = when {
                                 message.isFromMe && isIMessage -> bubbleColors.iMessageSent
                                 message.isFromMe -> bubbleColors.smsSent
@@ -431,7 +435,7 @@ internal fun SegmentedMessageBubble(
                             ) {
                                 Box(modifier = Modifier.padding(12.dp)) {
                                     InlineReplyQuote(
-                                        replyPreview = preview,
+                                        replyPreview = replyPreview,
                                         isFromMe = message.isFromMe,
                                         bubbleColor = quoteBubbleColor,
                                         onTap = onReplyQuoteTap,
@@ -446,21 +450,73 @@ internal fun SegmentedMessageBubble(
                                 is MessageSegment.MediaSegment -> {
                                     val progressState = rememberDownloadProgress(attachmentDelegate, segment.attachment.guid)
                                     val progress = progressState.value
-                                    // Images/GIFs now have internal gesture handling:
-                                    // - Lower 20% tap: toggle timestamp (onTimestampToggle)
-                                    // - Upper 80% tap / long press: open fullscreen (onMediaClick)
-                                    BorderlessMediaContent(
-                                        attachment = segment.attachment,
-                                        isFromMe = message.isFromMe,
-                                        onMediaClick = onMediaClick,
-                                        onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
-                                        maxWidth = 240.dp,
-                                        onDownloadClick = onDownloadClick,
-                                        isDownloading = progress != null,
-                                        downloadProgress = progress ?: 0f,
-                                        isPlacedSticker = message.isPlacedSticker,
-                                        messageGuid = message.guid
-                                    )
+                                    val isFirstMedia = index == 0
+
+                                    // For first media with reply preview: render as card with header
+                                    if (isFirstMedia && replyPreview != null) {
+                                        val cardColor = when {
+                                            message.isFromMe && isIMessage -> bubbleColors.iMessageSent
+                                            message.isFromMe -> bubbleColors.smsSent
+                                            else -> bubbleColors.received
+                                        }
+                                        Surface(
+                                            shape = RoundedCornerShape(18.dp),
+                                            color = cardColor,
+                                            modifier = Modifier.widthIn(max = 240.dp)
+                                        ) {
+                                            Column {
+                                                // Reply header with card-appropriate colors
+                                                Box(modifier = Modifier.padding(12.dp)) {
+                                                    InlineReplyQuote(
+                                                        replyPreview = replyPreview,
+                                                        isFromMe = message.isFromMe,
+                                                        bubbleColor = cardColor,
+                                                        onTap = onReplyQuoteTap,
+                                                        onLongPress = onReplyQuoteLongPress,
+                                                        isCardHeader = true
+                                                    )
+                                                }
+                                                // Media with only bottom corners rounded (top connects to header)
+                                                Box(
+                                                    modifier = Modifier.clip(
+                                                        RoundedCornerShape(
+                                                            topStart = 0.dp,
+                                                            topEnd = 0.dp,
+                                                            bottomStart = 18.dp,
+                                                            bottomEnd = 18.dp
+                                                        )
+                                                    )
+                                                ) {
+                                                    BorderlessMediaContent(
+                                                        attachment = segment.attachment,
+                                                        isFromMe = message.isFromMe,
+                                                        onMediaClick = onMediaClick,
+                                                        onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
+                                                        maxWidth = 240.dp,
+                                                        onDownloadClick = onDownloadClick,
+                                                        isDownloading = progress != null,
+                                                        downloadProgress = progress ?: 0f,
+                                                        isPlacedSticker = message.isPlacedSticker,
+                                                        messageGuid = message.guid
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        // Standalone media (no reply or not first)
+                                        BorderlessMediaContent(
+                                            attachment = segment.attachment,
+                                            isFromMe = message.isFromMe,
+                                            onMediaClick = onMediaClick,
+                                            onTimestampToggle = { if (gesturesEnabled && !isSelectionMode) showTimestamp = !showTimestamp },
+                                            maxWidth = 240.dp,
+                                            onDownloadClick = onDownloadClick,
+                                            isDownloading = progress != null,
+                                            downloadProgress = progress ?: 0f,
+                                            isPlacedSticker = message.isPlacedSticker,
+                                            messageGuid = message.guid
+                                        )
+                                    }
                                 }
 
                                 is MessageSegment.TextSegment -> {

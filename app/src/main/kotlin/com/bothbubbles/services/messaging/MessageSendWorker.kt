@@ -20,6 +20,7 @@ import com.bothbubbles.data.local.db.entity.PendingSyncStatus
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.services.messaging.sender.MessageAlreadyInTransitException
+import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.util.error.MessageErrorCode
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
@@ -53,9 +54,11 @@ class MessageSendWorker @AssistedInject constructor(
     private val pendingAttachmentDao: PendingAttachmentDao,
     private val attachmentDao: com.bothbubbles.data.local.db.dao.AttachmentDao,
     private val messageDao: MessageDao,
+    private val chatDao: com.bothbubbles.data.local.db.dao.ChatDao,
     private val messageSendingService: MessageSendingService,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val notifier: Notifier
 ) : CoroutineWorker(context, workerParams) {
 
     companion object {
@@ -66,8 +69,12 @@ class MessageSendWorker @AssistedInject constructor(
         /**
          * Time to wait for BlueBubbles server to confirm message state after successful send.
          * The server may report delivery failure (e.g., error 22 - not registered) via socket event.
+         *
+         * Set to 15 seconds - if the server hasn't confirmed or reported an error by then,
+         * we assume success. For attachments, this timeout only applies AFTER streaming
+         * completes successfully (streaming failures are handled immediately).
          */
-        private const val SERVER_CONFIRMATION_TIMEOUT_MS = 2 * 60 * 1000L // 2 minutes
+        private const val SERVER_CONFIRMATION_TIMEOUT_MS = 15_000L // 15 seconds
 
         /** Poll interval when waiting for server confirmation */
         private const val CONFIRMATION_POLL_INTERVAL_MS = 2000L // 2 seconds
@@ -397,13 +404,38 @@ class MessageSendWorker @AssistedInject constructor(
         errorMessage: String,
         errorCode: Int
     ): Result {
-        // Mark as FAILED
+        // Get the pending message to find the localId (temp GUID) and message text
+        val pendingMessage = pendingMessageDao.getById(pendingMessageId)
+        val localId = pendingMessage?.localId
+        val messagePreview = pendingMessage?.text
+
+        // Mark PendingMessageEntity as FAILED
         pendingMessageDao.updateStatusWithError(
             pendingMessageId,
             PendingSyncStatus.FAILED.name,
             errorMessage,
             System.currentTimeMillis()
         )
+
+        // CRITICAL: Also update the MessageEntity error field so UI shows "failed" not "sending"
+        if (localId != null) {
+            messageDao.updateMessageError(localId, errorCode, errorMessage)
+            Timber.d("Updated MessageEntity error for $localId: code=$errorCode")
+        }
+
+        // Show notification that message failed to deliver
+        try {
+            val chat = chatDao.getChatByGuid(chatGuid)
+            val chatTitle = chat?.displayName ?: chat?.chatIdentifier ?: "Unknown"
+            notifier.showMessageFailedNotification(
+                chatGuid = chatGuid,
+                chatTitle = chatTitle,
+                messagePreview = messagePreview,
+                errorMessage = errorMessage
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to show failure notification")
+        }
 
         return Result.failure()
     }

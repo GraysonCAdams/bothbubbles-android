@@ -774,7 +774,8 @@ fun ChatScreen(
     AnimatedThreadOverlay(
         threadDelegate = viewModel.thread,
         onMessageClick = { guid -> viewModel.thread.scrollToMessage(guid) },
-        onDismiss = { viewModel.thread.dismissThreadOverlay() }
+        onDismiss = { viewModel.thread.dismissThreadOverlay() },
+        bottomPadding = bottomBarHeightDp
     )
     } // End of outer Box
     } // End of CompositionLocalProvider

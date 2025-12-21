@@ -28,11 +28,18 @@ class NotificationService @Inject constructor(
 ) : Notifier {
     private val notificationManager = NotificationManagerCompat.from(context)
 
+    // Track active notification IDs per chat for proper cancellation when stacking
+    // Maps chatGuid -> Set of notification IDs
+    private val activeNotificationIds = mutableMapOf<String, MutableSet<Int>>()
+
     /**
      * Show a notification for a new message.
      *
      * Creates a per-conversation notification channel if one doesn't exist,
      * allowing users to customize notification settings per conversation.
+     *
+     * Uses unique notification IDs per message to enable stacking (multiple
+     * notifications per chat that don't replace each other).
      */
     override fun showMessageNotification(params: MessageNotificationParams) {
         if (!hasNotificationPermission()) return
@@ -63,20 +70,37 @@ class NotificationService @Inject constructor(
             attachmentMimeType = params.attachmentMimeType
         )
 
-        notificationManager.notify(params.chatGuid.hashCode(), notification)
+        // Use messageGuid for unique notification ID (enables stacking)
+        val notificationId = params.messageGuid.hashCode()
+
+        // Track this notification ID for the chat
+        synchronized(activeNotificationIds) {
+            activeNotificationIds.getOrPut(params.chatGuid) { mutableSetOf() }.add(notificationId)
+        }
+
+        notificationManager.notify(notificationId, notification)
     }
 
     /**
-     * Cancel notification for a chat.
+     * Cancel all notifications for a chat.
+     * Cancels all stacked notifications that belong to this chat.
      */
     override fun cancelNotification(chatGuid: String) {
-        notificationManager.cancel(chatGuid.hashCode())
+        synchronized(activeNotificationIds) {
+            val ids = activeNotificationIds.remove(chatGuid)
+            ids?.forEach { notificationId ->
+                notificationManager.cancel(notificationId)
+            }
+        }
     }
 
     /**
      * Cancel all message notifications.
      */
     override fun cancelAllNotifications() {
+        synchronized(activeNotificationIds) {
+            activeNotificationIds.clear()
+        }
         notificationManager.cancelAll()
     }
 
@@ -150,6 +174,37 @@ class NotificationService @Inject constructor(
     override fun dismissFaceTimeCallNotification(callUuid: String) {
         val notificationId = NotificationChannelManager.FACETIME_NOTIFICATION_ID_PREFIX + callUuid.hashCode()
         notificationManager.cancel(notificationId)
+    }
+
+    /**
+     * Show notification when a message fails to deliver.
+     * Uses a unique notification ID based on chat + timestamp so failures stack.
+     */
+    override fun showMessageFailedNotification(
+        chatGuid: String,
+        chatTitle: String,
+        messagePreview: String?,
+        errorMessage: String
+    ) {
+        if (!hasNotificationPermission()) return
+
+        // Get or create per-conversation channel
+        val channelId = notificationChannelManager.getOrCreateConversationChannel(
+            chatGuid = chatGuid,
+            chatTitle = chatTitle
+        )
+
+        val notification = notificationBuilder.buildMessageFailedNotification(
+            channelId = channelId,
+            chatGuid = chatGuid,
+            chatTitle = chatTitle,
+            messagePreview = messagePreview,
+            errorMessage = errorMessage
+        )
+
+        // Use unique ID based on chat + timestamp so failures stack
+        val notificationId = ("failed-$chatGuid-${System.currentTimeMillis()}").hashCode()
+        notificationManager.notify(notificationId, notification)
     }
 
     private fun hasNotificationPermission(): Boolean {

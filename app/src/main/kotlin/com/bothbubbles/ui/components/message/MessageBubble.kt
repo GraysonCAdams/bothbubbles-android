@@ -529,29 +529,34 @@ fun InlineReplyQuote(
     bubbleColor: Color,
     onTap: (() -> Unit)? = null,
     onLongPress: (() -> Unit)? = null,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isCardHeader: Boolean = false // When true, renders without background for use as card header
 ) {
     val hapticFeedback = LocalHapticFeedback.current
 
     // Determine colors based on bubble context
-    val accentColor = if (replyPreview.isFromMe)
-        BothBubblesTheme.bubbleColors.iMessageSent
-    else
-        MaterialTheme.colorScheme.primary
+    // For card header mode on sent messages, use white for readability on blue background
+    val accentColor = when {
+        isCardHeader && isFromMe -> Color.White
+        replyPreview.isFromMe -> BothBubblesTheme.bubbleColors.iMessageSent
+        else -> MaterialTheme.colorScheme.primary
+    }
 
     // Use a semi-transparent overlay that works on both light and dark bubbles
-    val quoteBackgroundColor = if (isFromMe) {
-        Color.Black.copy(alpha = 0.1f)
-    } else {
-        Color.Black.copy(alpha = 0.06f)
+    // Skip background for card header mode
+    val quoteBackgroundColor = when {
+        isCardHeader -> Color.Transparent
+        isFromMe -> Color.Black.copy(alpha = 0.1f)
+        else -> Color.Black.copy(alpha = 0.06f)
     }
 
     // Text colors that work on the quote background
+    // For card header on sent messages, use white text
     val senderTextColor = accentColor
-    val previewTextColor = if (isFromMe) {
-        BothBubblesTheme.bubbleColors.iMessageSentText.copy(alpha = 0.8f)
-    } else {
-        BothBubblesTheme.bubbleColors.receivedText.copy(alpha = 0.8f)
+    val previewTextColor = when {
+        isCardHeader && isFromMe -> Color.White.copy(alpha = 0.8f)
+        isFromMe -> BothBubblesTheme.bubbleColors.iMessageSentText.copy(alpha = 0.8f)
+        else -> BothBubblesTheme.bubbleColors.receivedText.copy(alpha = 0.8f)
     }
 
     Surface(

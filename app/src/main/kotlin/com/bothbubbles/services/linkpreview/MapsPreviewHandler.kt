@@ -94,8 +94,11 @@ internal class MapsPreviewHandler(
      * Builds a static map image URL using OpenStreetMap (free, no API key required)
      */
     private fun buildStaticMapUrl(lat: Double, lng: Double): String {
+        // Offset center north so pin appears vertically centered in the preview
+        // At zoom 15, offset is ~0.0008 (double zoom 16's 0.0004)
+        val centeredLat = lat + 0.0008
         return "https://staticmap.openstreetmap.de/staticmap.php?" +
-            "center=$lat,$lng&zoom=15&size=400x200&markers=$lat,$lng,red-pushpin"
+            "center=$centeredLat,$lng&zoom=15&size=400x200&markers=$lat,$lng,red-pushpin"
     }
 
     /**

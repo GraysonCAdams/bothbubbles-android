@@ -111,4 +111,19 @@ interface PendingMessageSource {
      * @return Number of unsent messages
      */
     suspend fun getUnsentCount(): Int
+
+    /**
+     * Verify stuck SENDING messages with the server on app startup.
+     *
+     * For each message in SENDING state:
+     * - If serverGuid exists, check with server if it was delivered
+     * - If delivered → mark as SENT
+     * - If not delivered or no serverGuid → mark as FAILED
+     *
+     * This prevents messages from being stuck in "sending" state forever after app kill.
+     * Does NOT re-attempt sending - just verifies and marks appropriately.
+     *
+     * @return Number of messages verified and updated
+     */
+    suspend fun verifyAndFailStuckMessages(): Int
 }

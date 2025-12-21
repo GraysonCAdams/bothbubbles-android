@@ -419,9 +419,9 @@ private fun Life360MapView(
                 val geoPoint = GeoPoint(latitude, longitude)
                 controller.setZoom(16.0)
 
-                // Offset center slightly south so pin appears visually centered
-                // Avatar pin is ~108px, so offset slightly more than location pin
-                val centeredPoint = GeoPoint(latitude - 0.00035, longitude)
+                // Offset center north so pin's visual center appears centered
+                // Avatar pin is ~108px, so offset slightly more than location pin (0.0004)
+                val centeredPoint = GeoPoint(latitude + 0.0005, longitude)
                 controller.setCenter(centeredPoint)
 
                 // Add marker with avatar pin

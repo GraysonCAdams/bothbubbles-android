@@ -117,4 +117,19 @@ interface Notifier {
      * @param count The total unread message count to display on the app badge
      */
     fun updateAppBadge(count: Int)
+
+    /**
+     * Show notification when a message fails to deliver.
+     *
+     * @param chatGuid The chat where the message failed
+     * @param chatTitle Display name of the conversation
+     * @param messagePreview Preview of the failed message text
+     * @param errorMessage The error reason (shown in expanded notification)
+     */
+    fun showMessageFailedNotification(
+        chatGuid: String,
+        chatTitle: String,
+        messagePreview: String?,
+        errorMessage: String
+    )
 }

@@ -4,6 +4,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.notifications.Notifier
 import com.bothbubbles.services.socket.SocketEvent
 import com.bothbubbles.services.socket.UiRefreshEvent
@@ -23,7 +24,8 @@ class ChatEventHandler @Inject constructor(
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
-    private val notifier: Notifier
+    private val notifier: Notifier,
+    private val activeConversationManager: ActiveConversationManager
 ) {
     fun handleTypingIndicator(event: SocketEvent.TypingIndicator) {
         // Typing indicators are typically handled at the UI layer via a shared flow
@@ -44,7 +46,11 @@ class ChatEventHandler @Inject constructor(
         }
 
         // Cancel notification for this chat since it was read (possibly on another device)
-        notifier.cancelNotification(event.chatGuid)
+        // BUT skip if the conversation is currently active (e.g. user is in the bubble)
+        // Cancelling the notification would force-close the bubble while the user is using it
+        if (!activeConversationManager.isConversationActive(event.chatGuid)) {
+            notifier.cancelNotification(event.chatGuid)
+        }
 
         // Emit UI refresh event for immediate unread badge update
         uiRefreshEvents.tryEmit(UiRefreshEvent.ChatRead(event.chatGuid))

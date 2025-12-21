@@ -26,6 +26,7 @@ import com.bothbubbles.data.model.PendingAttachmentInput
 import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
 import com.bothbubbles.data.local.db.entity.PendingSyncStatus
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.services.messaging.MessageSendWorker
@@ -60,7 +61,8 @@ class PendingMessageRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val attachmentDao: AttachmentDao,
     private val chatDao: ChatDao,
-    private val attachmentPersistenceManager: AttachmentPersistenceManager
+    private val attachmentPersistenceManager: AttachmentPersistenceManager,
+    private val api: BothBubblesApi
 ) : PendingMessageSource {
 
     private val workManager: WorkManager by lazy { WorkManager.getInstance(context) }
@@ -395,19 +397,12 @@ class PendingMessageRepository @Inject constructor(
     /**
      * Re-enqueue all pending messages.
      * Called at app startup to restart stalled jobs.
+     *
+     * NOTE: verifyAndFailStuckMessages() should be called BEFORE this method
+     * to handle SENDING messages that got interrupted. This method only
+     * re-enqueues PENDING messages, not FAILED ones (let user manually retry those).
      */
     override suspend fun reEnqueuePendingMessages(): Result<Unit> = runCatching {
-        // Reset messages stuck in SENDING status (app was killed during send)
-        // Consider stale if SENDING for more than 2 minutes
-        val staleThreshold = System.currentTimeMillis() - (2 * 60 * 1000)
-        val staleSending = pendingMessageDao.getStaleSending(staleThreshold)
-        if (staleSending.isNotEmpty()) {
-            Timber.i("Found ${staleSending.size} stale SENDING messages, resetting to PENDING")
-            staleSending.forEach { message ->
-                pendingMessageDao.updateStatus(message.id, PendingSyncStatus.PENDING.name)
-            }
-        }
-
         val pending = pendingMessageDao.getPendingAndFailed()
         var reEnqueuedCount = 0
 
@@ -481,4 +476,104 @@ class PendingMessageRepository @Inject constructor(
      * Get count of unsent messages (for startup indicator).
      */
     override suspend fun getUnsentCount(): Int = pendingMessageDao.getUnsentCount()
+
+    /**
+     * Verify stuck SENDING messages with the server on app startup.
+     * Also syncs FAILED pending messages where the MessageEntity error wasn't set.
+     *
+     * For each message in SENDING state:
+     * - If serverGuid exists, check with server if it was delivered
+     * - If delivered (error = 0) → mark as SENT
+     * - If not delivered or no serverGuid → mark as FAILED
+     *
+     * For each message in FAILED state:
+     * - Ensure the MessageEntity error field is set (sync from pending to messages table)
+     *
+     * This prevents messages from being stuck in "sending" state forever after app kill.
+     * Does NOT re-attempt sending - just verifies and marks appropriately.
+     */
+    override suspend fun verifyAndFailStuckMessages(): Int {
+        try {
+            var verifiedCount = 0
+
+            // 1. Handle SENDING messages - verify with server
+            val sendingMessages = pendingMessageDao.getByStatus(PendingSyncStatus.SENDING.name)
+            if (sendingMessages.isNotEmpty()) {
+                Timber.i("Found ${sendingMessages.size} stuck SENDING messages, verifying with server...")
+
+                for (message in sendingMessages) {
+                    val serverGuid = message.serverGuid
+                    val localId = message.localId
+
+                    if (serverGuid != null) {
+                        // Server GUID exists - API call succeeded before interruption
+                        // Check with server if the message was actually delivered
+                        try {
+                            val response = api.getMessage(serverGuid)
+                            if (response.isSuccessful) {
+                                val serverMessage = response.body()?.data
+                                if (serverMessage != null && serverMessage.error == 0) {
+                                    // Message was delivered successfully!
+                                    Timber.i("Message $localId was delivered (serverGuid=$serverGuid)")
+                                    pendingMessageDao.markAsSent(message.id, serverGuid)
+                                    // Update MessageEntity to show as sent
+                                    messageDao.replaceGuid(localId, serverGuid)
+                                    verifiedCount++
+                                    continue
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Timber.w(e, "Failed to verify message $localId with server")
+                        }
+                    }
+
+                    // Either no serverGuid, server unreachable, or message not delivered
+                    // Mark as FAILED
+                    val errorMessage = if (serverGuid == null) {
+                        "Send interrupted before server response"
+                    } else {
+                        "Message not confirmed delivered by server"
+                    }
+
+                    Timber.w("Marking stuck message as FAILED: $localId (serverGuid=$serverGuid)")
+                    pendingMessageDao.updateStatusWithError(
+                        message.id,
+                        PendingSyncStatus.FAILED.name,
+                        errorMessage,
+                        System.currentTimeMillis()
+                    )
+                    // Update MessageEntity so UI shows as failed
+                    messageDao.updateMessageError(localId, 1, errorMessage)
+                    verifiedCount++
+                }
+            }
+
+            // 2. Sync FAILED pending messages - ensure MessageEntity error is set
+            // This handles messages that failed before the fix was installed
+            val failedMessages = pendingMessageDao.getByStatus(PendingSyncStatus.FAILED.name)
+            if (failedMessages.isNotEmpty()) {
+                Timber.d("Syncing ${failedMessages.size} FAILED messages to ensure UI shows error...")
+
+                for (message in failedMessages) {
+                    val localId = message.localId
+                    // Check if the MessageEntity has error=0 (not synced yet)
+                    val messageEntity = messageDao.getMessageByGuid(localId)
+                    if (messageEntity != null && messageEntity.error == 0) {
+                        val errorMessage = message.errorMessage ?: "Message failed to send"
+                        Timber.i("Syncing error to MessageEntity: $localId")
+                        messageDao.updateMessageError(localId, 1, errorMessage)
+                        verifiedCount++
+                    }
+                }
+            }
+
+            if (verifiedCount > 0) {
+                Timber.i("Verified/synced $verifiedCount stuck messages")
+            }
+            return verifiedCount
+        } catch (e: Exception) {
+            Timber.e(e, "Error verifying stuck messages")
+            return 0
+        }
+    }
 }

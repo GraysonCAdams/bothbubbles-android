@@ -38,7 +38,8 @@ fun ThreadOverlay(
     threadChain: ThreadChain,
     onMessageClick: (String) -> Unit,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     // Combine origin message and replies into a single list
     val allMessages = buildList {
@@ -60,17 +61,18 @@ fun ThreadOverlay(
                 ) { onDismiss() }
         )
 
-        // Content card
+        // Content card - positioned above the chat compose bar with padding
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.85f)
                 .align(Alignment.BottomCenter)
+                .padding(bottom = bottomPadding + 8.dp) // Gap above compose bar
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() }
                 ) { /* Consume click to prevent dismissing when tapping content */ },
-            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+            shape = RoundedCornerShape(20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 3.dp
         ) {
@@ -226,7 +228,8 @@ fun AnimatedThreadOverlay(
     threadDelegate: ChatThreadDelegate,
     onMessageClick: (String) -> Unit,
     onDismiss: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
     // Collect thread state internally from delegate to avoid ChatScreen recomposition
     val threadState by threadDelegate.state.collectAsStateWithLifecycle()
@@ -244,7 +247,8 @@ fun AnimatedThreadOverlay(
             ThreadOverlay(
                 threadChain = threadChain,
                 onMessageClick = onMessageClick,
-                onDismiss = onDismiss
+                onDismiss = onDismiss,
+                bottomPadding = bottomPadding
             )
         }
     }

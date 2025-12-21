@@ -71,6 +71,7 @@ class ChatSendModeManager @AssistedInject constructor(
         private const val FLIP_FLOP_WINDOW_MS = 60_000L // 1 minute window for flip/flop detection
         private const val FLIP_FLOP_THRESHOLD = 3 // 3+ state changes = unstable server
         private const val PERIODIC_FALLBACK_CHECK_INTERVAL_MS = 30_000L // 30 seconds between fallback exit checks
+        private const val DISCONNECT_GRACE_PERIOD_MS = 5_000L // 5 seconds grace before SMS switch
     }
 
     // Server stability tracking
@@ -83,6 +84,7 @@ class ChatSendModeManager @AssistedInject constructor(
     private var lastAvailabilityCheck: Long = 0
     private var iMessageAvailabilityCheckJob: Job? = null
     private var periodicFallbackCheckJob: Job? = null
+    private var pendingSmsSwitchJob: Job? = null
 
     // Send mode state
     private val _currentSendMode = MutableStateFlow(initialSendMode)
@@ -467,6 +469,10 @@ class ChatSendModeManager @AssistedInject constructor(
                         serverConnectedSince = System.currentTimeMillis()
                     }
 
+                    // Cancel any pending SMS switch since we reconnected
+                    pendingSmsSwitchJob?.cancel()
+                    pendingSmsSwitchJob = null
+
                     // Clear input blocked state now that server is connected
                     _serverFallbackBlocked.value = false
 
@@ -499,18 +505,28 @@ class ChatSendModeManager @AssistedInject constructor(
                     val isIMessageOnly = isIMessageGroup || isEmailChat
 
                     if (!isIMessageOnly) {
-                        scope.launch {
-                            delay(3000) // Debounce
+                        // Cancel any existing pending switch before starting a new one
+                        pendingSmsSwitchJob?.cancel()
+                        pendingSmsSwitchJob = scope.launch {
+                            delay(DISCONNECT_GRACE_PERIOD_MS)
+
+                            // Re-check connection state after grace period
+                            if (socketConnection.connectionState.value == ConnectionState.CONNECTED) {
+                                Timber.d("Server reconnected during grace period, staying in iMessage mode")
+                                return@launch
+                            }
 
                             // Check if SMS is actually available before switching
                             val smsCapability = smsPermissionHelper.getSmsCapabilityStatus()
                             if (smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity) {
                                 // SMS is available - switch to SMS mode
                                 _currentSendMode.value = ChatSendMode.SMS
+                                Timber.i("Grace period expired, switched to SMS mode")
+                            } else {
+                                // If SMS isn't available, stay in iMessage mode - messages will queue
+                                // and send when server reconnects, or user can retry manually
+                                Timber.i("Grace period expired but SMS unavailable, staying in ${_currentSendMode.value} mode")
                             }
-                            // If SMS isn't available, stay in iMessage mode - messages will queue
-                            // and send when server reconnects, or user can retry manually
-                            Timber.i("Server disconnected, SMS available=${smsCapability.isFullyFunctional && smsCapability.hasCellularConnectivity}, staying in ${_currentSendMode.value} mode")
                         }
                     }
                 }

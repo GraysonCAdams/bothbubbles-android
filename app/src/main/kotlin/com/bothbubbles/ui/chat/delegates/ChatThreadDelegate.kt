@@ -70,12 +70,25 @@ class ChatThreadDelegate @AssistedInject constructor(
             val addressToAvatarPath = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
 
             // Batch load attachments for all thread messages
-            val allAttachments = attachmentRepository.getAttachmentsForMessages(
-                threadMessages.map { it.guid }
-            ).groupBy { it.messageGuid }
+            val messageGuids = threadMessages.map { it.guid }
+            val allAttachments = attachmentRepository.getAttachmentsForMessages(messageGuids)
+                .groupBy { it.messageGuid }
 
-            // Filter out placed stickers from thread overlay - they're visual overlays, not actual replies
+            // Batch load reactions for all thread messages
+            val allReactions = messageRepository.getReactionsForMessages(messageGuids)
+            val reactionsByMessage = allReactions.groupBy { reaction ->
+                reaction.associatedMessageGuid?.let { guid ->
+                    if (guid.contains("/")) guid.substringAfter("/") else guid
+                }
+            }
+
+            // Filter out reactions and placed stickers from thread overlay
+            // Reactions have thread_originator_guid set by the server but should only appear as badges
             val filteredReplies = replies.filter { msg ->
+                // Skip reactions - they appear as badges, not as thread replies
+                if (msg.isReaction) return@filter false
+
+                // Skip placed stickers - they're visual overlays, not actual replies
                 val msgAttachments = allAttachments[msg.guid].orEmpty()
                 val isPlacedSticker = msg.associatedMessageGuid != null &&
                     msgAttachments.any { it.mimeType?.contains("sticker") == true }
@@ -84,6 +97,7 @@ class ChatThreadDelegate @AssistedInject constructor(
 
             val threadChain = ThreadChain(
                 originMessage = origin?.toUiModel(
+                    reactions = reactionsByMessage[origin.guid].orEmpty(),
                     attachments = allAttachments[origin.guid].orEmpty(),
                     handleIdToName = handleIdToName,
                     addressToName = addressToName,
@@ -91,6 +105,7 @@ class ChatThreadDelegate @AssistedInject constructor(
                 ),
                 replies = filteredReplies.map { msg ->
                     msg.toUiModel(
+                        reactions = reactionsByMessage[msg.guid].orEmpty(),
                         attachments = allAttachments[msg.guid].orEmpty(),
                         handleIdToName = handleIdToName,
                         addressToName = addressToName,

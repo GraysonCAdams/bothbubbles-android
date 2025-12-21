@@ -378,7 +378,14 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 val setupComplete = settingsDataStore.isSetupComplete.first()
                 if (!setupComplete) return@launch
 
-                // Re-enqueue any pending messages and clean up sent ones
+                // FIRST: Verify stuck SENDING messages with server and mark as FAILED if not delivered
+                // This prevents messages from being stuck in "sending" state forever after app kill
+                val verifiedCount = pendingMessageSource.verifyAndFailStuckMessages()
+                if (verifiedCount > 0) {
+                    Timber.i("Verified $verifiedCount stuck messages on startup")
+                }
+
+                // Re-enqueue any pending messages (NOT failed - let user manually retry those)
                 pendingMessageSource.reEnqueuePendingMessages()
                 pendingMessageSource.cleanupSentMessages()
 

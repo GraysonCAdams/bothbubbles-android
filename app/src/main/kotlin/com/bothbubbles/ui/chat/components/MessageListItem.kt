@@ -141,7 +141,10 @@ fun MessageListItem(
         message = message
     )
 
-    val showDeliveryIndicator = message.isFromMe && index == lastOutgoingIndex
+    // Show indicator on: 1) last outgoing message, OR 2) any message still transmitting/waiting
+    val showDeliveryIndicator = message.isFromMe && (
+        index == lastOutgoingIndex || !message.isSent
+    )
 
     // Base padding for message grouping
     val basePadding = when {
