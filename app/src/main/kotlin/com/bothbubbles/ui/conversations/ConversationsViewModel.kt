@@ -215,6 +215,12 @@ class ConversationsViewModel @Inject constructor(
     // Phase 8: Event Collection from Delegates
     // ============================================================================
 
+    // Track when optimistic updates happen to prevent DataChanged from overwriting them
+    // This protects against race conditions where database observers emit before writes complete
+    @Volatile
+    private var lastOptimisticUpdateTime = 0L
+    private val optimisticUpdateProtectionMs = 500L // Ignore DataChanged for 500ms after optimistic update
+
     /**
      * Collect events from ConversationObserverDelegate.
      * Replaces the callback-based initialize() approach.
@@ -223,13 +229,23 @@ class ConversationsViewModel @Inject constructor(
         viewModelScope.launch {
             observerDelegate.events.collect { event ->
                 when (event) {
-                    is ConversationEvent.DataChanged -> refreshAllLoadedPages()
+                    is ConversationEvent.DataChanged -> {
+                        // Skip refresh if an optimistic update happened recently
+                        // This prevents database observers from overwriting optimistic updates
+                        // before the database write completes
+                        val timeSinceOptimisticUpdate = System.currentTimeMillis() - lastOptimisticUpdateTime
+                        if (timeSinceOptimisticUpdate < optimisticUpdateProtectionMs) {
+                            Timber.d("Skipping DataChanged refresh - optimistic update was ${timeSinceOptimisticUpdate}ms ago")
+                            return@collect
+                        }
+                        refreshAllLoadedPages()
+                    }
                     is ConversationEvent.NewMessage -> {
                         refreshAllLoadedPages()
                         _newMessageEvent.emit(Unit)
                     }
                     is ConversationEvent.MessageUpdated -> refreshAllLoadedPages()
-                    is ConversationEvent.ChatRead -> optimisticallyMarkChatRead(event.chatGuid)
+                    is ConversationEvent.ChatReadStatusChanged -> optimisticallyUpdateChatReadStatus(event.chatGuid, event.isRead)
                     // Actions events are not emitted by observer delegate
                     else -> { /* Ignore other events */ }
                 }
@@ -246,6 +262,8 @@ class ConversationsViewModel @Inject constructor(
             actionsDelegate.events.collect { event ->
                 when (event) {
                     is ConversationEvent.ConversationsUpdated -> {
+                        // Track when optimistic update happens to protect against DataChanged overwrites
+                        lastOptimisticUpdateTime = System.currentTimeMillis()
                         _uiState.update { it.copy(conversations = event.conversations.toStable()) }
                     }
                     is ConversationEvent.ScrollToIndex -> {
@@ -719,15 +737,17 @@ class ConversationsViewModel @Inject constructor(
     fun getSmsDefaultAppIntent() = smsPermissionHelper.createDefaultSmsAppIntent()
 
     /**
-     * Optimistically mark chat as read (called from observer delegate on socket event).
+     * Optimistically update chat read status (called from observer delegate on socket event).
+     * @param chatGuid The chat GUID
+     * @param isRead true if marked as read (unreadCount = 0), false if marked as unread (unreadCount = 1)
      */
-    private fun optimisticallyMarkChatRead(chatGuid: String) {
+    private fun optimisticallyUpdateChatReadStatus(chatGuid: String, isRead: Boolean) {
         _uiState.update { state ->
             val updated = state.conversations.map { conv ->
                 if (conv.guid == chatGuid ||
                     conv.mergedChatGuids.contains(chatGuid) ||
                     normalizeGuid(conv.guid) == normalizeGuid(chatGuid)) {
-                    conv.copy(unreadCount = 0)
+                    conv.copy(unreadCount = if (isRead) 0 else 1)
                 } else conv
             }
             state.copy(conversations = updated.toStable())
@@ -950,8 +970,7 @@ class ConversationsViewModel @Inject constructor(
                 formattedTime = formatRelativeTime(message.dateCreated, application),
                 isFromMe = message.isFromMe,
                 avatarPath = primaryParticipant?.cachedAvatarPath
-                    ?: chat?.customAvatarPath
-                    ?: chat?.serverGroupPhotoPath,
+                    ?: chat?.effectiveGroupPhotoPath,
                 isGroup = isGroup,
                 messageType = messageType,
                 linkTitle = linkPreview?.title,

@@ -71,6 +71,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -779,6 +781,16 @@ internal fun SimpleBubbleContent(
                         //         isFromMe = message.isFromMe
                         //     )
                         // }
+
+                        // Edited indicator for edited messages
+                        if (message.isEdited) {
+                            EditedIndicator(
+                                formattedEditTime = message.formattedEditTime,
+                                editHistory = message.editHistory,
+                                isFromMe = message.isFromMe,
+                                isIMessage = isIMessage
+                            )
+                        }
                     }
                 }
 
@@ -921,4 +933,84 @@ private fun rememberDownloadProgress(
             ?.distinctUntilChanged()
     }?.collectAsStateWithLifecycle(initialValue = null)
         ?: androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(null) }
+}
+
+/**
+ * Indicator showing that a message has been edited.
+ * Displayed as "Edited" text that can be tapped to show edit history.
+ * When tapped, expands to show previous versions of the message (iOS-style).
+ * If no history is available (for messages edited before this feature), shows the edit time.
+ */
+@Composable
+private fun EditedIndicator(
+    formattedEditTime: String?,
+    editHistory: List<EditHistoryEntry>,
+    isFromMe: Boolean,
+    isIMessage: Boolean,
+    modifier: Modifier = Modifier
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val bubbleColors = BothBubblesTheme.bubbleColors
+
+    // Text color matches the message text for the bubble type
+    val textColor = when {
+        isFromMe && isIMessage -> bubbleColors.iMessageSentText.copy(alpha = 0.7f)
+        isFromMe -> bubbleColors.smsSentText.copy(alpha = 0.7f)
+        else -> bubbleColors.receivedText.copy(alpha = 0.7f)
+    }
+
+    // Faded color for historical versions
+    val historyTextColor = textColor.copy(alpha = 0.5f)
+
+    val hasHistory = editHistory.isNotEmpty()
+
+    Column(modifier = modifier.padding(top = 4.dp)) {
+        // Edit history or "no history" message (shown when expanded)
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut()
+        ) {
+            Column(
+                modifier = Modifier.padding(bottom = 8.dp)
+            ) {
+                if (hasHistory) {
+                    // Show previous versions in reverse chronological order (newest first)
+                    editHistory.forEach { entry ->
+                        Column(modifier = Modifier.padding(vertical = 2.dp)) {
+                            // Previous message text (faded with strikethrough)
+                            if (!entry.text.isNullOrBlank()) {
+                                Text(
+                                    text = entry.text,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = historyTextColor,
+                                    textDecoration = TextDecoration.LineThrough
+                                )
+                            }
+                        }
+                    }
+                } else {
+                    // No history available - show edit time
+                    Text(
+                        text = "Edited${formattedEditTime?.let { " at $it" } ?: ""}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = historyTextColor
+                    )
+                }
+            }
+        }
+
+        // "Edited" indicator (or "Hide Edits" when expanded)
+        Text(
+            text = if (expanded && hasHistory) "Hide Edits" else if (expanded) "Hide" else "Edited",
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontWeight = FontWeight.Normal
+            ),
+            color = textColor,
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 4.dp, vertical = 2.dp)
+        )
+    }
 }

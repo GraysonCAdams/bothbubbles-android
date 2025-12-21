@@ -50,6 +50,7 @@ typealias AutoRespondedSenderEntity = com.bothbubbles.core.model.entity.AutoResp
 typealias VerifiedCounterpartCheckEntity = com.bothbubbles.core.model.entity.VerifiedCounterpartCheckEntity
 typealias AutoShareContactEntity = com.bothbubbles.core.model.entity.AutoShareContactEntity
 typealias TombstoneEntity = com.bothbubbles.core.model.entity.TombstoneEntity
+typealias MessageEditHistoryEntity = com.bothbubbles.core.model.entity.MessageEditHistoryEntity
 
 // Enums and utility types
 typealias MessageSource = com.bothbubbles.core.model.entity.MessageSource

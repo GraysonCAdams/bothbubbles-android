@@ -293,7 +293,7 @@ class ContactLoadDelegate @Inject constructor(
             displayName = displayName ?: chatIdentifier ?: "Group Chat",
             lastMessage = lastMessageText,
             lastMessageTime = formattedTime,
-            avatarPath = customAvatarPath ?: serverGroupPhotoPath,
+            avatarPath = effectiveGroupPhotoPath,
             participantCount = 0 // Could be populated from cross-ref count
         )
     }

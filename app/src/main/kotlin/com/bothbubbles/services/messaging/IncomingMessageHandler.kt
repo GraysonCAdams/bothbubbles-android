@@ -5,7 +5,9 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.core.model.entity.MessageEditHistoryEntity
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -41,6 +43,7 @@ class IncomingMessageHandler @Inject constructor(
     private val handleDao: HandleDao,
     private val attachmentDao: AttachmentDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val messageEditHistoryDao: MessageEditHistoryDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
     private val api: BothBubblesApi,
@@ -99,12 +102,33 @@ class IncomingMessageHandler @Inject constructor(
 
     /**
      * Handle message update (read receipt, delivery, edit, etc.)
+     *
+     * When a message is edited (new dateEdited > existing dateEdited), the previous
+     * text is saved to the edit history table before updating the message.
      */
     override suspend fun handleMessageUpdate(messageDto: MessageDto, chatGuid: String) {
         val existingMessage = messageDao.getMessageByGuid(messageDto.guid)
         if (existingMessage != null) {
             val localHandleId = resolveLocalHandleId(messageDto)
             val updated = messageDto.toEntity(chatGuid, localHandleId).copy(id = existingMessage.id)
+
+            // Check if this is a message edit (new dateEdited that differs from existing)
+            val incomingDateEdited = messageDto.dateEdited
+            val existingDateEdited = existingMessage.dateEdited
+
+            if (incomingDateEdited != null &&
+                (existingDateEdited == null || incomingDateEdited > existingDateEdited)) {
+                // This is a new edit - save the previous text to history
+                Timber.d("Message edited: ${messageDto.guid}, saving previous text to history")
+                messageEditHistoryDao.insert(
+                    MessageEditHistoryEntity(
+                        messageGuid = messageDto.guid,
+                        previousText = existingMessage.text,
+                        editedAt = incomingDateEdited
+                    )
+                )
+            }
+
             messageDao.updateMessage(updated)
         }
     }

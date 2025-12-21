@@ -108,11 +108,14 @@ class ChatInfoDelegate @AssistedInject constructor(
                             address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
                         } else null
 
+                        val groupPhotoPath = it.effectiveGroupPhotoPath
+
                         _state.update { state ->
                             state.copy(
                                 chatTitle = chatTitle,
                                 isGroup = it.isGroup,
                                 avatarPath = participants.firstOrNull()?.cachedAvatarPath,
+                                groupPhotoPath = groupPhotoPath,
                                 participantNames = participants.map { p -> p.displayName }.toStable(),
                                 participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
                                 participantAddresses = participants.map { p -> p.address }.toStable(),

@@ -8,9 +8,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -36,6 +34,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import android.net.Uri
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -52,6 +51,9 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 fun ComposeScreen(
     onNavigateBack: () -> Unit,
     onNavigateToChat: (String) -> Unit,
+    sharedText: String? = null,
+    sharedUris: List<Uri> = emptyList(),
+    initialAddress: String? = null,
     viewModel: ComposeViewModel = hiltViewModel()
 ) {
     val uiState by viewModel.uiState.collectAsState()
@@ -60,6 +62,27 @@ fun ComposeScreen(
     val gifSearchQuery by viewModel.gifSearchQuery.collectAsState()
     val focusRequester = remember { FocusRequester() }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Handle shared content from share intents
+    LaunchedEffect(sharedText, sharedUris) {
+        if (sharedText != null || sharedUris.isNotEmpty()) {
+            viewModel.setSharedContent(sharedText, sharedUris)
+        }
+    }
+
+    // Handle initial address from voice command (Google Assistant, Android Auto)
+    LaunchedEffect(initialAddress) {
+        if (initialAddress != null) {
+            viewModel.setInitialRecipient(initialAddress)
+        }
+    }
+
+    // Request focus on recipient field when screen opens (skip if we have an initial address)
+    LaunchedEffect(Unit) {
+        if (initialAddress == null) {
+            focusRequester.requestFocus()
+        }
+    }
 
     // Handle navigation after send
     LaunchedEffect(uiState.navigateToChatGuid) {
@@ -165,9 +188,10 @@ fun ComposeScreen(
                 }
             }
 
-            HorizontalDivider()
-
             // Full ChatComposer with GIF picker, attachments, camera, etc.
+            // Note: Don't add separate navigationBars padding - Scaffold's ime contentWindowInsets
+            // handles keyboard, and when keyboard is closed nav bars are at screen bottom.
+            // Adding explicit nav bar padding causes dead space when keyboard is open.
             ChatComposer(
                 state = composerState,
                 onEvent = viewModel::onComposerEvent,
@@ -176,9 +200,7 @@ fun ComposeScreen(
                 onGifSearchQueryChange = viewModel::onGifSearchQueryChange,
                 onGifSearch = viewModel::onGifSearch,
                 onGifSelected = viewModel::onGifSelected,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .windowInsetsPadding(WindowInsets.navigationBars)
+                modifier = Modifier.fillMaxWidth()
             )
         }
     }

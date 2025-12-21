@@ -198,14 +198,11 @@ suspend fun ChatEntity.toUiModel(
         null
     }
 
-    // Priority: user-set custom avatar > server-provided group photo
-    val effectiveChatAvatarPath = customAvatarPath ?: serverGroupPhotoPath
-
     return ConversationUiModel(
         guid = guid,
         displayName = resolvedDisplayName,
         avatarPath = avatarPath,
-        chatAvatarPath = effectiveChatAvatarPath, // Custom group photo > server group photo > participant collage
+        chatAvatarPath = effectiveGroupPhotoPath,
         lastMessageText = messageText,
         lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L, application),
         lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,

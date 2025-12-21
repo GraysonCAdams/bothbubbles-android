@@ -74,10 +74,83 @@ class ComposeConversationDelegate @Inject constructor(
             }
             else -> {
                 // Multiple recipients - look up existing group with exact participants
-                // For now, show as new conversation (group lookup by participants is complex)
+                loadMultiRecipientConversation(chips)
+            }
+        }
+    }
+
+    /**
+     * Load conversation for multiple recipients by finding existing group with exact participants.
+     * Prefers iMessage groups over SMS groups.
+     */
+    private suspend fun loadMultiRecipientConversation(chips: ImmutableList<RecipientChip>) {
+        _conversationState.value = ComposeConversationState.Loading
+
+        try {
+            // Get normalized addresses from chips for comparison
+            val chipAddresses = chips.map { chip ->
+                normalizeAddress(chip.address)
+            }.toSet()
+
+            Timber.d("Looking for group with ${chipAddresses.size} participants: $chipAddresses")
+
+            // Get recent group chats
+            val groupChats = chatRepository.getRecentGroupChats().first()
+            Timber.d("Found ${groupChats.size} group chats to check")
+
+            if (groupChats.isEmpty()) {
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = null
+                return
             }
+
+            // Batch fetch participants for all group chats
+            val participantsByChat = chatRepository.getParticipantsGroupedByChat(
+                groupChats.map { it.guid }
+            )
+
+            // Find groups with exact participant match
+            val matchingGroups = groupChats.filter { chat ->
+                val participants = participantsByChat[chat.guid] ?: emptyList()
+                val participantAddresses = participants.map { normalizeAddress(it.address) }.toSet()
+
+                val matches = participantAddresses == chipAddresses
+                if (matches) {
+                    Timber.d("Found matching group: ${chat.displayName ?: chat.guid} (${chat.guid})")
+                }
+                matches
+            }
+
+            if (matchingGroups.isEmpty()) {
+                Timber.d("No matching group found for participants")
+                _conversationState.value = ComposeConversationState.NewConversation
+                _foundChatGuid.value = null
+                return
+            }
+
+            // Prefer iMessage groups over SMS groups, then most recent
+            val bestGroup = matchingGroups
+                .sortedWith(compareByDescending<ChatEntity> { it.guid.startsWith("iMessage", ignoreCase = true) }
+                    .thenByDescending { it.latestMessageDate ?: 0L })
+                .first()
+
+            Timber.d("Selected group: ${bestGroup.displayName ?: bestGroup.guid}")
+            loadMessagesForChat(bestGroup.guid)
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to load multi-recipient conversation")
+            _conversationState.value = ComposeConversationState.NewConversation
+            _foundChatGuid.value = null
+        }
+    }
+
+    /**
+     * Normalize an address for comparison (phone numbers and emails).
+     */
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            address.lowercase()
+        } else {
+            PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
         }
     }
 
@@ -91,12 +164,7 @@ class ComposeConversationDelegate @Inject constructor(
                 return
             }
 
-            val address = chip.address
-            val normalizedAddress = if (address.contains("@")) {
-                address.lowercase()
-            } else {
-                PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
-            }
+            val normalizedAddress = normalizeAddress(chip.address)
 
             // Check all possible GUID variants
             val possibleGuids = listOf(

@@ -14,6 +14,8 @@ data class ChatInfoState(
     val chatTitle: String = "",
     val isGroup: Boolean = false,
     val avatarPath: String? = null,
+    /** Group photo path with priority: customAvatarPath > serverGroupPhotoPath > null (use collage) */
+    val groupPhotoPath: String? = null,
     val participantNames: StableList<String> = emptyList<String>().toStable(),
     val participantAvatarPaths: StableList<String?> = emptyList<String?>().toStable(),
     val participantAddresses: StableList<String> = emptyList<String>().toStable(),

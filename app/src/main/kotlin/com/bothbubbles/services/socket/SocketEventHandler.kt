@@ -35,8 +35,8 @@ sealed class UiRefreshEvent {
     /** A message was deleted/unsent */
     data class MessageDeleted(val chatGuid: String, val messageGuid: String) : UiRefreshEvent()
 
-    /** Chat read status changed (e.g., read from another device) */
-    data class ChatRead(val chatGuid: String) : UiRefreshEvent()
+    /** Chat read status changed (e.g., read/unread from another device) */
+    data class ChatReadStatusChanged(val chatGuid: String, val isRead: Boolean) : UiRefreshEvent()
 
     /** Conversation list should refresh (new chat, chat updated, etc.) */
     data class ConversationListChanged(val reason: String) : UiRefreshEvent()
@@ -164,7 +164,7 @@ class SocketEventHandler @Inject constructor(
 
                 // Chat events -> ChatEventHandler
                 is SocketEvent.TypingIndicator -> chatEventHandler.handleTypingIndicator(event)
-                is SocketEvent.ChatRead -> chatEventHandler.handleChatRead(event, _uiRefreshEvents)
+                is SocketEvent.ChatReadStatusChanged -> chatEventHandler.handleChatReadStatusChanged(event, _uiRefreshEvents)
                 is SocketEvent.ParticipantAdded -> chatEventHandler.handleParticipantAdded(event, _uiRefreshEvents)
                 is SocketEvent.ParticipantRemoved -> chatEventHandler.handleParticipantRemoved(event, _uiRefreshEvents)
                 is SocketEvent.ParticipantLeft -> chatEventHandler.handleParticipantLeft(event, _uiRefreshEvents)

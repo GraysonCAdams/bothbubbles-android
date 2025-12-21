@@ -144,14 +144,16 @@ class SocketEventParser(
         }
     }
 
-    val onChatRead = Emitter.Listener { args ->
+    val onChatReadStatusChanged = Emitter.Listener { args ->
         try {
             val data = args.firstOrNull() as? JSONObject ?: return@Listener
             val chatGuid = data.optString("chatGuid", "")
+            // Parse actual read status from server, default to true for legacy servers
+            val isRead = data.optBoolean("read", true)
 
             if (chatGuid.isNotBlank()) {
-                events.tryEmit(SocketEvent.ChatRead(chatGuid))
-                developerEventLog.get().logSocketEvent("chat-read-status-changed", "chat: ${chatGuid.take(20)}...")
+                events.tryEmit(SocketEvent.ChatReadStatusChanged(chatGuid, isRead))
+                developerEventLog.get().logSocketEvent("chat-read-status-changed", "chat: ${chatGuid.take(20)}..., read: $isRead")
             }
         } catch (e: Exception) {
             Timber.e(e, "Error parsing chat read status")

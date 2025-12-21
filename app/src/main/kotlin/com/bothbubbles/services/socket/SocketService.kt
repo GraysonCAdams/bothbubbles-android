@@ -41,7 +41,12 @@ sealed class SocketEvent {
         val errorCode: Int = 1
     ) : SocketEvent()
     data class TypingIndicator(val chatGuid: String, val isTyping: Boolean) : SocketEvent()
-    data class ChatRead(val chatGuid: String) : SocketEvent()
+    /**
+     * Chat read status changed on server (e.g., read from another device or marked unread).
+     * @param chatGuid The chat GUID
+     * @param isRead true if chat was marked as read, false if marked as unread
+     */
+    data class ChatReadStatusChanged(val chatGuid: String, val isRead: Boolean) : SocketEvent()
     data class ParticipantAdded(val chatGuid: String, val handleAddress: String) : SocketEvent()
     data class ParticipantRemoved(val chatGuid: String, val handleAddress: String) : SocketEvent()
     /** User voluntarily left group (distinct from being removed) */

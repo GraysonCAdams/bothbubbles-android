@@ -78,7 +78,10 @@ class NotificationReceiver : BroadcastReceiver() {
             ?.toString() ?: return
 
         try {
-            messageSendingService.sendMessage(
+            // Use sendUnified with AUTO mode to respect fallback state and chat type.
+            // This ensures notification replies (including Android Auto voice replies)
+            // correctly route to SMS for SMS-only chats or chats in fallback mode.
+            messageSendingService.sendUnified(
                 chatGuid = chatGuid,
                 text = replyText
             )

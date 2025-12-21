@@ -196,7 +196,14 @@ data class MessageUiModel(
      * When a user sends a message with both text and attachments, they are split into
      * separate messages (like native iMessage). This ID links them for visual grouping.
      */
-    val splitBatchId: String? = null
+    val splitBatchId: String? = null,
+    // Edit tracking
+    /** Timestamp when the message was last edited (null if never edited) */
+    val dateEdited: Long? = null,
+    /** Formatted string for when the message was edited (e.g., "2:30 PM") */
+    val formattedEditTime: String? = null,
+    /** Previous versions of the message text for edit history display */
+    val editHistory: StableList<EditHistoryEntry> = emptyList<EditHistoryEntry>().toStable()
 ) {
     /** True if this is a sticker that was placed on another message */
     val isPlacedSticker: Boolean
@@ -211,7 +218,29 @@ data class MessageUiModel(
     val isServerOrigin: Boolean
         get() = messageSource == MessageSource.IMESSAGE.name ||
                 messageSource == MessageSource.SERVER_SMS.name
+
+    /** True if this message has been edited */
+    val isEdited: Boolean
+        get() = dateEdited != null && dateEdited > dateCreated
+
+    /** True if this message has edit history available for viewing */
+    val hasEditHistory: Boolean
+        get() = editHistory.isNotEmpty()
 }
+
+/**
+ * Represents a previous version of a message before an edit.
+ * Used for displaying edit history in an iOS-style "ghost" overlay.
+ */
+@Immutable
+data class EditHistoryEntry(
+    /** The message text at this point in history */
+    val text: String?,
+    /** When this version was superseded by an edit (the edit timestamp) */
+    val editedAt: Long,
+    /** Formatted time for display (e.g., "2:30 PM") */
+    val formattedTime: String
+)
 
 /**
  * UI model for a mention within a message.

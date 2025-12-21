@@ -7,9 +7,14 @@ import androidx.core.app.Person
 import androidx.core.content.LocusIdCompat
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.ChatParticipantDao
+import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.util.GroupAvatarRenderer
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.di.ApplicationScope
@@ -47,6 +52,8 @@ class ShortcutService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val chatDao: ChatDao,
+    private val chatParticipantDao: ChatParticipantDao,
+    private val handleDao: HandleDao,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -103,24 +110,33 @@ class ShortcutService @Inject constructor(
         _isObserving.value = false
     }
 
+    // Separate job for the actual update work (not cancelled by debounce)
+    private var updateJob: Job? = null
+
     /**
      * Debounce updates to prevent rapid shortcut publishing during bulk operations.
+     * Only cancels the delay, not a running update.
      */
     private fun debounceAndUpdate(
         unifiedGroups: List<UnifiedChatGroupEntity>,
         groupChats: List<ChatEntity>
     ) {
+        // Cancel pending debounce, but let any running update complete
         debounceJob?.cancel()
         debounceJob = applicationScope.launch(ioDispatcher) {
             delay(DEBOUNCE_MS)
-            updateShortcuts(unifiedGroups, groupChats)
+            // Wait for any running update to complete before starting a new one
+            updateJob?.join()
+            updateJob = applicationScope.launch(ioDispatcher) {
+                updateShortcuts(unifiedGroups, groupChats)
+            }
         }
     }
 
     /**
      * Update sharing shortcuts based on current conversations.
      */
-    private fun updateShortcuts(
+    private suspend fun updateShortcuts(
         unifiedGroups: List<UnifiedChatGroupEntity>,
         groupChats: List<ChatEntity>
     ) {
@@ -143,12 +159,14 @@ class ShortcutService @Inject constructor(
             // Take top N conversations
             val topConversations = conversations.take(MAX_SHORTCUTS)
 
-            Timber.d("Publishing ${topConversations.size} share target shortcuts")
+            Timber.tag(TAG).d("Publishing ${topConversations.size} share target shortcuts")
 
             // Build and publish shortcuts
             topConversations.forEachIndexed { index, conversation ->
+                Timber.tag(TAG).d("Building shortcut #$index: ${conversation.displayName} (avatarPath=${conversation.avatarPath})")
                 val shortcut = buildShortcut(conversation, index)
                 ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
+                Timber.tag(TAG).d("Pushed shortcut for ${conversation.displayName}")
             }
 
         } catch (e: Exception) {
@@ -158,8 +176,9 @@ class ShortcutService @Inject constructor(
 
     /**
      * Build a combined list of conversations from unified groups and group chats.
+     * Looks up avatar paths from handles (for 1:1 chats) and chat entities (for groups).
      */
-    private fun buildConversationList(
+    private suspend fun buildConversationList(
         unifiedGroups: List<UnifiedChatGroupEntity>,
         groupChats: List<ChatEntity>
     ): List<ConversationInfo> {
@@ -169,27 +188,66 @@ class ShortcutService @Inject constructor(
         for (group in unifiedGroups) {
             val displayName = group.displayName
                 ?: PhoneNumberFormatter.format(group.identifier)
+
+            // Look up contact photo from handle by identifier (phone/email)
+            val handle = handleDao.getHandleByAddressAny(group.identifier)
+            val avatarPath = handle?.cachedAvatarPath
+
+            Timber.tag(TAG).d(
+                "Unified group: identifier=${group.identifier}, " +
+                "displayName=$displayName, " +
+                "handleFound=${handle != null}, " +
+                "avatarPath=$avatarPath"
+            )
+
             conversations.add(
                 ConversationInfo(
                     chatGuid = group.primaryChatGuid,
                     displayName = displayName,
                     isGroup = false,
-                    latestMessageDate = group.latestMessageDate ?: 0L
+                    latestMessageDate = group.latestMessageDate ?: 0L,
+                    avatarPath = avatarPath
                 )
             )
         }
 
-        // Add group chats
+        // Add group chats - batch fetch participants for all group chats
+        Timber.tag(TAG).d("Processing ${groupChats.size} group chats")
+        val groupChatGuids = groupChats.map { it.guid }
+        val allParticipants = if (groupChatGuids.isNotEmpty()) {
+            chatParticipantDao.getParticipantsWithChatGuids(groupChatGuids)
+                .groupBy { it.chatGuid }
+        } else {
+            emptyMap()
+        }
+        Timber.tag(TAG).d("Fetched participants for ${allParticipants.size} group chats")
+
         for (chat in groupChats) {
             val displayName = chat.displayName
                 ?: chat.chatIdentifier
                 ?: "Group"
+
+            // Get participants for this group chat (for collage avatar)
+            val participants = allParticipants[chat.guid] ?: emptyList()
+            val participantNames = participants.map { it.handle.displayName }
+            val participantAvatarPaths = participants.map { it.handle.cachedAvatarPath }
+
+            Timber.tag(TAG).d(
+                "Group chat: guid=${chat.guid.take(20)}, " +
+                "displayName=$displayName, " +
+                "participantCount=${participants.size}, " +
+                "participantNames=${participantNames.take(3)}"
+            )
+
             conversations.add(
                 ConversationInfo(
                     chatGuid = chat.guid,
                     displayName = displayName,
                     isGroup = true,
-                    latestMessageDate = chat.lastMessageDate ?: 0L
+                    latestMessageDate = chat.lastMessageDate ?: 0L,
+                    avatarPath = chat.effectiveGroupPhotoPath,
+                    participantNames = participantNames,
+                    participantAvatarPaths = participantAvatarPaths
                 )
             )
         }
@@ -200,6 +258,7 @@ class ShortcutService @Inject constructor(
 
     /**
      * Build a ShortcutInfoCompat for a conversation.
+     * Uses actual contact photo when available, falls back to generated avatar.
      */
     private fun buildShortcut(conversation: ConversationInfo, rank: Int): ShortcutInfoCompat {
         val shortcutId = "$SHORTCUT_ID_PREFIX${conversation.chatGuid}"
@@ -212,8 +271,44 @@ class ShortcutService @Inject constructor(
             type = "text/plain"
         }
 
-        // Generate avatar icon
-        val avatarIcon = AvatarGenerator.generateIconCompat(context, conversation.displayName, 128)
+        // Generate avatar icon based on conversation type
+        val avatarIcon: IconCompat = when {
+            // Has custom avatar path (contact photo or custom group photo)
+            conversation.avatarPath != null -> {
+                Timber.tag(TAG).d("Loading photo for ${conversation.displayName}: ${conversation.avatarPath}")
+                val photoBitmap = AvatarGenerator.loadContactPhotoBitmap(
+                    context,
+                    conversation.avatarPath,
+                    128,
+                    circleCrop = false  // Use adaptive icon format
+                )
+                if (photoBitmap != null) {
+                    Timber.tag(TAG).d("Photo loaded successfully for ${conversation.displayName}")
+                    IconCompat.createWithAdaptiveBitmap(photoBitmap)
+                } else {
+                    Timber.tag(TAG).w("Photo load FAILED for ${conversation.displayName}, using fallback")
+                    if (conversation.isGroup && conversation.participantNames.isNotEmpty()) {
+                        GroupAvatarRenderer.generateGroupAdaptiveIconCompatWithPhotos(
+                            context, conversation.participantNames, conversation.participantAvatarPaths, 128
+                        )
+                    } else {
+                        AvatarGenerator.generateAdaptiveIconCompat(context, conversation.displayName, 128)
+                    }
+                }
+            }
+            // Group chat without custom avatar - use participant collage
+            conversation.isGroup && conversation.participantNames.isNotEmpty() -> {
+                Timber.tag(TAG).d("Generating group collage for ${conversation.displayName} with ${conversation.participantNames.size} participants")
+                GroupAvatarRenderer.generateGroupAdaptiveIconCompatWithPhotos(
+                    context, conversation.participantNames, conversation.participantAvatarPaths, 128
+                )
+            }
+            // 1:1 chat without avatar - generate initials avatar
+            else -> {
+                Timber.tag(TAG).d("No avatarPath for ${conversation.displayName}, using generated avatar")
+                AvatarGenerator.generateAdaptiveIconCompat(context, conversation.displayName, 128)
+            }
+        }
 
         // Create Person for the conversation
         val person = Person.Builder()
@@ -243,6 +338,10 @@ class ShortcutService @Inject constructor(
         val chatGuid: String,
         val displayName: String,
         val isGroup: Boolean,
-        val latestMessageDate: Long
+        val latestMessageDate: Long,
+        val avatarPath: String? = null,  // Contact photo or custom group photo
+        // For group chats without custom avatar: participant names and their avatar paths
+        val participantNames: List<String> = emptyList(),
+        val participantAvatarPaths: List<String?> = emptyList()
     )
 }

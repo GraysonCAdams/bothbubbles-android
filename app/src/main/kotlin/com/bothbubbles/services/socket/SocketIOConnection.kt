@@ -157,7 +157,7 @@ class SocketIOConnection(
                     on(EVENT_MESSAGE_DELETED, eventParser.onMessageDeleted)
                     on(EVENT_MESSAGE_SEND_ERROR, eventParser.onMessageSendError)
                     on(EVENT_TYPING_INDICATOR, eventParser.onTypingIndicator)
-                    on(EVENT_CHAT_READ, eventParser.onChatRead)
+                    on(EVENT_CHAT_READ, eventParser.onChatReadStatusChanged)
                     on(EVENT_PARTICIPANT_ADDED, eventParser.onParticipantAdded)
                     on(EVENT_PARTICIPANT_REMOVED, eventParser.onParticipantRemoved)
                     on(EVENT_PARTICIPANT_LEFT, eventParser.onParticipantLeft)

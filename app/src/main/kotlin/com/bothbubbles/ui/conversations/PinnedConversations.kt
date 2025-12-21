@@ -45,7 +45,10 @@ import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -85,6 +88,7 @@ internal fun PinnedConversationsRow(
     onDragOverlayStart: (ConversationUiModel, Offset) -> Unit = { _, _ -> },
     onDragOverlayMove: (Offset) -> Unit = {},
     onDragOverlayEnd: () -> Unit = {},
+    bumpResetKey: Int = 0, // Increment to reset bump animation (e.g., when returning to screen)
     modifier: Modifier = Modifier
 ) {
     // Item width including spacing (100dp item + 12dp spacing)
@@ -133,6 +137,11 @@ internal fun PinnedConversationsRow(
         }.toSet()
     }
 
+    // Minimum fraction of item that must be visible to count as "in view"
+    // User wants 70% visible to still count as "outside", so threshold is > 70%
+    // Using 1.0 means only 100% visible counts as "in view"
+    val minVisibleFraction = 1.0f
+
     // Calculate which unread items are off-screen on each side
     val hasUnreadOffscreenLeft by remember(unreadIndices) {
         derivedStateOf {
@@ -145,14 +154,28 @@ internal fun PinnedConversationsRow(
 
             // Check if any unread items are completely off-screen to the left
             val hasUnreadCompletelyOffscreen = unreadIndices.any { it < firstVisibleIndex }
+            if (hasUnreadCompletelyOffscreen) return@derivedStateOf true
 
-            // Check if the first visible item is only partially visible (clipped on left)
-            // and has unread messages
+            // Check if any visible unread item is insufficiently visible (clipped on left)
             val viewportStart = layoutInfo.viewportStartOffset
-            val firstItemIsClipped = firstVisibleItem.offset < viewportStart
-            val firstItemHasUnread = firstVisibleIndex in unreadIndices
+            val viewportEnd = layoutInfo.viewportEndOffset
 
-            hasUnreadCompletelyOffscreen || (firstItemIsClipped && firstItemHasUnread)
+            visibleItemsInfo.any { itemInfo ->
+                if (itemInfo.index !in unreadIndices) return@any false
+
+                val itemStart = itemInfo.offset
+                // Only check left-side clipping
+                if (itemStart >= viewportStart) return@any false
+
+                // Calculate visible fraction
+                val itemEnd = itemStart + itemInfo.size
+                val visibleStart = maxOf(itemStart, viewportStart)
+                val visibleEnd = minOf(itemEnd, viewportEnd)
+                val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+
+                visibleFraction < minVisibleFraction
+            }
         }
     }
 
@@ -167,21 +190,35 @@ internal fun PinnedConversationsRow(
 
             // Check if any unread items are completely off-screen to the right
             val hasUnreadCompletelyOffscreen = unreadIndices.any { it > lastVisibleIndex }
+            if (hasUnreadCompletelyOffscreen) return@derivedStateOf true
 
-            // Check if the last visible item is only partially visible (clipped on right)
-            // and has unread messages
+            // Check if any visible unread item is insufficiently visible (clipped on right)
+            val viewportStart = layoutInfo.viewportStartOffset
             val viewportEnd = layoutInfo.viewportEndOffset
-            val lastItemEnd = lastVisibleItem.offset + lastVisibleItem.size
-            val lastItemIsClipped = lastItemEnd > viewportEnd
-            val lastItemHasUnread = lastVisibleIndex in unreadIndices
 
-            hasUnreadCompletelyOffscreen || (lastItemIsClipped && lastItemHasUnread)
+            visibleItemsInfo.any { itemInfo ->
+                if (itemInfo.index !in unreadIndices) return@any false
+
+                val itemEnd = itemInfo.offset + itemInfo.size
+                // Only check right-side clipping
+                if (itemEnd <= viewportEnd) return@any false
+
+                // Calculate visible fraction
+                val itemStart = itemInfo.offset
+                val visibleStart = maxOf(itemStart, viewportStart)
+                val visibleEnd = minOf(itemEnd, viewportEnd)
+                val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+
+                visibleFraction < minVisibleFraction
+            }
         }
     }
 
     // Scroll bump animation state
-    var bumpAnimationShown by remember { mutableStateOf(false) }
-    var userHasScrolledAway by remember { mutableStateOf(false) }
+    // Key on bumpResetKey so animation resets when returning to screen
+    var bumpAnimationShown by remember(bumpResetKey) { mutableStateOf(false) }
+    var userHasScrolledAway by remember(bumpResetKey) { mutableStateOf(false) }
 
     // Track if user has scrolled significantly (to reset bump animation trigger)
     val hasScrolledAway by remember {
@@ -214,21 +251,97 @@ internal fun PinnedConversationsRow(
     val pauseBetweenBumps = 400L // ms pause between alternating bumps
 
     // Perform scroll bump animation when there are unread items offscreen
-    LaunchedEffect(hasUnreadOffscreenLeft, hasUnreadOffscreenRight, bumpAnimationShown, isDragging) {
-        if (bumpAnimationShown || isDragging) return@LaunchedEffect
-        if (!hasUnreadOffscreenLeft && !hasUnreadOffscreenRight) return@LaunchedEffect
+    // Use snapshotFlow to properly observe layout changes after initial composition
+    LaunchedEffect(unreadIndices) {
+        if (unreadIndices.isEmpty()) return@LaunchedEffect
 
-        // Small delay to let the UI settle after initial render
+        // Use snapshotFlow to observe layout info changes
+        snapshotFlow {
+            val layoutInfo = listState.layoutInfo
+            val visibleItemsInfo = layoutInfo.visibleItemsInfo
+            if (visibleItemsInfo.isEmpty()) return@snapshotFlow Pair(false, false)
+
+            val viewportStart = layoutInfo.viewportStartOffset
+            val viewportEnd = layoutInfo.viewportEndOffset
+            val firstVisibleIndex = visibleItemsInfo.firstOrNull()?.index ?: 0
+            val lastVisibleIndex = visibleItemsInfo.lastOrNull()?.index ?: 0
+
+            // Check left side
+            val hasUnreadLeft = unreadIndices.any { it < firstVisibleIndex } ||
+                visibleItemsInfo.any { itemInfo ->
+                    if (itemInfo.index !in unreadIndices) return@any false
+                    val itemStart = itemInfo.offset
+                    if (itemStart >= viewportStart) return@any false
+                    val itemEnd = itemStart + itemInfo.size
+                    val visibleStart = maxOf(itemStart, viewportStart)
+                    val visibleEnd = minOf(itemEnd, viewportEnd)
+                    val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                    val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+                    visibleFraction < minVisibleFraction
+                }
+
+            // Check right side
+            val hasUnreadRight = unreadIndices.any { it > lastVisibleIndex } ||
+                visibleItemsInfo.any { itemInfo ->
+                    if (itemInfo.index !in unreadIndices) return@any false
+                    val itemEnd = itemInfo.offset + itemInfo.size
+                    if (itemEnd <= viewportEnd) return@any false
+                    val itemStart = itemInfo.offset
+                    val visibleStart = maxOf(itemStart, viewportStart)
+                    val visibleEnd = minOf(itemEnd, viewportEnd)
+                    val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                    val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+                    visibleFraction < minVisibleFraction
+                }
+
+            Pair(hasUnreadLeft, hasUnreadRight)
+        }
+        .filter { (left, right) -> (left || right) && !bumpAnimationShown && !isDragging }
+        .first() // Wait for first occurrence of unread items offscreen
+
+        // Small delay to let the UI settle
         delay(300)
 
         // Double-check conditions haven't changed
         if (bumpAnimationShown || isDragging) return@LaunchedEffect
 
-        bumpAnimationShown = true
+        // Re-check which sides have unread
+        val layoutInfo = listState.layoutInfo
+        val visibleItemsInfo = layoutInfo.visibleItemsInfo
+        val viewportStart = layoutInfo.viewportStartOffset
+        val viewportEnd = layoutInfo.viewportEndOffset
+        val firstVisibleIndex = visibleItemsInfo.firstOrNull()?.index ?: 0
+        val lastVisibleIndex = visibleItemsInfo.lastOrNull()?.index ?: 0
 
-        // Determine which directions need bumps
-        val bumpLeft = hasUnreadOffscreenLeft
-        val bumpRight = hasUnreadOffscreenRight
+        val bumpLeft = unreadIndices.any { it < firstVisibleIndex } ||
+            visibleItemsInfo.any { itemInfo ->
+                if (itemInfo.index !in unreadIndices) return@any false
+                val itemStart = itemInfo.offset
+                if (itemStart >= viewportStart) return@any false
+                val itemEnd = itemStart + itemInfo.size
+                val visibleStart = maxOf(itemStart, viewportStart)
+                val visibleEnd = minOf(itemEnd, viewportEnd)
+                val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+                visibleFraction < minVisibleFraction
+            }
+
+        val bumpRight = unreadIndices.any { it > lastVisibleIndex } ||
+            visibleItemsInfo.any { itemInfo ->
+                if (itemInfo.index !in unreadIndices) return@any false
+                val itemEnd = itemInfo.offset + itemInfo.size
+                if (itemEnd <= viewportEnd) return@any false
+                val itemStart = itemInfo.offset
+                val visibleStart = maxOf(itemStart, viewportStart)
+                val visibleEnd = minOf(itemEnd, viewportEnd)
+                val visibleWidth = (visibleEnd - visibleStart).coerceAtLeast(0)
+                val visibleFraction = if (itemInfo.size > 0) visibleWidth.toFloat() / itemInfo.size else 1f
+                visibleFraction < minVisibleFraction
+            }
+
+        if (!bumpLeft && !bumpRight) return@LaunchedEffect
+
+        bumpAnimationShown = true
 
         if (bumpLeft && bumpRight) {
             // Both directions have unread - alternate with pauses
@@ -483,8 +596,16 @@ internal fun PinnedDragOverlay(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Avatar with unread badge
+            // Priority: chatAvatarPath (group photo) > GroupAvatar (collage) > Avatar (contact)
             Box(modifier = Modifier.size(60.dp)) {
-                if (conversation.isGroup) {
+                if (conversation.chatAvatarPath != null) {
+                    // Group photo from server (or custom) takes precedence
+                    Avatar(
+                        name = conversation.displayName,
+                        avatarPath = conversation.chatAvatarPath,
+                        size = 56.dp
+                    )
+                } else if (conversation.isGroup) {
                     GroupAvatar(
                         names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
                         avatarPaths = conversation.participantAvatarPaths,
@@ -592,7 +713,15 @@ internal fun PinnedConversationItem(
                             }
                         }
                     } else {
-                        if (conversation.isGroup) {
+                        // Priority: chatAvatarPath (group photo) > GroupAvatar (collage) > Avatar (contact)
+                        if (conversation.chatAvatarPath != null) {
+                            // Group photo from server (or custom) takes precedence
+                            Avatar(
+                                name = conversation.displayName,
+                                avatarPath = conversation.chatAvatarPath,
+                                size = 72.dp
+                            )
+                        } else if (conversation.isGroup) {
                             GroupAvatar(
                                 names = conversation.participantNames.ifEmpty { listOf(conversation.displayName) },
                                 avatarPaths = conversation.participantAvatarPaths,

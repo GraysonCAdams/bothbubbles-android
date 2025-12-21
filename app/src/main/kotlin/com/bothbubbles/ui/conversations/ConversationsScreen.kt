@@ -85,21 +85,6 @@ fun ConversationsScreen(
     val categoryFilter by viewModel.selectedCategoryFilter.collectAsStateWithLifecycle()
     val enabledCategories by viewModel.enabledCategories.collectAsStateWithLifecycle()
 
-    // Refresh state when screen resumes (to catch permission/default app changes)
-    DisposableEffect(lifecycleOwner) {
-        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
-            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
-                viewModel.refreshSmsState()
-                // Refresh contact info in case permission was granted or contacts changed
-                viewModel.onPermissionStateChanged()
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
-    }
-
     var isSearchActive by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf<SearchFilter?>(null) }
     var showFilterDropdown by remember { mutableStateOf(false) }
@@ -108,6 +93,27 @@ fun ConversationsScreen(
 
     // Settings panel state
     var isSettingsOpen by remember { mutableStateOf(false) }
+
+    // Bump animation reset key - increments on each resume to reset the bump animation
+    // This ensures the scroll bump animation can trigger again when returning from a chat
+    var bumpResetKey by remember { mutableIntStateOf(0) }
+
+    // Refresh state when screen resumes (to catch permission/default app changes)
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshSmsState()
+                // Refresh contact info in case permission was granted or contacts changed
+                viewModel.onPermissionStateChanged()
+                // Increment bump reset key to allow scroll bump animation to trigger again
+                bumpResetKey++
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     LaunchedEffect(reopenSettingsPanel) {
         if (reopenSettingsPanel) {
@@ -455,7 +461,8 @@ fun ConversationsScreen(
                 },
                 onClearConversationFilter = { viewModel.setConversationFilter("all") },
                 onClearCategoryFilter = { viewModel.setCategoryFilter(null) },
-                padding = padding
+                padding = padding,
+                bumpResetKey = bumpResetKey
             )
         } // End of Scaffold content
 

@@ -9,6 +9,7 @@ import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.ui.compose.RecipientSuggestion
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
 import kotlinx.collections.immutable.toImmutableList
@@ -210,7 +211,7 @@ class SuggestionDelegate @Inject constructor(
                     chatGuid = chat.guid,
                     displayName = chat.displayName ?: chat.chatIdentifier ?: "Group Chat",
                     memberPreview = buildMemberPreview(chat),
-                    avatarPath = chat.customAvatarPath ?: chat.serverGroupPhotoPath
+                    avatarPath = chat.effectiveGroupPhotoPath
                 )
             }
 
@@ -241,15 +242,20 @@ class SuggestionDelegate @Inject constructor(
             for (group in unifiedGroups) {
                 matchedIdentifiers.add(group.identifier)
 
-                // Determine service from primaryChatGuid
+                // Look up all handles for this address to find iMessage capability
+                val handles = handleRepository.getHandlesByAddress(group.identifier)
+                val hasIMessageHandle = handles.any { it.isIMessage }
+                // Use iMessage handle for avatar if available, otherwise any handle
+                val handle = handles.find { it.isIMessage } ?: handles.firstOrNull()
+
+                // Determine service: prefer iMessage if any handle supports it
+                // Fall back to primaryChatGuid prefix if no handles found
                 val service = when {
+                    hasIMessageHandle -> "iMessage"
                     group.primaryChatGuid.startsWith("iMessage", ignoreCase = true) -> "iMessage"
                     group.primaryChatGuid.startsWith("RCS", ignoreCase = true) -> "RCS"
                     else -> "SMS"
                 }
-
-                // Look up handle for nickname and avatar
-                val handle = handleRepository.getHandleByAddressAny(group.identifier)
 
                 // Get display name from:
                 // 1. Unified group displayName (set for group chats)
@@ -343,7 +349,9 @@ class SuggestionDelegate @Inject constructor(
         return if (address.contains("@")) {
             address.lowercase()
         } else {
-            address.replace(Regex("[^0-9+]"), "")
+            // Use proper phone normalization that adds country code for consistency
+            // This ensures "7709057960" matches "+17709057960" in the handle map
+            PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
         }
     }
 

@@ -178,6 +178,15 @@ fun ChatScreen(
     // threadOverlayState, forwardableChats, isWhatsAppAvailable are now collected internally
     // by their respective child components
 
+    // Default back press handler - clears saved chat state so app opens to conversations list
+    // This has lowest priority (declared first) - selection/tapback handlers override it
+    BackHandler(
+        enabled = !state.isMessageSelectionMode && state.selectedMessageForTapback == null
+    ) {
+        viewModel.onNavigateBack()
+        onBackClick()
+    }
+
     // Handle back press to exit message selection mode (higher priority than tapback)
     BackHandler(enabled = state.isMessageSelectionMode) {
         state.clearMessageSelection()

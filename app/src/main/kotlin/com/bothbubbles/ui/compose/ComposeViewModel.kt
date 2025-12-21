@@ -71,6 +71,8 @@ class ComposeViewModel @Inject constructor(
                 _uiState.update { it.copy(chips = chips) }
                 // Load conversation when chips change
                 conversationDelegate.loadConversation(chips)
+                // Update composer send mode based on effective service
+                updateComposerSendMode(chips)
             }
         }
 
@@ -144,6 +146,17 @@ class ComposeViewModel @Inject constructor(
      */
     fun onChipRemove(chip: RecipientChip) {
         recipientDelegate.removeChip(chip)
+    }
+
+    /**
+     * Set an initial recipient from voice command (Google Assistant, Android Auto).
+     * This adds the recipient as a chip and triggers service detection.
+     */
+    fun setInitialRecipient(address: String) {
+        recipientDelegate.addChipFromText(address)
+        // Clear any input that might have been set
+        _uiState.update { it.copy(recipientInput = "") }
+        suggestionDelegate.hideSuggestions()
     }
 
     /**
@@ -248,7 +261,39 @@ class ComposeViewModel @Inject constructor(
         _uiState.update { it.copy(error = null) }
     }
 
+    // ===== Shared Content =====
+
+    /**
+     * Set shared content from a share intent.
+     * Call this when navigating to ComposeScreen with shared content.
+     */
+    fun setSharedContent(text: String?, uris: List<android.net.Uri>) {
+        if (text != null) {
+            composerDelegate.onComposerEvent(ComposerEvent.TextChanged(text), onSend = {})
+        }
+        if (uris.isNotEmpty()) {
+            composerDelegate.onComposerEvent(ComposerEvent.AddAttachments(uris), onSend = {})
+        }
+    }
+
     // ===== Private Helpers =====
+
+    /**
+     * Update composer send mode based on effective service from chips.
+     */
+    private fun updateComposerSendMode(chips: kotlinx.collections.immutable.ImmutableList<RecipientChip>) {
+        val effectiveService = when {
+            chips.isEmpty() -> RecipientService.IMESSAGE
+            chips.any { it.service == RecipientService.INVALID } -> RecipientService.IMESSAGE
+            chips.any { it.service == RecipientService.SMS } -> RecipientService.SMS
+            else -> RecipientService.IMESSAGE
+        }
+        val sendMode = when (effectiveService) {
+            RecipientService.SMS -> ChatSendMode.SMS
+            else -> ChatSendMode.IMESSAGE
+        }
+        composerDelegate.updateSendMode(sendMode)
+    }
 
     private fun clearRecipientInput() {
         _uiState.update { it.copy(recipientInput = "") }

@@ -116,7 +116,7 @@ class ConversationObserverDelegate @AssistedInject constructor(
         observeSyncState()
         observeNewMessagesFromSocket()
         observeMessageUpdatesFromSocket()
-        observeChatReadFromSocket()
+        observeChatReadStatusFromSocket()
         observeTotalUnreadCount()
     }
 
@@ -556,15 +556,15 @@ class ConversationObserverDelegate @AssistedInject constructor(
 
     /**
      * Observe chat read status changes from socket for immediate unread badge updates.
-     * When a chat is marked as read (e.g., from another device), update the UI instantly.
+     * When a chat is marked as read/unread (e.g., from another device), update the UI instantly.
      */
-    private fun observeChatReadFromSocket() {
+    private fun observeChatReadStatusFromSocket() {
         scope.launch {
             socketConnection.events
-                .filterIsInstance<SocketEvent.ChatRead>()
+                .filterIsInstance<SocketEvent.ChatReadStatusChanged>()
                 .collect { event ->
-                    Timber.d("Socket: Chat read ${event.chatGuid}")
-                    _events.emit(ConversationEvent.ChatRead(event.chatGuid))
+                    Timber.d("Socket: Chat read status changed ${event.chatGuid}, isRead: ${event.isRead}")
+                    _events.emit(ConversationEvent.ChatReadStatusChanged(event.chatGuid, event.isRead))
                 }
         }
     }

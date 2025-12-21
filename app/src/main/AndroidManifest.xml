@@ -287,6 +287,12 @@
             </intent-filter>
         </service>
 
+        <!-- Voice Message Service - Headless message sending for Google Assistant/Android Auto -->
+        <!-- Sends messages without UI when both recipient AND message body are provided -->
+        <service
+            android:name=".services.voice.VoiceMessageService"
+            android:exported="false" />
+
         <!-- SMS Status Receiver (sent/delivered callbacks) -->
         <receiver
             android:name=".services.sms.SmsStatusReceiver"

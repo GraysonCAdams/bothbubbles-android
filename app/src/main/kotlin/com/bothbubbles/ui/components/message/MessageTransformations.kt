@@ -26,7 +26,8 @@ fun MessageEntity.toUiModel(
     handleIdToName: Map<Long, String> = emptyMap(),
     addressToName: Map<String, String> = emptyMap(),
     addressToAvatarPath: Map<String, String?> = emptyMap(),
-    replyPreview: ReplyPreviewData? = null
+    replyPreview: ReplyPreviewData? = null,
+    editHistory: List<EditHistoryEntry> = emptyList()
 ): MessageUiModel {
     // Filter reactions using old BlueBubbles Flutter logic:
     // 1. Remove duplicate GUIDs
@@ -136,7 +137,11 @@ fun MessageEntity.toUiModel(
         emojiAnalysis = analyzeEmojis(text),
         // Group event fields
         isGroupEvent = isGroupEvent,
-        groupEventText = groupEventText
+        groupEventText = groupEventText,
+        // Edit tracking
+        dateEdited = dateEdited,
+        formattedEditTime = dateEdited?.let { formatMessageTime(it) },
+        editHistory = editHistory.toStable()
     )
 }
 

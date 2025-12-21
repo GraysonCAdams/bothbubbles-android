@@ -76,6 +76,7 @@ fun ConversationMainContent(
     onClearConversationFilter: () -> Unit,
     onClearCategoryFilter: () -> Unit,
     padding: PaddingValues,
+    bumpResetKey: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
@@ -201,6 +202,7 @@ fun ConversationMainContent(
                                     isSelectionMode = isSelectionMode,
                                     isLoadingMore = isLoadingMore,
                                     showReconnectingIndicator = showReconnectingIndicator,
+                                    bumpResetKey = bumpResetKey,
                                     onConversationClick = onConversationClick,
                                     onConversationLongClick = onConversationLongClick,
                                     onAvatarClick = onAvatarClick,

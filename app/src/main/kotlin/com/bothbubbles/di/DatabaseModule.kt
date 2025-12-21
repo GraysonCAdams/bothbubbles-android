@@ -8,6 +8,7 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.AutoRespondedSenderDao
 import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
@@ -25,6 +26,7 @@ import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
+import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -72,6 +74,12 @@ object DatabaseModule {
     @Singleton
     fun provideChatDao(database: BothBubblesDatabase): ChatDao {
         return database.chatDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideChatParticipantDao(database: BothBubblesDatabase): ChatParticipantDao {
+        return database.chatParticipantDao()
     }
 
     @Provides
@@ -192,5 +200,11 @@ object DatabaseModule {
     @Singleton
     fun providePopularChatsDao(database: BothBubblesDatabase): PopularChatsDao {
         return database.popularChatsDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideMessageEditHistoryDao(database: BothBubblesDatabase): MessageEditHistoryDao {
+        return database.messageEditHistoryDao()
     }
 }

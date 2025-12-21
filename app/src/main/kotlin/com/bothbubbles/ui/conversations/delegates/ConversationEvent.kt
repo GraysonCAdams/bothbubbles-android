@@ -28,9 +28,10 @@ sealed class ConversationEvent {
     data object MessageUpdated : ConversationEvent()
 
     /**
-     * Chat was marked as read (from another device via socket).
+     * Chat read status changed (from another device via socket).
+     * @param isRead true if marked as read, false if marked as unread
      */
-    data class ChatRead(val chatGuid: String) : ConversationEvent()
+    data class ChatReadStatusChanged(val chatGuid: String, val isRead: Boolean) : ConversationEvent()
 
     // ============================================================================
     // Action Events - from ConversationActionsDelegate

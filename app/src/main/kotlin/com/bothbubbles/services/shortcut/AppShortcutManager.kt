@@ -28,7 +28,7 @@ import javax.inject.Singleton
 /**
  * Manages dynamic app shortcuts that appear when long-pressing the app icon.
  *
- * These shortcuts show the top 3 most popular (most engaged) chats based on
+ * These shortcuts show the top 5 most popular (most engaged) chats based on
  * message frequency in the last 30 days. Tapping a shortcut opens that chat directly.
  *
  * Unlike share targets (handled by [ShortcutService]), these are launcher shortcuts
@@ -50,7 +50,7 @@ class AppShortcutManager @Inject constructor(
     companion object {
         private const val TAG = "AppShortcutManager"
         private const val DEBOUNCE_MS = 5000L // 5 seconds debounce
-        private const val MAX_SHORTCUTS = 3
+        private const val MAX_SHORTCUTS = 5
         private const val SHORTCUT_ID_PREFIX = "popular_"
     }
 

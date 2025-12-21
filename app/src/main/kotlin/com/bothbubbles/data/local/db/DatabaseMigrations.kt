@@ -1203,6 +1203,32 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 48 to 49: Add message_edit_history table for tracking message edits.
+     *
+     * iMessage supports message editing (iOS 16+). When a message is edited:
+     * - The server sends an updated message with new text and dateEdited
+     * - We save the previous text in this table before updating the message
+     * - The UI can show "Edited" indicator and allow viewing edit history
+     *
+     * The table uses a foreign key to cascade-delete history when the message is deleted.
+     */
+    val MIGRATION_48_49 = object : Migration(48, 49) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS message_edit_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    message_guid TEXT NOT NULL,
+                    previous_text TEXT DEFAULT NULL,
+                    edited_at INTEGER NOT NULL,
+                    FOREIGN KEY (message_guid) REFERENCES messages(guid) ON DELETE CASCADE
+                )
+            """.trimIndent())
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_message_edit_history_message_guid ON message_edit_history(message_guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_message_edit_history_edited_at ON message_edit_history(edited_at)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1255,6 +1281,7 @@ object DatabaseMigrations {
         MIGRATION_44_45,
         MIGRATION_45_46,
         MIGRATION_46_47,
-        MIGRATION_47_48
+        MIGRATION_47_48,
+        MIGRATION_48_49
     )
 }

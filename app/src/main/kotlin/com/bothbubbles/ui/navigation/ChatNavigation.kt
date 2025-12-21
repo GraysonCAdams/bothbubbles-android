@@ -38,13 +38,17 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
             .getStateFlow<String?>(NavigationKeys.CAPTURED_PHOTO_URI, null)
             .collectAsStateWithLifecycle()
 
-        // Handle shared content from share picker
-        val sharedText = backStackEntry.savedStateHandle
+        // Handle shared content - prefer route params (direct share), fall back to savedStateHandle (share picker)
+        val sharedTextFromHandle = backStackEntry.savedStateHandle
             .getStateFlow<String?>(NavigationKeys.SHARED_TEXT, null)
             .collectAsStateWithLifecycle()
-        val sharedUris = backStackEntry.savedStateHandle
+        val sharedUrisFromHandle = backStackEntry.savedStateHandle
             .getStateFlow<ArrayList<String>?>(NavigationKeys.SHARED_URIS, null)
             .collectAsStateWithLifecycle()
+
+        // Route params take precedence (from direct share), then savedStateHandle (from in-app share picker)
+        val effectiveSharedText = route.sharedText ?: sharedTextFromHandle.value
+        val effectiveSharedUris = route.sharedUris.ifEmpty { sharedUrisFromHandle.value ?: emptyList() }
 
         // Handle search activation from ChatDetails screen
         val activateSearch = backStackEntry.savedStateHandle
@@ -99,9 +103,10 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                 backStackEntry.savedStateHandle.remove<String>(NavigationKeys.EDITED_ATTACHMENT_CAPTION)
                 backStackEntry.savedStateHandle.remove<String>(NavigationKeys.ORIGINAL_ATTACHMENT_URI)
             },
-            sharedText = sharedText.value,
-            sharedUris = sharedUris.value?.map { it.toUri() } ?: emptyList(),
+            sharedText = effectiveSharedText,
+            sharedUris = effectiveSharedUris.map { it.toUri() },
             onSharedContentHandled = {
+                // Clear savedStateHandle entries (route params are immutable and don't need clearing)
                 backStackEntry.savedStateHandle.remove<String>(NavigationKeys.SHARED_TEXT)
                 backStackEntry.savedStateHandle.remove<ArrayList<String>>(NavigationKeys.SHARED_URIS)
             },
@@ -135,15 +140,27 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
         )
     }
 
-    // Apple-style compose screen (new)
-    composable<Screen.Compose> {
+    // Apple-style compose screen (new) - also used for sharing from other apps
+    composable<Screen.Compose> { backStackEntry ->
+        val route: Screen.Compose = backStackEntry.toRoute()
+        val context = LocalContext.current
+
         ComposeScreen(
-            onNavigateBack = { navController.popBackStack() },
+            onNavigateBack = {
+                // Try to pop back stack - if nothing to pop (opened from share intent),
+                // finish the activity to return to the sharing app
+                if (!navController.popBackStack()) {
+                    (context as? android.app.Activity)?.finish()
+                }
+            },
             onNavigateToChat = { chatGuid ->
                 navController.navigate(Screen.Chat(chatGuid)) {
                     popUpTo(Screen.Conversations) { inclusive = false }
                 }
-            }
+            },
+            sharedText = route.sharedText,
+            sharedUris = route.sharedUris.map { it.toUri() },
+            initialAddress = route.initialAddress
         )
     }
 

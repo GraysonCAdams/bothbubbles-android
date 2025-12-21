@@ -47,6 +47,21 @@ data class ChatDto(
     @Json(name = "isArchived") val isArchived: Boolean = false,
     @Json(name = "isPinned") val isPinned: Boolean = false,
     @Json(name = "hasUnreadMessage") val hasUnreadMessage: Boolean = false,
+    @Json(name = "properties") val properties: List<ChatPropertiesDto>? = null
+) {
+    /**
+     * Extract groupPhotoGuid from the properties list.
+     * BlueBubbles server returns this nested in a properties array.
+     */
+    val groupPhotoGuid: String?
+        get() = properties?.firstOrNull()?.groupPhotoGuid
+}
+
+/**
+ * Chat properties DTO - contains optional chat metadata like group photo
+ */
+@JsonClass(generateAdapter = true)
+data class ChatPropertiesDto(
     @Json(name = "groupPhotoGuid") val groupPhotoGuid: String? = null
 )
 

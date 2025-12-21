@@ -22,7 +22,10 @@ sealed interface Screen {
         // Comma-separated list of all merged chat GUIDs (for merged iMessage+SMS conversations)
         val mergedGuids: String? = null,
         // Target message GUID to scroll to and highlight (from notification deep-link)
-        val targetMessageGuid: String? = null
+        val targetMessageGuid: String? = null,
+        // Shared content from direct share (Android share sheet)
+        val sharedText: String? = null,
+        val sharedUris: List<String> = emptyList()
     ) : Screen
 
     @Serializable
@@ -33,9 +36,15 @@ sealed interface Screen {
 
     /**
      * Apple-style compose screen with recipient field and inline conversation.
+     * Also used for sharing content from other apps and voice command intents.
      */
     @Serializable
-    data object Compose : Screen
+    data class Compose(
+        val sharedText: String? = null,
+        val sharedUris: List<String> = emptyList(),
+        // Pre-filled recipient from voice command (Google Assistant, Android Auto)
+        val initialAddress: String? = null
+    ) : Screen
 
     @Serializable
     data class GroupCreator(

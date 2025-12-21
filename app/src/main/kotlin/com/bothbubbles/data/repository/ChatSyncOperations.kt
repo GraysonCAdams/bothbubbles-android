@@ -81,6 +81,7 @@ class ChatSyncOperations @Inject constructor(
                 .filter { it.groupPhotoGuid != null }
                 .associate { it.guid to it.groupPhotoGuid }
             if (groupPhotos.isNotEmpty()) {
+                timber.log.Timber.tag(TAG).i("Found ${groupPhotos.size} chats with group photos to sync")
                 groupPhotoSyncManager.syncGroupPhotos(groupPhotos)
             }
 

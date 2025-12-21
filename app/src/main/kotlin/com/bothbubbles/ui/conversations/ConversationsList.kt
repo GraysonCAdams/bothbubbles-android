@@ -46,6 +46,7 @@ internal fun ConversationsList(
     isSelectionMode: Boolean,
     isLoadingMore: Boolean,
     showReconnectingIndicator: Boolean,
+    bumpResetKey: Int = 0,
     onConversationClick: (chatGuid: String, mergedGuids: List<String>) -> Unit,
     onConversationLongClick: (guid: String) -> Unit,
     onAvatarClick: (ContactInfo) -> Unit,
@@ -113,6 +114,7 @@ internal fun ConversationsList(
                     onDragOverlayStart = onDragOverlayStart,
                     onDragOverlayMove = onDragOverlayMove,
                     onDragOverlayEnd = onDragOverlayEnd,
+                    bumpResetKey = bumpResetKey,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
             }

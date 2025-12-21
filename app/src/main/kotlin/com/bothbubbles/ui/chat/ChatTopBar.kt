@@ -64,6 +64,7 @@ fun ChatTopBar(
     ChatTopBarContent(
         chatTitle = infoState.chatTitle,
         avatarPath = infoState.avatarPath,
+        groupPhotoPath = infoState.groupPhotoPath,
         isGroup = infoState.isGroup,
         participantNames = infoState.participantNames,
         participantAvatarPaths = infoState.participantAvatarPaths,
@@ -96,6 +97,7 @@ fun ChatTopBar(
 private fun ChatTopBarContent(
     chatTitle: String,
     avatarPath: String?,
+    groupPhotoPath: String?,
     isGroup: Boolean,
     participantNames: List<String>,
     participantAvatarPaths: List<String?>,
@@ -133,13 +135,23 @@ private fun ChatTopBarContent(
                 // In bubble mode, title is not clickable (no details screen)
                 modifier = if (isBubbleMode) Modifier else Modifier.clickable(onClick = onDetailsClick)
             ) {
-                if (isGroup && participantNames.size > 1) {
+                // Priority: groupPhotoPath (custom/server) > GroupAvatar (collage) > Avatar (contact)
+                if (isGroup && groupPhotoPath != null) {
+                    // Use custom or server group photo
+                    Avatar(
+                        name = chatTitle,
+                        avatarPath = groupPhotoPath,
+                        size = 40.dp
+                    )
+                } else if (isGroup && participantNames.size > 1) {
+                    // Fall back to participant collage
                     GroupAvatar(
                         names = participantNames.ifEmpty { listOf(chatTitle) },
                         avatarPaths = participantAvatarPaths,
                         size = 40.dp
                     )
                 } else {
+                    // 1:1 chat - use contact photo
                     Avatar(
                         name = chatTitle,
                         avatarPath = avatarPath,

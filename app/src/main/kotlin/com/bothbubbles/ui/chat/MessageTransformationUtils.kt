@@ -3,6 +3,7 @@ package com.bothbubbles.ui.chat
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.ui.components.message.AttachmentUiModel
+import com.bothbubbles.ui.components.message.EditHistoryEntry
 import com.bothbubbles.ui.components.message.MessageUiModel
 import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.ui.components.message.ReplyPreviewData
@@ -28,7 +29,8 @@ object MessageTransformationUtils {
         handleIdToName: Map<Long, String> = emptyMap(),
         addressToName: Map<String, String> = emptyMap(),
         addressToAvatarPath: Map<String, String?> = emptyMap(),
-        replyPreview: ReplyPreviewData? = null
+        replyPreview: ReplyPreviewData? = null,
+        editHistory: List<EditHistoryEntry> = emptyList()
     ): MessageUiModel {
         // Filter reactions using old BlueBubbles Flutter logic:
         // 1. Remove duplicate GUIDs
@@ -127,7 +129,11 @@ object MessageTransformationUtils {
             // Pre-compute emoji analysis to avoid recalculating on every composition
             emojiAnalysis = analyzeEmojis(text),
             // Split batch grouping for messages composed together (text + attachments)
-            splitBatchId = splitBatchId
+            splitBatchId = splitBatchId,
+            // Edit tracking
+            dateEdited = dateEdited,
+            formattedEditTime = dateEdited?.let { formatTime(it) },
+            editHistory = editHistory.toStable()
         )
     }
 

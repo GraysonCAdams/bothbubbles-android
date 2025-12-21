@@ -23,12 +23,14 @@ private val ENTER_DURATION = MotionTokens.Duration.MEDIUM_4
 private val EXIT_DURATION = MotionTokens.Duration.MEDIUM_2
 
 /**
- * Data class to hold share intent data parsed from MainActivity
+ * Data class to hold share intent data parsed from MainActivity.
+ * Also used for voice command intents (Google Assistant, Android Auto).
  */
 data class ShareIntentData(
     val sharedText: String? = null,
     val sharedUris: List<Uri> = emptyList(),
-    val directShareChatGuid: String? = null  // Pre-selected chat from sharing shortcut
+    val directShareChatGuid: String? = null,  // Pre-selected chat from sharing shortcut
+    val recipientAddress: String? = null      // Pre-filled recipient from voice command (sms: URI)
 )
 
 /**
@@ -59,15 +61,21 @@ fun BothBubblesNavHost(
     notificationDeepLinkData: NotificationDeepLinkData? = null
 ) {
     // Determine start destination based on setup status and share intent
+    // Note: For direct share (with directShareChatGuid), we start at Conversations
+    // and navigate to Chat via LaunchedEffect so back button works
     val startDestination: Screen = when {
         !isSetupComplete -> Screen.Setup()
-        // Direct share from shortcut - go straight to chat
-        shareIntentData?.directShareChatGuid != null -> Screen.Chat(shareIntentData.directShareChatGuid)
-        // Regular share - show picker to select conversation
-        shareIntentData != null -> Screen.SharePicker(
+        // Voice command intent with recipient (Google Assistant, Android Auto)
+        shareIntentData?.recipientAddress != null -> Screen.Compose(
+            sharedText = shareIntentData.sharedText,
+            initialAddress = shareIntentData.recipientAddress
+        )
+        // Regular share (no pre-selected chat) - go to compose screen with shared content
+        shareIntentData != null && shareIntentData.directShareChatGuid == null -> Screen.Compose(
             sharedText = shareIntentData.sharedText,
             sharedUris = shareIntentData.sharedUris.map { it.toString() }
         )
+        // For direct share or normal launch, start at Conversations
         else -> Screen.Conversations
     }
 
@@ -105,16 +113,20 @@ fun BothBubblesNavHost(
         }
     }
 
-    // Handle direct share from sharing shortcut: pass shared content to chat screen
+    // Handle direct share from sharing shortcut: navigate to chat with shared content
     LaunchedEffect(shareIntentData) {
         if (shareIntentData?.directShareChatGuid != null && isSetupComplete) {
-            // Pass shared content to the chat screen via savedStateHandle
-            navController.currentBackStackEntry?.savedStateHandle?.apply {
-                shareIntentData.sharedText?.let { set(NavigationKeys.SHARED_TEXT, it) }
-                if (shareIntentData.sharedUris.isNotEmpty()) {
-                    set(NavigationKeys.SHARED_URIS, ArrayList(shareIntentData.sharedUris.map { it.toString() }))
-                }
-            } ?: Timber.w("Failed to set shared content: currentBackStackEntry is null")
+            // Navigate to the chat with shared content as route params
+            // (Conversations is already in back stack as start destination)
+            navController.navigate(
+                Screen.Chat(
+                    chatGuid = shareIntentData.directShareChatGuid,
+                    sharedText = shareIntentData.sharedText,
+                    sharedUris = shareIntentData.sharedUris.map { it.toString() }
+                )
+            ) {
+                launchSingleTop = true
+            }
         }
     }
 
@@ -177,7 +189,7 @@ fun BothBubblesNavHost(
                     navController.navigate(Screen.Chat(chatGuid, mergedGuidsStr))
                 },
                 onNewMessageClick = {
-                    navController.navigate(Screen.Compose)
+                    navController.navigate(Screen.Compose())
                 },
                 onSettingsClick = {
                     // No longer used - settings panel slides in from right

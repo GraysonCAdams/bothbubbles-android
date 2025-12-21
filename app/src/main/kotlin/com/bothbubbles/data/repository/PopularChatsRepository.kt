@@ -46,7 +46,7 @@ class PopularChatsRepository @Inject constructor(
         const val DEFAULT_LIMIT = 10
 
         /** Number of chats for launcher shortcuts */
-        const val LAUNCHER_SHORTCUT_LIMIT = 3
+        const val LAUNCHER_SHORTCUT_LIMIT = 5
     }
 
     /**
@@ -133,14 +133,14 @@ class PopularChatsRepository @Inject constructor(
     }
 
     /**
-     * Get popular chats for launcher shortcuts (top 3).
+     * Get popular chats for launcher shortcuts (top 5).
      */
     suspend fun getPopularChatsForLauncher(): List<PopularChat> {
         return getPopularChats(limit = LAUNCHER_SHORTCUT_LIMIT)
     }
 
     /**
-     * Observe popular chats for launcher shortcuts (top 3).
+     * Observe popular chats for launcher shortcuts (top 5).
      */
     fun observePopularChatsForLauncher(): Flow<List<PopularChat>> {
         return observePopularChats(limit = LAUNCHER_SHORTCUT_LIMIT)
@@ -217,7 +217,7 @@ class PopularChatsRepository @Inject constructor(
             isGroup = chat.isGroup,
             messageCount = popularity.messageCount,
             latestMessageDate = popularity.latestMessageDate,
-            avatarPath = chat.customAvatarPath ?: chat.serverGroupPhotoPath,
+            avatarPath = chat.effectiveGroupPhotoPath,
             identifier = chat.chatIdentifier
         )
     }

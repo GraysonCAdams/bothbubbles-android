@@ -244,10 +244,22 @@ class MessageSendWorker @AssistedInject constructor(
             }
 
             // Determine delivery mode
-            val deliveryMode = try {
+            // Re-evaluate if the message was queued with IMESSAGE mode but conditions may have changed.
+            // Using AUTO for IMESSAGE-queued messages lets the unified routing logic check:
+            // - Current server connection state
+            // - Fallback tracker status
+            // - Chat type (SMS/iMessage prefix)
+            // This prevents stale routing decisions when server state changes between queue and send.
+            val queuedMode = try {
                 MessageDeliveryMode.valueOf(pendingMessage.deliveryMode)
             } catch (e: Exception) {
                 MessageDeliveryMode.AUTO
+            }
+            val deliveryMode = when (queuedMode) {
+                // LOCAL_SMS/LOCAL_MMS are explicit user choices - don't override
+                MessageDeliveryMode.LOCAL_SMS, MessageDeliveryMode.LOCAL_MMS -> queuedMode
+                // IMESSAGE and AUTO should be re-evaluated by unified routing logic
+                MessageDeliveryMode.IMESSAGE, MessageDeliveryMode.AUTO -> MessageDeliveryMode.AUTO
             }
 
             // Send via MessageSendingService

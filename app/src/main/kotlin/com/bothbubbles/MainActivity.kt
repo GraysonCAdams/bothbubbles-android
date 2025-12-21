@@ -35,6 +35,7 @@ import com.bothbubbles.ui.navigation.ShareIntentData
 import com.bothbubbles.ui.navigation.StateRestorationData
 import com.bothbubbles.services.notifications.NotificationChannelManager
 import com.bothbubbles.services.notifications.NotificationService
+import com.bothbubbles.services.voice.VoiceMessageService
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.delay
@@ -70,6 +71,14 @@ class MainActivity : ComponentActivity() {
                 dynamicLightColorScheme(this)
             }
             window.decorView.setBackgroundColor(dynamicScheme.background.toArgb())
+        }
+
+        // Check for headless voice command (has both recipient AND message body)
+        // Route to VoiceMessageService for seamless Google Assistant/Android Auto experience
+        if (shouldHandleHeadless(intent)) {
+            startVoiceMessageService(intent)
+            finish()
+            return
         }
 
         // Parse share intent data
@@ -163,17 +172,60 @@ class MainActivity : ComponentActivity() {
         if (intent == null) return null
 
         return when (intent.action) {
+            // Voice command intents (Google Assistant, Android Auto "send a message to...")
+            Intent.ACTION_SENDTO -> {
+                val data = intent.data ?: return null
+                if (data.scheme !in listOf("sms", "smsto", "mms", "mmsto")) return null
+
+                // Extract recipient from URI (format: sms:+1234567890 or smsto:+1234567890)
+                val recipient = data.schemeSpecificPart
+                    ?.takeWhile { it != '?' }  // Remove query params
+                    ?.takeIf { it.isNotBlank() }
+
+                // Extract message body from query param or extras
+                val messageBody = data.getQueryParameter("body")
+                    ?: intent.getStringExtra("sms_body")
+                    ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+
+                if (recipient != null) {
+                    Timber.d("Voice command intent: recipient=$recipient, body=${messageBody?.take(20)}...")
+                    ShareIntentData(
+                        sharedText = messageBody,
+                        recipientAddress = recipient
+                    )
+                } else null
+            }
+
             Intent.ACTION_SEND -> {
                 val mimeType = intent.type ?: return null
 
-                // Check if it's an SMS/MMS scheme intent (not a share sheet intent)
+                // Check if it's an SMS/MMS scheme intent with recipient (voice command via ACTION_SEND)
                 val data = intent.data
                 if (data != null && data.scheme in listOf("sms", "smsto", "mms", "mmsto")) {
-                    return null
+                    // Extract recipient from URI
+                    val recipient = data.schemeSpecificPart
+                        ?.takeWhile { it != '?' }
+                        ?.takeIf { it.isNotBlank() }
+
+                    val messageBody = data.getQueryParameter("body")
+                        ?: intent.getStringExtra("sms_body")
+                        ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+
+                    if (recipient != null) {
+                        Timber.d("Voice command via ACTION_SEND: recipient=$recipient")
+                        return ShareIntentData(
+                            sharedText = messageBody,
+                            recipientAddress = recipient
+                        )
+                    }
+                    // If no recipient in URI, fall through to regular share handling
                 }
 
                 // Check if this is a direct share from a sharing shortcut
+                // Android Direct Share API (API 29+) puts shortcut ID in EXTRA_SHORTCUT_ID,
+                // not the extras from the shortcut's intent template
                 val directShareChatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
+                    ?: extractChatGuidFromShortcutId(intent)
 
                 when {
                     mimeType.startsWith("text/") -> {
@@ -207,6 +259,7 @@ class MainActivity : ComponentActivity() {
             Intent.ACTION_SEND_MULTIPLE -> {
                 val uris = getParcelableArrayListExtraCompat<Uri>(intent, Intent.EXTRA_STREAM)
                 val directShareChatGuid = intent.getStringExtra(NotificationChannelManager.EXTRA_CHAT_GUID)
+                    ?: extractChatGuidFromShortcutId(intent)
                 if (!uris.isNullOrEmpty() || directShareChatGuid != null) {
                     ShareIntentData(
                         sharedUris = uris ?: emptyList(),
@@ -267,5 +320,79 @@ class MainActivity : ComponentActivity() {
             messageGuid = messageGuid,
             mergedGuids = mergedGuids
         )
+    }
+
+    /**
+     * Extract chat GUID from Android Direct Share shortcut ID.
+     *
+     * When sharing via Android's share sheet to a direct share target (API 29+),
+     * Android does NOT preserve extras from the shortcut's intent template.
+     * Instead, it provides the shortcut ID via Intent.EXTRA_SHORTCUT_ID.
+     *
+     * Our shortcut IDs are formatted as "share_{chatGuid}", so we extract
+     * the chat GUID by removing the prefix.
+     */
+    private fun extractChatGuidFromShortcutId(intent: Intent): String? {
+        val shortcutId = intent.getStringExtra(Intent.EXTRA_SHORTCUT_ID)
+            ?: return null
+
+        val prefix = "share_"
+        return if (shortcutId.startsWith(prefix)) {
+            shortcutId.removePrefix(prefix).takeIf { it.isNotBlank() }
+        } else {
+            null
+        }
+    }
+
+    /**
+     * Check if this intent should be handled headlessly (no UI).
+     *
+     * For a seamless Google Assistant/Android Auto experience, we send messages
+     * without showing UI when BOTH recipient AND message body are provided.
+     * This matches the behavior of Google Messages and other native messaging apps.
+     */
+    private fun shouldHandleHeadless(intent: Intent?): Boolean {
+        if (intent == null) return false
+        if (intent.action != Intent.ACTION_SENDTO) return false
+
+        val data = intent.data ?: return false
+        if (data.scheme !in listOf("sms", "smsto", "mms", "mmsto")) return false
+
+        // Must have recipient
+        val recipient = data.schemeSpecificPart
+            ?.takeWhile { it != '?' }
+            ?.takeIf { it.isNotBlank() }
+            ?: return false
+
+        // Must have message body for headless send
+        val messageBody = data.getQueryParameter("body")
+            ?: intent.getStringExtra("sms_body")
+            ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+
+        val hasBody = !messageBody.isNullOrBlank()
+
+        if (hasBody) {
+            Timber.d("Headless voice command detected: recipient=$recipient")
+        }
+
+        return hasBody
+    }
+
+    /**
+     * Start the VoiceMessageService to handle the voice command headlessly.
+     */
+    private fun startVoiceMessageService(intent: Intent?) {
+        if (intent == null) return
+
+        val serviceIntent = Intent(this, VoiceMessageService::class.java).apply {
+            action = intent.action
+            data = intent.data
+            // Copy relevant extras
+            intent.getStringExtra("sms_body")?.let { putExtra("sms_body", it) }
+            intent.getStringExtra(Intent.EXTRA_TEXT)?.let { putExtra(Intent.EXTRA_TEXT, it) }
+        }
+
+        startService(serviceIntent)
+        Timber.d("Started VoiceMessageService for headless send")
     }
 }

@@ -183,4 +183,15 @@ data class ChatEntity(
      */
     val isSnoozed: Boolean
         get() = snoozeUntil != null && (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis())
+
+    /**
+     * Effective group photo path with priority:
+     * 1. customAvatarPath (user-set on Android device)
+     * 2. serverGroupPhotoPath (from BlueBubbles server / iMessage)
+     * 3. null (use participant collage as fallback)
+     *
+     * Use this property everywhere group avatars are displayed for consistency.
+     */
+    val effectiveGroupPhotoPath: String?
+        get() = customAvatarPath ?: serverGroupPhotoPath
 }

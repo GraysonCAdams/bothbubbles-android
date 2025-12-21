@@ -101,7 +101,7 @@ fun ConversationDetailsScreen(
                         modifier = Modifier.alpha(headerScrollProgress)
                     ) {
                         val avatarPath = if (uiState.chat?.isGroup == true) {
-                            uiState.chat?.customAvatarPath
+                            uiState.chat?.effectiveGroupPhotoPath
                         } else {
                             uiState.participants.firstOrNull()?.cachedAvatarPath
                         }
@@ -168,7 +168,7 @@ fun ConversationDetailsScreen(
                 // Large centered header (fades out as it scrolls, app bar title fades in)
                 item {
                     val headerAvatarPath = if (uiState.chat?.isGroup == true) {
-                        uiState.chat?.customAvatarPath
+                        uiState.chat?.effectiveGroupPhotoPath
                     } else {
                         uiState.participants.firstOrNull()?.cachedAvatarPath
                     }

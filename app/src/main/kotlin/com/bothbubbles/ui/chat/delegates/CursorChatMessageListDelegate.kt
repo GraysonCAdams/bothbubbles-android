@@ -2,12 +2,14 @@ package com.bothbubbles.ui.chat.delegates
 
 import androidx.lifecycle.SavedStateHandle
 import com.bothbubbles.core.network.api.dto.MessageDto
+import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.db.entity.TransferState
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.ui.components.message.EditHistoryEntry
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
@@ -101,6 +103,7 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
     private val settingsDataStore: SettingsDataStore,
     private val chatStateCache: ChatStateCache,
+    private val messageEditHistoryDao: MessageEditHistoryDao,
     @Assisted private val chatGuid: String,
     @Assisted private val mergedChatGuids: List<String>,
     @Assisted private val scope: CoroutineScope,
@@ -490,6 +493,9 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
         // Build reply preview map
         val replyPreviewMap = buildReplyPreviewMap(dedupedEntities)
 
+        // Load edit history for edited messages
+        val editHistoryByMessage = loadEditHistoryForMessages(dedupedEntities)
+
         // Fetch missing handles (include both messages and reactions)
         val mutableHandleIdToName = handleIdToName.toMutableMap()
         val allEntitiesForHandles = dedupedEntities + reactions
@@ -523,13 +529,15 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             attachments = allAttachments
         ) { entity, entityReactions, entityAttachments ->
             val replyPreview = entity.threadOriginatorGuid?.let { replyPreviewMap[it] }
+            val editHistory = editHistoryByMessage[entity.guid] ?: emptyList()
             entity.toUiModel(
                 reactions = entityReactions,
                 attachments = entityAttachments,
                 handleIdToName = mutableHandleIdToName,
                 addressToName = mutableAddressToName,
                 addressToAvatarPath = addressToAvatarPath,
-                replyPreview = replyPreview
+                replyPreview = replyPreview,
+                editHistory = editHistory
             )
         }
 
@@ -612,6 +620,39 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
             handleIdToName[id]?.let { return it }
         }
         return null
+    }
+
+    /**
+     * Load edit history for edited messages.
+     * Only queries for messages that have dateEdited set (were actually edited).
+     * Returns a map of message GUID -> list of edit history entries.
+     */
+    private suspend fun loadEditHistoryForMessages(
+        messages: List<MessageEntity>
+    ): Map<String, List<EditHistoryEntry>> {
+        // Filter to only edited messages to avoid unnecessary queries
+        val editedMessageGuids = messages
+            .filter { it.dateEdited != null }
+            .map { it.guid }
+
+        if (editedMessageGuids.isEmpty()) return emptyMap()
+
+        // Load edit history for all edited messages (batch query would be ideal,
+        // but we'll query individually for now since the list should be small)
+        return editedMessageGuids.associateWith { guid ->
+            try {
+                messageEditHistoryDao.getEditHistorySync(guid).map { entity ->
+                    EditHistoryEntry(
+                        text = entity.previousText,
+                        editedAt = entity.editedAt,
+                        formattedTime = formatMessageTime(entity.editedAt)
+                    )
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to load edit history for message $guid")
+                emptyList()
+            }
+        }
     }
 
     // ============================================================================

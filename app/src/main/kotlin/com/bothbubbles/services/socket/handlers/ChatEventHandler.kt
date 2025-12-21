@@ -33,28 +33,42 @@ class ChatEventHandler @Inject constructor(
         Timber.d("Typing indicator: ${event.chatGuid} = ${event.isTyping}")
     }
 
-    suspend fun handleChatRead(
-        event: SocketEvent.ChatRead,
+    suspend fun handleChatReadStatusChanged(
+        event: SocketEvent.ChatReadStatusChanged,
         uiRefreshEvents: MutableSharedFlow<UiRefreshEvent>
     ) {
-        Timber.d("Chat read: ${event.chatGuid}")
-        chatDao.updateUnreadCount(event.chatGuid, 0)
+        Timber.d("Chat read status changed: ${event.chatGuid}, isRead: ${event.isRead}")
 
-        // Also update the unified group's unread count for badge sync
-        unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
-            unifiedChatGroupDao.updateUnreadCount(group.id, 0)
-        }
+        if (event.isRead) {
+            // Chat was marked as read (e.g., from another device)
+            chatDao.updateUnreadCount(event.chatGuid, 0)
+            chatDao.updateUnreadStatus(event.chatGuid, false)
 
-        // Cancel notification for this chat since it was read (possibly on another device)
-        // BUT skip if the conversation is currently active (e.g. user is in the bubble)
-        // Cancelling the notification would force-close the bubble while the user is using it
-        if (!activeConversationManager.isConversationActive(event.chatGuid)) {
-            notifier.cancelNotification(event.chatGuid)
+            // Also update the unified group's unread count for badge sync
+            unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
+                unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+            }
+
+            // Cancel notification for this chat since it was read (possibly on another device)
+            // BUT skip if the conversation is currently active (e.g. user is in the bubble)
+            // Cancelling the notification would force-close the bubble while the user is using it
+            if (!activeConversationManager.isConversationActive(event.chatGuid)) {
+                notifier.cancelNotification(event.chatGuid)
+            }
+        } else {
+            // Chat was marked as unread (e.g., user marked as unread from another device)
+            chatDao.updateUnreadCount(event.chatGuid, 1)
+            chatDao.updateUnreadStatus(event.chatGuid, true)
+
+            // Also update the unified group's unread count for badge sync
+            unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
+                unifiedChatGroupDao.updateUnreadCount(group.id, 1)
+            }
         }
 
         // Emit UI refresh event for immediate unread badge update
-        uiRefreshEvents.tryEmit(UiRefreshEvent.ChatRead(event.chatGuid))
-        uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("chat_read"))
+        uiRefreshEvents.tryEmit(UiRefreshEvent.ChatReadStatusChanged(event.chatGuid, event.isRead))
+        uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("chat_read_status_changed"))
     }
 
     suspend fun handleParticipantAdded(

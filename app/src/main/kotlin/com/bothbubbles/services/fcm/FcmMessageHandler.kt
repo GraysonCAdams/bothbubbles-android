@@ -13,12 +13,15 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.developer.DeveloperEventLog
 import com.bothbubbles.services.media.AttachmentDownloadQueue
+import com.bothbubbles.services.messaging.IncomingMessageHandler
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.services.messaging.MessageDeduplicator
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.core.network.api.dto.MessageDto
 import com.google.firebase.messaging.RemoteMessage
+import com.squareup.moshi.Moshi
 import dagger.Lazy
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -53,6 +56,8 @@ class FcmMessageHandler @Inject constructor(
     private val activeConversationManager: ActiveConversationManager,
     private val developerEventLog: Lazy<DeveloperEventLog>,
     private val attachmentDownloadQueue: AttachmentDownloadQueue,
+    private val incomingMessageHandler: IncomingMessageHandler,
+    private val moshi: Moshi,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -262,11 +267,9 @@ class FcmMessageHandler @Inject constructor(
         )
         Timber.d("DEBUG: Notification shown successfully!")
 
-        // Enqueue first image attachment for download so notification can update with inline preview
-        enqueueFirstImageAttachment(messageJson, chatGuid)
-
-        // Sync this chat to ensure message is saved (heals any gaps from stale socket)
-        triggerChatSync(chatGuid)
+        // Sync this chat first to ensure message and attachments are saved to database
+        // We must await this before downloading attachments, otherwise the attachment record won't exist
+        syncChatAndDownloadAttachment(chatGuid, messageJson)
     }
 
     /**
@@ -307,10 +310,114 @@ class FcmMessageHandler @Inject constructor(
         return fallback to null
     }
 
-    private fun handleUpdatedMessage(data: Map<String, String>) {
+    /**
+     * Handle message update events from FCM.
+     * This includes edits, read receipts, delivery status changes, etc.
+     *
+     * For message edits specifically, we:
+     * 1. Parse the updated message data
+     * 2. Save the previous text to edit history
+     * 3. Update the notification with the new text
+     */
+    private suspend fun handleUpdatedMessage(data: Map<String, String>) {
         Timber.d("Message updated via FCM: ${data["guid"]}")
-        // Trigger socket reconnect to get full update
-        triggerSocketReconnect()
+
+        // Parse the JSON data
+        val dataJsonString = data["data"]
+        if (dataJsonString.isNullOrBlank()) {
+            Timber.w("FCM updated-message missing 'data' field, triggering socket sync")
+            triggerSocketReconnect()
+            return
+        }
+
+        // Parse JSON and convert to MessageDto
+        val messageDto: MessageDto
+        try {
+            val adapter = moshi.adapter(MessageDto::class.java)
+            messageDto = adapter.fromJson(dataJsonString)
+                ?: throw Exception("Failed to parse MessageDto")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to parse FCM updated-message JSON, triggering socket sync")
+            triggerSocketReconnect()
+            return
+        }
+
+        // Extract chat GUID
+        val chatGuid = messageDto.chats?.firstOrNull()?.guid
+        if (chatGuid.isNullOrBlank()) {
+            Timber.w("FCM updated-message missing chatGuid, triggering socket sync")
+            triggerSocketReconnect()
+            return
+        }
+
+        // Handle the message update (this saves edit history if it's an edit)
+        incomingMessageHandler.handleMessageUpdate(messageDto, chatGuid)
+
+        // Check if this is a message edit that needs notification update
+        if (messageDto.dateEdited != null && !messageDto.isFromMe) {
+            updateNotificationForEdit(messageDto, chatGuid)
+        }
+
+        // Also sync to ensure we catch any related updates
+        triggerChatSync(chatGuid)
+    }
+
+    /**
+     * Update the notification for an edited message.
+     * Similar to MessageEventHandler.updateNotificationIfEdited() but for FCM.
+     */
+    private suspend fun updateNotificationForEdit(messageDto: MessageDto, chatGuid: String) {
+        // Skip if conversation is active
+        if (activeConversationManager.isConversationActive(chatGuid)) return
+
+        val chat = chatDao.getChatByGuid(chatGuid)
+        val senderAddress = messageDto.handle?.address
+
+        // Check notification settings
+        if (chat?.notificationsEnabled == false) return
+        chat?.snoozeUntil?.let { snoozeUntil ->
+            if (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis()) return
+        }
+
+        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
+        val messageText = messageDto.text ?: return
+
+        // For group chats, extract first name for cleaner notification display
+        val displaySenderName = if (chat?.isGroup == true && senderName != null) {
+            extractFirstName(senderName)
+        } else {
+            senderName
+        }
+
+        // Fetch participants for chat title resolution
+        val participants = chatRepository.getParticipantsForChat(chatGuid)
+        val participantNames = participants.map { it.rawDisplayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
+
+        val chatTitle = if (chat != null) {
+            chatRepository.resolveChatTitle(chat, participants)
+        } else {
+            senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
+        }
+
+        Timber.d("Updating notification for edited message via FCM: ${messageDto.guid}")
+
+        // Show updated notification (same messageGuid = replaces existing notification)
+        notificationService.showMessageNotification(
+            com.bothbubbles.services.notifications.MessageNotificationParams(
+                chatGuid = chatGuid,
+                chatTitle = chatTitle,
+                messageText = messageText,
+                messageGuid = messageDto.guid,
+                senderName = displaySenderName,
+                senderAddress = senderAddress,
+                isGroup = chat?.isGroup ?: false,
+                avatarUri = senderAvatarUri,
+                participantNames = participantNames,
+                participantAvatarPaths = participantAvatarPaths,
+                subject = messageDto.subject
+            )
+        )
     }
 
     private fun handleFaceTimeCall(data: Map<String, String>) {
@@ -377,9 +484,29 @@ class FcmMessageHandler @Inject constructor(
      */
     private fun triggerChatSync(chatGuid: String) {
         applicationScope.launch(ioDispatcher) {
-            Timber.d("Triggering chat sync for $chatGuid after FCM")
+            Timber.tag("FcmMessageHandler\$triggerChatSync").d("Triggering chat sync for $chatGuid after FCM")
             messageRepository.syncMessagesForChat(chatGuid, limit = 10)
                 .onFailure { Timber.e(it, "Failed to sync chat $chatGuid after FCM") }
+        }
+    }
+
+    /**
+     * Sync a chat and then download the first image attachment for notification preview.
+     * The sync must complete first so the attachment record exists in the database.
+     */
+    private fun syncChatAndDownloadAttachment(chatGuid: String, messageJson: JSONObject) {
+        applicationScope.launch(ioDispatcher) {
+            Timber.d("Syncing chat $chatGuid before downloading attachment")
+
+            // First, sync to ensure attachment is in the database
+            messageRepository.syncMessagesForChat(chatGuid, limit = 10)
+                .onFailure {
+                    Timber.e(it, "Failed to sync chat $chatGuid after FCM")
+                    return@launch
+                }
+
+            // Now that sync is complete, enqueue attachment download
+            enqueueFirstImageAttachment(messageJson, chatGuid)
         }
     }
 

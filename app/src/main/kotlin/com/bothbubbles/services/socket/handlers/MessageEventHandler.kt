@@ -242,6 +242,78 @@ class MessageEventHandler @Inject constructor(
         // Emit UI refresh events for immediate updates (read receipts, delivery status, edits)
         uiRefreshEvents.tryEmit(UiRefreshEvent.MessageUpdated(event.chatGuid, event.message.guid))
         uiRefreshEvents.tryEmit(UiRefreshEvent.ConversationListChanged("message_updated"))
+
+        // Update notification if this is an edit to a message from another user
+        updateNotificationIfEdited(event)
+    }
+
+    /**
+     * Updates the notification for an edited message.
+     * Only updates if:
+     * - The message has a dateEdited (indicating it was edited)
+     * - The message is not from me (I don't need notifications for my own edits)
+     * - The chat is not currently active (user isn't viewing it)
+     */
+    private suspend fun updateNotificationIfEdited(event: SocketEvent.MessageUpdated) {
+        val messageDto = event.message
+
+        // Skip if not an edit
+        if (messageDto.dateEdited == null) return
+
+        // Skip if from me
+        if (messageDto.isFromMe) return
+
+        // Skip if conversation is active
+        if (activeConversationManager.isConversationActive(event.chatGuid)) return
+
+        Timber.d("Updating notification for edited message: ${messageDto.guid}")
+
+        val chat = chatDao.getChatByGuid(event.chatGuid)
+        val senderAddress = messageDto.handle?.address
+
+        // Check notification settings
+        if (chat?.notificationsEnabled == false) return
+        chat?.snoozeUntil?.let { snoozeUntil ->
+            if (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis()) return
+        }
+
+        val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(messageDto)
+        val messageText = messageDto.text ?: return // No text to show
+
+        // For group chats, extract first name for cleaner notification display
+        val displaySenderName = if (chat?.isGroup == true && senderName != null) {
+            extractFirstName(senderName)
+        } else {
+            senderName
+        }
+
+        // Fetch participants for chat title resolution
+        val participants = chatRepository.getParticipantsForChat(event.chatGuid)
+        val participantNames = participants.map { it.rawDisplayName }
+        val participantAvatarPaths = participants.map { it.cachedAvatarPath }
+
+        val chatTitle = if (chat != null) {
+            chatRepository.resolveChatTitle(chat, participants)
+        } else {
+            senderName ?: PhoneNumberFormatter.format(senderAddress ?: "")
+        }
+
+        // Show updated notification (same messageGuid = replaces existing notification)
+        notificationService.showMessageNotification(
+            com.bothbubbles.services.notifications.MessageNotificationParams(
+                chatGuid = event.chatGuid,
+                chatTitle = chatTitle,
+                messageText = messageText,
+                messageGuid = messageDto.guid,
+                senderName = displaySenderName,
+                senderAddress = senderAddress,
+                isGroup = chat?.isGroup ?: false,
+                avatarUri = senderAvatarUri,
+                participantNames = participantNames,
+                participantAvatarPaths = participantAvatarPaths,
+                subject = messageDto.subject
+            )
+        )
     }
 
     suspend fun handleMessageDeleted(
