@@ -6,6 +6,7 @@ import com.bothbubbles.core.network.api.AuthInterceptor
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.Life360Api
 import com.bothbubbles.core.network.api.TenorApi
+import com.bothbubbles.core.network.api.UnitJsonAdapter
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import dagger.Module
@@ -33,6 +34,7 @@ object CoreNetworkModule {
     @Singleton
     fun provideMoshi(): Moshi {
         return Moshi.Builder()
+            .add(Unit::class.java, UnitJsonAdapter())  // Handle ApiResponse<Unit> for read/unread endpoints
             .addLast(KotlinJsonAdapterFactory())
             .build()
     }

@@ -392,17 +392,12 @@ private fun LocationMapView(
 
                 val geoPoint = GeoPoint(latitude, longitude)
                 controller.setZoom(16.0)
+                controller.setCenter(geoPoint)
 
-                // Offset center north so pin's visual center (red circle) appears centered
-                // The marker anchor is at the bottom, so we shift the viewport center north
-                // to compensate for the pin extending upward from the GPS point
-                val centeredPoint = GeoPoint(latitude + 0.0004, longitude)
-                controller.setCenter(centeredPoint)
-
-                // Add red location marker
+                // Add red location marker centered exactly on the GPS point
                 val marker = Marker(this).apply {
                     position = geoPoint
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     icon = createRedPinDrawable(ctx)
                 }
                 overlays.add(marker)
@@ -414,6 +409,7 @@ private fun LocationMapView(
 
 /**
  * Creates a red map pin drawable for the location marker.
+ * Pin is drawn with its visual center at the bitmap center for proper ANCHOR_CENTER alignment.
  */
 private fun createRedPinDrawable(context: android.content.Context): android.graphics.drawable.Drawable {
     val size = 72
@@ -422,29 +418,29 @@ private fun createRedPinDrawable(context: android.content.Context): android.grap
     val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
     val cx = size / 2f
+    val cy = size / 2f
     val pinRadius = size * 0.28f
-    val pinCenterY = size * 0.32f
 
     // Shadow
     paint.color = 0x40000000
-    canvas.drawCircle(cx + 2, pinCenterY + 2, pinRadius, paint)
+    canvas.drawCircle(cx + 2, cy + 2, pinRadius, paint)
 
     // Red pin body (circle)
     paint.color = 0xFFE53935.toInt() // MD3 Red 600
     paint.style = android.graphics.Paint.Style.FILL
-    canvas.drawCircle(cx, pinCenterY, pinRadius, paint)
+    canvas.drawCircle(cx, cy, pinRadius, paint)
 
     // Pin point (triangle pointing down)
     val path = android.graphics.Path()
-    path.moveTo(cx - pinRadius * 0.5f, pinCenterY + pinRadius * 0.7f)
-    path.lineTo(cx, size * 0.85f)
-    path.lineTo(cx + pinRadius * 0.5f, pinCenterY + pinRadius * 0.7f)
+    path.moveTo(cx - pinRadius * 0.5f, cy + pinRadius * 0.7f)
+    path.lineTo(cx, size * 0.92f)
+    path.lineTo(cx + pinRadius * 0.5f, cy + pinRadius * 0.7f)
     path.close()
     canvas.drawPath(path, paint)
 
     // White inner circle
     paint.color = 0xFFFFFFFF.toInt()
-    canvas.drawCircle(cx, pinCenterY, pinRadius * 0.4f, paint)
+    canvas.drawCircle(cx, cy, pinRadius * 0.4f, paint)
 
     return android.graphics.drawable.BitmapDrawable(context.resources, bitmap)
 }

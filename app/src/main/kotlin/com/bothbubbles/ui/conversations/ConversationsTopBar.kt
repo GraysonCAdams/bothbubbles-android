@@ -59,6 +59,7 @@ internal fun ConversationsTopBar(
     enabledCategories: Set<MessageCategory>,
     hasSettingsWarning: Boolean,
     totalUnreadCount: Int,
+    showUnreadCountInHeader: Boolean,
     onFilterSelected: (ConversationFilter) -> Unit,
     onCategorySelected: (MessageCategory?) -> Unit,
     onSearchClick: () -> Unit,
@@ -106,7 +107,7 @@ internal fun ConversationsTopBar(
             )
 
             // Unread count badge
-            if (totalUnreadCount > 0) {
+            if (showUnreadCountInHeader && totalUnreadCount > 0) {
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)

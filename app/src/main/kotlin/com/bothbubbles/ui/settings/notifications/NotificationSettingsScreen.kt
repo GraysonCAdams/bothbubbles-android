@@ -24,8 +24,10 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import androidx.core.content.ContextCompat
 import androidx.core.content.PermissionChecker
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -101,6 +103,7 @@ fun NotificationSettingsContent(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val haptic = LocalHapticFeedback.current
 
     // Refresh bubble permission state when screen resumes (user may have changed it in settings)
     LaunchedEffect(lifecycleOwner) {
@@ -172,7 +175,10 @@ fun NotificationSettingsContent(
                 trailingContent = {
                     Switch(
                         checked = uiState.notificationsEnabled,
-                        onCheckedChange = viewModel::setNotificationsEnabled
+                        onCheckedChange = {
+                            HapticUtils.onConfirm(haptic)
+                            viewModel.setNotificationsEnabled(it)
+                        }
                     )
                 }
             )
@@ -191,7 +197,10 @@ fun NotificationSettingsContent(
                         trailingContent = {
                             Switch(
                                 checked = uiState.notifyOnChatList,
-                                onCheckedChange = viewModel::setNotifyOnChatList
+                                onCheckedChange = {
+                                    HapticUtils.onConfirm(haptic)
+                                    viewModel.setNotifyOnChatList(it)
+                                }
                             )
                         }
                     )

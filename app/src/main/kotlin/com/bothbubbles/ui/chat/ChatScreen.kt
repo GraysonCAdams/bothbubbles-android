@@ -660,7 +660,23 @@ fun ChatScreen(
                         openNavApp = { navApp ->
                             val intent = viewModel.etaSharing.createNavAppIntent(navApp)
                             if (intent != null) {
+                                // Show notification about fetching destination
+                                com.bothbubbles.services.eta.EtaNotificationHelper
+                                    .showDestinationFetchNotification(context, navApp.displayName)
                                 context.startActivity(intent)
+                                // Schedule return to BothBubbles after a brief delay
+                                // This gives the accessibility service time to scrape the destination
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    // Cancel the fetch notification when returning
+                                    com.bothbubbles.services.eta.EtaNotificationHelper
+                                        .cancelDestinationFetchNotification(context)
+                                    val returnIntent = context.packageManager
+                                        .getLaunchIntentForPackage(context.packageName)?.apply {
+                                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                                                    android.content.Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+                                        }
+                                    returnIntent?.let { context.startActivity(it) }
+                                }, 2000L) // 2s delay to allow accessibility to scrape destination
                                 true
                             } else {
                                 false

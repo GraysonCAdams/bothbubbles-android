@@ -41,8 +41,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.R
 import com.bothbubbles.ui.theme.BubbleColors
 
@@ -164,9 +166,13 @@ fun ChatRecordingPanel(
                     color = inputColors.inputText.copy(alpha = 0.7f)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
+                val haptic = LocalHapticFeedback.current
                 Switch(
                     checked = isNoiseCancellationEnabled,
-                    onCheckedChange = { onNoiseCancellationToggle() },
+                    onCheckedChange = {
+                        HapticUtils.onConfirm(haptic)
+                        onNoiseCancellationToggle()
+                    },
                     modifier = Modifier.height(24.dp),
                     colors = SwitchDefaults.colors(
                         checkedThumbColor = MaterialTheme.colorScheme.primary,

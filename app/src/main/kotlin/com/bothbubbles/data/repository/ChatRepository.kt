@@ -1,17 +1,26 @@
 package com.bothbubbles.data.repository
 
+import androidx.work.Constraints
+import androidx.work.ExistingWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequestBuilder
+import androidx.work.WorkManager
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
-import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.displayName
-import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.core.model.entity.PendingReadStatusEntity
 import com.bothbubbles.core.network.api.BothBubblesApi
+import com.bothbubbles.services.sync.ReadStatusSyncWorker
+import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow
+import timber.log.Timber
+import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,9 +37,11 @@ class ChatRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val tombstoneDao: TombstoneDao,
     private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val pendingReadStatusDao: PendingReadStatusDao,
     private val api: BothBubblesApi,
     private val syncOps: ChatSyncOperations,
-    private val participantOps: ChatParticipantOperations
+    private val participantOps: ChatParticipantOperations,
+    private val workManager: WorkManager
 ) {
 
     // ===== Local Query Operations =====
@@ -315,7 +326,9 @@ class ChatRepository @Inject constructor(
 
     /**
      * Mark chat as read on server and locally.
+     *
      * Uses optimistic local-first update for instant UI feedback.
+     * Server sync is queued via WorkManager for reliable delivery.
      */
     suspend fun markChatAsRead(guid: String): Result<Unit> = runCatching {
         // Update locally first for immediate UI feedback
@@ -327,25 +340,15 @@ class ChatRepository @Inject constructor(
             unifiedChatGroupDao.updateUnreadCount(group.id, 0)
         }
 
-        // Sync to server (fire-and-forget, don't block local update)
-        try {
-            val response = api.markChatRead(guid)
-            if (!response.isSuccessful) {
-                Timber.w("Failed to mark chat as read on server: ${response.code()}")
-            }
-        } catch (e: IllegalArgumentException) {
-            // Known issue: Moshi can't deserialize ApiResponse<Unit> because Unit is not a data class
-            // TODO: Fix by changing API return type to Response<Unit> or adding UnitJsonAdapter to Moshi
-            // See: core/network/src/main/kotlin/com/bothbubbles/core/network/api/BothBubblesApi.kt
-            Timber.w("Moshi converter issue for markChatRead (ApiResponse<Unit>): ${e.message}")
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to sync read status to server for chat: $guid")
-        }
+        // Queue server sync (WorkManager ensures reliable delivery)
+        queueReadStatusSync(guid, isRead = true)
     }
 
     /**
      * Mark chat as unread on server and locally.
+     *
      * Uses optimistic local-first update for instant UI feedback.
+     * Server sync is queued via WorkManager for reliable delivery.
      */
     suspend fun markChatAsUnread(guid: String): Result<Unit> = runCatching {
         // Update locally first for immediate UI feedback
@@ -358,19 +361,42 @@ class ChatRepository @Inject constructor(
             unifiedChatGroupDao.updateUnreadCount(group.id, 1)
         }
 
-        // Sync to server (fire-and-forget, don't block local update)
-        try {
-            val response = api.markChatUnread(guid)
-            if (!response.isSuccessful) {
-                Timber.w("Failed to mark chat as unread on server: ${response.code()}")
-            }
-        } catch (e: IllegalArgumentException) {
-            // Known issue: Moshi can't deserialize ApiResponse<Unit> because Unit is not a data class
-            // TODO: Fix by changing API return type to Response<Unit> or adding UnitJsonAdapter to Moshi
-            Timber.w("Moshi converter issue for markChatUnread (ApiResponse<Unit>): ${e.message}")
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to sync unread status to server for chat: $guid")
-        }
+        // Queue server sync (WorkManager ensures reliable delivery)
+        queueReadStatusSync(guid, isRead = false)
+    }
+
+    /**
+     * Queue a read status sync for reliable delivery to the server.
+     *
+     * Uses database deduplication (unique constraint on chat_guid) to ensure
+     * only the latest read status is synced. WorkManager handles retry with
+     * exponential backoff when network is unavailable.
+     */
+    private suspend fun queueReadStatusSync(chatGuid: String, isRead: Boolean) {
+        // Insert or replace pending sync (deduplication by chat_guid)
+        pendingReadStatusDao.insert(
+            PendingReadStatusEntity(
+                chatGuid = chatGuid,
+                isRead = isRead
+            )
+        )
+
+        // Schedule worker with network constraint
+        val constraints = Constraints.Builder()
+            .setRequiredNetworkType(NetworkType.CONNECTED)
+            .build()
+
+        val workRequest = OneTimeWorkRequestBuilder<ReadStatusSyncWorker>()
+            .setConstraints(constraints)
+            .setInitialDelay(500, TimeUnit.MILLISECONDS)  // Small debounce for batch efficiency
+            .build()
+
+        // Use KEEP policy - don't duplicate if already scheduled
+        workManager.enqueueUniqueWork(
+            ReadStatusSyncWorker.UNIQUE_WORK_NAME,
+            ExistingWorkPolicy.KEEP,
+            workRequest
+        )
     }
 
     /**

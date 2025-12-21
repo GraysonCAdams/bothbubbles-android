@@ -61,7 +61,8 @@ internal fun SwipePreviewCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     ) {
                         Icon(
                             leftAction.icon,
@@ -72,7 +73,8 @@ internal fun SwipePreviewCard(
                         Text(
                             leftAction.label,
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White
+                            color = Color.White,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
@@ -92,7 +94,8 @@ internal fun SwipePreviewCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Column(
-                        horizontalAlignment = Alignment.CenterHorizontally
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     ) {
                         Icon(
                             rightAction.icon,
@@ -103,7 +106,8 @@ internal fun SwipePreviewCard(
                         Text(
                             rightAction.label,
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.White
+                            color = Color.White,
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
                         )
                     }
                 }
@@ -155,12 +159,12 @@ internal fun SwipePreviewCard(
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
                 Text(
-                    "\u2190 Swipe Right",
+                    "Swipe Right \u2192",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "Swipe Left \u2192",
+                    "\u2190 Swipe Left",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

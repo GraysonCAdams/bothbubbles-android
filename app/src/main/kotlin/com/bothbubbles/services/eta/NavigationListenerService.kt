@@ -40,6 +40,7 @@ class NavigationListenerService : NotificationListenerService() {
         const val CHANNEL_ETA_PROMPT = "eta_prompt"
         const val NOTIFICATION_ID_ETA_SHARING = 3000001
         const val NOTIFICATION_ID_ETA_PROMPT = 3000002
+        const val NOTIFICATION_ID_DESTINATION_FETCH = 3000003
 
         const val ACTION_STOP_SHARING = "com.bothbubbles.action.STOP_ETA_SHARING"
 

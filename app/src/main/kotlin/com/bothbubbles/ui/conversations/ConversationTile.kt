@@ -85,9 +85,9 @@ internal fun GoogleStyleConversationTile(
     )
     val shape = RoundedCornerShape(cornerRadius)
 
-    // Animate vertical padding for smooth height transition
+    // Animate vertical padding for smooth height transition (only in selection mode)
     val verticalPadding by animateDpAsState(
-        targetValue = if (isSelectionMode || hasRoundedCorners) 4.dp else 0.dp,
+        targetValue = if (isSelectionMode) 4.dp else 0.dp,
         animationSpec = tween(durationMillis = MotionTokens.Duration.NORMAL),
         label = "verticalPadding"
     )

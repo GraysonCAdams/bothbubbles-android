@@ -13,9 +13,9 @@ enum class EtaMessageType {
 /**
  * Navigation app types we support for ETA scraping
  */
-enum class NavigationApp(val packageName: String) {
-    GOOGLE_MAPS("com.google.android.apps.maps"),
-    WAZE("com.waze");
+enum class NavigationApp(val packageName: String, val displayName: String) {
+    GOOGLE_MAPS("com.google.android.apps.maps", "Google Maps"),
+    WAZE("com.waze", "Waze");
 
     companion object {
         fun fromPackage(packageName: String): NavigationApp? {

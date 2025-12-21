@@ -103,7 +103,16 @@ class DestinationExtractor @Inject constructor(
         nodesVisited = 0
         val isAndroidAuto = isAndroidAutoMode()
 
-        Timber.d("$TAG: Extracting destination from ${app.name} (Android Auto: $isAndroidAuto)")
+        Timber.d("$TAG: ========== EXTRACTING DESTINATION ==========")
+        Timber.d("$TAG: App: ${app.name}, Android Auto: $isAndroidAuto")
+
+        // Always log screen content for debugging
+        Timber.d("$TAG: Screen content:")
+        val allContent = debugCollectAllText(rootNode, maxItems = 100)
+        allContent.forEachIndexed { index, text ->
+            Timber.d("$TAG: [$index] $text")
+        }
+        Timber.d("$TAG: ==========================================")
 
         val patterns = when (app) {
             NavigationApp.GOOGLE_MAPS -> GOOGLE_MAPS_DEST_PATTERNS
@@ -180,15 +189,22 @@ class DestinationExtractor @Inject constructor(
         }
 
         // Strategy 5: Heuristic search for addresses/places (low confidence)
-        val fromHeuristic = findDestinationByHeuristic(rootNode, 0)
-        if (fromHeuristic != null) {
-            Timber.d("$TAG: Found destination via heuristic: $fromHeuristic")
-            return ParsedDestinationData(
-                destination = fromHeuristic,
-                navigationApp = app,
-                isAndroidAutoMode = isAndroidAuto,
-                confidence = DestinationConfidence.LOW
-            )
+        // Only use heuristic when on step-list/directions screen, NOT on map screen
+        // Map screen is detected by presence of "Map bearing" in content
+        val isOnMapScreen = allContent.any { it.contains("Map bearing", ignoreCase = true) }
+        if (isOnMapScreen) {
+            Timber.d("$TAG: Skipping heuristic - on map screen (detected 'Map bearing')")
+        } else {
+            val fromHeuristic = findDestinationByHeuristic(rootNode, 0)
+            if (fromHeuristic != null) {
+                Timber.d("$TAG: Found destination via heuristic: $fromHeuristic")
+                return ParsedDestinationData(
+                    destination = fromHeuristic,
+                    navigationApp = app,
+                    isAndroidAutoMode = isAndroidAuto,
+                    confidence = DestinationConfidence.LOW
+                )
+            }
         }
 
         Timber.w("$TAG: No destination found (visited $nodesVisited nodes)")

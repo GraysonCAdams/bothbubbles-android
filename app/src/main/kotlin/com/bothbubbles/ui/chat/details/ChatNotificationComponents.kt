@@ -7,9 +7,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.ui.components.common.ConversationAvatar
 
 @Composable
@@ -57,6 +59,7 @@ internal fun NotificationToggleCard(
     isEnabled: Boolean,
     onToggle: (Boolean) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
     Card(
         modifier = Modifier
             .fillMaxWidth()
@@ -69,7 +72,10 @@ internal fun NotificationToggleCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onToggle(!isEnabled) }
+                .clickable {
+                    HapticUtils.onConfirm(haptic)
+                    onToggle(!isEnabled)
+                }
                 .padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -80,7 +86,10 @@ internal fun NotificationToggleCard(
             )
             Switch(
                 checked = isEnabled,
-                onCheckedChange = onToggle
+                onCheckedChange = {
+                    HapticUtils.onConfirm(haptic)
+                    onToggle(it)
+                }
             )
         }
     }

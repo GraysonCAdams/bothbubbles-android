@@ -12,8 +12,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.services.categorization.EntityExtractionService
@@ -69,6 +71,7 @@ fun CategorizationSettingsContent(
     uiState: CategorizationSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
+    val haptic = LocalHapticFeedback.current
 
     LaunchedEffect(uiState.downloadError) {
         uiState.downloadError?.let { error ->
@@ -120,7 +123,10 @@ fun CategorizationSettingsContent(
                     trailingContent = {
                         Switch(
                             checked = uiState.categorizationEnabled,
-                            onCheckedChange = { viewModel.setCategorizationEnabled(it) }
+                            onCheckedChange = {
+                                HapticUtils.onConfirm(haptic)
+                                viewModel.setCategorizationEnabled(it)
+                            }
                         )
                     }
                 )
@@ -186,7 +192,10 @@ fun CategorizationSettingsContent(
                     trailingContent = {
                         Switch(
                             checked = uiState.mlAutoUpdateOnCellular,
-                            onCheckedChange = { viewModel.setMlAutoUpdateOnCellular(it) }
+                            onCheckedChange = {
+                                HapticUtils.onConfirm(haptic)
+                                viewModel.setMlAutoUpdateOnCellular(it)
+                            }
                         )
                     }
                 )
@@ -226,7 +235,10 @@ fun CategorizationSettingsContent(
                         trailingContent = {
                             Switch(
                                 checked = isEnabled,
-                                onCheckedChange = onToggle
+                                onCheckedChange = {
+                                    HapticUtils.onConfirm(haptic)
+                                    onToggle(it)
+                                }
                             )
                         }
                     )

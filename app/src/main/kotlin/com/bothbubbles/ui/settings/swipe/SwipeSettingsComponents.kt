@@ -8,11 +8,17 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.TouchApp
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 
 @Composable
 internal fun SwitchSettingCard(
@@ -23,6 +29,7 @@ internal fun SwitchSettingCard(
     onCheckedChange: (Boolean) -> Unit,
     enabled: Boolean = true
 ) {
+    val haptic = LocalHapticFeedback.current
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -58,7 +65,10 @@ internal fun SwitchSettingCard(
             }
             Switch(
                 checked = checked,
-                onCheckedChange = onCheckedChange,
+                onCheckedChange = { newValue ->
+                    HapticUtils.onConfirm(haptic)
+                    onCheckedChange(newValue)
+                },
                 enabled = enabled
             )
         }
@@ -70,6 +80,13 @@ internal fun SensitivityCard(
     sensitivity: Float,
     onSensitivityChange: (Float) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+    // Track the last step to detect when we cross to a new step
+    var lastStep by remember { mutableFloatStateOf(sensitivity) }
+
+    // Calculate step size: range is 0.15f to 0.5f with 6 steps = 7 positions
+    val stepSize = (0.5f - 0.15f) / 7
+
     Card(
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceContainerLow
@@ -101,7 +118,19 @@ internal fun SensitivityCard(
             Column {
                 Slider(
                     value = sensitivity,
-                    onValueChange = onSensitivityChange,
+                    onValueChange = { newValue ->
+                        // Calculate which step we're on (snap to nearest)
+                        val currentStep = ((newValue - 0.15f) / stepSize).toInt()
+                        val previousStep = ((lastStep - 0.15f) / stepSize).toInt()
+
+                        // Trigger haptic when crossing to a new step
+                        if (currentStep != previousStep) {
+                            HapticUtils.onDragTransition(haptic)
+                            lastStep = newValue
+                        }
+
+                        onSensitivityChange(newValue)
+                    },
                     valueRange = 0.15f..0.5f,
                     steps = 6,
                     modifier = Modifier.fillMaxWidth()

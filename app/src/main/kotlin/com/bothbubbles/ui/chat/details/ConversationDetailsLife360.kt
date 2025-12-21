@@ -418,16 +418,12 @@ private fun Life360MapView(
 
                 val geoPoint = GeoPoint(latitude, longitude)
                 controller.setZoom(16.0)
+                controller.setCenter(geoPoint)
 
-                // Offset center north so pin's visual center appears centered
-                // Avatar pin is ~108px, so offset slightly more than location pin (0.0004)
-                val centeredPoint = GeoPoint(latitude + 0.0005, longitude)
-                controller.setCenter(centeredPoint)
-
-                // Add marker with avatar pin
+                // Add marker with avatar pin centered exactly on the GPS point
                 val marker = Marker(this).apply {
                     position = geoPoint
-                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
+                    setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_CENTER)
                     title = displayName
                     icon = avatarPinDrawable
                 }
@@ -439,8 +435,8 @@ private fun Life360MapView(
 }
 
 /**
- * Create an avatar pin for the preview map.
- * Size is 108px (50% larger than original 72px) for better visibility.
+ * Create an avatar circle for the preview map.
+ * Simple circle with white border, no tail, perfectly centered.
  */
 private fun createPreviewAvatarPinDrawable(
     context: Context,
@@ -448,30 +444,20 @@ private fun createPreviewAvatarPinDrawable(
     avatarPath: String?,
     accentColor: Int
 ): BitmapDrawable {
-    val size = 108
+    val size = 72
     val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
     val canvas = Canvas(bitmap)
 
     val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     val cx = size / 2f
-    val avatarCenterY = size * 0.35f
-    val avatarRadius = size * 0.30f
-
-    // Shadow
-    paint.color = 0x40000000
-    canvas.drawCircle(cx, avatarCenterY + 4, avatarRadius + 3, paint)
+    val cy = size / 2f
+    val avatarRadius = size * 0.38f
+    val borderWidth = 3f
 
     // White border/background for avatar
     paint.color = 0xFFFFFFFF.toInt()
     paint.style = Paint.Style.FILL
-    canvas.drawCircle(cx, avatarCenterY, avatarRadius + 3, paint)
-
-    // Draw the pointed bottom (teardrop tail)
-    val path = android.graphics.Path()
-    path.moveTo(cx - avatarRadius * 0.5f, avatarCenterY + avatarRadius * 0.7f)
-    path.quadTo(cx, size * 0.90f, cx + avatarRadius * 0.5f, avatarCenterY + avatarRadius * 0.7f)
-    path.close()
-    canvas.drawPath(path, paint)
+    canvas.drawCircle(cx, cy, avatarRadius + borderWidth, paint)
 
     // Draw avatar image
     val avatarBitmap = if (avatarPath != null) {
@@ -482,11 +468,11 @@ private fun createPreviewAvatarPinDrawable(
 
     // Clip avatar to circle
     val avatarLeft = cx - avatarRadius
-    val avatarTop = avatarCenterY - avatarRadius
+    val avatarTop = cy - avatarRadius
 
     canvas.save()
     val clipPath = android.graphics.Path()
-    clipPath.addCircle(cx, avatarCenterY, avatarRadius, android.graphics.Path.Direction.CW)
+    clipPath.addCircle(cx, cy, avatarRadius, android.graphics.Path.Direction.CW)
     canvas.clipPath(clipPath)
     canvas.drawBitmap(
         avatarBitmap,
@@ -495,12 +481,6 @@ private fun createPreviewAvatarPinDrawable(
         paint
     )
     canvas.restore()
-
-    // Accent color ring around avatar
-    paint.color = accentColor
-    paint.style = Paint.Style.STROKE
-    paint.strokeWidth = 2f
-    canvas.drawCircle(cx, avatarCenterY, avatarRadius + 1.5f, paint)
 
     return BitmapDrawable(context.resources, bitmap)
 }

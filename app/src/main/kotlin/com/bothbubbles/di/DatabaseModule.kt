@@ -16,6 +16,7 @@ import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
+import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
@@ -130,6 +131,12 @@ object DatabaseModule {
     @Singleton
     fun providePendingAttachmentDao(database: BothBubblesDatabase): PendingAttachmentDao {
         return database.pendingAttachmentDao()
+    }
+
+    @Provides
+    @Singleton
+    fun providePendingReadStatusDao(database: BothBubblesDatabase): PendingReadStatusDao {
+        return database.pendingReadStatusDao()
     }
 
     @Provides

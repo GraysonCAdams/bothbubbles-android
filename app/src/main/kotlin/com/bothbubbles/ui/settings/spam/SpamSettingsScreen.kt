@@ -12,7 +12,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.bothbubbles.data.local.db.entity.displayName
@@ -59,6 +61,8 @@ fun SpamSettingsContent(
     viewModel: SpamSettingsViewModel = hiltViewModel(),
     uiState: SpamSettingsUiState = viewModel.uiState.collectAsStateWithLifecycle().value
 ) {
+    val haptic = LocalHapticFeedback.current
+
     if (uiState.isLoading) {
         Box(
             modifier = modifier.fillMaxSize(),
@@ -101,7 +105,10 @@ fun SpamSettingsContent(
                             }
                             Switch(
                                 checked = uiState.spamDetectionEnabled,
-                                onCheckedChange = { viewModel.setSpamDetectionEnabled(it) }
+                                onCheckedChange = {
+                                    HapticUtils.onConfirm(haptic)
+                                    viewModel.setSpamDetectionEnabled(it)
+                                }
                             )
                         }
                     }

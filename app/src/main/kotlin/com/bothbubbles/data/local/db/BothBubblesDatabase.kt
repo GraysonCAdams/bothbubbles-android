@@ -14,6 +14,7 @@ import com.bothbubbles.data.local.db.dao.LinkPreviewDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
+import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
@@ -32,6 +33,7 @@ import com.bothbubbles.data.local.db.entity.LinkPreviewEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.PendingAttachmentEntity
 import com.bothbubbles.data.local.db.entity.PendingMessageEntity
+import com.bothbubbles.data.local.db.entity.PendingReadStatusEntity
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.SeenMessageEntity
@@ -67,6 +69,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         SeenMessageEntity::class,
         PendingMessageEntity::class,
         PendingAttachmentEntity::class,
+        PendingReadStatusEntity::class,
         IMessageAvailabilityCacheEntity::class,
         SyncRangeEntity::class,
         AutoRespondedSenderEntity::class,
@@ -75,7 +78,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         TombstoneEntity::class,
         Life360MemberEntity::class
     ],
-    version = 44,
+    version = 45,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -91,6 +94,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun seenMessageDao(): SeenMessageDao
     abstract fun pendingMessageDao(): PendingMessageDao
     abstract fun pendingAttachmentDao(): PendingAttachmentDao
+    abstract fun pendingReadStatusDao(): PendingReadStatusDao
     abstract fun iMessageCacheDao(): IMessageCacheDao
     abstract fun syncRangeDao(): SyncRangeDao
     abstract fun autoRespondedSenderDao(): AutoRespondedSenderDao

@@ -26,8 +26,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import com.bothbubbles.util.HapticUtils
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -158,9 +160,13 @@ internal fun SyncPage(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
                             )
                         }
+                        val haptic = LocalHapticFeedback.current
                         Switch(
                             checked = uiState.skipEmptyChats,
-                            onCheckedChange = onSkipEmptyChatsChange
+                            onCheckedChange = {
+                                HapticUtils.onConfirm(haptic)
+                                onSkipEmptyChatsChange(it)
+                            }
                         )
                     }
                 }

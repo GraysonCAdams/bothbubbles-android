@@ -79,7 +79,7 @@ fun ConversationMainContent(
     modifier: Modifier = Modifier
 ) {
     val density = LocalDensity.current
-    val cardShape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+    val cardShape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp)
 
     Surface(
         modifier = modifier

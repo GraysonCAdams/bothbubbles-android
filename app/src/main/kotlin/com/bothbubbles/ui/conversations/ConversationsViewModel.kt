@@ -335,8 +335,18 @@ class ConversationsViewModel @Inject constructor(
 
     private fun observeAppTitleSetting() {
         viewModelScope.launch {
-            settingsDataStore.useSimpleAppTitle.collect { useSimple ->
-                _uiState.update { it.copy(useSimpleAppTitle = useSimple) }
+            combine(
+                settingsDataStore.useSimpleAppTitle,
+                settingsDataStore.showUnreadCountInHeader
+            ) { useSimple, showUnread ->
+                Pair(useSimple, showUnread)
+            }.collect { (useSimple, showUnread) ->
+                _uiState.update {
+                    it.copy(
+                        useSimpleAppTitle = useSimple,
+                        showUnreadCountInHeader = showUnread
+                    )
+                }
             }
         }
     }

@@ -88,7 +88,43 @@ Check `app/build/compose_compiler/` for `compose_metrics.json`.
 ### Linting
 We use Slack's Compose Lint Checks. The build will fail if you violate common rules (e.g., passing `MutableState` as a parameter).
 
-## 4. Common Pitfalls to Avoid
+## 4. Scroll Position Persistence
+
+**Rule**: Use `rememberSaveable` with built-in savers to preserve scroll positions across process death.
+
+```kotlin
+// REQUIRED for LazyColumn/LazyRow
+val listState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+LazyColumn(state = listState) { ... }
+
+// REQUIRED for LazyGrid
+val gridState = rememberSaveable(saver = LazyGridState.Saver) { LazyGridState() }
+LazyVerticalGrid(state = gridState) { ... }
+```
+
+## 5. Flow Combine for Many Flows
+
+When combining 6+ flows, use array syntax with **safe casts and defaults**:
+
+```kotlin
+combine(
+    flow1, flow2, flow3, flow4, flow5, flow6, flow7, flow8
+) { values: Array<Any?> ->
+    @Suppress("UNCHECKED_CAST")
+    val value1 = values[0] as? Boolean ?: false        // Safe cast with default
+    val value2 = values[1] as? String                   // Nullable stays nullable
+    val value3 = values[2] as? Float ?: 0f              // Safe cast with default
+    // ... extract each value with safe type cast
+}
+```
+
+**Important**: Use `as?` (safe cast) with Elvis operator defaults, not `as` (unsafe cast). StateFlow values can be null during initialization, causing `ClassCastException` at runtime.
+
+The standard `combine` with trailing lambda only supports up to 5 flows.
+
+## 6. Common Pitfalls to Avoid
 
 *   **God Composables**: If a Composable has more than 5-7 state parameters, it is likely doing too much. Refactor by pushing state down or grouping into a stable State class.
 *   **Stale Captures**: Be careful with `LaunchedEffect(Unit)`. If it collects a flow that depends on a captured variable (like a list), it might use a stale version of that list. Use `rememberUpdatedState` or restart the effect when the dependency changes.
+*   **Lambda Capturing**: Use method references (`viewModel::method`) instead of lambdas that capture state (`{ viewModel.method() }`). Lambdas are recreated on every recomposition if they capture mutable state.
+*   **Logic in Composition**: Never put logging, I/O, or complex calculations in the composition path. Use `LaunchedEffect` or `remember` with keys.

@@ -1029,6 +1029,10 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                     result.onSuccess { messages ->
                         if (messages.isNotEmpty()) {
                             Timber.tag(TAG).d("Adaptive polling found ${messages.size} missed messages")
+                            // [DICTATION_DEBUG] New messages may trigger UI updates
+                            Timber.tag("DICTATION_DEBUG").d(
+                                "Adaptive poll found ${messages.size} new messages - may trigger recomposition"
+                            )
                         }
                     }
                 } catch (e: Exception) {
@@ -1060,6 +1064,10 @@ class CursorChatMessageListDelegate @AssistedInject constructor(
                         result.onSuccess { messages ->
                             if (messages.isNotEmpty()) {
                                 Timber.tag(TAG).d("Foreground sync found ${messages.size} messages")
+                                // [DICTATION_DEBUG] Foreground resume found messages - may trigger recomposition
+                                Timber.tag("DICTATION_DEBUG").d(
+                                    "Foreground resume sync found ${messages.size} messages - may trigger recomposition"
+                                )
                             }
                         }
                     } catch (e: Exception) {

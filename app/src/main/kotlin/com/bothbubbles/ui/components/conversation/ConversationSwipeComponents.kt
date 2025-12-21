@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -24,10 +23,13 @@ import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -97,18 +99,25 @@ fun SwipeableConversationTile(
         return
     }
 
+    // Track threshold crossing for haptic feedback
+    var wasPastThreshold by remember { mutableStateOf(false) }
+    var wasSettled by remember { mutableStateOf(true) }
+
     // MD3 SwipeToDismissBox state with confirmValueChange callback
     val swipeState = rememberSwipeToDismissBoxState(
         confirmValueChange = { dismissValue ->
+            // Check if past threshold before committing
+            val isPastThreshold = wasPastThreshold
+
             when (dismissValue) {
                 SwipeToDismissBoxValue.StartToEnd -> {
-                    if (rightAction != SwipeActionType.NONE) {
+                    if (rightAction != SwipeActionType.NONE && isPastThreshold) {
                         HapticUtils.onConfirm(haptic)
                         onSwipeAction(rightAction)
                     }
                 }
                 SwipeToDismissBoxValue.EndToStart -> {
-                    if (leftAction != SwipeActionType.NONE) {
+                    if (leftAction != SwipeActionType.NONE && isPastThreshold) {
                         HapticUtils.onConfirm(haptic)
                         onSwipeAction(leftAction)
                     }
@@ -120,6 +129,34 @@ fun SwipeableConversationTile(
         }
     )
 
+    // Monitor swipe progress for threshold crossing haptics
+    val currentProgress = swipeState.progress
+    val isCurrentlySettled = swipeState.dismissDirection == SwipeToDismissBoxValue.Settled
+    val isPastThreshold = currentProgress > swipeConfig.sensitivity
+
+    // Haptic feedback when crossing threshold (in either direction)
+    LaunchedEffect(isPastThreshold, isCurrentlySettled) {
+        if (!isCurrentlySettled) {
+            if (isPastThreshold && !wasPastThreshold) {
+                // Crossed INTO the trigger zone
+                HapticUtils.onDragTransition(haptic)
+            } else if (!isPastThreshold && wasPastThreshold) {
+                // Crossed OUT of the trigger zone (swiping back)
+                HapticUtils.onDragTransition(haptic)
+            }
+        }
+        wasPastThreshold = isPastThreshold
+    }
+
+    // Haptic feedback when returning to settled position (edge)
+    LaunchedEffect(isCurrentlySettled) {
+        if (isCurrentlySettled && !wasSettled) {
+            // Just returned to settled position - subtle haptic
+            HapticUtils.onTap(haptic)
+        }
+        wasSettled = isCurrentlySettled
+    }
+
     SwipeToDismissBox(
         state = swipeState,
         modifier = modifier.fillMaxWidth(),
@@ -129,7 +166,8 @@ fun SwipeableConversationTile(
             SwipeBackground(
                 state = swipeState,
                 leftAction = leftAction,
-                rightAction = rightAction
+                rightAction = rightAction,
+                threshold = swipeConfig.sensitivity
             )
         },
         content = {
@@ -141,13 +179,19 @@ fun SwipeableConversationTile(
 /**
  * Background layer that shows swipe action icons and labels.
  * Uses MD3 design tokens for consistent styling.
+ *
+ * @param state The swipe state from SwipeToDismissBox
+ * @param leftAction Action for end-to-start swipe
+ * @param rightAction Action for start-to-end swipe
+ * @param threshold The sensitivity threshold for triggering actions
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 internal fun RowScope.SwipeBackground(
     state: SwipeToDismissBoxState,
     leftAction: SwipeActionType,
-    rightAction: SwipeActionType
+    rightAction: SwipeActionType,
+    threshold: Float = 0.4f
 ) {
     val dismissDirection = state.dismissDirection
 
@@ -159,7 +203,7 @@ internal fun RowScope.SwipeBackground(
     }
 
     // Calculate if past the commit threshold based on progress
-    val isPastThreshold = state.progress > 0.4f
+    val isPastThreshold = state.progress > threshold
 
     // Use MD3 surface container for subtle background
     val swipeBackgroundColor = MaterialTheme.colorScheme.surfaceContainerHighest
@@ -183,8 +227,6 @@ internal fun RowScope.SwipeBackground(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(12.dp))
             .background(color)
             .padding(horizontal = 24.dp),
         contentAlignment = when (dismissDirection) {

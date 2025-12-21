@@ -31,8 +31,10 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 
@@ -182,6 +184,8 @@ private fun SettingsToggleItem(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val haptic = LocalHapticFeedback.current
+
     // Subtle scale animation on toggle (Android 16 style)
     val scale by animateFloatAsState(
         targetValue = if (checked) 1f else 0.98f,
@@ -223,7 +227,10 @@ private fun SettingsToggleItem(
         }
         Switch(
             checked = checked,
-            onCheckedChange = onCheckedChange,
+            onCheckedChange = {
+                HapticUtils.onConfirm(haptic)
+                onCheckedChange(it)
+            },
             enabled = enabled
         )
     }

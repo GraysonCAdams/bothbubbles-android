@@ -89,8 +89,18 @@ class SettingsViewModel @Inject constructor(
 
     private fun observeAppTitleSetting() {
         viewModelScope.launch {
-            settingsDataStore.useSimpleAppTitle.collect { useSimple ->
-                _uiState.update { it.copy(useSimpleAppTitle = useSimple) }
+            combine(
+                settingsDataStore.useSimpleAppTitle,
+                settingsDataStore.showUnreadCountInHeader
+            ) { useSimple, showUnread ->
+                Pair(useSimple, showUnread)
+            }.collect { (useSimple, showUnread) ->
+                _uiState.update {
+                    it.copy(
+                        useSimpleAppTitle = useSimple,
+                        showUnreadCountInHeader = showUnread
+                    )
+                }
             }
         }
     }
@@ -98,6 +108,12 @@ class SettingsViewModel @Inject constructor(
     fun setUseSimpleAppTitle(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setUseSimpleAppTitle(enabled)
+        }
+    }
+
+    fun setShowUnreadCountInHeader(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setShowUnreadCountInHeader(enabled)
         }
     }
 
@@ -382,6 +398,7 @@ data class SettingsUiState(
     val isMarkingAllRead: Boolean = false,
     val error: String? = null,
     val useSimpleAppTitle: Boolean = false,
+    val showUnreadCountInHeader: Boolean = true,
     // Private API settings
     val enablePrivateApi: Boolean = false,
     val sendTypingIndicators: Boolean = true,

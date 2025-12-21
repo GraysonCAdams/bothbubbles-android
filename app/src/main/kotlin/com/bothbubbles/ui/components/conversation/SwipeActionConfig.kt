@@ -22,7 +22,7 @@ enum class SwipeActionType(
     DELETE("delete", "Delete", Icons.Default.Delete, Color(0xFFD32F2F)),
     MUTE("mute", "Mute", Icons.Default.NotificationsOff, Color(0xFF7B1FA2)),
     UNMUTE("unmute", "Unmute", Icons.Default.Notifications, Color(0xFF7B1FA2)),
-    MARK_READ("mark_read", "Mark as Read", Icons.Default.MarkEmailRead, Color(0xFF0097A7)),
+    MARK_READ("mark_read", "Read/Unread", Icons.Default.MarkEmailRead, Color(0xFF0097A7)),
     MARK_UNREAD("mark_unread", "Mark as Unread", Icons.Default.MarkEmailUnread, Color(0xFF0097A7)),
     SNOOZE("snooze", "Snooze", Icons.Default.Snooze, Color(0xFF9C27B0)),
     UNSNOOZE("unsnooze", "Unsnooze", Icons.Outlined.Snooze, Color(0xFF9C27B0));

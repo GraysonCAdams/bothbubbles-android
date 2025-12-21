@@ -45,8 +45,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.data.repository.AutoShareContact
 import com.bothbubbles.services.contacts.PhoneContact
 
@@ -223,9 +225,13 @@ private fun AutoShareContactCard(
             )
 
             // Toggle
+            val haptic = LocalHapticFeedback.current
             Switch(
                 checked = contact.enabled,
-                onCheckedChange = onToggle
+                onCheckedChange = {
+                    HapticUtils.onConfirm(haptic)
+                    onToggle(it)
+                }
             )
 
             // Delete button

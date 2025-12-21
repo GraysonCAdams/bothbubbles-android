@@ -58,6 +58,7 @@ import com.bothbubbles.ui.chat.composer.components.ReplyPreviewBar
 import com.bothbubbles.ui.chat.composer.components.SmartReplyRow
 import com.bothbubbles.ui.chat.composer.panels.ComposerPanelHost
 import com.bothbubbles.ui.theme.BothBubblesTheme
+import timber.log.Timber
 
 /**
  * Main chat composer component following Google Messages design patterns.
@@ -115,8 +116,13 @@ fun ChatComposer(
 
     // Hide keyboard and clear focus when any panel opens
     // Clearing focus ensures tapping the text field will trigger a focus change event
+    // [DICTATION_DEBUG] Panel changes that clear focus will interrupt dictation
     LaunchedEffect(state.activePanel) {
         if (state.activePanel != ComposerPanel.None) {
+            Timber.tag("DICTATION_DEBUG").w(
+                "Panel opened: ${state.activePanel} - clearing focus and hiding keyboard. " +
+                "This WILL interrupt voice dictation!"
+            )
             keyboardController?.hide()
             focusManager.clearFocus()
         }

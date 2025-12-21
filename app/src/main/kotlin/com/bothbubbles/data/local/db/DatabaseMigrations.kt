@@ -1113,6 +1113,38 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 44 to 45: Add pending_read_status table for reliable
+     * read status synchronization to the BlueBubbles server.
+     *
+     * Read status changes are now queued in this table and processed by WorkManager,
+     * ensuring reliable delivery even when network is unavailable or the app is killed.
+     *
+     * Features:
+     * - Deduplication by chat_guid (unique index) - only latest status matters
+     * - Retry tracking with exponential backoff
+     * - Error message storage for debugging
+     */
+    val MIGRATION_44_45 = object : Migration(44, 45) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS pending_read_status (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    chat_guid TEXT NOT NULL,
+                    is_read INTEGER NOT NULL DEFAULT 1,
+                    sync_status TEXT NOT NULL DEFAULT 'PENDING',
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    error_message TEXT DEFAULT NULL,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                    last_attempt_at INTEGER DEFAULT NULL
+                )
+            """.trimIndent())
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_pending_read_status_chat_guid ON pending_read_status(chat_guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_read_status_sync_status ON pending_read_status(sync_status)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_pending_read_status_created_at ON pending_read_status(created_at)")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1161,6 +1193,7 @@ object DatabaseMigrations {
         MIGRATION_40_41,
         MIGRATION_41_42,
         MIGRATION_42_43,
-        MIGRATION_43_44
+        MIGRATION_43_44,
+        MIGRATION_44_45
     )
 }

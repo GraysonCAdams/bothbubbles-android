@@ -1,7 +1,11 @@
 package com.bothbubbles.ui.conversations
 
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -22,8 +26,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -39,6 +45,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -49,6 +56,8 @@ import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
@@ -117,17 +126,72 @@ internal fun PinnedConversationsRow(
     // Build ordered list of actual conversations (not just GUIDs) so LazyRow detects data changes
     val orderedConversations = currentOrder.mapNotNull { guid -> conversationMap[guid] }
 
-    LazyRow(
-        modifier = modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
-        userScrollEnabled = !isDragging
-    ) {
-        itemsIndexed(
-            items = orderedConversations,
-            key = { _, conv -> conv.guid }
-        ) { index, conversation ->
-            val guid = conversation.guid
+    // Scroll state for tracking visible items
+    val listState = rememberLazyListState()
+
+    // Calculate which unread items are off-screen on each side
+    val hasUnreadOffscreenLeft by remember {
+        derivedStateOf {
+            val firstVisibleIndex = listState.firstVisibleItemIndex
+            // Check if any items before first visible have unread messages
+            orderedConversations.take(firstVisibleIndex).any { it.unreadCount > 0 }
+        }
+    }
+
+    val hasUnreadOffscreenRight by remember {
+        derivedStateOf {
+            val visibleItemsInfo = listState.layoutInfo.visibleItemsInfo
+            if (visibleItemsInfo.isEmpty()) return@derivedStateOf false
+            val lastVisibleIndex = visibleItemsInfo.lastOrNull()?.index ?: 0
+            // Check if any items after last visible have unread messages
+            if (lastVisibleIndex < orderedConversations.lastIndex) {
+                orderedConversations.drop(lastVisibleIndex + 1).any { it.unreadCount > 0 }
+            } else {
+                false
+            }
+        }
+    }
+
+    // Pulsing animation for edge glow
+    val infiniteTransition = rememberInfiniteTransition(label = "unreadGlowPulse")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.3f,
+        targetValue = 0.7f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulseAlpha"
+    )
+
+    // Animated visibility for the glow
+    val leftGlowAlpha by animateFloatAsState(
+        targetValue = if (hasUnreadOffscreenLeft) pulseAlpha else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "leftGlowAlpha"
+    )
+    val rightGlowAlpha by animateFloatAsState(
+        targetValue = if (hasUnreadOffscreenRight) pulseAlpha else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "rightGlowAlpha"
+    )
+
+    // Glow color based on theme (use primary or error color for attention)
+    val glowColor = MaterialTheme.colorScheme.primary
+
+    Box(modifier = modifier.fillMaxWidth()) {
+        LazyRow(
+            state = listState,
+            modifier = Modifier.fillMaxWidth(),
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
+            userScrollEnabled = !isDragging
+        ) {
+            itemsIndexed(
+                items = orderedConversations,
+                key = { _, conv -> conv.guid }
+            ) { index, conversation ->
+                val guid = conversation.guid
 
             val isBeingDragged = index == draggedItemIndex && isDragging
 
@@ -256,6 +320,43 @@ internal fun PinnedConversationsRow(
                     }
                 )
             }
+        }
+        }
+
+        // Left edge glow for unread pins off-screen to the left
+        if (leftGlowAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .width(32.dp)
+                    .height(100.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                glowColor.copy(alpha = leftGlowAlpha),
+                                Color.Transparent
+                            )
+                        )
+                    )
+            )
+        }
+
+        // Right edge glow for unread pins off-screen to the right
+        if (rightGlowAlpha > 0f) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(32.dp)
+                    .height(100.dp)
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                glowColor.copy(alpha = rightGlowAlpha)
+                            )
+                        )
+                    )
+            )
         }
     }
 }

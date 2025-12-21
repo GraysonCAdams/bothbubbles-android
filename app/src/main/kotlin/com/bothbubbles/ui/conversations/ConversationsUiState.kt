@@ -39,6 +39,7 @@ data class ConversationsUiState(
     val swipeConfig: SwipeConfig = SwipeConfig(),
     val messageSearchResults: StableList<MessageSearchResult> = emptyList<MessageSearchResult>().toStable(),
     val useSimpleAppTitle: Boolean = false,
+    val showUnreadCountInHeader: Boolean = true,
     val userProfileName: String? = null,
     val userProfileAvatarUri: String? = null,
     // Categorization enabled flag (for settings)

@@ -85,6 +85,32 @@ object EtaNotificationHelper {
     }
 
     /**
+     * Show the destination fetching notification when opening nav app to scrape destination.
+     */
+    fun showDestinationFetchNotification(context: Context, navAppName: String) {
+        val notification = NotificationCompat.Builder(context, NavigationListenerService.CHANNEL_ETA_SHARING)
+            .setSmallIcon(android.R.drawable.ic_menu_mylocation)
+            .setContentTitle("Fetching destination details")
+            .setContentText("Getting destination from $navAppName...")
+            .setOngoing(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_STATUS)
+            .setAutoCancel(false)
+            .build()
+
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.notify(NavigationListenerService.NOTIFICATION_ID_DESTINATION_FETCH, notification)
+    }
+
+    /**
+     * Cancel the destination fetch notification.
+     */
+    fun cancelDestinationFetchNotification(context: Context) {
+        val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        notificationManager.cancel(NavigationListenerService.NOTIFICATION_ID_DESTINATION_FETCH)
+    }
+
+    /**
      * Format ETA minutes for display.
      */
     fun formatEtaMinutes(minutes: Int): String {

@@ -373,6 +373,7 @@ fun ConversationsScreen(
                                 enabledCategories = enabledCategories,
                                 hasSettingsWarning = uiState.hasSettingsWarning,
                                 totalUnreadCount = uiState.totalUnreadCount,
+                                showUnreadCountInHeader = uiState.showUnreadCountInHeader,
                                 onFilterSelected = { filter ->
                                     viewModel.setConversationFilter(filter.name.lowercase())
                                 },
@@ -436,7 +437,11 @@ fun ConversationsScreen(
                 },
                 onSwipeAction = { chatGuid, action ->
                     when (action) {
-                        SwipeActionType.ARCHIVE, SwipeActionType.DELETE -> {
+                        SwipeActionType.ARCHIVE,
+                        SwipeActionType.DELETE,
+                        SwipeActionType.PIN,
+                        SwipeActionType.MUTE,
+                        SwipeActionType.MARK_UNREAD -> {
                             pendingSwipeAction = chatGuid to action
                         }
                         else -> viewModel.handleSwipeAction(chatGuid, action)

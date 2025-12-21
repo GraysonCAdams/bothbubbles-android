@@ -485,6 +485,23 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                // Show unread count in header toggle
+                SettingsMenuItem(
+                    icon = Icons.Default.MarkUnreadChatAlt,
+                    title = "Show unread count",
+                    subtitle = if (uiState.showUnreadCountInHeader) "Badge visible in header" else "Badge hidden",
+                    onClick = { viewModel.setShowUnreadCountInHeader(!uiState.showUnreadCountInHeader) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.showUnreadCountInHeader,
+                            onCheckedChange = { viewModel.setShowUnreadCountInHeader(it) },
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Message effects
                 SettingsMenuItem(
                     icon = Icons.Default.AutoAwesome,

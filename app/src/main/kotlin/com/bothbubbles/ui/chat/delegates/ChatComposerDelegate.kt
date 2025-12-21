@@ -416,15 +416,23 @@ class ChatComposerDelegate @AssistedInject constructor(
     ) {
         when (event) {
             is ComposerEvent.TextChanged -> {
-                // Timber.tag("PerfTrace").d("TextChanged event received, text length=${event.text.length}")
+                // [DICTATION_DEBUG] Normal text change from UI - this is the expected path
+                Timber.tag("DICTATION_DEBUG").v(
+                    "TextChanged event: len=${event.text.length}, last15='${event.text.takeLast(15)}'"
+                )
                 _draftText.value = event.text
                 handleTypingIndicator(event.text)
                 persistDraft(event.text)
             }
             is ComposerEvent.TextFieldFocusChanged -> {
+                // [DICTATION_DEBUG] Focus changes - loss of focus kills dictation
+                Timber.tag("DICTATION_DEBUG").d(
+                    "TextFieldFocusChanged: ${_isTextFieldFocused.value} -> ${event.isFocused}"
+                )
                 _isTextFieldFocused.value = event.isFocused
                 // When text field gains focus, dismiss any open panel (keyboard takes over)
                 if (event.isFocused && _activePanel.value != ComposerPanel.None) {
+                    Timber.tag("DICTATION_DEBUG").d("Dismissing panel because text field gained focus")
                     _activePanel.value = ComposerPanel.None
                 }
             }
@@ -447,6 +455,8 @@ class ChatComposerDelegate @AssistedInject constructor(
                 onDismissReply()
             }
             is ComposerEvent.ToggleMediaPicker -> {
+                // [DICTATION_DEBUG] Panel changes trigger focus clearing which interrupts dictation
+                Timber.tag("DICTATION_DEBUG").w("ToggleMediaPicker - may interrupt dictation")
                 // Close any picker (MediaPicker or GifPicker), or open MediaPicker if none open
                 _activePanel.update { current ->
                     when (current) {
@@ -456,15 +466,19 @@ class ChatComposerDelegate @AssistedInject constructor(
                 }
             }
             is ComposerEvent.ToggleEmojiPicker -> {
+                Timber.tag("DICTATION_DEBUG").w("ToggleEmojiPicker - may interrupt dictation")
                 _activePanel.update { if (it == ComposerPanel.EmojiKeyboard) ComposerPanel.None else ComposerPanel.EmojiKeyboard }
             }
             is ComposerEvent.ToggleGifPicker -> {
+                Timber.tag("DICTATION_DEBUG").w("ToggleGifPicker - may interrupt dictation")
                 _activePanel.update { if (it == ComposerPanel.GifPicker) ComposerPanel.None else ComposerPanel.GifPicker }
             }
             is ComposerEvent.OpenGallery -> {
+                Timber.tag("DICTATION_DEBUG").w("OpenGallery - may interrupt dictation")
                 _activePanel.update { ComposerPanel.MediaPicker }
             }
             is ComposerEvent.DismissPanel -> {
+                Timber.tag("DICTATION_DEBUG").d("DismissPanel")
                 _activePanel.update { ComposerPanel.None }
             }
             is ComposerEvent.ReorderAttachments -> {
@@ -502,6 +516,13 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Update the draft text.
      */
     fun setDraftText(text: String) {
+        // [DICTATION_DEBUG] Track when draft text is set programmatically
+        val oldText = _draftText.value
+        if (oldText != text) {
+            Timber.tag("DICTATION_DEBUG").d(
+                "setDraftText: '${oldText.takeLast(15)}' -> '${text.takeLast(15)}' (len: ${oldText.length} -> ${text.length})"
+            )
+        }
         _draftText.value = text
     }
 
@@ -524,7 +545,13 @@ class ChatComposerDelegate @AssistedInject constructor(
      * Restore draft text (e.g., from database).
      */
     fun restoreDraftText(text: String?) {
-        _draftText.value = text ?: ""
+        val newText = text ?: ""
+        // [DICTATION_DEBUG] Draft restoration may interrupt dictation
+        Timber.tag("DICTATION_DEBUG").w(
+            "restoreDraftText called: restoring '${newText.takeLast(15)}' (len=${newText.length}). " +
+            "This external update may interrupt dictation."
+        )
+        _draftText.value = newText
     }
 
     /**
@@ -1068,6 +1095,12 @@ class ChatComposerDelegate @AssistedInject constructor(
     private fun handleMentionSelection(suggestion: MentionSuggestion) {
         val currentPopup = _mentionPopupState.value
         if (!currentPopup.isVisible) return
+
+        // [DICTATION_DEBUG] Mention insertion updates draft text externally
+        Timber.tag("DICTATION_DEBUG").w(
+            "handleMentionSelection: Inserting mention '${suggestion.fullName}' - " +
+            "this external text update may interrupt dictation"
+        )
 
         val (newText, newCursor, mention) = MentionPositionTracker.insertMention(
             text = _draftText.value,

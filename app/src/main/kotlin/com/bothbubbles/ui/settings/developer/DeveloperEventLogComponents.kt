@@ -10,10 +10,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.bothbubbles.util.HapticUtils
 import com.bothbubbles.services.developer.ConnectionMode
 import com.bothbubbles.services.developer.DeveloperEvent
 import com.bothbubbles.services.developer.EventSource
@@ -278,9 +280,13 @@ internal fun DeveloperModeToggle(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+            val haptic = LocalHapticFeedback.current
             Switch(
                 checked = isEnabled,
-                onCheckedChange = { onToggle() }
+                onCheckedChange = {
+                    HapticUtils.onConfirm(haptic)
+                    onToggle()
+                }
             )
         }
     }

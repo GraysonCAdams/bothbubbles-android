@@ -128,6 +128,7 @@ class SettingsDataStore @Inject constructor(
 
     val useDynamicColor: Flow<Boolean> get() = uiPrefs.useDynamicColor
     val useSimpleAppTitle: Flow<Boolean> get() = uiPrefs.useSimpleAppTitle
+    val showUnreadCountInHeader: Flow<Boolean> get() = uiPrefs.showUnreadCountInHeader
     val denseChatTiles: Flow<Boolean> get() = uiPrefs.denseChatTiles
     val use24HourFormat: Flow<Boolean> get() = uiPrefs.use24HourFormat
     val showDeliveryTimestamps: Flow<Boolean> get() = uiPrefs.showDeliveryTimestamps
@@ -157,6 +158,7 @@ class SettingsDataStore @Inject constructor(
 
     suspend fun setUseDynamicColor(enabled: Boolean) = uiPrefs.setUseDynamicColor(enabled)
     suspend fun setUseSimpleAppTitle(enabled: Boolean) = uiPrefs.setUseSimpleAppTitle(enabled)
+    suspend fun setShowUnreadCountInHeader(enabled: Boolean) = uiPrefs.setShowUnreadCountInHeader(enabled)
     suspend fun setDenseChatTiles(enabled: Boolean) = uiPrefs.setDenseChatTiles(enabled)
     suspend fun setUse24HourFormat(enabled: Boolean) = uiPrefs.setUse24HourFormat(enabled)
     suspend fun setShowDeliveryTimestamps(enabled: Boolean) = uiPrefs.setShowDeliveryTimestamps(enabled)

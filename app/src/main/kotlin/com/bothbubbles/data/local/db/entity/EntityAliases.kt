@@ -32,6 +32,10 @@ typealias PendingMessageEntity = com.bothbubbles.core.model.entity.PendingMessag
 typealias PendingAttachmentEntity = com.bothbubbles.core.model.entity.PendingAttachmentEntity
 typealias PendingSyncStatus = com.bothbubbles.core.model.entity.PendingSyncStatus
 
+// Pending read status sync
+typealias PendingReadStatusEntity = com.bothbubbles.core.model.entity.PendingReadStatusEntity
+typealias ReadSyncStatus = com.bothbubbles.core.model.entity.ReadSyncStatus
+
 // Supporting entities
 typealias SyncRangeEntity = com.bothbubbles.core.model.entity.SyncRangeEntity
 typealias SyncSource = com.bothbubbles.core.model.entity.SyncSource

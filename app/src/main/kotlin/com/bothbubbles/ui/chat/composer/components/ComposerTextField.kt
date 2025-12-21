@@ -37,6 +37,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.ChatSendMode
+import timber.log.Timber
 import com.bothbubbles.ui.chat.composer.MentionSpan
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
@@ -105,8 +106,15 @@ fun ComposerTextField(
     }
 
     // Sync external text changes (e.g., when mention is inserted)
+    // [DICTATION_DEBUG] This may interrupt voice dictation by resetting TextFieldValue
     LaunchedEffect(text) {
         if (textFieldValue.text != text) {
+            Timber.tag("DICTATION_DEBUG").w(
+                "External text sync triggered! " +
+                "Current TFV: '${textFieldValue.text.takeLast(20)}' (len=${textFieldValue.text.length}, cursor=${textFieldValue.selection.start}) -> " +
+                "New text: '${text.takeLast(20)}' (len=${text.length}). " +
+                "This resets TextFieldValue and may interrupt dictation."
+            )
             // Keep cursor at end when text changes externally
             textFieldValue = TextFieldValue(
                 text = text,
@@ -161,6 +169,10 @@ fun ComposerTextField(
                 value = textFieldValue,
                 onValueChange = { newValue ->
                     if (isEnabled) {
+                        // [DICTATION_DEBUG] Log user input changes
+                        Timber.tag("DICTATION_DEBUG").d(
+                            "onValueChange: '${newValue.text.takeLast(15)}' (len=${newValue.text.length}, cursor=${newValue.selection.start})"
+                        )
                         textFieldValue = newValue
                         onTextChange(newValue.text)
                         // Notify about cursor position for mention detection
@@ -178,6 +190,12 @@ fun ComposerTextField(
                     )
                     .focusRequester(focusRequester)
                     .onFocusChanged { focusState ->
+                        // [DICTATION_DEBUG] Log focus changes - loss of focus kills dictation
+                        if (isFocused != focusState.isFocused) {
+                            Timber.tag("DICTATION_DEBUG").w(
+                                "TextField focus changed: $isFocused -> ${focusState.isFocused}"
+                            )
+                        }
                         isFocused = focusState.isFocused
                         onFocusChanged(focusState.isFocused)
                     },

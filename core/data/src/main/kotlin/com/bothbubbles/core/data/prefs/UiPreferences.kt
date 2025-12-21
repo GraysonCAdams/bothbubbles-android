@@ -27,6 +27,10 @@ class UiPreferences @Inject constructor(
         prefs[Keys.USE_SIMPLE_APP_TITLE] ?: false
     }
 
+    val showUnreadCountInHeader: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SHOW_UNREAD_COUNT_IN_HEADER] ?: true
+    }
+
     val denseChatTiles: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.DENSE_CHAT_TILES] ?: false
     }
@@ -186,6 +190,12 @@ class UiPreferences @Inject constructor(
     suspend fun setUseSimpleAppTitle(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.USE_SIMPLE_APP_TITLE] = enabled
+        }
+    }
+
+    suspend fun setShowUnreadCountInHeader(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SHOW_UNREAD_COUNT_IN_HEADER] = enabled
         }
     }
 
@@ -374,6 +384,7 @@ class UiPreferences @Inject constructor(
         // UI
         val USE_DYNAMIC_COLOR = booleanPreferencesKey("use_dynamic_color")
         val USE_SIMPLE_APP_TITLE = booleanPreferencesKey("use_simple_app_title")
+        val SHOW_UNREAD_COUNT_IN_HEADER = booleanPreferencesKey("show_unread_count_in_header")
         val DENSE_CHAT_TILES = booleanPreferencesKey("dense_chat_tiles")
         val USE_24_HOUR_FORMAT = booleanPreferencesKey("use_24_hour_format")
         val SHOW_DELIVERY_TIMESTAMPS = booleanPreferencesKey("show_delivery_timestamps")

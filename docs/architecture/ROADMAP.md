@@ -2,16 +2,19 @@
 
 Outstanding phases and tasks for the BothBubbles architecture refactoring.
 
+**Note**: For completed phases (0-15), see [COMPLETED.md](./COMPLETED.md).
+
 ## Phase Overview
 
 | Phase | Focus | Status | Effort |
 |-------|-------|--------|--------|
 | [Phase 13](#phase-13-testing-infrastructure) | Testing Infrastructure | 🔜 Planned | 95-105h |
-| [Phase 14](#phase-14-feature-module-extraction) | Feature Module Extraction | 🔄 Structure Complete | 60-70h |
-| [Phase 15](#phase-15-security--polish) | Security & Polish | 🔜 Planned | 28-38h |
-| [Phase 16](#phase-16-cicd-pipeline) | CI/CD Pipeline | 🔜 Planned | 16-18h |
+| Phase 14 | Core Module Extraction | ✅ Complete | - |
+| Phase 15 | Feature Module Extraction | ✅ Complete | - |
+| [Phase 16](#phase-16-security--polish) | Security & Polish | 🔜 Planned | 28-38h |
+| [Phase 17](#phase-17-cicd-pipeline) | CI/CD Pipeline | 🔜 Planned | 16-18h |
 
-**Total Remaining Effort**: ~200-230 hours
+**Total Remaining Effort**: ~140-160 hours
 
 ---
 
@@ -87,63 +90,10 @@ Build comprehensive testing infrastructure for the codebase.
 
 ---
 
-## Phase 14: Feature Module Extraction
-
-> **Status**: Structure Complete (migration remaining)
-> **Prerequisite**: Phase 6 ✅ Complete
-
-Migrate code to feature modules for better build times and encapsulation.
-
-### Completed ✅
-- [x] `:navigation` module created with Routes.kt
-- [x] `:core:data` module with interfaces
-- [x] Feature module structures created
-- [x] Build configuration complete
-- [x] **File decomposition** (ConversationsScreen, ChatMessageList)
-
-### Remaining Tasks
-
-- [ ] **Migrate Settings Module**
-  - [ ] Move `AboutScreen.kt` + `AboutViewModel.kt` to `:feature:settings`
-  - [ ] Update imports and verify build
-  - [ ] Move remaining settings screens (15+)
-
-- [ ] **Migrate Setup Module**
-  - [ ] Move `SetupScreen.kt` + `SetupViewModel.kt` to `:feature:setup`
-  - [ ] Move setup delegates
-  - [ ] Update navigation wiring
-
-- [ ] **Migrate Conversations Module**
-  - [ ] Move `ConversationsScreen.kt` + `ConversationsViewModel.kt`
-  - [ ] Move conversation delegates (5)
-  - [ ] Move conversation components
-
-- [ ] **Migrate Chat Module** (largest, do last)
-  - [ ] Move `ChatScreen.kt` + `ChatViewModel.kt`
-  - [ ] Move chat delegates (14)
-  - [ ] Move chat components
-
-- [ ] **Navigation Wiring**
-  - [ ] Update `AppNavHost.kt` to use feature navigation extensions
-  - [ ] Each feature provides `NavGraphBuilder` extension
-
-- [ ] **Cleanup**
-  - [ ] Move tests to appropriate modules
-  - [ ] Remove entity aliases in app module
-  - [ ] Verify all features work
-
-### Exit Criteria
-- All features in separate modules
-- No feature module depends on another
-- App module < 500 LOC
-- Build time reduced for incremental changes
-
----
-
-## Phase 15: Security & Polish
+## Phase 16: Security & Polish
 
 > **Status**: Planned
-> **Prerequisite**: Phase 14 complete
+> **Prerequisite**: Phase 15 complete
 
 Security audit and final polish for production.
 
@@ -185,10 +135,10 @@ Security audit and final polish for production.
 
 ---
 
-## Phase 16: CI/CD Pipeline
+## Phase 17: CI/CD Pipeline
 
 > **Status**: Planned
-> **Prerequisite**: Phases 13, 15 complete
+> **Prerequisite**: Phases 13, 16 complete
 
 Automate quality gates for sustainable development.
 
@@ -254,18 +204,17 @@ bothbubbles-app/
 │   ├── model/              # ✅ Domain models
 │   ├── network/            # ✅ API layer
 │   ├── data/               # ✅ Interfaces
-│   └── design/             # Theme, shared components
+│   └── design/             # ✅ Theme, shared components
 ├── feature/
-│   ├── chat/               # 🔄 Structure ready
-│   ├── conversations/      # 🔄 Structure ready
-│   ├── settings/           # 🔄 Structure ready
-│   └── setup/              # 🔄 Structure ready
+│   ├── chat/               # ✅ Structure complete
+│   ├── conversations/      # ✅ Structure complete
+│   ├── settings/           # ✅ Structure complete
+│   └── setup/              # ✅ Structure complete
 └── navigation/             # ✅ Route contracts
 ```
 
 ### Priority Order
 
-1. **Phase 14** (Feature Module Extraction) — Improves build times
-2. **Phase 13** (Testing) — Can run in parallel
-3. **Phase 15** (Security) — Before release
-4. **Phase 16** (CI/CD) — Sustains quality
+1. **Phase 13** (Testing) — Build test infrastructure
+2. **Phase 16** (Security) — Before release
+3. **Phase 17** (CI/CD) — Sustains quality
