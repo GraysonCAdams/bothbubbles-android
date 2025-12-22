@@ -14,6 +14,7 @@ import androidx.core.content.FileProvider
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.data.repository.ChatRepository
@@ -48,6 +49,7 @@ class NotificationMediaUpdater @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val chatRepository: ChatRepository,
     private val notificationService: NotificationService,
     private val activeConversationManager: ActiveConversationManager,
@@ -196,6 +198,9 @@ class NotificationMediaUpdater @Inject constructor(
                 }
             }
 
+            // Get unified chat for avatar path
+            val unifiedChat = chat.unifiedChatId?.let { unifiedChatDao.getById(it) }
+
             // Get participants and chat info
             val participants = chatRepository.getParticipantsForChat(chatGuid)
             val participantNames = participants.map { it.rawDisplayName }
@@ -229,7 +234,7 @@ class NotificationMediaUpdater @Inject constructor(
                     avatarUri = senderAvatarUri,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
-                    groupAvatarPath = chat.effectiveGroupPhotoPath,
+                    groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                     subject = message.subject,
                     attachmentUri = attachmentUri,
                     attachmentMimeType = notificationMimeType

@@ -88,7 +88,22 @@ data class ChatEntity(
      * When this chat was soft-deleted.
      */
     @ColumnInfo(name = "date_deleted")
-    val dateDeleted: Long? = null
+    val dateDeleted: Long? = null,
+
+    /**
+     * Local path to the server-provided group photo (for group chats).
+     * This is downloaded from the BlueBubbles server when available.
+     * Priority for display: customAvatarPath > serverGroupPhotoPath > participant collage
+     */
+    @ColumnInfo(name = "server_group_photo_path")
+    val serverGroupPhotoPath: String? = null,
+
+    /**
+     * Server attachment GUID for the group photo (e.g., "at_0_xxx").
+     * Used to detect when the photo has changed and needs re-download.
+     */
+    @ColumnInfo(name = "server_group_photo_guid")
+    val serverGroupPhotoGuid: String? = null
 ) {
     /**
      * Whether this chat uses SMS text forwarding

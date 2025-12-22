@@ -1,6 +1,5 @@
 package com.bothbubbles.ui.conversations.delegates
 
-import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.ui.conversations.ConversationFilter
 import com.bothbubbles.ui.conversations.ConversationUiModel
@@ -117,7 +116,6 @@ enum class BatchAction {
  * - Applies batch actions in chunks for efficiency
  */
 class ConversationSelectionDelegate @AssistedInject constructor(
-    private val chatRepository: ChatRepository,
     private val unifiedChatRepository: UnifiedChatRepository,
     @Assisted private val scope: CoroutineScope
 ) {
@@ -245,26 +243,17 @@ class ConversationSelectionDelegate @AssistedInject constructor(
     /**
      * Query the total count of conversations matching the current filter.
      * This counts all conversations in the database, not just loaded ones.
+     * All conversations (1:1 and groups) are now tracked via UnifiedChatEntity.
      */
     private suspend fun queryFilteredCount(
         filter: ConversationFilter,
         categoryFilter: String?
     ): Int {
-        // Get counts from all sources
-        val unifiedCount = unifiedChatRepository.getFilteredCount(
+        // All conversations are now tracked via UnifiedChatRepository
+        return unifiedChatRepository.getFilteredCount(
             filter = filter,
             categoryFilter = categoryFilter
         )
-        val groupChatCount = chatRepository.getFilteredGroupChatCount(
-            filter = filter,
-            categoryFilter = categoryFilter
-        )
-        val nonGroupChatCount = chatRepository.getFilteredNonGroupChatCount(
-            filter = filter,
-            categoryFilter = categoryFilter
-        )
-
-        return unifiedCount + groupChatCount + nonGroupChatCount
     }
 
     /**
@@ -328,7 +317,8 @@ class ConversationSelectionDelegate @AssistedInject constructor(
     }
 
     /**
-     * Fetch conversation GUIDs matching the filter, in batches.
+     * Fetch conversation IDs matching the filter, in batches.
+     * All conversations (1:1 and groups) are now tracked via UnifiedChatEntity.
      */
     private suspend fun fetchFilteredConversationGuids(
         filter: ConversationFilter,
@@ -336,27 +326,13 @@ class ConversationSelectionDelegate @AssistedInject constructor(
         limit: Int,
         offset: Int
     ): List<String> {
-        // Get IDs from all sources
-        val unifiedIds = unifiedChatRepository.getFilteredIds(
+        // All conversations are now tracked via UnifiedChatRepository
+        return unifiedChatRepository.getFilteredIds(
             filter = filter,
             categoryFilter = categoryFilter,
             limit = limit,
             offset = offset
         )
-        val groupChatGuids = chatRepository.getFilteredGroupChatGuids(
-            filter = filter,
-            categoryFilter = categoryFilter,
-            limit = limit,
-            offset = offset
-        )
-        val nonGroupChatGuids = chatRepository.getFilteredNonGroupChatGuids(
-            filter = filter,
-            categoryFilter = categoryFilter,
-            limit = limit,
-            offset = offset
-        )
-
-        return (unifiedIds + groupChatGuids + nonGroupChatGuids).distinct()
     }
 
     /**

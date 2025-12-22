@@ -11,6 +11,7 @@ import com.bothbubbles.data.local.db.BothBubblesDatabase
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -62,6 +63,7 @@ class IMessageSenderStrategy @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
     private val attachmentDao: AttachmentDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val api: BothBubblesApi,
     private val settingsDataStore: SettingsDataStore,
     private val videoCompressor: VideoCompressor,
@@ -122,19 +124,37 @@ class IMessageSenderStrategy @Inject constructor(
             }
 
             if (existingMessage == null) {
+                val now = System.currentTimeMillis()
+                val chat = chatDao.getChatByGuid(options.chatGuid)
+                val unifiedChatId = chat?.unifiedChatId
                 val tempMessage = MessageEntity(
                     guid = tempGuid,
                     chatGuid = options.chatGuid,
+                    unifiedChatId = unifiedChatId,
                     text = options.text,
                     subject = options.subject,
-                    dateCreated = System.currentTimeMillis(),
+                    dateCreated = now,
                     isFromMe = true,
                     threadOriginatorGuid = options.replyToGuid,
                     expressiveSendStyleId = options.effectId,
                     messageSource = MessageSource.IMESSAGE.name
                 )
                 messageDao.insertMessage(tempMessage)
-                chatDao.updateLastMessage(options.chatGuid, System.currentTimeMillis(), options.text)
+                // Update unified chat's latest message
+                unifiedChatId?.let { unifiedId ->
+                    unifiedChatDao.updateLatestMessageIfNewer(
+                        id = unifiedId,
+                        date = now,
+                        text = options.text,
+                        guid = tempGuid,
+                        isFromMe = true,
+                        hasAttachments = false,
+                        source = MessageSource.IMESSAGE.name,
+                        dateDelivered = null,
+                        dateRead = null,
+                        error = 0
+                    )
+                }
             }
 
             val response = api.sendMessage(
@@ -211,10 +231,13 @@ class IMessageSenderStrategy @Inject constructor(
             val tempAttachmentGuids = options.attachments.indices.map { "$tempGuid-att-$it" }
 
             if (existingMessage == null) {
+                val chat = chatDao.getChatByGuid(options.chatGuid)
+                val unifiedChatId = chat?.unifiedChatId
                 database.withTransaction {
                     val tempMessage = MessageEntity(
                         guid = tempGuid,
                         chatGuid = options.chatGuid,
+                        unifiedChatId = unifiedChatId,
                         text = options.text.ifBlank { null },
                         subject = options.subject,
                         dateCreated = System.currentTimeMillis(),
@@ -253,7 +276,23 @@ class IMessageSenderStrategy @Inject constructor(
                 messageDao.updateErrorStatus(tempGuid, 0)
             }
 
-            chatDao.updateLastMessage(options.chatGuid, System.currentTimeMillis(), options.text.ifBlank { "[Attachment]" })
+            // Update unified chat's latest message
+            val now = System.currentTimeMillis()
+            val previewText = options.text.ifBlank { "[Attachment]" }
+            chatDao.getChatByGuid(options.chatGuid)?.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateLatestMessageIfNewer(
+                    id = unifiedId,
+                    date = now,
+                    text = previewText,
+                    guid = tempGuid,
+                    isFromMe = true,
+                    hasAttachments = true,
+                    source = MessageSource.IMESSAGE.name,
+                    dateDelivered = null,
+                    dateRead = null,
+                    error = 0
+                )
+            }
 
             var lastResponse: MessageDto? = null
             val defaultQualityStr = settingsDataStore.defaultImageQuality.first()

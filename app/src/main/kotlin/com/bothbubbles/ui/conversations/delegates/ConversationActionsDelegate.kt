@@ -173,7 +173,7 @@ class ConversationActionsDelegate @AssistedInject constructor(
             }
 
             // Persist to database in background - update unified chat (which is the source of truth)
-            val chat = chatRepository.getChatByGuid(chatGuid)
+            val chat = chatRepository.getChat(chatGuid)
             val unifiedChatId = chat?.unifiedChatId
             if (unifiedChatId != null) {
                 unifiedChatRepository.updatePinStatus(unifiedChatId, newPinState, if (newPinState) newPinIndex else null)
@@ -214,7 +214,7 @@ class ConversationActionsDelegate @AssistedInject constructor(
 
             // Persist to database - update unified chats (which are the source of truth)
             reorderedGuids.forEachIndexed { index, guid ->
-                val chat = chatRepository.getChatByGuid(guid)
+                val chat = chatRepository.getChat(guid)
                 val unifiedChatId = chat?.unifiedChatId
                 if (unifiedChatId != null) {
                     unifiedChatRepository.updatePinStatus(unifiedChatId, true, index)

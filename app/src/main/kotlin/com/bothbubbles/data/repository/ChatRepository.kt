@@ -339,6 +339,191 @@ class ChatRepository @Inject constructor(
         chatDao.deleteChatWithDependencies(guid, tombstoneDao, messageDao)
     }
 
+    /**
+     * Mark a chat as read by its GUID.
+     * Looks up the unified chat ID and marks it as read.
+     */
+    suspend fun markChatAsRead(chatGuid: String): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.markAsRead(unifiedId)
+        }
+    }
+
+    /**
+     * Mark a chat as unread by its GUID.
+     * Looks up the unified chat ID and sets unread count to 1.
+     */
+    suspend fun markChatAsUnread(chatGuid: String): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateUnreadCount(unifiedId, 1)
+        }
+    }
+
+    /**
+     * Snooze a chat by its GUID.
+     * Looks up the unified chat ID and updates snooze until time.
+     */
+    suspend fun snoozeChat(chatGuid: String, durationMs: Long): Result<Unit> = runCatching {
+        val snoozeUntil = if (durationMs == -1L) -1L else System.currentTimeMillis() + durationMs
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateSnoozeUntil(unifiedId, snoozeUntil)
+        }
+    }
+
+    /**
+     * Unsnooze a chat by its GUID.
+     * Looks up the unified chat ID and clears snooze until time.
+     */
+    suspend fun unsnoozeChat(chatGuid: String): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateSnoozeUntil(unifiedId, null)
+        }
+    }
+
+    /**
+     * Set muted status for a chat by its GUID.
+     * Looks up the unified chat ID and updates notifications enabled.
+     */
+    suspend fun setMuted(chatGuid: String, muted: Boolean): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateNotificationsEnabled(unifiedId, !muted)
+        }
+    }
+
+    /**
+     * Set archived status for a chat by its GUID.
+     * Looks up the unified chat ID and updates archive status.
+     */
+    suspend fun setArchived(chatGuid: String, archived: Boolean): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateArchiveStatus(unifiedId, archived)
+        }
+    }
+
+    /**
+     * Set starred status for a chat by its GUID.
+     * Looks up the unified chat ID and updates starred status.
+     */
+    suspend fun setStarred(chatGuid: String, starred: Boolean): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateStarredStatus(unifiedId, starred)
+        }
+    }
+
+    /**
+     * Update custom avatar path for a chat by its GUID.
+     * Looks up the unified chat ID and updates the custom avatar path.
+     */
+    suspend fun updateCustomAvatarPath(chatGuid: String, path: String?): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateCustomAvatarPath(unifiedId, path)
+        }
+    }
+
+    /**
+     * Find a chat GUID by normalized address.
+     * Uses the unified chat's sourceId which is the preferred chat GUID.
+     *
+     * @param address The normalized phone number or email
+     * @return The chat GUID or null if not found
+     */
+    suspend fun findChatGuidByAddress(address: String): String? {
+        return unifiedChatDao.getByNormalizedAddress(address)?.sourceId
+    }
+
+    /**
+     * Update draft text for a chat by its GUID.
+     * Looks up the unified chat ID and updates the textFieldText.
+     */
+    suspend fun updateDraftText(chatGuid: String, text: String?): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateTextFieldText(unifiedId, text)
+        }
+    }
+
+    /**
+     * Get draft text for a chat by its GUID.
+     * Looks up the unified chat and returns the textFieldText.
+     */
+    suspend fun getDraftText(chatGuid: String): String? {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        return chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.getById(unifiedId)?.textFieldText
+        }
+    }
+
+    /**
+     * Update preferred send mode for a chat by its GUID.
+     * Looks up the unified chat ID and updates the send mode preference.
+     */
+    suspend fun updatePreferredSendMode(chatGuid: String, mode: String?, manuallySet: Boolean): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updatePreferredSendMode(unifiedId, mode, manuallySet)
+        }
+    }
+
+    /**
+     * Get send mode preference for a chat by its GUID.
+     * Returns a pair of (preferredSendMode, sendModeManuallySet) or null if not found.
+     */
+    suspend fun getSendModePreference(chatGuid: String): Pair<String?, Boolean>? {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        return chat?.unifiedChatId?.let { unifiedId ->
+            val unifiedChat = unifiedChatDao.getById(unifiedId)
+            unifiedChat?.let { it.preferredSendMode to it.sendModeManuallySet }
+        }
+    }
+
+    /**
+     * Observe archived chat count from unified chats.
+     */
+    fun observeArchivedChatCount(): Flow<Int> =
+        unifiedChatDao.observeArchivedCount()
+
+    /**
+     * Observe unread chat count from unified chats.
+     */
+    fun observeUnreadChatCount(): Flow<Int> =
+        unifiedChatDao.observeTotalUnreadCount()
+
+    /**
+     * Mark all unified chats as read.
+     */
+    suspend fun markAllChatsAsRead(): Result<Unit> = runCatching {
+        unifiedChatDao.markAllAsRead()
+    }
+
+    /**
+     * Set notifications enabled/disabled for a chat by its GUID.
+     * Looks up the unified chat ID and updates the notifications enabled flag.
+     */
+    suspend fun setNotificationsEnabled(chatGuid: String, enabled: Boolean): Result<Unit> = runCatching {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateNotificationsEnabled(unifiedId, enabled)
+        }
+    }
+
+    /**
+     * Get notifications enabled status for a chat by its GUID.
+     */
+    suspend fun getNotificationsEnabled(chatGuid: String): Boolean {
+        val chat = chatDao.getChatByGuid(chatGuid)
+        return chat?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.getById(unifiedId)?.notificationsEnabled
+        } ?: true
+    }
+
     // ===== Data Cleanup =====
 
     /**

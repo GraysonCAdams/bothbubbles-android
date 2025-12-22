@@ -9,7 +9,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.core.model.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -57,6 +57,7 @@ class SmsRepository @Inject constructor(
     private val messageOperations = SmsMessageOperations(
         context = context,
         chatDao = chatDao,
+        unifiedChatDao = unifiedChatDao,
         messageDao = messageDao,
         tombstoneDao = tombstoneDao,
         smsContentProvider = smsContentProvider
@@ -448,8 +449,7 @@ class SmsRepository @Inject constructor(
                 chatIdentifier = if (isGroup) null else address,
                 displayName = null,
                 isGroup = isGroup,
-                lastMessageDate = System.currentTimeMillis(),
-                unreadCount = 0
+                latestMessageDate = System.currentTimeMillis()
             )
             chatDao.insertChat(chat)
 

@@ -52,6 +52,12 @@ class UnifiedChatRepository @Inject constructor(
     fun observeById(id: String): Flow<UnifiedChatEntity?> =
         unifiedChatDao.observeById(id)
 
+    /**
+     * Alias for observeById for API consistency.
+     */
+    fun observeChat(id: String): Flow<UnifiedChatEntity?> =
+        observeById(id)
+
     // ==================== Count Queries ====================
 
     /**

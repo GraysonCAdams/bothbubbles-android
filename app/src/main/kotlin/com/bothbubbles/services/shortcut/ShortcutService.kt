@@ -82,8 +82,8 @@ class ShortcutService @Inject constructor(
         observationJob = applicationScope.launch(ioDispatcher) {
             // Combine unified chats (1:1 chats) and group chats into a single stream
             combine(
-                unifiedChatDao.observeActive(),
-                chatDao.observeActiveGroupChats()
+                unifiedChatDao.observeActiveChats(),
+                chatDao.observeGroupChats()
             ) { unifiedChats, groupChats ->
                 Pair(unifiedChats, groupChats)
             }
@@ -187,12 +187,11 @@ class ShortcutService @Inject constructor(
         // Add unified chats (1:1 chats)
         for (chat in unifiedChats) {
             val displayName = chat.displayName
-                ?: chat.cachedContactName
                 ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
-            // Use cached avatar path from unified chat, or look up from handle
+            // Use effective avatar path from unified chat, or look up from handle
             val handle = handleDao.getHandleByAddressAny(chat.normalizedAddress)
-            val avatarPath = chat.cachedAvatarPath ?: handle?.cachedAvatarPath
+            val avatarPath = chat.effectiveAvatarPath ?: handle?.cachedAvatarPath
 
             Timber.tag(TAG).d(
                 "Unified chat: identifier=${chat.normalizedAddress}, " +
@@ -223,6 +222,14 @@ class ShortcutService @Inject constructor(
         }
         Timber.tag(TAG).d("Fetched participants for ${allParticipants.size} group chats")
 
+        // Batch fetch unified chats for group avatar lookup
+        val unifiedChatIds = groupChats.mapNotNull { it.unifiedChatId }
+        val unifiedChatsMap = if (unifiedChatIds.isNotEmpty()) {
+            unifiedChatDao.getByIds(unifiedChatIds).associateBy { it.id }
+        } else {
+            emptyMap()
+        }
+
         for (chat in groupChats) {
             val displayName = chat.displayName
                 ?: chat.chatIdentifier
@@ -232,6 +239,10 @@ class ShortcutService @Inject constructor(
             val participants = allParticipants[chat.guid] ?: emptyList()
             val participantNames = participants.map { it.handle.displayName }
             val participantAvatarPaths = participants.map { it.handle.cachedAvatarPath }
+
+            // Get avatar from unified chat
+            val unifiedChat = chat.unifiedChatId?.let { unifiedChatsMap[it] }
+            val avatarPath = unifiedChat?.effectiveAvatarPath
 
             Timber.tag(TAG).d(
                 "Group chat: guid=${chat.guid.take(20)}, " +
@@ -245,8 +256,8 @@ class ShortcutService @Inject constructor(
                     chatGuid = chat.guid,
                     displayName = displayName,
                     isGroup = true,
-                    latestMessageDate = chat.lastMessageDate ?: 0L,
-                    avatarPath = chat.effectiveGroupPhotoPath,
+                    latestMessageDate = chat.latestMessageDate ?: 0L,
+                    avatarPath = avatarPath,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths
                 )

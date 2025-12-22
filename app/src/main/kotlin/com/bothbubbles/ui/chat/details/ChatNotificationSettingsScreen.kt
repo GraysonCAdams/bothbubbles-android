@@ -80,7 +80,7 @@ fun ChatNotificationSettingsScreen(
                         subtitle = if (uiState.notificationsEnabled) "Notifications enabled" else "Notifications muted",
                         isGroup = uiState.chat?.isGroup == true,
                         participantNames = uiState.participants.map { it.displayName },
-                        avatarPath = uiState.chat?.effectiveGroupPhotoPath
+                        avatarPath = uiState.participants.firstOrNull()?.cachedAvatarPath
                     )
                 }
 

@@ -13,6 +13,7 @@ import com.bothbubbles.core.model.entity.MessageSource
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.EntryPoint
@@ -48,6 +49,7 @@ class HeadlessSmsSendService : Service() {
         fun chatDao(): ChatDao
         fun handleDao(): HandleDao
         fun messageDao(): MessageDao
+        fun unifiedChatDao(): UnifiedChatDao
         fun androidContactsService(): AndroidContactsService
     }
 
@@ -55,6 +57,7 @@ class HeadlessSmsSendService : Service() {
     private lateinit var chatDao: ChatDao
     private lateinit var handleDao: HandleDao
     private lateinit var messageDao: MessageDao
+    private lateinit var unifiedChatDao: UnifiedChatDao
     private lateinit var androidContactsService: AndroidContactsService
 
     override fun onCreate() {
@@ -66,6 +69,7 @@ class HeadlessSmsSendService : Service() {
         chatDao = entryPoint.chatDao()
         handleDao = entryPoint.handleDao()
         messageDao = entryPoint.messageDao()
+        unifiedChatDao = entryPoint.unifiedChatDao()
         androidContactsService = entryPoint.androidContactsService()
     }
 
@@ -155,10 +159,15 @@ class HeadlessSmsSendService : Service() {
                     )
                 }
 
+                // Get unifiedChatId for the message
+                val chat = chatDao.getChatByGuid(chatGuid)
+                val unifiedChatId = chat?.unifiedChatId
+
                 // Create message entity for the sent message (after successful send)
                 val messageEntity = MessageEntity(
                     guid = messageGuid,
                     chatGuid = chatGuid,
+                    unifiedChatId = unifiedChatId,
                     handleId = handleId,
                     text = message,
                     isFromMe = true,
@@ -170,8 +179,21 @@ class HeadlessSmsSendService : Service() {
                 // Insert message into database
                 messageDao.insertMessage(messageEntity)
 
-                // Update chat's last message
-                chatDao.updateLastMessage(chatGuid, now, message)
+                // Update unified chat's latest message
+                unifiedChatId?.let { unifiedId ->
+                    unifiedChatDao.updateLatestMessageIfNewer(
+                        id = unifiedId,
+                        date = now,
+                        text = message,
+                        guid = messageGuid,
+                        isFromMe = true,
+                        hasAttachments = false,
+                        source = MessageSource.LOCAL_SMS.name,
+                        dateDelivered = now,
+                        dateRead = null,
+                        error = 0
+                    )
+                }
 
                 Timber.d("Quick-reply SMS sent and logged successfully")
             } catch (e: Exception) {
@@ -195,9 +217,7 @@ class HeadlessSmsSendService : Service() {
                 chatIdentifier = address,
                 displayName = null,
                 isGroup = false,
-                lastMessageDate = date,
-                lastMessageText = lastMessage,
-                unreadCount = 0
+                latestMessageDate = date
             )
             chatDao.insertChat(chat)
         }

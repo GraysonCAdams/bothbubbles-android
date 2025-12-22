@@ -11,11 +11,12 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
@@ -47,6 +48,7 @@ import java.util.concurrent.ConcurrentHashMap
 class ConversationListContent(
     private val carContext: CarContext,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
@@ -62,7 +64,7 @@ class ConversationListContent(
 
     // Cache for conversations
     @Volatile
-    private var cachedConversations: List<ChatEntity> = emptyList()
+    private var cachedConversations: List<UnifiedChatEntity> = emptyList()
 
     @Volatile
     private var cachedMessages: Map<String, MessageEntity?> = emptyMap()
@@ -110,13 +112,13 @@ class ConversationListContent(
 
         contentScope.launch {
             try {
-                val chats = chatDao.getActiveChats().first()
+                val chats = unifiedChatDao.observeActiveChats().first()
 
                 val sortedChats = chats.sortedWith(
-                    compareByDescending<ChatEntity> { it.hasUnreadMessage && it.isPinned }
+                    compareByDescending<UnifiedChatEntity> { it.hasUnreadMessage && it.isPinned }
                         .thenByDescending { it.hasUnreadMessage }
                         .thenByDescending { it.isPinned }
-                        .thenByDescending { it.lastMessageDate ?: 0L }
+                        .thenByDescending { it.latestMessageDate ?: 0L }
                 )
 
                 val displayCount = minOf((currentPage + 1) * PAGE_SIZE, sortedChats.size)
@@ -125,8 +127,8 @@ class ConversationListContent(
 
                 cachedConversations = chatsToDisplay
 
-                // Pre-fetch latest messages
-                val chatGuids = chatsToDisplay.map { it.guid }
+                // Pre-fetch latest messages using sourceId (the primary chat GUID)
+                val chatGuids = chatsToDisplay.map { it.sourceId }
                 val latestMessages = messageDao.getLatestMessagesForChats(chatGuids)
                 cachedMessages = latestMessages.associateBy { it.chatGuid }
 
@@ -147,9 +149,9 @@ class ConversationListContent(
                 val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
                     .groupBy({ it.chatGuid }, { it.handle })
                 for (chat in chatsToDisplay) {
-                    val participants = participantsByChat[chat.guid] ?: emptyList()
+                    val participants = participantsByChat[chat.sourceId] ?: emptyList()
                     val participantNames = when {
-                        participants.isEmpty() -> chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: ""
+                        participants.isEmpty() -> PhoneNumberFormatter.format(chat.normalizedAddress)
                         participants.size == 1 -> {
                             participants.first().cachedDisplayName
                                 ?: participants.first().formattedAddress
@@ -163,7 +165,7 @@ class ConversationListContent(
                             }
                         }
                     }
-                    participantNameCache[chat.guid] = participantNames
+                    participantNameCache[chat.id] = participantNames
                 }
 
                 isLoading = false
@@ -183,7 +185,7 @@ class ConversationListContent(
      * Loads contact photos in background, then invalidates to update UI.
      */
     private fun loadAvatarsAsync(
-        chats: List<ChatEntity>,
+        chats: List<UnifiedChatEntity>,
         participantsByChat: Map<String, List<com.bothbubbles.data.local.db.entity.HandleEntity>>
     ) {
         if (avatarsLoading) return
@@ -193,13 +195,14 @@ class ConversationListContent(
             var anyLoaded = false
 
             for (chat in chats) {
-                if (avatarCache.containsKey(chat.guid)) continue
+                if (avatarCache.containsKey(chat.id)) continue
 
-                val participants = participantsByChat[chat.guid] ?: emptyList()
+                val participants = participantsByChat[chat.sourceId] ?: emptyList()
                 val primaryParticipant = participants.firstOrNull()
 
-                // Try to load avatar from cached avatar path
-                val avatarBitmap = primaryParticipant?.cachedAvatarPath?.let { path ->
+                // Try to load avatar from unified chat's effective avatar path first, then participant
+                val avatarPath = chat.effectiveAvatarPath ?: primaryParticipant?.cachedAvatarPath
+                val avatarBitmap = avatarPath?.let { path ->
                     try {
                         val file = java.io.File(path)
                         if (file.exists()) {
@@ -209,12 +212,12 @@ class ConversationListContent(
                             }
                         } else null
                     } catch (e: Exception) {
-                        Timber.d(e, "Failed to load avatar for ${chat.guid}")
+                        Timber.d(e, "Failed to load avatar for ${chat.id}")
                         null
                     }
                 }
 
-                avatarCache[chat.guid] = avatarBitmap
+                avatarCache[chat.id] = avatarBitmap
                 if (avatarBitmap != null) anyLoaded = true
             }
 
@@ -290,9 +293,9 @@ class ConversationListContent(
      *
      * Unread state shown via title prefix (● indicator).
      */
-    private fun buildConversationRow(chat: ChatEntity): Row? {
-        val latestMessage = cachedMessages[chat.guid]
-        val displayTitle = chat.displayName ?: participantNameCache[chat.guid] ?: ""
+    private fun buildConversationRow(chat: UnifiedChatEntity): Row? {
+        val latestMessage = cachedMessages[chat.sourceId]
+        val displayTitle = chat.displayName ?: participantNameCache[chat.id] ?: ""
         val messagePreview = buildMessagePreview(latestMessage, chat)
 
         // Build title with unread indicator
@@ -303,7 +306,7 @@ class ConversationListContent(
         }
 
         // Use cached avatar bitmap or fall back to placeholder
-        val icon = avatarCache[chat.guid]?.let { bitmap ->
+        val icon = avatarCache[chat.id]?.let { bitmap ->
             CarIcon.Builder(IconCompat.createWithBitmap(bitmap)).build()
         } ?: CarIcon.Builder(
             IconCompat.createWithResource(carContext, R.mipmap.ic_launcher)
@@ -318,9 +321,10 @@ class ConversationListContent(
                     screenManager.push(
                         ConversationDetailScreen(
                             carContext = carContext,
-                            chat = chat,
+                            unifiedChat = chat,
                             messageDao = messageDao,
                             handleDao = handleDao,
+                            unifiedChatDao = unifiedChatDao,
                             chatRepository = chatRepository,
                             syncService = syncService,
                             featurePreferences = featurePreferences,
@@ -332,12 +336,12 @@ class ConversationListContent(
                 }
                 .build()
         } catch (e: Exception) {
-            Timber.e(e, "Failed to build Row for ${chat.guid}")
+            Timber.e(e, "Failed to build Row for ${chat.id}")
             null
         }
     }
 
-    private fun buildMessagePreview(message: MessageEntity?, chat: ChatEntity): String {
+    private fun buildMessagePreview(message: MessageEntity?, chat: UnifiedChatEntity): String {
         if (message == null) return "No messages"
 
         // Privacy mode: show generic message instead of content
@@ -350,7 +354,7 @@ class ConversationListContent(
         val text = AutoUtils.parseReactionText(rawText)
         val hasAttachment = message.hasAttachments
 
-        val isGroupChat = chat.displayName != null
+        val isGroupChat = chat.isGroup
         val senderPrefix = when {
             message.isFromMe -> "You: "
             isGroupChat -> {

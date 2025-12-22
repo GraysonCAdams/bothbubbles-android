@@ -2,6 +2,7 @@ package com.bothbubbles.data.repository
 
 import android.content.Context
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.util.NetworkConfig
 import com.bothbubbles.util.retryWithBackoff
@@ -25,7 +26,7 @@ import javax.inject.Singleton
  * these via the groupPhotoGuid field on chat objects. This manager:
  * - Downloads group photos when they are new or changed
  * - Stores them locally in the app's files directory
- * - Updates the chat entity with the local path
+ * - Updates the unified chat entity with the local path
  *
  * This is separate from customAvatarPath which is set by the user on the Android device.
  * Priority for avatar display: customAvatarPath > serverGroupPhotoPath > participant collage
@@ -34,6 +35,7 @@ import javax.inject.Singleton
 class GroupPhotoSyncManager @Inject constructor(
     @ApplicationContext private val context: Context,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val settingsDataStore: SettingsDataStore,
     private val okHttpClient: OkHttpClient
 ) {
@@ -49,6 +51,9 @@ class GroupPhotoSyncManager @Inject constructor(
     /**
      * Sync a group photo for a chat if the server provides one.
      *
+     * For group chats: Stores photo path on ChatEntity (since groups don't use unified chats)
+     * For 1:1 chats: Stores photo path on UnifiedChatEntity
+     *
      * @param chatGuid The chat's GUID
      * @param serverGroupPhotoGuid The attachment GUID from the server (e.g., "at_0_xxx")
      * @return true if a photo was downloaded/updated, false if already up-to-date or no photo
@@ -57,34 +62,92 @@ class GroupPhotoSyncManager @Inject constructor(
         chatGuid: String,
         serverGroupPhotoGuid: String?
     ): Boolean = withContext(Dispatchers.IO) {
+        val chat = chatDao.getChatByGuid(chatGuid) ?: return@withContext false
+
+        // Handle group chats vs 1:1 chats differently
+        if (chat.isGroup) {
+            syncGroupChatPhoto(chat.guid, chat.serverGroupPhotoPath, chat.serverGroupPhotoGuid, serverGroupPhotoGuid)
+        } else {
+            // 1:1 chats use unified chat for photo storage
+            val unifiedChatId = chat.unifiedChatId ?: return@withContext false
+            val unifiedChat = unifiedChatDao.getById(unifiedChatId) ?: return@withContext false
+            syncUnifiedChatPhoto(unifiedChatId, chat.guid, unifiedChat.serverGroupPhotoPath, unifiedChat.serverGroupPhotoGuid, serverGroupPhotoGuid)
+        }
+    }
+
+    /**
+     * Sync photo for a group chat (stores on ChatEntity).
+     */
+    private suspend fun syncGroupChatPhoto(
+        chatGuid: String,
+        currentPhotoPath: String?,
+        currentPhotoGuid: String?,
+        serverGroupPhotoGuid: String?
+    ): Boolean {
         // No group photo on server
         if (serverGroupPhotoGuid == null) {
-            // Check if we had one before and should clear it
-            val chat = chatDao.getChatByGuid(chatGuid)
-            if (chat?.serverGroupPhotoGuid != null) {
+            if (currentPhotoGuid != null) {
                 Timber.tag(TAG).d("Group photo removed for chat $chatGuid, clearing local copy")
-                clearGroupPhoto(chatGuid)
+                clearGroupChatPhoto(chatGuid, currentPhotoPath)
             }
-            return@withContext false
+            return false
         }
 
         // Check if we already have this photo
-        val chat = chatDao.getChatByGuid(chatGuid)
-        if (chat?.serverGroupPhotoGuid == serverGroupPhotoGuid && chat.serverGroupPhotoPath != null) {
-            // Verify the file still exists
-            val existingFile = File(chat.serverGroupPhotoPath)
+        if (currentPhotoGuid == serverGroupPhotoGuid && currentPhotoPath != null) {
+            val existingFile = File(currentPhotoPath)
             if (existingFile.exists()) {
                 Timber.tag(TAG).d("Group photo for chat $chatGuid already downloaded, skipping")
-                return@withContext false
+                return false
             }
-            // File was deleted, need to re-download
             Timber.tag(TAG).d("Group photo file missing for chat $chatGuid, re-downloading")
         }
 
         // Download the new photo
-        try {
+        return try {
             val localPath = downloadGroupPhoto(chatGuid, serverGroupPhotoGuid)
-            chatDao.updateServerGroupPhoto(chatGuid, serverGroupPhotoGuid, localPath)
+            chatDao.updateServerGroupPhoto(chatGuid, localPath, serverGroupPhotoGuid)
+            Timber.tag(TAG).i("Downloaded group photo for chat $chatGuid")
+            true
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to download group photo for chat $chatGuid")
+            false
+        }
+    }
+
+    /**
+     * Sync photo for a 1:1 chat (stores on UnifiedChatEntity).
+     */
+    private suspend fun syncUnifiedChatPhoto(
+        unifiedChatId: String,
+        chatGuid: String,
+        currentPhotoPath: String?,
+        currentPhotoGuid: String?,
+        serverGroupPhotoGuid: String?
+    ): Boolean {
+        // No group photo on server
+        if (serverGroupPhotoGuid == null) {
+            if (currentPhotoGuid != null) {
+                Timber.tag(TAG).d("Group photo removed for chat $chatGuid, clearing local copy")
+                clearUnifiedChatPhoto(unifiedChatId, currentPhotoPath)
+            }
+            return false
+        }
+
+        // Check if we already have this photo
+        if (currentPhotoGuid == serverGroupPhotoGuid && currentPhotoPath != null) {
+            val existingFile = File(currentPhotoPath)
+            if (existingFile.exists()) {
+                Timber.tag(TAG).d("Group photo for chat $chatGuid already downloaded, skipping")
+                return false
+            }
+            Timber.tag(TAG).d("Group photo file missing for chat $chatGuid, re-downloading")
+        }
+
+        // Download the new photo
+        return try {
+            val localPath = downloadGroupPhoto(chatGuid, serverGroupPhotoGuid)
+            unifiedChatDao.updateServerGroupPhoto(unifiedChatId, localPath, serverGroupPhotoGuid)
             Timber.tag(TAG).i("Downloaded group photo for chat $chatGuid")
             true
         } catch (e: Exception) {
@@ -143,13 +206,11 @@ class GroupPhotoSyncManager @Inject constructor(
     }
 
     /**
-     * Clear the group photo for a chat (e.g., when the server no longer provides one).
+     * Clear the group photo for a group chat (stores on ChatEntity).
      */
-    private suspend fun clearGroupPhoto(chatGuid: String) {
-        val chat = chatDao.getChatByGuid(chatGuid) ?: return
-
+    private suspend fun clearGroupChatPhoto(chatGuid: String, photoPath: String?) {
         // Delete the local file if it exists
-        chat.serverGroupPhotoPath?.let { path ->
+        photoPath?.let { path ->
             try {
                 File(path).delete()
             } catch (e: Exception) {
@@ -159,6 +220,23 @@ class GroupPhotoSyncManager @Inject constructor(
 
         // Clear the database fields
         chatDao.updateServerGroupPhoto(chatGuid, null, null)
+    }
+
+    /**
+     * Clear the group photo for a unified chat (e.g., when the server no longer provides one).
+     */
+    private suspend fun clearUnifiedChatPhoto(unifiedChatId: String, photoPath: String?) {
+        // Delete the local file if it exists
+        photoPath?.let { path ->
+            try {
+                File(path).delete()
+            } catch (e: Exception) {
+                Timber.tag(TAG).w(e, "Failed to delete group photo file: $path")
+            }
+        }
+
+        // Clear the database fields
+        unifiedChatDao.updateServerGroupPhoto(unifiedChatId, null, null)
     }
 
     /**

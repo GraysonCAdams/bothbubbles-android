@@ -1,10 +1,12 @@
 package com.bothbubbles.services.spam
 
 import timber.log.Timber
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -21,17 +23,25 @@ import javax.inject.Singleton
 class SpamRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val spamDetector: SpamDetector
 ) {
     /**
      * Get all spam conversations as a Flow.
+     * Returns unified chats marked as spam.
      */
-    fun getSpamChats(): Flow<List<ChatEntity>> = chatDao.getSpamChats()
+    fun getSpamChats(): Flow<List<UnifiedChatEntity>> =
+        unifiedChatDao.observeAllChats().map { chats ->
+            chats.filter { it.isSpam }
+        }
 
     /**
      * Get count of spam conversations as a Flow.
      */
-    fun getSpamChatCount(): Flow<Int> = chatDao.getSpamChatCount()
+    fun getSpamChatCount(): Flow<Int> =
+        unifiedChatDao.observeAllChats().map { chats ->
+            chats.count { it.isSpam }
+        }
 
     /**
      * Evaluate a new message for spam and update the chat status if needed.
@@ -45,7 +55,10 @@ class SpamRepository @Inject constructor(
         val result = spamDetector.evaluate(senderAddress, messageText, chatGuid)
 
         if (result.isSpam) {
-            chatDao.updateSpamStatus(chatGuid, true, result.score)
+            // Update unified chat spam status
+            chatDao.getChatByGuid(chatGuid)?.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateSpamStatus(unifiedId, true, result.score)
+            }
             Timber.i("Marked chat $chatGuid as spam (score: ${result.score})")
         }
 
@@ -60,8 +73,10 @@ class SpamRepository @Inject constructor(
     suspend fun reportAsSpam(chatGuid: String) {
         val chat = chatDao.getChatByGuid(chatGuid) ?: return
 
-        // Mark chat as spam with max score
-        chatDao.updateSpamStatus(chatGuid, true, 100)
+        // Mark unified chat as spam with max score
+        chat.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateSpamStatus(unifiedId, true, 100)
+        }
 
         // Increment spam report count for all participants
         val participants = chatDao.getParticipantsForChat(chatGuid)
@@ -82,8 +97,10 @@ class SpamRepository @Inject constructor(
      * - Whitelists the sender so future messages aren't auto-flagged
      */
     suspend fun markAsSafe(chatGuid: String) {
-        // Clear spam status
-        chatDao.clearSpamStatus(chatGuid)
+        // Clear spam status on unified chat
+        chatDao.getChatByGuid(chatGuid)?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateSpamStatus(unifiedId, false, 0)
+        }
 
         // Whitelist all participants
         val participants = chatDao.getParticipantsForChat(chatGuid)
@@ -98,15 +115,19 @@ class SpamRepository @Inject constructor(
      * Mark that spam was reported to carrier (7726).
      */
     suspend fun markReportedToCarrier(chatGuid: String) {
-        chatDao.markAsReportedToCarrier(chatGuid)
-        Timber.i("Marked chat $chatGuid as reported to carrier")
+        chatDao.getChatByGuid(chatGuid)?.unifiedChatId?.let { unifiedId ->
+            unifiedChatDao.updateSpamReportedToCarrier(unifiedId, true)
+            Timber.i("Marked chat $chatGuid (unified: $unifiedId) as reported to carrier")
+        }
     }
 
     /**
      * Check if a chat is marked as spam.
      */
     suspend fun isSpam(chatGuid: String): Boolean {
-        return chatDao.getChatByGuid(chatGuid)?.isSpam == true
+        val chat = chatDao.getChatByGuid(chatGuid) ?: return false
+        val unifiedChat = chat.unifiedChatId?.let { unifiedChatDao.getById(it) }
+        return unifiedChat?.isSpam == true
     }
 
     /**

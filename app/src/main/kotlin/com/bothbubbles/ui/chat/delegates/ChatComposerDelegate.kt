@@ -243,14 +243,12 @@ class ChatComposerDelegate @AssistedInject constructor(
     }
 
     /**
-     * Load draft text from the chat entity (runs once at initialization).
+     * Load draft text from the unified chat entity (runs once at initialization).
      */
     private fun loadDraftFromChat() {
         scope.launch {
-            val chat = chatRepository.observeChat(chatGuid)
-                .filterNotNull()
-                .first()
-            restoreDraftText(chat.textFieldText)
+            val draftText = chatRepository.getDraftText(chatGuid)
+            restoreDraftText(draftText)
         }
     }
 

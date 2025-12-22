@@ -54,6 +54,7 @@ fun ConversationDetailsScreen(
     var showVideoCallDialog by remember { mutableStateOf(false) }
     var showDiscordSetupDialog by remember { mutableStateOf(false) }
     var showDiscordHelpOverlay by remember { mutableStateOf(false) }
+    var showCalendarPickerDialog by remember { mutableStateOf(false) }
     var showLife360ActionsSheet by remember { mutableStateOf(false) }
     var selectedParticipant by remember { mutableStateOf<HandleEntity?>(null) }
 
@@ -101,7 +102,7 @@ fun ConversationDetailsScreen(
                         modifier = Modifier.alpha(headerScrollProgress)
                     ) {
                         val avatarPath = if (uiState.chat?.isGroup == true) {
-                            uiState.chat?.effectiveGroupPhotoPath
+                            uiState.unifiedChat?.effectiveAvatarPath
                         } else {
                             uiState.participants.firstOrNull()?.cachedAvatarPath
                         }
@@ -168,7 +169,7 @@ fun ConversationDetailsScreen(
                 // Large centered header (fades out as it scrolls, app bar title fades in)
                 item {
                     val headerAvatarPath = if (uiState.chat?.isGroup == true) {
-                        uiState.chat?.effectiveGroupPhotoPath
+                        uiState.unifiedChat?.effectiveAvatarPath
                     } else {
                         uiState.participants.firstOrNull()?.cachedAvatarPath
                     }
@@ -283,14 +284,17 @@ fun ConversationDetailsScreen(
                     )
                 }
 
-                // Profile fields section (Discord channel for 1:1 chats)
+                // Profile fields section (Discord channel + Calendar for 1:1 chats)
                 if (uiState.chat?.isGroup != true) {
                     item {
                         ProfileFieldsSection(
                             discordChannelId = uiState.discordChannelId,
                             isDiscordInstalled = viewModel.isDiscordInstalled(),
+                            calendarAssociation = uiState.calendarAssociation,
                             onDiscordEditClick = { showDiscordSetupDialog = true },
-                            onDiscordClearClick = { viewModel.clearDiscordChannelId() }
+                            onDiscordClearClick = { viewModel.clearDiscordChannelId() },
+                            onCalendarEditClick = { showCalendarPickerDialog = true },
+                            onCalendarClearClick = { viewModel.clearCalendarAssociation() }
                         )
                     }
                 }
@@ -489,6 +493,20 @@ fun ConversationDetailsScreen(
         Life360LocationActionsSheet(
             life360Member = life360MemberForSheet,
             onDismiss = { showLife360ActionsSheet = false }
+        )
+    }
+
+    // Calendar picker dialog
+    if (showCalendarPickerDialog) {
+        CalendarPickerDialog(
+            currentCalendarId = uiState.calendarAssociation?.calendarId,
+            contactName = uiState.displayName,
+            onCalendarSelected = { calendar ->
+                viewModel.setCalendarAssociation(calendar)
+                showCalendarPickerDialog = false
+            },
+            onDismiss = { showCalendarPickerDialog = false },
+            getCalendars = viewModel::getAvailableCalendars
         )
     }
 }

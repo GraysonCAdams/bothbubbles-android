@@ -103,16 +103,15 @@ class GroupSetupViewModel @Inject constructor(
                                 guid = chatGuid,
                                 chatIdentifier = addresses.joinToString(", "),
                                 displayName = groupName,
-                                isArchived = false,
-                                isPinned = false,
                                 isGroup = true,
-                                hasUnreadMessage = false,
-                                unreadCount = 0,
-                                lastMessageDate = System.currentTimeMillis(),
-                                lastMessageText = null,
-                                customAvatarPath = customAvatarPath
+                                latestMessageDate = System.currentTimeMillis()
                             )
                             chatRepository.insertChat(newChat)
+
+                            // Update unified chat with custom avatar if provided
+                            customAvatarPath?.let { path ->
+                                chatRepository.updateCustomAvatarPath(chatGuid, path)
+                            }
                         } else if (groupName != null || groupPhotoUri != null) {
                             // Update existing chat with name/photo
                             val customAvatarPath = groupPhotoUri?.let { uri ->

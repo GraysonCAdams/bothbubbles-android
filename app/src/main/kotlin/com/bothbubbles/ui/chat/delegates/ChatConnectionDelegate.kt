@@ -174,14 +174,15 @@ class ChatConnectionDelegate @AssistedInject constructor(
 
         scope.launch(Dispatchers.IO) {
             try {
-                // Find unified group for this chat
-                val unifiedGroup = chatRepository.getUnifiedGroupForChat(chatGuid)
-                if (unifiedGroup == null) {
-                    Timber.d("No unified group for $chatGuid - skipping counterpart check")
+                // Find unified chat ID for this chat
+                val chat = chatRepository.getChat(chatGuid)
+                val unifiedChatId = chat?.unifiedChatId
+                if (unifiedChatId == null) {
+                    Timber.d("No unified chat ID for $chatGuid - skipping counterpart check")
                     return@launch
                 }
 
-                val result = counterpartSyncService.checkAndRepairCounterpart(unifiedGroup.id)
+                val result = counterpartSyncService.checkAndRepairCounterpart(unifiedChatId)
                 when (result) {
                     is CounterpartSyncService.CheckResult.Found -> {
                         Timber.i("Found and synced counterpart: ${result.chatGuid}")

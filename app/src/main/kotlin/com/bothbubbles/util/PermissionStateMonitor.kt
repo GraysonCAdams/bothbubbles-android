@@ -72,6 +72,14 @@ class PermissionStateMonitor @Inject constructor(
     }
 
     /**
+     * Check if READ_CALENDAR permission is granted.
+     * Required for: CalendarContentProvider, contact calendar associations
+     */
+    fun hasCalendarPermission(): Boolean {
+        return checkPermission(Manifest.permission.READ_CALENDAR)
+    }
+
+    /**
      * Check if POST_NOTIFICATIONS permission is granted (Android 13+).
      * Always returns true for Android 12 and below.
      */
@@ -123,6 +131,7 @@ class PermissionStateMonitor @Inject constructor(
         Timber.d("  - Coarse Location: ${hasCoarseLocationPermission()}")
         Timber.d("  - SMS Read: ${hasSmsReadPermission()}")
         Timber.d("  - SMS Send: ${hasSmsSendPermission()}")
+        Timber.d("  - Calendar: ${hasCalendarPermission()}")
         Timber.d("  - Notifications: ${hasNotificationPermission()}")
         Timber.d("  - Accessibility Service: ${hasAccessibilityServiceEnabled()}")
     }

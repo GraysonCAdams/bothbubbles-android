@@ -18,6 +18,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.components.CyclingSubtextDisplay
+import com.bothbubbles.ui.chat.delegates.ChatHeaderIntegrationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatSendModeManager
@@ -34,6 +36,7 @@ import com.bothbubbles.util.PhoneNumberFormatter
  *
  * @param operationsDelegate Delegate for operations state (internal collection)
  * @param chatInfoDelegate Delegate for chat info state (internal collection)
+ * @param headerIntegrationsDelegate Delegate for cycling header content (Life360, Calendar, etc.)
  * @param sendModeManager Manager for send mode state (for menu visibility)
  * @param reelsFeedEnabled Whether the Reels feed feature is enabled
  * @param hasReelVideos Whether there are cached reel videos for this chat
@@ -45,6 +48,7 @@ fun ChatTopBar(
     // NEW: Delegates for internal collection
     operationsDelegate: ChatOperationsDelegate,
     chatInfoDelegate: ChatInfoDelegate,
+    headerIntegrationsDelegate: ChatHeaderIntegrationsDelegate?,
     sendModeManager: ChatSendModeManager?,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
@@ -81,17 +85,14 @@ fun ChatTopBar(
         isLocalSmsChat = infoState.isLocalSmsChat,
         showSendModeSwitch = showSendModeSwitch,
         currentSendMode = currentSendMode,
-        locationSubtext = infoState.locationSubtext,
+        headerIntegrationsDelegate = headerIntegrationsDelegate,
+        onLife360Click = { onLife360MapClick(firstParticipantAddress) },
         reelsFeedEnabled = reelsFeedEnabled,
         hasReelVideos = hasReelVideos,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
         onReelsClick = onReelsClick,
-        onLocationClick = {
-            // Navigate to contact details page
-            onDetailsClick()
-        },
         onMenuAction = onMenuAction,
         modifier = modifier,
         isBubbleMode = isBubbleMode
@@ -117,14 +118,14 @@ private fun ChatTopBarContent(
     isLocalSmsChat: Boolean,
     showSendModeSwitch: Boolean,
     currentSendMode: ChatSendMode,
-    locationSubtext: String?,
+    headerIntegrationsDelegate: ChatHeaderIntegrationsDelegate?,
+    onLife360Click: () -> Unit,
     reelsFeedEnabled: Boolean,
     hasReelVideos: Boolean,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
     onReelsClick: () -> Unit,
-    onLocationClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
     isBubbleMode: Boolean = false
@@ -195,15 +196,12 @@ private fun ChatTopBarContent(
                             )
                         }
                     }
-                    // Location subtext (only for 1:1 chats with Life360 linked)
-                    if (locationSubtext != null && !isGroup) {
-                        Text(
-                            text = locationSubtext,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.clickable(onClick = onLocationClick)
+                    // Cycling subtext (Life360 location, Calendar events, etc.)
+                    // Only shown for 1:1 chats
+                    if (!isGroup && headerIntegrationsDelegate != null) {
+                        CyclingSubtextDisplay(
+                            delegate = headerIntegrationsDelegate,
+                            onLife360Click = onLife360Click
                         )
                     }
                 }

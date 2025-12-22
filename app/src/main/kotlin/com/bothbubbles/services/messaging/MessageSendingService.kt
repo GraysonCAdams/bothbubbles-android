@@ -111,7 +111,7 @@ class MessageSendingService @Inject constructor(
         // TEMPORARY BLOCK: Set to false to re-enable sending
         // REMOVE THIS BEFORE RELEASE
         // !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-        private const val BLOCK_ALL_SENDS = false
+        private const val BLOCK_ALL_SENDS = true
     }
 
     private fun blockIfEnabled(): Result<Nothing>? {

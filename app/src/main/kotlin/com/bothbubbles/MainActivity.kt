@@ -54,6 +54,9 @@ class MainActivity : ComponentActivity() {
     @Inject
     lateinit var connectionModeManager: ConnectionModeManager
 
+    @Inject
+    lateinit var unifiedChatDao: com.bothbubbles.data.local.db.dao.UnifiedChatDao
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // Must be before super.onCreate()
         installSplashScreen()
@@ -177,24 +180,30 @@ class MainActivity : ComponentActivity() {
                 val data = intent.data ?: return null
 
                 // Handle imto scheme for group chat IM contacts
-                // Format: imto://BothBubbles/{chatGuid} or imto:BothBubbles:{chatGuid}
+                // Format: imto://BothBubbles/{unifiedChatId} or imto:BothBubbles:{unifiedChatId}
                 if (data.scheme == "imto") {
                     val host = data.host ?: data.schemeSpecificPart?.substringBefore(":")
                     if (host == "BothBubbles") {
-                        // Extract chat GUID - could be in path or after second colon
-                        val chatGuid = data.pathSegments?.firstOrNull()
+                        // Extract unified chat ID - could be in path or after second colon
+                        val unifiedChatId = data.pathSegments?.firstOrNull()
                             ?: data.schemeSpecificPart?.substringAfter(":")?.substringAfter(":")
 
                         // Extract message body from extras
                         val messageBody = intent.getStringExtra("sms_body")
                             ?: intent.getStringExtra(Intent.EXTRA_TEXT)
 
-                        if (!chatGuid.isNullOrBlank()) {
-                            Timber.d("Voice command IM intent: chatGuid=$chatGuid, body=${messageBody?.take(20)}...")
-                            return ShareIntentData(
-                                sharedText = messageBody,
-                                directShareChatGuid = chatGuid  // Direct to group chat
-                            )
+                        if (!unifiedChatId.isNullOrBlank()) {
+                            // Resolve unified chat ID to chat GUID (sourceId)
+                            val chatGuid = resolveUnifiedChatToGuid(unifiedChatId)
+                            if (chatGuid != null) {
+                                Timber.d("Voice command IM intent: unifiedId=$unifiedChatId, chatGuid=$chatGuid, body=${messageBody?.take(20)}...")
+                                return ShareIntentData(
+                                    sharedText = messageBody,
+                                    directShareChatGuid = chatGuid  // Direct to group chat
+                                )
+                            } else {
+                                Timber.w("Could not resolve unified chat ID: $unifiedChatId")
+                            }
                         }
                     }
                     return null
@@ -208,7 +217,7 @@ class MainActivity : ComponentActivity() {
                     ?.takeIf { it.isNotBlank() }
 
                 // Extract message body from query param or extras
-                val messageBody = data.getQueryParameter("body")
+                val messageBody = safeGetQueryParameter(data, "body")
                     ?: intent.getStringExtra("sms_body")
                     ?: intent.getStringExtra(Intent.EXTRA_TEXT)
 
@@ -232,7 +241,7 @@ class MainActivity : ComponentActivity() {
                         ?.takeWhile { it != '?' }
                         ?.takeIf { it.isNotBlank() }
 
-                    val messageBody = data.getQueryParameter("body")
+                    val messageBody = safeGetQueryParameter(data, "body")
                         ?: intent.getStringExtra("sms_body")
                         ?: intent.getStringExtra(Intent.EXTRA_TEXT)
 
@@ -390,7 +399,7 @@ class MainActivity : ComponentActivity() {
             ?: return false
 
         // Must have message body for headless send
-        val messageBody = data.getQueryParameter("body")
+        val messageBody = safeGetQueryParameter(data, "body")
             ?: intent.getStringExtra("sms_body")
             ?: intent.getStringExtra(Intent.EXTRA_TEXT)
 
@@ -419,5 +428,45 @@ class MainActivity : ComponentActivity() {
 
         startService(serviceIntent)
         Timber.d("Started VoiceMessageService for headless send")
+    }
+
+    /**
+     * Safely extract a query parameter from a URI.
+     *
+     * For opaque URIs like "sms:+1234567890?body=hello", getQueryParameter()
+     * throws UnsupportedOperationException. This helper handles both hierarchical
+     * and opaque URIs.
+     */
+    private fun safeGetQueryParameter(uri: android.net.Uri, key: String): String? {
+        return try {
+            if (uri.isHierarchical) {
+                uri.getQueryParameter(key)
+            } else {
+                // For opaque URIs, manually parse query from schemeSpecificPart
+                uri.schemeSpecificPart
+                    ?.substringAfter("?", "")
+                    ?.split("&")
+                    ?.find { it.startsWith("$key=") }
+                    ?.substringAfter("$key=")
+                    ?.let { android.net.Uri.decode(it) }
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Resolve a unified chat ID to the primary chat GUID (sourceId).
+     * Used for Google Assistant/Android Auto group chat intents.
+     */
+    private fun resolveUnifiedChatToGuid(unifiedChatId: String): String? {
+        return try {
+            runBlocking {
+                unifiedChatDao.getById(unifiedChatId)?.sourceId
+            }
+        } catch (e: Exception) {
+            Timber.e(e, "Error resolving unified chat ID to chat GUID")
+            null
+        }
     }
 }

@@ -285,7 +285,7 @@ class ContactLoadDelegate @Inject constructor(
         val timeFormatter = DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault())
         val dateFormatter = DateTimeFormatter.ofPattern("MMM d", Locale.getDefault())
 
-        val formattedTime = lastMessageDate?.let { timestamp ->
+        val formattedTime = latestMessageDate?.let { timestamp ->
             val now = System.currentTimeMillis()
             val diff = now - timestamp
             val oneDayMs = 24 * 60 * 60 * 1000L
@@ -301,9 +301,9 @@ class ContactLoadDelegate @Inject constructor(
         return GroupChatUiModel(
             guid = guid,
             displayName = displayName ?: chatIdentifier ?: "Group Chat",
-            lastMessage = lastMessageText,
+            lastMessage = null,
             lastMessageTime = formattedTime,
-            avatarPath = effectiveGroupPhotoPath,
+            avatarPath = null, // Group photo now stored in UnifiedChatEntity
             participantCount = 0 // Could be populated from cross-ref count
         )
     }

@@ -11,11 +11,12 @@ import androidx.car.app.model.Row
 import androidx.car.app.model.Template
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.R
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
-import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
@@ -43,9 +44,10 @@ import java.util.concurrent.ConcurrentHashMap
  */
 class ConversationDetailScreen(
     carContext: CarContext,
-    private val chat: ChatEntity,
+    private val unifiedChat: UnifiedChatEntity,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val chatRepository: ChatRepository,
     private val syncService: SyncService? = null,
     private val featurePreferences: FeaturePreferences? = null,
@@ -117,11 +119,11 @@ class ConversationDetailScreen(
 
         // Auto mark-as-read when entering conversation
         // This ensures the notification is cleared on the phone
-        if (chat.hasUnreadMessage) {
+        if (unifiedChat.hasUnreadMessage) {
             screenScope.launch {
                 try {
-                    chatRepository.markChatAsRead(chat.guid)
-                    Timber.d("Auto-marked chat ${chat.guid} as read")
+                    unifiedChatDao.markAsRead(unifiedChat.id)
+                    Timber.d("Auto-marked chat ${unifiedChat.id} as read")
                     onRefresh() // Refresh conversation list to update unread indicator
                 } catch (e: Exception) {
                     Timber.e(e, "Failed to auto mark as read")
@@ -136,11 +138,11 @@ class ConversationDetailScreen(
                 isLoadingMessages = true
 
                 // Get total count to determine if there are more messages
-                totalMessageCount = messageDao.getMessageCountForChat(chat.guid)
+                totalMessageCount = messageDao.getMessageCountForChat(unifiedChat.sourceId)
 
                 val messageLimit = (currentPage + 1) * PAGE_SIZE
                 val messages = messageDao.observeMessagesForChat(
-                    chatGuid = chat.guid,
+                    chatGuid = unifiedChat.sourceId,
                     limit = messageLimit,
                     offset = 0
                 ).first()
@@ -164,12 +166,12 @@ class ConversationDetailScreen(
 
                 // If no messages found, trigger priority sync to load them immediately
                 if (messages.isEmpty() && syncService != null) {
-                    Timber.i("No messages found, triggering priority sync for ${chat.guid}")
-                    syncService.prioritizeChatSync(chat.guid)
+                    Timber.i("No messages found, triggering priority sync for ${unifiedChat.sourceId}")
+                    syncService.prioritizeChatSync(unifiedChat.sourceId)
                     // Re-fetch after a short delay to pick up synced messages
                     kotlinx.coroutines.delay(2000)
                     val refreshedMessages = messageDao.observeMessagesForChat(
-                        chatGuid = chat.guid,
+                        chatGuid = unifiedChat.sourceId,
                         limit = messageLimit,
                         offset = 0
                     ).first()
@@ -236,7 +238,7 @@ class ConversationDetailScreen(
     }
 
     override fun onGetTemplate(): Template {
-        val displayTitle = chat.displayName ?: "Conversation"
+        val displayTitle = unifiedChat.displayName ?: "Conversation"
 
         val itemListBuilder = ItemList.Builder()
 

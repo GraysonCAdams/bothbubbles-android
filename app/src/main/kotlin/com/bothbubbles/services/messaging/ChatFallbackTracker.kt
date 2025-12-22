@@ -2,6 +2,7 @@ package com.bothbubbles.services.messaging
 
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.core.data.ConnectionState
@@ -36,6 +37,7 @@ enum class FallbackReason {
 class ChatFallbackTracker @Inject constructor(
     private val socketService: SocketService,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
 ) {
@@ -78,7 +80,10 @@ class ChatFallbackTracker @Inject constructor(
         fallbackChats[chatGuid] = entry
         updateObservable()
         applicationScope.launch(ioDispatcher) {
-            chatDao.updateFallbackState(chatGuid, true, reason.name, entry.updatedAt)
+            // Look up unified chat ID and update fallback state
+            chatDao.getChatByGuid(chatGuid)?.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateSmsFallbackStatus(unifiedId, true, reason.name, entry.updatedAt)
+            }
         }
         Timber.i("Chat $chatGuid entered SMS fallback mode: $reason")
     }
@@ -90,7 +95,10 @@ class ChatFallbackTracker @Inject constructor(
         fallbackChats.remove(chatGuid)
         updateObservable()
         applicationScope.launch(ioDispatcher) {
-            chatDao.updateFallbackState(chatGuid, false, null, null)
+            // Look up unified chat ID and clear fallback state
+            chatDao.getChatByGuid(chatGuid)?.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateSmsFallbackStatus(unifiedId, false, null, null)
+            }
         }
         Timber.i("Chat $chatGuid exited SMS fallback mode")
     }
@@ -135,7 +143,7 @@ class ChatFallbackTracker @Inject constructor(
     }
 
     private suspend fun restorePersistedFallbacks() {
-        val persisted = chatDao.getChatsInFallback()
+        val persisted = unifiedChatDao.getChatsInFallback()
         if (persisted.isEmpty()) return
 
         persisted.forEach { projection ->
@@ -144,7 +152,7 @@ class ChatFallbackTracker @Inject constructor(
             }
 
             if (reason != null) {
-                fallbackChats[projection.guid] = ChatFallbackEntry(
+                fallbackChats[projection.chatGuid] = ChatFallbackEntry(
                     reason = reason,
                     updatedAt = projection.updatedAt ?: System.currentTimeMillis()
                 )

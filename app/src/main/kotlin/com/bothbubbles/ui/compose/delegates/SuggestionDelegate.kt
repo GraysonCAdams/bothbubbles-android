@@ -220,7 +220,7 @@ class SuggestionDelegate @Inject constructor(
                     chatGuid = chat.guid,
                     displayName = chat.displayName ?: chat.chatIdentifier ?: "Group Chat",
                     memberPreview = buildMemberPreview(chat),
-                    avatarPath = chat.effectiveGroupPhotoPath
+                    avatarPath = null // Group photo now stored in UnifiedChatEntity
                 )
             }
 
@@ -269,11 +269,9 @@ class SuggestionDelegate @Inject constructor(
 
                 // Get display name from:
                 // 1. Unified chat displayName
-                // 2. Cached contact name
-                // 3. Handle's cachedDisplayName (contact nickname like "💛 Liz")
-                // 4. Formatted phone number as fallback
+                // 2. Handle's cachedDisplayName (contact nickname like "💛 Liz")
+                // 3. Formatted phone number as fallback
                 val displayName = chat.displayName
-                    ?: chat.cachedContactName
                     ?: handle?.cachedDisplayName
                     ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
@@ -286,7 +284,7 @@ class SuggestionDelegate @Inject constructor(
                         address = chat.normalizedAddress,
                         formattedAddress = PhoneNumberFormatter.format(chat.normalizedAddress),
                         service = service,
-                        avatarPath = chat.cachedAvatarPath ?: handle?.cachedAvatarPath,
+                        avatarPath = chat.effectiveAvatarPath ?: handle?.cachedAvatarPath,
                         chatGuid = chat.sourceId
                     )
                 )

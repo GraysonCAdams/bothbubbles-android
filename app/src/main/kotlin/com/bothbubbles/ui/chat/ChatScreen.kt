@@ -487,6 +487,7 @@ fun ChatScreen(
                     ChatTopBar(
                         operationsDelegate = viewModel.operations,
                         chatInfoDelegate = viewModel.chatInfo,
+                        headerIntegrationsDelegate = viewModel.headerIntegrations,
                         sendModeManager = viewModel.sendMode,
                         onBackClick = {
                             // Clear saved state when user explicitly navigates back
@@ -1008,10 +1009,10 @@ fun ChatScreen(
                     viewModel.toggleReaction(
                         messageGuid = messageGuid,
                         tapback = when (tapback) {
-                            ReelsTapback.LIKE -> Tapback.THUMBS_UP
-                            ReelsTapback.LAUGH -> Tapback.HAHA
-                            ReelsTapback.LOVE -> Tapback.HEART
-                            ReelsTapback.DISLIKE -> Tapback.THUMBS_DOWN
+                            ReelsTapback.LIKE -> Tapback.LIKE
+                            ReelsTapback.LAUGH -> Tapback.LAUGH
+                            ReelsTapback.LOVE -> Tapback.LOVE
+                            ReelsTapback.DISLIKE -> Tapback.DISLIKE
                         }
                     )
                 }

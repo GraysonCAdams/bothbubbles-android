@@ -217,7 +217,7 @@ class MessageEventHandler @Inject constructor(
                     linkPreviewDomain = linkDomain,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
-                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
+                    groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                     subject = savedMessage.subject
                 )
             )
@@ -318,7 +318,7 @@ class MessageEventHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
-                groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
+                groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                 subject = messageDto.subject
             )
         )

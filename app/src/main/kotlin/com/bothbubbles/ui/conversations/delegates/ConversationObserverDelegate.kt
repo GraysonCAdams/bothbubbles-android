@@ -570,12 +570,12 @@ class ConversationObserverDelegate @AssistedInject constructor(
     }
 
     /**
-     * Observe total unread count from database (chats table).
+     * Observe total unread count from database (unified chats table).
      * Uses the same source as conversation list items for consistency.
      */
     private fun observeTotalUnreadCount() {
         scope.launch {
-            chatRepository.observeTotalUnreadMessageCount()
+            unifiedChatRepository.observeTotalUnreadCount()
                 .collect { count ->
                     _totalUnreadCount.value = count
                 }

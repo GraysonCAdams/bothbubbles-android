@@ -85,21 +85,21 @@ fun ArchivedChatsContent(
         LazyColumn(modifier = modifier.fillMaxSize()) {
             items(
                 items = uiState.archivedChats,
-                key = { it.guid }
+                key = { it.id }
             ) { chat ->
-                val formattedIdentifier = chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
+                val formattedAddress = PhoneNumberFormatter.format(chat.normalizedAddress)
                 ListItem(
                     headlineContent = {
                         Text(
-                            text = chat.displayName ?: formattedIdentifier ?: "",
+                            text = chat.displayName ?: formattedAddress,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
                     },
-                    supportingContent = chat.lastMessageText?.let {
+                    supportingContent = chat.latestMessageText?.let { messageText ->
                         {
                             Text(
-                                text = it,
+                                text = messageText,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -108,13 +108,13 @@ fun ArchivedChatsContent(
                     },
                     leadingContent = {
                         Avatar(
-                            name = chat.displayName ?: formattedIdentifier ?: "?",
+                            name = chat.displayName ?: formattedAddress,
                             size = 48.dp
                         )
                     },
                     trailingContent = {
                         IconButton(
-                            onClick = { viewModel.unarchiveChat(chat.guid) }
+                            onClick = { viewModel.unarchiveChat(chat.id) }
                         ) {
                             Icon(
                                 Icons.Default.Unarchive,
@@ -122,7 +122,7 @@ fun ArchivedChatsContent(
                             )
                         }
                     },
-                    modifier = Modifier.clickable { onChatClick(chat.guid) }
+                    modifier = Modifier.clickable { onChatClick(chat.sourceId) }  // Use sourceId (chat GUID) for navigation
                 )
                 HorizontalDivider()
             }

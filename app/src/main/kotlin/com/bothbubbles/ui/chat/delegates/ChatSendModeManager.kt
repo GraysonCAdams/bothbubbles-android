@@ -422,14 +422,13 @@ class ChatSendModeManager @AssistedInject constructor(
     }
 
     /**
-     * Load persisted send mode preference.
+     * Load persisted send mode preference from unified chat.
      */
     private fun loadPersistedSendMode() {
         scope.launch {
             try {
-                val chat = chatRepository.getChat(chatGuid)
-                val preferredMode = chat?.preferredSendMode
-                if (chat != null && chat.sendModeManuallySet && preferredMode != null) {
+                val (preferredMode, manuallySet) = chatRepository.getSendModePreference(chatGuid) ?: return@launch
+                if (manuallySet && preferredMode != null) {
                     val persistedMode = when (preferredMode.lowercase()) {
                         "imessage" -> ChatSendMode.IMESSAGE
                         "sms" -> ChatSendMode.SMS

@@ -18,6 +18,7 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -61,6 +62,7 @@ class PendingMessageRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val attachmentDao: AttachmentDao,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val attachmentPersistenceManager: AttachmentPersistenceManager,
     private val api: BothBubblesApi
 ) : PendingMessageSource {
@@ -222,10 +224,15 @@ class PendingMessageRepository @Inject constructor(
                 pendingAttachmentDao.insertAll(pendingAttachmentEntities)
             }
 
-            // 3. Create local echo in messages table (instant UI feedback)
+            // 3. Look up the chat to get unifiedChatId for the message
+            val chat = chatDao.getChatByGuid(chatGuid)
+            val unifiedChatId = chat?.unifiedChatId
+
+            // 4. Create local echo in messages table (instant UI feedback)
             val localEcho = MessageEntity(
                 guid = clientGuid,
                 chatGuid = chatGuid,
+                unifiedChatId = unifiedChatId,
                 text = text,
                 subject = subject,
                 dateCreated = createdAt,
@@ -238,7 +245,7 @@ class PendingMessageRepository @Inject constructor(
             )
             messageDao.insertMessage(localEcho)
 
-            // 4. Create attachment entities for immediate display
+            // 5. Create attachment entities for immediate display
             // Store raw absolute paths (not file:// URIs) so downstream code works consistently
             persistedAttachments.forEach { data ->
                 val attachmentEntity = AttachmentEntity(
@@ -255,12 +262,21 @@ class PendingMessageRepository @Inject constructor(
                 attachmentDao.insertAttachment(attachmentEntity)
             }
 
-            // 5. Update chat's last message for conversation list
-            chatDao.updateLastMessage(
-                chatGuid,
-                createdAt,
-                text ?: if (persistedAttachments.isNotEmpty()) "[Attachment]" else ""
-            )
+            // 6. Update unified chat's latest message for conversation list
+            unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateLatestMessageIfNewer(
+                    id = unifiedId,
+                    date = createdAt,
+                    text = text ?: if (persistedAttachments.isNotEmpty()) "[Attachment]" else "",
+                    guid = clientGuid,
+                    isFromMe = true,
+                    hasAttachments = persistedAttachments.isNotEmpty(),
+                    source = messageSource.name,
+                    dateDelivered = null,
+                    dateRead = null,
+                    error = 0
+                )
+            }
 
             pendingId
         }

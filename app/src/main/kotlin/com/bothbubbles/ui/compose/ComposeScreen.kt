@@ -31,7 +31,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import android.net.Uri
@@ -64,6 +66,9 @@ fun ComposeScreen(
     val focusRequester = remember { FocusRequester() }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Track whether composer should request focus (when we have an initial address)
+    var shouldFocusComposer by remember { mutableStateOf(false) }
+
     // Handle shared content from share intents
     LaunchedEffect(sharedText, sharedUris) {
         if (sharedText != null || sharedUris.isNotEmpty()) {
@@ -71,14 +76,16 @@ fun ComposeScreen(
         }
     }
 
-    // Handle initial address from voice command (Google Assistant, Android Auto)
+    // Handle initial address from voice command (Google Assistant, Android Auto) or SMS intent
     LaunchedEffect(initialAddress) {
         if (initialAddress != null) {
             viewModel.setInitialRecipient(initialAddress)
+            // Focus the composer field after setting the recipient
+            shouldFocusComposer = true
         }
     }
 
-    // Request focus on recipient field when screen opens (skip if we have an initial address)
+    // Request focus on recipient field when screen opens (only if no initial address)
     LaunchedEffect(Unit) {
         if (initialAddress == null) {
             focusRequester.requestFocus()
@@ -191,6 +198,8 @@ fun ComposeScreen(
                     onGifSearchQueryChange = viewModel::onGifSearchQueryChange,
                     onGifSearch = viewModel::onGifSearch,
                     onGifSelected = viewModel::onGifSelected,
+                    shouldRequestFocus = shouldFocusComposer,
+                    onFocusRequested = { shouldFocusComposer = false },
                     modifier = Modifier.fillMaxWidth()
                 )
             }

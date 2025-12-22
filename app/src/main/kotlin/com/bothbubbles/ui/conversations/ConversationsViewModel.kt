@@ -969,8 +969,7 @@ class ConversationsViewModel @Inject constructor(
                 timestamp = message.dateCreated,
                 formattedTime = formatRelativeTime(message.dateCreated, application),
                 isFromMe = message.isFromMe,
-                avatarPath = primaryParticipant?.cachedAvatarPath
-                    ?: chat?.effectiveGroupPhotoPath,
+                avatarPath = primaryParticipant?.cachedAvatarPath,
                 isGroup = isGroup,
                 messageType = messageType,
                 linkTitle = linkPreview?.title,

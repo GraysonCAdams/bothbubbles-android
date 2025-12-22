@@ -334,13 +334,8 @@ class GroupCreatorViewModel @Inject constructor(
                                 guid = chatGuid,
                                 chatIdentifier = addresses.joinToString(", "),
                                 displayName = null,
-                                isArchived = false,
-                                isPinned = false,
                                 isGroup = true,
-                                hasUnreadMessage = false,
-                                unreadCount = 0,
-                                lastMessageDate = System.currentTimeMillis(),
-                                lastMessageText = null
+                                latestMessageDate = System.currentTimeMillis()
                             )
                             chatRepository.insertChat(newChat)
 

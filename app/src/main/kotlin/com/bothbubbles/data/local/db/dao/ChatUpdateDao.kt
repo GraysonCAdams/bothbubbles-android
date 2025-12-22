@@ -45,4 +45,15 @@ interface ChatUpdateDao {
 
     @Query("UPDATE chats SET unified_chat_id = :unifiedChatId WHERE guid IN (:guids)")
     suspend fun updateUnifiedChatIdForChats(guids: List<String>, unifiedChatId: String)
+
+    /**
+     * Update the server group photo for a chat (used for group chats with iMessage group photos).
+     */
+    @Query("""
+        UPDATE chats
+        SET server_group_photo_path = :photoPath,
+            server_group_photo_guid = :photoGuid
+        WHERE guid = :guid
+    """)
+    suspend fun updateServerGroupPhoto(guid: String, photoPath: String?, photoGuid: String?)
 }

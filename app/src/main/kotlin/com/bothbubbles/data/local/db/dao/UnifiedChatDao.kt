@@ -255,8 +255,22 @@ interface UnifiedChatDao {
     @Query("UPDATE unified_chats SET is_sms_fallback = :isFallback, fallback_reason = :reason, fallback_updated_at = :updatedAt WHERE id = :id")
     suspend fun updateSmsFallbackStatus(id: String, isFallback: Boolean, reason: String?, updatedAt: Long?)
 
+    /**
+     * Get unified chats that are in SMS fallback mode.
+     * Returns source_id (chatGuid), fallback_reason, and fallback_updated_at for restoration.
+     */
+    @Query("""
+        SELECT source_id, fallback_reason, fallback_updated_at
+        FROM unified_chats
+        WHERE is_sms_fallback = 1 AND date_deleted IS NULL
+    """)
+    suspend fun getChatsInFallback(): List<FallbackProjection>
+
     @Query("UPDATE unified_chats SET is_spam = :isSpam, spam_score = :spamScore WHERE id = :id")
     suspend fun updateSpamStatus(id: String, isSpam: Boolean, spamScore: Int)
+
+    @Query("UPDATE unified_chats SET spam_reported_to_carrier = :reported WHERE id = :id")
+    suspend fun updateSpamReportedToCarrier(id: String, reported: Boolean)
 
     @Query("UPDATE unified_chats SET category = :category, category_confidence = :confidence, category_last_updated = :lastUpdated WHERE id = :id")
     suspend fun updateCategory(id: String, category: String?, confidence: Int, lastUpdated: Long)
@@ -362,3 +376,13 @@ interface UnifiedChatDao {
     """)
     suspend fun clearInvalidDisplayNames(): Int
 }
+
+/**
+ * Projection for restoring fallback state.
+ * Maps source_id to chatGuid for compatibility with ChatFallbackTracker.
+ */
+data class FallbackProjection(
+    @androidx.room.ColumnInfo(name = "source_id") val chatGuid: String,
+    @androidx.room.ColumnInfo(name = "fallback_reason") val reason: String?,
+    @androidx.room.ColumnInfo(name = "fallback_updated_at") val updatedAt: Long?
+)

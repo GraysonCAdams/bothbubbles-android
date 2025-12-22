@@ -1385,6 +1385,125 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 51 to 52: Trim chats table to protocol-only fields.
+     *
+     * The unified chat architecture moved conversation-level state to UnifiedChatEntity.
+     * ChatEntity now only stores protocol-specific data:
+     * - id, guid, unified_chat_id, chat_identifier, display_name
+     * - style, is_group, latest_message_date, date_created, date_deleted
+     *
+     * All other fields (is_pinned, is_archived, mute_type, etc.) are now in UnifiedChatEntity.
+     * This migration recreates the chats table with the trimmed schema.
+     */
+    val MIGRATION_51_52 = object : Migration(51, 52) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 51→52: Trim chats table to protocol-only fields")
+
+            // Create new trimmed chats table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS chats_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    guid TEXT NOT NULL,
+                    unified_chat_id TEXT DEFAULT NULL,
+                    chat_identifier TEXT DEFAULT NULL,
+                    display_name TEXT DEFAULT NULL,
+                    style INTEGER DEFAULT NULL,
+                    is_group INTEGER NOT NULL DEFAULT 0,
+                    latest_message_date INTEGER DEFAULT NULL,
+                    date_created INTEGER NOT NULL DEFAULT 0,
+                    date_deleted INTEGER DEFAULT NULL
+                )
+            """.trimIndent())
+
+            // Copy data from old table (only the columns we're keeping)
+            db.execSQL("""
+                INSERT INTO chats_new (
+                    id, guid, unified_chat_id, chat_identifier, display_name,
+                    style, is_group, latest_message_date, date_created, date_deleted
+                )
+                SELECT
+                    id, guid, unified_chat_id, chat_identifier, display_name,
+                    style, is_group, latest_message_date, date_created, date_deleted
+                FROM chats
+            """.trimIndent())
+
+            // Drop old table
+            db.execSQL("DROP TABLE chats")
+
+            // Rename new table
+            db.execSQL("ALTER TABLE chats_new RENAME TO chats")
+
+            // Recreate indexes
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_chats_guid ON chats(guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_unified_chat_id ON chats(unified_chat_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_latest_message_date ON chats(latest_message_date)")
+
+            Timber.i("Migration 51→52 complete: Chats table trimmed to protocol-only fields")
+        }
+    }
+
+    /**
+     * Migration from version 52 to 53: Clear invalid unified_chat_id from group chats.
+     *
+     * Group chats were incorrectly being linked to unified chats, which caused them to be
+     * displayed with the wrong sender name (first participant's name instead of actual sender).
+     * Unified chats are only for merging 1:1 iMessage/SMS conversations.
+     *
+     * This migration clears the unified_chat_id from any group chats that were incorrectly linked.
+     */
+    val MIGRATION_52_53 = object : Migration(52, 53) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Clear unified_chat_id from group chats (they should never be linked)
+            db.execSQL("UPDATE chats SET unified_chat_id = NULL WHERE is_group = 1 AND unified_chat_id IS NOT NULL")
+            Timber.i("Migration 52→53 complete: Cleared invalid unified_chat_id from group chats")
+        }
+    }
+
+    /**
+     * Migration from version 53 to 54: Add contact_calendar_associations table.
+     *
+     * This table stores which device calendar is associated with which contact.
+     * Uses address-based linking (like Life360) so the association works across
+     * both iMessage and SMS handles for the same contact.
+     */
+    val MIGRATION_53_54 = object : Migration(53, 54) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS contact_calendar_associations (
+                    linked_address TEXT PRIMARY KEY NOT NULL,
+                    calendar_id INTEGER NOT NULL,
+                    calendar_display_name TEXT NOT NULL,
+                    calendar_color INTEGER DEFAULT NULL,
+                    account_name TEXT DEFAULT NULL,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                    updated_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()}
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_contact_calendar_associations_calendar_id ON contact_calendar_associations(calendar_id)"
+            )
+            Timber.i("Migration 53→54 complete: Added contact_calendar_associations table")
+        }
+    }
+
+    /**
+     * Migration 54 → 55: Add group photo fields to chats table.
+     *
+     * Group photos from the BlueBubbles server were previously stored on unified_chats,
+     * but group chats don't use unified chats. This adds the fields directly to ChatEntity
+     * so group photo sync can work properly.
+     */
+    val MIGRATION_54_55 = object : Migration(54, 55) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_path TEXT DEFAULT NULL")
+            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_guid TEXT DEFAULT NULL")
+            Timber.i("Migration 54→55 complete: Added group photo fields to chats table")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1440,6 +1559,10 @@ object DatabaseMigrations {
         MIGRATION_47_48,
         MIGRATION_48_49,
         MIGRATION_49_50,
-        MIGRATION_50_51
+        MIGRATION_50_51,
+        MIGRATION_51_52,
+        MIGRATION_52_53,
+        MIGRATION_53_54,
+        MIGRATION_54_55
     )
 }

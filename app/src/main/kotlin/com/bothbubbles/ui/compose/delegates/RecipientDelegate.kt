@@ -5,10 +5,13 @@ import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.HandleRepository
+import com.bothbubbles.services.contacts.ContactPhotoLoader
+import com.bothbubbles.services.contacts.ContactQueryHelper
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.compose.RecipientChip
 import com.bothbubbles.ui.compose.RecipientService
 import com.bothbubbles.ui.compose.RecipientSuggestion
+import com.bothbubbles.ui.conversations.formatDisplayName
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
@@ -35,7 +38,9 @@ class RecipientDelegate @Inject constructor(
     private val api: BothBubblesApi,
     private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
-    private val handleRepository: HandleRepository
+    private val handleRepository: HandleRepository,
+    private val contactQueryHelper: ContactQueryHelper,
+    private val contactPhotoLoader: ContactPhotoLoader
 ) {
     private val _chips = MutableStateFlow<ImmutableList<RecipientChip>>(persistentListOf())
     val chips: StateFlow<ImmutableList<RecipientChip>> = _chips.asStateFlow()
@@ -97,8 +102,8 @@ class RecipientDelegate @Inject constructor(
     }
 
     /**
-     * Add a chip from raw text input (Enter pressed).
-     * Validates the format and determines service asynchronously.
+     * Add a chip from raw text input (Enter pressed or initial address from intent).
+     * Validates the format, looks up contact info, and determines service asynchronously.
      */
     fun addChipFromText(text: String) {
         val trimmed = text.trim()
@@ -106,13 +111,23 @@ class RecipientDelegate @Inject constructor(
 
         // Create chip with initial service based on format validation
         val (isValid, initialService) = validateAddressFormat(trimmed)
+        Timber.d("addChipFromText: address=$trimmed, isValid=$isValid, initialService=$initialService")
+
+        // Look up contact info for this address
+        val contactDisplayName = contactQueryHelper.getContactDisplayName(trimmed)
+        val contactPhotoUri = contactPhotoLoader.getContactPhotoUri(trimmed)
+        Timber.d("addChipFromText: contactDisplayName=$contactDisplayName, hasPhoto=${contactPhotoUri != null}")
+
+        // Determine display name: contact name > formatted phone > raw address
+        val displayName = contactDisplayName ?: formatDisplayName(trimmed)
 
         val chip = RecipientChip(
             id = UUID.randomUUID().toString(),
             address = trimmed,
-            displayName = formatDisplayName(trimmed),
+            displayName = displayName,
             service = if (isValid) initialService else RecipientService.INVALID,
-            isGroup = false
+            isGroup = false,
+            avatarPath = contactPhotoUri
         )
 
         addChip(chip)
@@ -200,31 +215,48 @@ class RecipientDelegate @Inject constructor(
     private suspend fun checkAndUpdateService(chipId: String, address: String) {
         try {
             val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
-            val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
+            Timber.d("checkAndUpdateService: address=$address, smsOnlyMode=$smsOnlyMode")
 
-            // In SMS-only mode or disconnected, keep as SMS
-            if (smsOnlyMode || !isConnected) return
+            // In SMS-only mode, keep as SMS
+            if (smsOnlyMode) {
+                Timber.d("checkAndUpdateService: SMS-only mode, keeping as SMS")
+                return
+            }
 
             // Check if it's an email (always iMessage)
             if (address.isEmail()) {
+                Timber.d("checkAndUpdateService: email detected, updating to iMessage")
                 updateChipService(chipId, RecipientService.IMESSAGE)
                 return
             }
 
-            // Check cached handle first
+            // Check cached handle first (local lookup, doesn't need server connection)
             val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
+            Timber.d("checkAndUpdateService: normalizedAddress=$normalizedAddress")
+
             val cachedHandle = handleRepository.getHandleByAddressAny(address)
                 ?: handleRepository.getHandleByAddressAny(normalizedAddress)
+            Timber.d("checkAndUpdateService: cachedHandle=$cachedHandle, isIMessage=${cachedHandle?.isIMessage}")
 
             if (cachedHandle?.isIMessage == true) {
+                Timber.d("checkAndUpdateService: cached handle is iMessage, updating chip")
                 updateChipService(chipId, RecipientService.IMESSAGE)
                 return
             }
 
-            // Check with server
-            val response = api.checkIMessageAvailability(address)
-            if (response.isSuccessful && response.body()?.data?.available == true) {
-                updateChipService(chipId, RecipientService.IMESSAGE)
+            // If connected, check with server for fresh availability
+            val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
+            Timber.d("checkAndUpdateService: isConnected=$isConnected")
+
+            if (isConnected) {
+                val response = api.checkIMessageAvailability(address)
+                Timber.d("checkAndUpdateService: API response code=${response.code()}, available=${response.body()?.data?.available}")
+                if (response.isSuccessful && response.body()?.data?.available == true) {
+                    Timber.d("checkAndUpdateService: API confirmed iMessage available, updating chip")
+                    updateChipService(chipId, RecipientService.IMESSAGE)
+                }
+            } else {
+                Timber.d("checkAndUpdateService: not connected to server, keeping as SMS")
             }
         } catch (e: Exception) {
             Timber.w(e, "Failed to check iMessage availability")
@@ -239,11 +271,6 @@ class RecipientDelegate @Inject constructor(
             currentChips[index] = currentChips[index].copy(service = service)
             _chips.value = currentChips.toImmutableList()
         }
-    }
-
-    private fun formatDisplayName(address: String): String {
-        // For now, just return the address. Could enhance with contact lookup.
-        return address
     }
 
     private fun String.isPhoneNumber(): Boolean {

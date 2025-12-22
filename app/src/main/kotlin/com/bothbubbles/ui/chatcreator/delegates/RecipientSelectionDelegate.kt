@@ -4,9 +4,12 @@ import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.services.contacts.ContactPhotoLoader
+import com.bothbubbles.services.contacts.ContactQueryHelper
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.SelectedRecipient
+import com.bothbubbles.ui.conversations.formatDisplayName
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -27,7 +30,9 @@ import javax.inject.Inject
 class RecipientSelectionDelegate @Inject constructor(
     private val api: BothBubblesApi,
     private val socketConnection: SocketConnection,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val contactQueryHelper: ContactQueryHelper,
+    private val contactPhotoLoader: ContactPhotoLoader
 ) {
     companion object {
         /** Timeout for waiting for all iMessage checks to complete */
@@ -94,15 +99,24 @@ class RecipientSelectionDelegate @Inject constructor(
     }
 
     /**
-     * Add a recipient from manual address entry (phone number or email)
+     * Add a recipient from manual address entry (phone number or email).
+     * Looks up contact info to show the contact's name instead of raw address.
      */
     fun addManualRecipient(address: String, service: String) {
+        // Try to find contact info for this address
+        val contactDisplayName = contactQueryHelper.getContactDisplayName(address)
+        val contactPhotoUri = contactPhotoLoader.getContactPhotoUri(address)
+
+        // Determine display name: contact name > formatted phone > raw address
+        val displayName = contactDisplayName
+            ?: formatDisplayName(address)
+
         val recipient = SelectedRecipient(
             address = address,
-            displayName = address,
+            displayName = displayName,
             service = service,
-            avatarPath = null,
-            isManualEntry = true
+            avatarPath = contactPhotoUri,
+            isManualEntry = contactDisplayName == null  // Only manual if no contact found
         )
         addRecipientInternal(recipient)
     }

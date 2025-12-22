@@ -281,7 +281,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
                     senderAddress = address,
                     isGroup = false,
                     avatarUri = senderAvatarUri,
-                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath
+                    groupAvatarPath = unifiedChat?.effectiveAvatarPath
                 )
             )
 

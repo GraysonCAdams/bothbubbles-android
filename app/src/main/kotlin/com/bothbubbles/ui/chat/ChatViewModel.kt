@@ -4,8 +4,10 @@ import timber.log.Timber
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.media.ExoPlayerPool
 import com.bothbubbles.services.notifications.Notifier
@@ -18,6 +20,7 @@ import com.bothbubbles.ui.chat.delegates.ChatComposerDelegate
 import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
+import com.bothbubbles.ui.chat.delegates.ChatHeaderIntegrationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
 import com.bothbubbles.ui.chat.delegates.ChatReelsDelegate
 import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
@@ -80,6 +83,7 @@ import javax.inject.Inject
 class ChatViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val socketConnection: SocketConnection,
     private val settingsDataStore: SettingsDataStore,
     private val chatFallbackTracker: ChatFallbackTracker,
@@ -99,6 +103,7 @@ class ChatViewModel @Inject constructor(
     private val sendModeFactory: ChatSendModeManager.Factory,
     private val scheduledMessagesFactory: ChatScheduledMessageDelegate.Factory,
     private val chatInfoFactory: ChatInfoDelegate.Factory,
+    private val headerIntegrationsFactory: ChatHeaderIntegrationsDelegate.Factory,
     private val connectionFactory: ChatConnectionDelegate.Factory,
     // Media playback
     val exoPlayerPool: ExoPlayerPool,
@@ -147,6 +152,14 @@ class ChatViewModel @Inject constructor(
     val search: ChatSearchDelegate = searchFactory.create(viewModelScope, mergedChatGuids)
     val attachment: ChatAttachmentDelegate = attachmentFactory.create(chatGuid, viewModelScope, mergedChatGuids)
     val chatInfo: ChatInfoDelegate = chatInfoFactory.create(chatGuid, viewModelScope, mergedChatGuids)
+
+    // Header integrations (Life360, Calendar) - created with empty participants, updated when chatInfo loads
+    val headerIntegrations: ChatHeaderIntegrationsDelegate = headerIntegrationsFactory.create(
+        participantAddresses = emptySet(),
+        isGroup = false,
+        scope = viewModelScope
+    )
+
     val operations: ChatOperationsDelegate = operationsFactory.create(chatGuid, viewModelScope)
     val sync: ChatSyncDelegate = syncFactory.create(chatGuid, viewModelScope, mergedChatGuids)
     val send: ChatSendDelegate = sendFactory.create(chatGuid, viewModelScope)
@@ -276,6 +289,18 @@ class ChatViewModel @Inject constructor(
             messageList.socketNewMessage.collect {
                 messageList.markAsRead()
             }
+        }
+
+        // Update header integrations when participants load
+        viewModelScope.launch {
+            chatInfo.state
+                .map { it.participantAddresses.toSet() to it.isGroup }
+                .distinctUntilChanged()
+                .collect { (addresses, isGroup) ->
+                    if (addresses.isNotEmpty()) {
+                        headerIntegrations.updateParticipants(addresses)
+                    }
+                }
         }
         // Forward ETA sharing delegate's state to UI state
         viewModelScope.launch {
@@ -500,9 +525,12 @@ class ChatViewModel @Inject constructor(
     private fun loadPersistedSendMode() {
         viewModelScope.launch {
             try {
+                // Look up unified chat for send mode preferences
                 val chat = chatRepository.getChat(chatGuid)
-                val preferredMode = chat?.preferredSendMode
-                if (chat != null && chat.sendModeManuallySet && preferredMode != null) {
+                val unifiedChatId = chat?.unifiedChatId ?: return@launch
+                val unifiedChat = unifiedChatRepository.getById(unifiedChatId) ?: return@launch
+                val preferredMode = unifiedChat.preferredSendMode
+                if (unifiedChat.sendModeManuallySet && preferredMode != null) {
                     val persistedMode = when (preferredMode.lowercase()) {
                         "imessage" -> ChatSendMode.IMESSAGE
                         "sms" -> ChatSendMode.SMS
@@ -770,11 +798,11 @@ class ChatViewModel @Inject constructor(
 
     /**
      * Get all available chats for forwarding (excluding current chat).
-     * Retained because it uses chatGuid which is private.
+     * Returns unified chats (excluding the current conversation).
      */
-    fun getForwardableChats(): Flow<List<com.bothbubbles.data.local.db.entity.ChatEntity>> {
-        return chatRepository.observeActiveChats()
-            .map { chats -> chats.filter { it.guid != chatGuid } }
+    fun getForwardableChats(): Flow<List<UnifiedChatEntity>> {
+        return unifiedChatRepository.observeActiveChats()
+            .map { chats -> chats.filter { it.sourceId != chatGuid } }
     }
 
     fun clearError() {

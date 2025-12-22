@@ -5,6 +5,7 @@ import android.telephony.SmsManager
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -29,7 +30,8 @@ import javax.inject.Singleton
 class SpamReportingService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val chatDao: ChatDao,
-    private val messageDao: MessageDao
+    private val messageDao: MessageDao,
+    private val unifiedChatDao: UnifiedChatDao
 ) {
     companion object {
         /** The universal carrier spam reporting short code */
@@ -94,8 +96,10 @@ class SpamReportingService @Inject constructor(
             Timber.i("Reporting spam to carrier: sending message content to 7726")
             sendSms(SPAM_SHORT_CODE, messageContent)
 
-            // Mark the chat as reported to carrier
-            chatDao.markAsReportedToCarrier(chatGuid)
+            // Mark the chat as reported to carrier via unified chat
+            chat.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.updateSpamReportedToCarrier(unifiedId, true)
+            }
 
             // After a delay, send the sender's phone number
             // This is done asynchronously - the carrier will request the number
@@ -136,6 +140,9 @@ class SpamReportingService @Inject constructor(
      * Check if a chat has already been reported to the carrier.
      */
     suspend fun isReportedToCarrier(chatGuid: String): Boolean {
-        return chatDao.getChatByGuid(chatGuid)?.spamReportedToCarrier == true
+        val chat = chatDao.getChatByGuid(chatGuid) ?: return false
+        val unifiedId = chat.unifiedChatId ?: return false
+        val unifiedChat = unifiedChatDao.getById(unifiedId) ?: return false
+        return unifiedChat.spamReportedToCarrier
     }
 }

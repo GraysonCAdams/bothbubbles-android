@@ -5,7 +5,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.core.model.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -99,9 +99,7 @@ class SmsImporter(
                 chatIdentifier = if (isGroup) null else addresses.first(),
                 displayName = null, // Will be resolved from contacts
                 isGroup = isGroup,
-                lastMessageDate = thread.lastMessageDate,
-                lastMessageText = thread.snippet,
-                unreadCount = if (thread.isRead) 0 else 1
+                latestMessageDate = thread.lastMessageDate
             )
             chatDao.insertChat(chat)
         }

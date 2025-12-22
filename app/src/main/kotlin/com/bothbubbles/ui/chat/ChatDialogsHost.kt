@@ -411,8 +411,8 @@ fun ChatDialogsHost(
         },
         chats = forwardableChats.map { chat ->
             ForwardableChatInfo(
-                guid = chat.guid,
-                displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
+                guid = chat.sourceId,  // Use sourceId (chat GUID) not id (unified chat ID)
+                displayName = chat.displayName ?: PhoneNumberFormatter.format(chat.normalizedAddress),
                 isGroup = chat.isGroup
             )
         },

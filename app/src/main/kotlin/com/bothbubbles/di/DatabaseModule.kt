@@ -10,6 +10,7 @@ import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
+import com.bothbubbles.data.local.db.dao.ContactCalendarDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.Life360Dao
@@ -206,5 +207,11 @@ object DatabaseModule {
     @Singleton
     fun provideUnifiedChatDao(database: BothBubblesDatabase): UnifiedChatDao {
         return database.unifiedChatDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideContactCalendarDao(database: BothBubblesDatabase): ContactCalendarDao {
+        return database.contactCalendarDao()
     }
 }

@@ -8,6 +8,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.provider.ContactsContract
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.util.GroupAvatarRenderer
 import dagger.hilt.EntryPoint
@@ -44,13 +45,14 @@ object GroupContactSyncManager {
     @InstallIn(SingletonComponent::class)
     interface SyncEntryPoint {
         fun chatDao(): ChatDao
+        fun unifiedChatDao(): UnifiedChatDao
     }
 
     /**
      * Data class to hold group chat info with participants for syncing.
      */
     private data class GroupChatWithParticipants(
-        val guid: String,
+        val unifiedChatId: String,
         val displayName: String,
         val effectiveGroupPhotoPath: String?,
         val participants: List<HandleEntity>
@@ -175,13 +177,16 @@ object GroupContactSyncManager {
                 SyncEntryPoint::class.java
             )
             val chatDao = entryPoint.chatDao()
+            val unifiedChatDao = entryPoint.unifiedChatDao()
 
             // Get all group chats
             val allGroupChats = chatDao.getAllGroupChats()
 
-            // Filter to only named groups that are recently active (within 1 year)
+            // Filter to only named groups that are recently active (within 1 year) and have unified chat ID
             val eligibleGroupChats = allGroupChats.filter { chat ->
-                isNamedGroup(chat.displayName) && isRecentlyActive(chat.lastMessageDate)
+                chat.unifiedChatId != null &&
+                isNamedGroup(chat.displayName) &&
+                isRecentlyActive(chat.latestMessageDate)
             }
 
             // Deduplicate by display name (same group can have iMessage/SMS/MMS variants)
@@ -190,11 +195,11 @@ object GroupContactSyncManager {
                 .groupBy { it.displayName?.lowercase()?.trim() }
                 .mapNotNull { (_, chats) ->
                     // Pick the one with most recent activity (or first if all null)
-                    chats.maxByOrNull { it.lastMessageDate ?: 0L }
+                    chats.maxByOrNull { it.latestMessageDate ?: 0L }
                 }
 
             val genericCount = allGroupChats.count { !isNamedGroup(it.displayName) }
-            val inactiveCount = allGroupChats.count { isNamedGroup(it.displayName) && !isRecentlyActive(it.lastMessageDate) }
+            val inactiveCount = allGroupChats.count { isNamedGroup(it.displayName) && !isRecentlyActive(it.latestMessageDate) }
             val deduplicatedCount = eligibleGroupChats.size - deduplicatedGroupChats.size
             Timber.d("Syncing ${deduplicatedGroupChats.size} group chats to contacts ($genericCount generic/unnamed, $inactiveCount inactive >1yr, $deduplicatedCount duplicates excluded)")
 
@@ -219,25 +224,35 @@ object GroupContactSyncManager {
                 valueTransform = { it.handle }
             )
 
+            // Batch fetch unified chats for avatar lookup
+            val unifiedChatIds = deduplicatedGroupChats.mapNotNull { it.unifiedChatId }
+            val unifiedChatsMap = if (unifiedChatIds.isNotEmpty()) {
+                unifiedChatDao.getByIds(unifiedChatIds).associateBy { it.id }
+            } else {
+                emptyMap()
+            }
+
             // Build group chat data with participants
-            val groupChatsWithParticipants = deduplicatedGroupChats.map { chat ->
+            val groupChatsWithParticipants = deduplicatedGroupChats.mapNotNull { chat ->
+                val unifiedChatId = chat.unifiedChatId ?: return@mapNotNull null
+                val unifiedChat = unifiedChatsMap[unifiedChatId]
                 GroupChatWithParticipants(
-                    guid = chat.guid,
+                    unifiedChatId = unifiedChatId,
                     displayName = chat.displayName ?: "Group Chat",
-                    effectiveGroupPhotoPath = chat.effectiveGroupPhotoPath,
+                    effectiveGroupPhotoPath = unifiedChat?.effectiveAvatarPath,
                     participants = participantsByGuid[chat.guid] ?: emptyList()
                 )
             }
 
-            // Build set of current eligible group chat GUIDs
-            val currentEligibleGroupGuids = deduplicatedGroupChats.map { it.guid }.toSet()
+            // Build set of current eligible unified chat IDs
+            val currentEligibleUnifiedIds = groupChatsWithParticipants.map { it.unifiedChatId }.toSet()
 
             // Delete contacts for groups that:
             // 1. No longer exist
             // 2. Were previously synced but are now generic/unnamed (migration)
             // 3. Were previously synced but are now inactive >1 year (migration)
             val toDelete = existingContacts.filter { contact ->
-                contact.chatGuid !in currentEligibleGroupGuids
+                contact.unifiedChatId !in currentEligibleUnifiedIds
             }
             for (contact in toDelete) {
                 deleteContact(context, contact.rawContactId)
@@ -247,7 +262,7 @@ object GroupContactSyncManager {
             // Create/update contacts for current eligible groups
             for (groupChat in groupChatsWithParticipants) {
                 val displayName = formatGroupDisplayName(groupChat.displayName)
-                val existing = existingContacts.find { it.chatGuid == groupChat.guid }
+                val existing = existingContacts.find { it.unifiedChatId == groupChat.unifiedChatId }
 
                 // Generate avatar bitmap - prefer chat's photo over participant collage
                 val avatarBitmap = generateGroupAvatar(
@@ -259,16 +274,18 @@ object GroupContactSyncManager {
                 if (existing != null) {
                     // Update if name changed
                     if (existing.displayName != displayName) {
-                        updateContactName(context, existing.rawContactId, displayName)
+                        updateContactName(context, existing.rawContactId, displayName, groupChat.unifiedChatId)
                         Timber.d("Updated contact name: ${existing.displayName} -> $displayName")
                     }
                     // Always update the photo (in case participants changed)
                     updateContactPhoto(context, existing.rawContactId, avatarBitmap)
-                    // Ensure IM row exists (migration for contacts created before IM support)
-                    ensureImRowExists(context, existing.rawContactId, groupChat.guid)
+                    // Ensure IM row has correct unified chat ID (migration from chat GUID)
+                    ensureImRowExists(context, existing.rawContactId, groupChat.unifiedChatId)
+                    // Ensure custom data row has correct unified chat ID (migration from chat GUID)
+                    ensureCustomDataRowUpdated(context, existing.rawContactId, groupChat.unifiedChatId)
                 } else {
                     // Create new contact with photo
-                    createGroupContact(context, account, groupChat.guid, displayName, avatarBitmap)
+                    createGroupContact(context, account, groupChat.unifiedChatId, displayName, avatarBitmap)
                     Timber.d("Created contact for group: $displayName")
                 }
 
@@ -387,19 +404,21 @@ object GroupContactSyncManager {
 
     /**
      * Formats the display name for a group contact.
-     * Format: "Group Name (BothBubbles)"
+     * Uses the group name as-is for cleaner display in Contacts app.
      */
     private fun formatGroupDisplayName(groupName: String): String {
-        return "$groupName (BothBubbles)"
+        return groupName
     }
 
     /**
      * Creates a new contact for a group chat.
+     *
+     * @param unifiedChatId The unified chat ID - stable identifier for the conversation
      */
     private fun createGroupContact(
         context: Context,
         account: Account,
-        chatGuid: String,
+        unifiedChatId: String,
         displayName: String,
         avatarBitmap: Bitmap?
     ) {
@@ -429,12 +448,12 @@ object GroupContactSyncManager {
                 .build()
         )
 
-        // Add custom data row with chat GUID (for our intent handler when tapped in Contacts app)
+        // Add custom data row with unified chat ID (for our intent handler when tapped in Contacts app)
         ops.add(
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                 .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
                 .withValue(ContactsContract.Data.MIMETYPE, MIME_TYPE_GROUP_CHAT)
-                .withValue(ContactsContract.Data.DATA1, chatGuid)
+                .withValue(ContactsContract.Data.DATA1, unifiedChatId)
                 .withValue(ContactsContract.Data.DATA2, "Send Message")
                 .withValue(ContactsContract.Data.DATA3, displayName)
                 .build()
@@ -442,6 +461,7 @@ object GroupContactSyncManager {
 
         // Add IM data row - this is what Google Assistant uses to identify messageable contacts
         // Without this, Google Assistant won't recognize these contacts for "send a message to X" commands
+        // We store the unified chat ID which is the stable identifier for the conversation
         ops.add(
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                 .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
@@ -449,7 +469,7 @@ object GroupContactSyncManager {
                     ContactsContract.Data.MIMETYPE,
                     ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
                 )
-                .withValue(ContactsContract.CommonDataKinds.Im.DATA, chatGuid)
+                .withValue(ContactsContract.CommonDataKinds.Im.DATA, unifiedChatId)
                 .withValue(
                     ContactsContract.CommonDataKinds.Im.PROTOCOL,
                     ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM
@@ -523,26 +543,44 @@ object GroupContactSyncManager {
     }
 
     /**
-     * Ensures an IM data row exists for a contact.
+     * Ensures an IM data row exists for a contact with the correct unified chat ID.
      * This is needed for Google Assistant to recognize the contact as "messageable".
-     * Migration: contacts created before IM support won't have this row.
+     * Migration: contacts created before IM support or with old chat GUID format need updating.
      */
-    private fun ensureImRowExists(context: Context, rawContactId: Long, chatGuid: String) {
-        // Check if IM row already exists
-        val exists = context.contentResolver.query(
+    private fun ensureImRowExists(context: Context, rawContactId: Long, unifiedChatId: String) {
+        // Check if IM row already exists with correct unified chat ID
+        val existingImData = context.contentResolver.query(
             ContactsContract.Data.CONTENT_URI,
-            arrayOf(ContactsContract.Data._ID),
+            arrayOf(ContactsContract.Data._ID, ContactsContract.CommonDataKinds.Im.DATA),
             "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
             arrayOf(
                 rawContactId.toString(),
                 ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
             ),
             null
-        )?.use { cursor -> cursor.count > 0 } ?: false
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                cursor.getString(1) // IM.DATA value
+            } else null
+        }
 
-        if (exists) return
+        // If exists with correct ID, nothing to do
+        if (existingImData == unifiedChatId) return
 
-        // Add IM row
+        // Delete existing IM row if it has wrong data (migration from chat GUID to unified ID)
+        if (existingImData != null) {
+            context.contentResolver.delete(
+                ContactsContract.Data.CONTENT_URI,
+                "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(
+                    rawContactId.toString(),
+                    ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
+                )
+            )
+            Timber.d("Deleted old IM row for contact $rawContactId (migrating to unified ID)")
+        }
+
+        // Add IM row with unified chat ID
         try {
             val ops = ArrayList<ContentProviderOperation>()
             ops.add(
@@ -552,7 +590,7 @@ object GroupContactSyncManager {
                         ContactsContract.Data.MIMETYPE,
                         ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
                     )
-                    .withValue(ContactsContract.CommonDataKinds.Im.DATA, chatGuid)
+                    .withValue(ContactsContract.CommonDataKinds.Im.DATA, unifiedChatId)
                     .withValue(
                         ContactsContract.CommonDataKinds.Im.PROTOCOL,
                         ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM
@@ -562,7 +600,7 @@ object GroupContactSyncManager {
                     .build()
             )
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
-            Timber.d("Added IM row for contact $rawContactId (migration)")
+            Timber.d("Added/updated IM row for contact $rawContactId with unified ID")
         } catch (e: Exception) {
             Timber.e(e, "Failed to add IM row for contact $rawContactId")
         }
@@ -583,7 +621,8 @@ object GroupContactSyncManager {
     private fun updateContactName(
         context: Context,
         rawContactId: Long,
-        newDisplayName: String
+        newDisplayName: String,
+        unifiedChatId: String
     ) {
         val ops = ArrayList<ContentProviderOperation>()
 
@@ -601,13 +640,14 @@ object GroupContactSyncManager {
                 .build()
         )
 
-        // Also update the custom data row
+        // Also update the custom data row (DATA1 = unifiedChatId, DATA3 = displayName)
         ops.add(
             ContentProviderOperation.newUpdate(ContactsContract.Data.CONTENT_URI)
                 .withSelection(
                     "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
                     arrayOf(rawContactId.toString(), MIME_TYPE_GROUP_CHAT)
                 )
+                .withValue(ContactsContract.Data.DATA1, unifiedChatId)
                 .withValue(ContactsContract.Data.DATA3, newDisplayName)
                 .build()
         )
@@ -616,6 +656,41 @@ object GroupContactSyncManager {
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
         } catch (e: Exception) {
             Timber.e(e, "Failed to update contact name")
+        }
+    }
+
+    /**
+     * Ensures the custom data row (MIME_TYPE_GROUP_CHAT) has the correct unified chat ID.
+     * Migration: contacts created with old chat GUID format need updating.
+     */
+    private fun ensureCustomDataRowUpdated(context: Context, rawContactId: Long, unifiedChatId: String) {
+        // Check current DATA1 value
+        val currentData1 = context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data.DATA1),
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(rawContactId.toString(), MIME_TYPE_GROUP_CHAT),
+            null
+        )?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+
+        // If already correct, nothing to do
+        if (currentData1 == unifiedChatId) return
+
+        // Update DATA1 to unified chat ID
+        try {
+            context.contentResolver.update(
+                ContactsContract.Data.CONTENT_URI,
+                android.content.ContentValues().apply {
+                    put(ContactsContract.Data.DATA1, unifiedChatId)
+                },
+                "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+                arrayOf(rawContactId.toString(), MIME_TYPE_GROUP_CHAT)
+            )
+            Timber.d("Updated custom data row for contact $rawContactId to unified ID")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to update custom data row for contact $rawContactId")
         }
     }
 
@@ -642,7 +717,7 @@ object GroupContactSyncManager {
 
         val projection = arrayOf(
             ContactsContract.Data.RAW_CONTACT_ID,
-            ContactsContract.Data.DATA1, // chatGuid
+            ContactsContract.Data.DATA1, // unifiedChatId (or legacy chatGuid for migration)
             ContactsContract.Data.DATA3  // displayName
         )
 
@@ -673,7 +748,7 @@ object GroupContactSyncManager {
                 contacts.add(
                     SyncedContact(
                         rawContactId = cursor.getLong(rawContactIdIdx),
-                        chatGuid = cursor.getString(data1Idx) ?: "",
+                        unifiedChatId = cursor.getString(data1Idx) ?: "",
                         displayName = cursor.getString(data3Idx) ?: ""
                     )
                 )
@@ -704,7 +779,7 @@ object GroupContactSyncManager {
 
     private data class SyncedContact(
         val rawContactId: Long,
-        val chatGuid: String,
+        val unifiedChatId: String,
         val displayName: String
     )
 }

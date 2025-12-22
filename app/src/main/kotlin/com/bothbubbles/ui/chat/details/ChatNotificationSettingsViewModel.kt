@@ -21,6 +21,7 @@ import javax.inject.Inject
 data class ChatNotificationSettingsUiState(
     val chat: ChatEntity? = null,
     val participants: List<HandleEntity> = emptyList(),
+    val notificationsEnabled: Boolean = true,
     val isLoading: Boolean = true
 ) {
     val displayName: String
@@ -28,9 +29,6 @@ data class ChatNotificationSettingsUiState(
             ?: participants.firstOrNull()?.displayName
             ?: chat?.chatIdentifier
             ?: ""
-
-    val notificationsEnabled: Boolean
-        get() = chat?.notificationsEnabled ?: true
 }
 
 /**
@@ -51,13 +49,23 @@ class ChatNotificationSettingsViewModel @Inject constructor(
     private val route: Screen.ChatNotificationSettings = savedStateHandle.toRoute()
     val chatGuid: String = route.chatGuid
 
+    private val _notificationsEnabled = kotlinx.coroutines.flow.MutableStateFlow(true)
+
+    init {
+        viewModelScope.launch {
+            _notificationsEnabled.value = chatRepository.getNotificationsEnabled(chatGuid)
+        }
+    }
+
     val uiState: StateFlow<ChatNotificationSettingsUiState> = combine(
         chatRepository.observeChat(chatGuid),
-        chatRepository.observeParticipantsForChat(chatGuid)
-    ) { chat, participants ->
+        chatRepository.observeParticipantsForChat(chatGuid),
+        _notificationsEnabled
+    ) { chat, participants, notificationsEnabled ->
         ChatNotificationSettingsUiState(
             chat = chat,
             participants = participants,
+            notificationsEnabled = notificationsEnabled,
             isLoading = false
         )
     }.stateIn(
@@ -72,6 +80,7 @@ class ChatNotificationSettingsViewModel @Inject constructor(
      * independent of the Android channel settings.
      */
     fun setNotificationsEnabled(enabled: Boolean) {
+        _notificationsEnabled.value = enabled
         viewModelScope.launch {
             chatRepository.setNotificationsEnabled(chatGuid, enabled)
         }

@@ -13,6 +13,7 @@ import androidx.work.WorkerParameters
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
@@ -47,6 +48,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val settingsDataStore: SettingsDataStore,
     private val notificationService: NotificationService,
     private val appLifecycleTracker: AppLifecycleTracker,
@@ -203,12 +205,15 @@ class BackgroundSyncWorker @AssistedInject constructor(
         messages: List<com.bothbubbles.data.local.db.entity.MessageEntity>,
         previousNewestTimestamp: Long
     ) {
+        // Look up unified chat for notification settings
+        val unifiedChat = chat.unifiedChatId?.let { unifiedChatDao.getById(it) }
+
         // Check notification settings for this chat
-        if (chat.notificationsEnabled == false) {
+        if (unifiedChat?.notificationsEnabled == false) {
             Timber.d("Notifications disabled for chat ${chat.guid}")
             return
         }
-        if (chat.isSnoozed) {
+        if (unifiedChat?.isSnoozed == true) {
             Timber.d("Chat ${chat.guid} is snoozed")
             return
         }
@@ -262,7 +267,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
                     avatarUri = senderAvatarUri,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
-                    groupAvatarPath = chat.effectiveGroupPhotoPath,
+                    groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                     subject = message.subject
                 )
             )

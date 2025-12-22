@@ -11,10 +11,15 @@ import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.ContactCalendarAssociation
+import com.bothbubbles.data.repository.ContactCalendarRepository
 import com.bothbubbles.data.repository.Life360Repository
+import com.bothbubbles.services.calendar.DeviceCalendar
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.life360.Life360Service
@@ -39,12 +44,14 @@ import javax.inject.Inject
 
 data class ConversationDetailsUiState(
     val chat: ChatEntity? = null,
+    val unifiedChat: UnifiedChatEntity? = null,
     val participants: List<HandleEntity> = emptyList(),
     val imageCount: Int = 0,
     val otherMediaCount: Int = 0,
     val recentImages: List<AttachmentEntity> = emptyList(),
     val isContactStarred: Boolean = false,
     val discordChannelId: String? = null,
+    val calendarAssociation: ContactCalendarAssociation? = null,
     val life360Members: List<Life360Member> = emptyList(),
     val isLoading: Boolean = true,
     val error: String? = null
@@ -69,13 +76,13 @@ data class ConversationDetailsUiState(
         }
 
     val isMuted: Boolean
-        get() = chat?.muteType != null
+        get() = unifiedChat?.notificationsEnabled == false
 
     val isPinned: Boolean
-        get() = chat?.isPinned == true
+        get() = unifiedChat?.isPinned == true
 
     val isArchived: Boolean
-        get() = chat?.isArchived == true
+        get() = unifiedChat?.isArchived == true
 
     val isIMessage: Boolean
         get() = chat?.isIMessage == true
@@ -84,10 +91,10 @@ data class ConversationDetailsUiState(
         get() = chat?.isLocalSms == true || chat?.isTextForwarding == true
 
     val isSnoozed: Boolean
-        get() = chat?.isSnoozed == true
+        get() = unifiedChat?.isSnoozed == true
 
     val snoozeUntil: Long?
-        get() = chat?.snoozeUntil
+        get() = unifiedChat?.snoozeUntil
 
     /**
      * Whether the first participant is a saved contact.
@@ -108,9 +115,11 @@ data class ConversationDetailsUiState(
 class ConversationDetailsViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val chatRepository: ChatRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val attachmentRepository: AttachmentRepository,
     private val androidContactsService: AndroidContactsService,
     private val discordContactService: DiscordContactService,
+    private val calendarRepository: ContactCalendarRepository,
     private val life360Repository: Life360Repository,
     private val life360Service: Life360Service,
     private val featurePreferences: FeaturePreferences
@@ -142,34 +151,62 @@ class ConversationDetailsViewModel @Inject constructor(
             life360Repository.observeMembersByPhoneNumbers(addresses)
         }
 
+    // Observe unified chat for UI state properties (pinned, archived, snoozed, etc.)
+    private val unifiedChatFlow = chatRepository.observeChat(chatGuid)
+        .flatMapLatest { chat ->
+            val unifiedId = chat?.unifiedChatId
+            if (unifiedId != null) {
+                unifiedChatRepository.observeChat(unifiedId)
+            } else {
+                flowOf(null)
+            }
+        }
+
+    // Observe calendar association for the first participant
+    private val calendarAssociationFlow = chatRepository.observeParticipantsForChat(chatGuid)
+        .flatMapLatest { participants ->
+            val address = participants.firstOrNull()?.address
+            if (address != null) {
+                calendarRepository.observeAssociation(address)
+            } else {
+                flowOf(null)
+            }
+        }
+
     val uiState: StateFlow<ConversationDetailsUiState> = combine(
         chatRepository.observeChat(chatGuid),
+        unifiedChatFlow,
         chatRepository.observeParticipantsForChat(chatGuid),
         attachmentRepository.observeImageCountForChat(chatGuid),
         attachmentRepository.observeOtherMediaCountForChat(chatGuid),
         attachmentRepository.observeRecentImagesForChat(chatGuid, 5),
         _isContactStarred,
         _discordChannelId,
+        calendarAssociationFlow,
         life360MembersFlow
     ) { values ->
         @Suppress("UNCHECKED_CAST")
         val chat = values[0] as? ChatEntity
-        val participants = values[1] as? List<HandleEntity> ?: emptyList()
-        val imageCount = values[2] as? Int ?: 0
-        val otherMediaCount = values[3] as? Int ?: 0
-        val recentImages = values[4] as? List<AttachmentEntity> ?: emptyList()
-        val isStarred = values[5] as? Boolean ?: false
-        val discordChannelId = values[6] as? String
-        val life360Members = values[7] as? List<Life360Member> ?: emptyList()
+        val unifiedChat = values[1] as? UnifiedChatEntity
+        val participants = values[2] as? List<HandleEntity> ?: emptyList()
+        val imageCount = values[3] as? Int ?: 0
+        val otherMediaCount = values[4] as? Int ?: 0
+        val recentImages = values[5] as? List<AttachmentEntity> ?: emptyList()
+        val isStarred = values[6] as? Boolean ?: false
+        val discordChannelId = values[7] as? String
+        val calendarAssociation = values[8] as? ContactCalendarAssociation
+        val life360Members = values[9] as? List<Life360Member> ?: emptyList()
 
         ConversationDetailsUiState(
             chat = chat,
+            unifiedChat = unifiedChat,
             participants = participants,
             imageCount = imageCount,
             otherMediaCount = otherMediaCount,
             recentImages = recentImages,
             isContactStarred = isStarred,
             discordChannelId = discordChannelId,
+            calendarAssociation = calendarAssociation,
             life360Members = life360Members,
             isLoading = false
         )
@@ -212,36 +249,42 @@ class ConversationDetailsViewModel @Inject constructor(
     fun togglePin() {
         viewModelScope.launch {
             val currentState = uiState.value
+            val unifiedId = currentState.unifiedChat?.id ?: return@launch
             val newPinned = !currentState.isPinned
-            chatRepository.setPinned(chatGuid, newPinned)
+            unifiedChatRepository.updatePinStatus(unifiedId, newPinned, null)
         }
     }
 
     fun toggleMute() {
         viewModelScope.launch {
             val currentState = uiState.value
+            val unifiedId = currentState.unifiedChat?.id ?: return@launch
             val newMuted = !currentState.isMuted
-            chatRepository.setMuted(chatGuid, newMuted)
+            unifiedChatRepository.updateNotificationsEnabled(unifiedId, !newMuted)
         }
     }
 
     fun snoozeChat(durationMs: Long) {
         viewModelScope.launch {
-            chatRepository.snoozeChat(chatGuid, durationMs)
+            val unifiedId = uiState.value.unifiedChat?.id ?: return@launch
+            val snoozeUntil = System.currentTimeMillis() + durationMs
+            unifiedChatRepository.updateSnoozeUntil(unifiedId, snoozeUntil)
         }
     }
 
     fun unsnoozeChat() {
         viewModelScope.launch {
-            chatRepository.unsnoozeChat(chatGuid)
+            val unifiedId = uiState.value.unifiedChat?.id ?: return@launch
+            unifiedChatRepository.updateSnoozeUntil(unifiedId, null)
         }
     }
 
     fun toggleArchive() {
         viewModelScope.launch {
             val currentState = uiState.value
+            val unifiedId = currentState.unifiedChat?.id ?: return@launch
             val newArchived = !currentState.isArchived
-            chatRepository.setArchived(chatGuid, newArchived)
+            unifiedChatRepository.updateArchiveStatus(unifiedId, newArchived)
             if (newArchived) {
                 _actionState.value = ActionState.Archived
             }
@@ -258,12 +301,13 @@ class ConversationDetailsViewModel @Inject constructor(
     fun blockContact() {
         viewModelScope.launch {
             val address = uiState.value.firstParticipantAddress
+            val unifiedId = uiState.value.unifiedChat?.id
             if (address.isNotEmpty()) {
                 // Block using Android's BlockedNumberContract
                 val blocked = androidContactsService.blockNumber(address)
                 if (blocked) {
                     // Also archive the chat
-                    chatRepository.setArchived(chatGuid, true)
+                    unifiedId?.let { unifiedChatRepository.updateArchiveStatus(it, true) }
                     _actionState.value = ActionState.Blocked
                 }
             }
@@ -454,6 +498,38 @@ class ConversationDetailsViewModel @Inject constructor(
             true // WhatsApp is commonly installed
         } catch (e: Exception) {
             false
+        }
+    }
+
+    // ===== Calendar Association =====
+
+    /**
+     * Get available device calendars for the picker.
+     */
+    suspend fun getAvailableCalendars(): List<DeviceCalendar> =
+        calendarRepository.getAvailableCalendars()
+
+    /**
+     * Set calendar association for the participant.
+     */
+    fun setCalendarAssociation(calendar: DeviceCalendar) {
+        val address = uiState.value.firstParticipantAddress
+        if (address.isEmpty()) return
+
+        viewModelScope.launch {
+            calendarRepository.setAssociation(address, calendar)
+        }
+    }
+
+    /**
+     * Clear calendar association for the participant.
+     */
+    fun clearCalendarAssociation() {
+        val address = uiState.value.firstParticipantAddress
+        if (address.isEmpty()) return
+
+        viewModelScope.launch {
+            calendarRepository.removeAssociation(address)
         }
     }
 

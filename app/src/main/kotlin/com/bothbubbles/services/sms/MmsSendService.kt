@@ -7,6 +7,7 @@ import android.net.Uri
 import android.provider.Telephony
 import android.telephony.SmsManager
 import timber.log.Timber
+import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -31,6 +32,7 @@ import javax.inject.Singleton
 class MmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
+    private val chatDao: ChatDao,
     private val smsPermissionHelper: SmsPermissionHelper,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
@@ -71,6 +73,9 @@ class MmsSendService @Inject constructor(
             val messageGuid = providerMessage?.let { "mms-${it.id}" }
                 ?: "mms-outgoing-$timestamp"
 
+            // Look up unifiedChatId for fallback message creation
+            val unifiedChatId = chatDao.getChatByGuid(chatGuid)?.unifiedChatId
+
             val message: MessageEntity
             if (tempGuid != null) {
                 // Update existing temp message with the real MMS GUID
@@ -93,6 +98,7 @@ class MmsSendService @Inject constructor(
                     message = MessageEntity(
                         guid = messageGuid,
                         chatGuid = chatGuid,
+                        unifiedChatId = unifiedChatId,
                         text = text,
                         subject = subject,
                         dateCreated = timestamp,
@@ -111,6 +117,7 @@ class MmsSendService @Inject constructor(
                 message = MessageEntity(
                     guid = messageGuid,
                     chatGuid = chatGuid,
+                    unifiedChatId = unifiedChatId,
                     text = text,
                     subject = subject,
                     dateCreated = timestamp,

@@ -6,6 +6,7 @@ import android.provider.Telephony
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.services.sms.SmsContentProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,6 +18,7 @@ import kotlinx.coroutines.withContext
 class SmsMessageOperations(
     private val context: Context,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val messageDao: MessageDao,
     private val tombstoneDao: TombstoneDao,
     private val smsContentProvider: SmsContentProvider
@@ -35,8 +37,12 @@ class SmsMessageOperations(
                 smsContentProvider.markThreadAsRead(threadId)  // SMS
                 smsContentProvider.markMmsAsRead(threadId)     // MMS
             }
-            chatDao.updateUnreadCount(chatGuid, 0)
-            chatDao.updateUnreadStatus(chatGuid, false)
+            // Mark the unified chat as read
+            val chat = chatDao.getChatByGuid(chatGuid)
+            chat?.unifiedChatId?.let { unifiedId ->
+                unifiedChatDao.markAsRead(unifiedId)
+            }
+            Unit
         }
     }
 

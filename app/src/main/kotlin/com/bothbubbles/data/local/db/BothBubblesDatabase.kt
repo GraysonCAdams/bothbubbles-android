@@ -8,23 +8,24 @@ import com.bothbubbles.data.local.db.dao.AutoShareContactDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.ChatQueryDao
+import com.bothbubbles.data.local.db.dao.ContactCalendarDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.IMessageCacheDao
 import com.bothbubbles.data.local.db.dao.Life360Dao
 import com.bothbubbles.data.local.db.dao.LinkPreviewDao
-import com.bothbubbles.data.local.db.dao.PopularChatsDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import com.bothbubbles.data.local.db.dao.PendingAttachmentDao
 import com.bothbubbles.data.local.db.dao.PendingMessageDao
 import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
+import com.bothbubbles.data.local.db.dao.PopularChatsDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
-import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.AutoRespondedSenderEntity
 import com.bothbubbles.data.local.db.entity.AutoShareContactEntity
@@ -45,6 +46,7 @@ import com.bothbubbles.data.local.db.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 import com.bothbubbles.data.local.db.entity.MessageEditHistoryEntity
+import com.bothbubbles.core.model.entity.ContactCalendarAssociationEntity
 import com.bothbubbles.core.model.entity.Life360MemberEntity
 
 /**
@@ -79,9 +81,10 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         AutoShareContactEntity::class,
         TombstoneEntity::class,
         Life360MemberEntity::class,
-        MessageEditHistoryEntity::class
+        MessageEditHistoryEntity::class,
+        ContactCalendarAssociationEntity::class
     ],
-    version = 51,
+    version = 54,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -109,6 +112,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun life360Dao(): Life360Dao
     abstract fun popularChatsDao(): PopularChatsDao
     abstract fun messageEditHistoryDao(): MessageEditHistoryDao
+    abstract fun contactCalendarDao(): ContactCalendarDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

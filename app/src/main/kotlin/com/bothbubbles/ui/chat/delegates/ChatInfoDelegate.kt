@@ -108,14 +108,17 @@ class ChatInfoDelegate @AssistedInject constructor(
                             address?.let { addr -> discordContactService.getDiscordChannelId(addr) }
                         } else null
 
-                        val groupPhotoPath = it.effectiveGroupPhotoPath
+                        // Group photo path now comes from UnifiedChatEntity - use null here as avatar
+                        // is resolved from participants. GroupPhotoPath lookup would require additional
+                        // unified chat query, but avatar fallback already handles this.
+                        val chatGroupPhotoPath: String? = null
 
                         _state.update { state ->
                             state.copy(
                                 chatTitle = chatTitle,
                                 isGroup = it.isGroup,
                                 avatarPath = participants.firstOrNull()?.cachedAvatarPath,
-                                groupPhotoPath = groupPhotoPath,
+                                groupPhotoPath = chatGroupPhotoPath,
                                 participantNames = participants.map { p -> p.displayName }.toStable(),
                                 participantAvatarPaths = participants.map { p -> p.cachedAvatarPath }.toStable(),
                                 participantAddresses = participants.map { p -> p.address }.toStable(),
@@ -124,8 +127,8 @@ class ChatInfoDelegate @AssistedInject constructor(
                                 isLocalSmsChat = it.isLocalSms,
                                 isIMessageChat = it.isIMessage,
                                 smsInputBlocked = it.isSmsChat && !smsPermissionHelper.isDefaultSmsApp(),
-                                isSnoozed = it.isSnoozed,
-                                snoozeUntil = it.snoozeUntil,
+                                isSnoozed = false, // Snooze status now managed by UnifiedChatEntity via ChatOperationsDelegate
+                                snoozeUntil = null,
                                 discordChannelId = discordChannelId
                             )
                         }

@@ -183,12 +183,12 @@ class ComposeConversationDelegate @Inject constructor(
                 "sms;-;$normalizedAddress"
             )
 
-            // Find existing chat with messages
+            // Find existing chat with messages (check latestMessageDate as proxy for having messages)
             var bestChat: ChatEntity? = null
             for (guid in possibleGuids) {
                 val chat = chatRepository.getChat(guid)
                 if (chat != null) {
-                    if (chat.lastMessageText != null) {
+                    if (chat.latestMessageDate != null) {
                         bestChat = chat
                         break
                     }
@@ -198,7 +198,7 @@ class ComposeConversationDelegate @Inject constructor(
                 }
             }
 
-            if (bestChat != null && bestChat.lastMessageText != null) {
+            if (bestChat != null && bestChat.latestMessageDate != null) {
                 // Found existing conversation with messages
                 loadMessagesForChat(bestChat.guid)
             } else if (bestChat != null) {
@@ -226,7 +226,7 @@ class ComposeConversationDelegate @Inject constructor(
 
         try {
             val chat = chatRepository.getChat(chatGuid)
-            if (chat != null && chat.lastMessageText != null) {
+            if (chat != null && chat.latestMessageDate != null) {
                 loadMessagesForChat(chatGuid)
             } else {
                 // Group chat with no messages - resolve merged GUIDs for consistent navigation

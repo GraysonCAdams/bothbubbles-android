@@ -79,8 +79,8 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
 
         // Use cached latest message from unified chat
         val latestTimestamp = unifiedChat.latestMessageDate ?: 0L
-        val rawMessageText = unifiedChat.cachedLatestMessageText ?: ""
-        val isFromMe = unifiedChat.cachedLatestMessageIsFromMe
+        val rawMessageText = unifiedChat.latestMessageText ?: ""
+        val isFromMe = unifiedChat.latestMessageIsFromMe
 
         // Use the source chat for display info
         val primaryChat = chats.find { it.guid == unifiedChat.sourceId } ?: chats.first()
@@ -94,7 +94,6 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
 
         // Determine display name using unified chat's cached values
         val displayName = unifiedChat.displayName?.takeIf { it.isNotBlank() }
-            ?: unifiedChat.cachedContactName?.takeIf { it.isNotBlank() }
             ?: primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
             ?: primaryChat.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
             ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
@@ -105,14 +104,14 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         val anyTyping = chatGuids.any { it in typingChats }
 
         // Get attachments for the latest message if it has any
-        val attachments = if (unifiedChat.cachedLatestMessageHasAttachments && unifiedChat.cachedLatestMessageGuid != null) {
-            attachmentRepository.getAttachmentsForMessage(unifiedChat.cachedLatestMessageGuid!!)
+        val attachments = if (unifiedChat.latestMessageHasAttachments && unifiedChat.latestMessageGuid != null) {
+            attachmentRepository.getAttachmentsForMessage(unifiedChat.latestMessageGuid!!)
         } else emptyList()
         val firstAttachment = attachments.firstOrNull()
         val attachmentCount = attachments.size
 
         // Check for invisible ink effect
-        val latestMessage = unifiedChat.cachedLatestMessageGuid?.let { messageRepository.getMessageByGuid(it) }
+        val latestMessage = unifiedChat.latestMessageGuid?.let { messageRepository.getMessageByGuid(it) }
         val isInvisibleInk = latestMessage?.expressiveSendStyleId?.contains("invisibleink", ignoreCase = true) == true
 
         // Determine message type with enhanced detection
@@ -154,7 +153,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         return ConversationUiModel(
             guid = unifiedChat.sourceId,
             displayName = displayName,
-            avatarPath = unifiedChat.cachedAvatarPath ?: primaryParticipant?.cachedAvatarPath,
+            avatarPath = unifiedChat.effectiveAvatarPath ?: primaryParticipant?.cachedAvatarPath,
             lastMessageText = messageText,
             lastMessageTime = formatRelativeTime(latestTimestamp, application),
             lastMessageTimestamp = latestTimestamp,
@@ -179,7 +178,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             category = unifiedChat.category,
             isSnoozed = unifiedChat.isSnoozed,
             snoozeUntil = unifiedChat.snoozeUntil,
-            lastMessageSource = unifiedChat.cachedLatestMessageSource,
+            lastMessageSource = unifiedChat.latestMessageSource,
             mergedChatGuids = chatGuids,
             isMerged = chatGuids.size > 1,
             contactKey = PhoneNumberFormatter.getContactKey(address),

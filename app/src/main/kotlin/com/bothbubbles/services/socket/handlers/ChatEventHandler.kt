@@ -43,16 +43,13 @@ class ChatEventHandler @Inject constructor(
     ) {
         Timber.d("Chat read status changed: ${event.chatGuid}, isRead: ${event.isRead}")
 
+        // Update unified chat's unread status (single source of truth for UI state)
+        val chat = chatDao.getChatByGuid(event.chatGuid)
+        val unifiedChatId = chat?.unifiedChatId
+
         if (event.isRead) {
             // Chat was marked as read (e.g., from another device)
-            chatDao.updateUnreadCount(event.chatGuid, 0)
-            chatDao.updateUnreadStatus(event.chatGuid, false)
-
-            // Also update the unified chat's unread count for badge sync
-            val chat = chatDao.getChatByGuid(event.chatGuid)
-            chat?.unifiedChatId?.let { unifiedChatId ->
-                unifiedChatDao.markAsRead(unifiedChatId)
-            }
+            unifiedChatId?.let { unifiedChatDao.markAsRead(it) }
 
             // Cancel notification for this chat since it was read (possibly on another device)
             // BUT skip if the conversation is currently active (e.g. user is in the bubble)
@@ -62,14 +59,7 @@ class ChatEventHandler @Inject constructor(
             }
         } else {
             // Chat was marked as unread (e.g., user marked as unread from another device)
-            chatDao.updateUnreadCount(event.chatGuid, 1)
-            chatDao.updateUnreadStatus(event.chatGuid, true)
-
-            // Also update the unified chat's unread count for badge sync
-            val chat = chatDao.getChatByGuid(event.chatGuid)
-            chat?.unifiedChatId?.let { unifiedChatId ->
-                unifiedChatDao.updateUnreadCount(unifiedChatId, 1)
-            }
+            unifiedChatId?.let { unifiedChatDao.updateUnreadCount(it, 1) }
         }
 
         // Emit UI refresh event for immediate unread badge update

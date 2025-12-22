@@ -491,9 +491,7 @@ class VoiceMessageService : Service() {
                 chatIdentifier = address,
                 displayName = null,
                 isGroup = false,
-                lastMessageDate = System.currentTimeMillis(),
-                lastMessageText = null,
-                unreadCount = 0
+                latestMessageDate = System.currentTimeMillis()
             )
             chatDao.insertChat(chat)
             Timber.d("Created new chat: $chatGuid")

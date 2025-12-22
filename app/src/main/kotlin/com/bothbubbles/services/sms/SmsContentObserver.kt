@@ -228,7 +228,7 @@ class SmsContentObserver @Inject constructor(
                                     senderAddress = normalizedAddress,
                                     isGroup = false,
                                     avatarUri = senderAvatarUri,
-                                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath
+                                    groupAvatarPath = unifiedChat?.effectiveAvatarPath
                                 )
                             )
                         }
@@ -377,7 +377,7 @@ class SmsContentObserver @Inject constructor(
                                     senderAddress = primaryAddress,
                                     isGroup = isGroup,
                                     avatarUri = senderAvatarUri,
-                                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
+                                    groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                                     attachmentUri = firstMediaAttachment?.dataUri,
                                     attachmentMimeType = firstMediaAttachment?.contentType
                                 )

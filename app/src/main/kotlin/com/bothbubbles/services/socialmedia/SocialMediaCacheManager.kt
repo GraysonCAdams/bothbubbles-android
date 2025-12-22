@@ -215,11 +215,11 @@ class SocialMediaCacheManager @Inject constructor(
         videoUrl: String,
         originalUrl: String,
         messageGuid: String,
-        chatGuid: String? = null,
+        chatGuid: String?,
         platform: SocialMediaPlatform,
-        senderName: String? = null,
-        senderAddress: String? = null,
-        sentTimestamp: Long = 0L
+        senderName: String?,
+        senderAddress: String?,
+        sentTimestamp: Long
     ): StateFlow<DownloadProgress> {
         val hash = hashUrl(originalUrl)
         val progressFlow = MutableStateFlow(DownloadProgress())

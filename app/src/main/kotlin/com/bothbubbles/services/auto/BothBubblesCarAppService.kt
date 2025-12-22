@@ -12,6 +12,7 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
@@ -40,6 +41,9 @@ class BothBubblesCarAppService : CarAppService() {
 
     @Inject
     lateinit var chatDao: ChatDao
+
+    @Inject
+    lateinit var unifiedChatDao: UnifiedChatDao
 
     @Inject
     lateinit var messageDao: MessageDao
@@ -80,6 +84,7 @@ class BothBubblesCarAppService : CarAppService() {
     override fun onCreateSession(sessionInfo: SessionInfo): Session {
         return BothBubblesAutoSession(
             chatDao = chatDao,
+            unifiedChatDao = unifiedChatDao,
             messageDao = messageDao,
             handleDao = handleDao,
             chatRepository = chatRepository,
@@ -100,6 +105,7 @@ class BothBubblesCarAppService : CarAppService() {
  */
 class BothBubblesAutoSession(
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
@@ -114,6 +120,7 @@ class BothBubblesAutoSession(
         return MessagingRootScreen(
             carContext = carContext,
             chatDao = chatDao,
+            unifiedChatDao = unifiedChatDao,
             messageDao = messageDao,
             handleDao = handleDao,
             chatRepository = chatRepository,

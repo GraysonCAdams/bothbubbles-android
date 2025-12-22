@@ -88,8 +88,6 @@ class IncomingMessageHandler @Inject constructor(
         // We successfully inserted - safe to update chat metadata
         // Only this thread will execute this block for this message
         if (!message.isFromMe) {
-            chatDao.updateLastMessage(chatGuid, message.dateCreated, message.text)
-
             // Update unified chat's unread count and latest message
             if (unifiedChatId != null) {
                 unifiedChatDao.incrementUnreadCount(unifiedChatId)
@@ -132,12 +130,13 @@ class IncomingMessageHandler @Inject constructor(
 
         // Background download social media videos if enabled
         // Only process incoming messages (not from self) that contain text
-        if (!message.isFromMe && !message.text.isNullOrBlank()) {
+        val messageText = message.text
+        if (!message.isFromMe && !messageText.isNullOrBlank()) {
             triggerSocialMediaBackgroundDownload(
                 messageGuid = message.guid,
                 chatGuid = chatGuid,
-                text = message.text,
-                senderName = messageDto.handle?.displayName,
+                text = messageText,
+                senderName = messageDto.handle?.formattedAddress,
                 senderAddress = messageDto.handle?.address,
                 timestamp = message.dateCreated
             )
@@ -221,13 +220,18 @@ class IncomingMessageHandler @Inject constructor(
      * Resolve or create the unified chat ID for a chat.
      *
      * Strategy:
-     * 1. Check if chat already has a unified_chat_id
-     * 2. Try to find existing unified chat by normalized address
-     * 3. Create new unified chat if none exists
+     * 1. Skip unified chat creation for group chats (they don't merge)
+     * 2. Check if chat already has a unified_chat_id
+     * 3. Try to find existing unified chat by normalized address
+     * 4. Create new unified chat if none exists
      */
     private suspend fun resolveUnifiedChatId(chatGuid: String, messageDto: MessageDto): String? {
         // Try to get chat with its unified_chat_id
         val chat = chatDao.getChatByGuid(chatGuid)
+
+        // Group chats should NOT be linked to unified chats
+        // Unified chats are for merging 1:1 iMessage/SMS conversations
+        if (chat?.isGroup == true) return null
 
         // If chat already has a unified_chat_id, use it
         chat?.unifiedChatId?.let { return it }

@@ -3,6 +3,7 @@ package com.bothbubbles.services.fcm
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.data.local.db.entity.displayName
@@ -51,6 +52,7 @@ class FcmMessageHandler @Inject constructor(
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val androidContactsService: AndroidContactsService,
     private val messageDeduplicator: MessageDeduplicator,
     private val activeConversationManager: ActiveConversationManager,
@@ -195,9 +197,10 @@ class FcmMessageHandler @Inject constructor(
 
         // Get chat info from local database
         val chat = chatDao.getChatByGuid(chatGuid)
+        val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
 
         // Check if notifications are disabled for this chat
-        if (chat?.notificationsEnabled == false) {
+        if (unifiedChat?.notificationsEnabled == false) {
             Timber.d("Notifications disabled for chat $chatGuid, skipping FCM notification")
             // Must still sync to save the message even if we don't notify
             triggerChatSync(chatGuid)
@@ -205,7 +208,7 @@ class FcmMessageHandler @Inject constructor(
         }
 
         // Check if chat is snoozed
-        if (chat?.isSnoozed == true) {
+        if (unifiedChat?.isSnoozed == true) {
             Timber.d("Chat $chatGuid is snoozed, skipping FCM notification")
             // Must still sync to save the message even if we don't notify
             triggerChatSync(chatGuid)
@@ -262,7 +265,7 @@ class FcmMessageHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
-                groupAvatarPath = chat?.effectiveGroupPhotoPath,
+                groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                 subject = messageSubject
             )
         )
@@ -372,13 +375,12 @@ class FcmMessageHandler @Inject constructor(
         if (activeConversationManager.isConversationActive(chatGuid)) return
 
         val chat = chatDao.getChatByGuid(chatGuid)
+        val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
         val senderAddress = messageDto.handle?.address
 
         // Check notification settings
-        if (chat?.notificationsEnabled == false) return
-        chat?.snoozeUntil?.let { snoozeUntil ->
-            if (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis()) return
-        }
+        if (unifiedChat?.notificationsEnabled == false) return
+        if (unifiedChat?.isSnoozed == true) return
 
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(senderAddress, null)
         val messageText = messageDto.text ?: return
@@ -416,7 +418,7 @@ class FcmMessageHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
-                groupAvatarPath = chat?.effectiveGroupPhotoPath,
+                groupAvatarPath = unifiedChat?.effectiveAvatarPath,
                 subject = messageDto.subject
             )
         )

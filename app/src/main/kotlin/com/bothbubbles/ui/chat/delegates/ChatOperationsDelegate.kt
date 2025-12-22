@@ -8,6 +8,7 @@ import android.provider.ContactsContract
 import timber.log.Timber
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.services.contacts.ContactBlocker
 import com.bothbubbles.services.contacts.DiscordContactService
 import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
@@ -22,10 +23,13 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -42,6 +46,7 @@ import kotlinx.coroutines.launch
 class ChatOperationsDelegate @AssistedInject constructor(
     private val application: Application,
     private val chatRepository: ChatRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val messageRepository: MessageRepository,
     private val spamRepository: SpamRepository,
     private val spamReportingService: SpamReportingService,
@@ -72,18 +77,28 @@ class ChatOperationsDelegate @AssistedInject constructor(
     }
 
     /**
-     * Observe the chat entity and update state when archive/star/spam status changes.
+     * Observe the unified chat entity and update state when archive/star/spam status changes.
      */
+    @OptIn(ExperimentalCoroutinesApi::class)
     private fun observeChatState() {
         scope.launch {
             chatRepository.observeChat(chatGuid)
                 .filterNotNull()
-                .collect { chat ->
+                .flatMapLatest { chat ->
+                    val unifiedId = chat.unifiedChatId
+                    if (unifiedId != null) {
+                        unifiedChatRepository.observeChat(unifiedId)
+                    } else {
+                        flowOf(null)
+                    }
+                }
+                .filterNotNull()
+                .collect { unifiedChat ->
                     _state.update { it.copy(
-                        isArchived = chat.isArchived,
-                        isStarred = chat.isStarred,
-                        isSpam = chat.isSpam,
-                        isReportedToCarrier = chat.spamReportedToCarrier
+                        isArchived = unifiedChat.isArchived,
+                        isStarred = unifiedChat.isStarred,
+                        isSpam = unifiedChat.isSpam,
+                        isReportedToCarrier = unifiedChat.spamReportedToCarrier
                     )}
                 }
         }

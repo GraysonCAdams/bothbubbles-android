@@ -9,6 +9,7 @@ import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.prefs.FeaturePreferences
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
@@ -40,6 +41,7 @@ import kotlinx.coroutines.launch
 class MessagingRootScreen(
     carContext: CarContext,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val messageDao: MessageDao,
     private val handleDao: HandleDao,
     private val chatRepository: ChatRepository,
@@ -83,6 +85,7 @@ class MessagingRootScreen(
         ConversationListContent(
             carContext = carContext,
             chatDao = chatDao,
+            unifiedChatDao = unifiedChatDao,
             messageDao = messageDao,
             handleDao = handleDao,
             chatRepository = chatRepository,

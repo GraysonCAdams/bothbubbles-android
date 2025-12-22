@@ -9,6 +9,7 @@ import android.provider.Telephony
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
 import timber.log.Timber
+import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -26,6 +27,7 @@ import javax.inject.Singleton
 class SmsSendService @Inject constructor(
     @ApplicationContext private val context: Context,
     private val messageDao: MessageDao,
+    private val chatDao: ChatDao,
     private val smsPermissionHelper: SmsPermissionHelper
 ) {
     companion object {
@@ -61,6 +63,9 @@ class SmsSendService @Inject constructor(
             // Store original address in metadata for retry support
             val initialMetadata = SmsRetryMetadata(originalAddress = address)
 
+            // Look up unifiedChatId for fallback message creation
+            val unifiedChatId = chatDao.getChatByGuid(chatGuid)?.unifiedChatId
+
             val message: MessageEntity
             if (tempGuid != null) {
                 // Update existing temp message with the real SMS GUID
@@ -85,6 +90,7 @@ class SmsSendService @Inject constructor(
                     message = MessageEntity(
                         guid = messageGuid,
                         chatGuid = chatGuid,
+                        unifiedChatId = unifiedChatId,
                         text = text,
                         dateCreated = timestamp,
                         isFromMe = true,
@@ -102,6 +108,7 @@ class SmsSendService @Inject constructor(
                 message = MessageEntity(
                     guid = messageGuid,
                     chatGuid = chatGuid,
+                    unifiedChatId = unifiedChatId,
                     text = text,
                     dateCreated = timestamp,
                     isFromMe = true,

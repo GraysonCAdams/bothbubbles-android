@@ -175,8 +175,8 @@ class ChatCreationDelegate @Inject constructor(
             for (guid in possibleGuids) {
                 val chat = chatRepository.getChat(guid)
                 if (chat != null) {
-                    // Prefer chats that have messages (lastMessageText is not null)
-                    if (chat.lastMessageText != null) {
+                    // Prefer chats that have messages (latestMessageDate is not null)
+                    if (chat.latestMessageDate != null) {
                         Timber.d("Found existing chat with messages: ${chat.guid}")
                         _createdChatGuid.value = chat.guid
                         return ChatCreationResult.Success(chat.guid)
@@ -205,13 +205,8 @@ class ChatCreationDelegate @Inject constructor(
                 guid = newGuid,
                 chatIdentifier = normalizedAddress,
                 displayName = null,
-                isArchived = false,
-                isPinned = false,
                 isGroup = false,
-                hasUnreadMessage = false,
-                unreadCount = 0,
-                lastMessageDate = System.currentTimeMillis(),
-                lastMessageText = null
+                latestMessageDate = null
             )
             chatRepository.insertChat(newChat)
 

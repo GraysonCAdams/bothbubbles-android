@@ -359,13 +359,8 @@ class ComposeViewModel @Inject constructor(
                 guid = newGuid,
                 chatIdentifier = normalizedAddress,
                 displayName = null,
-                isArchived = false,
-                isPinned = false,
                 isGroup = false,
-                hasUnreadMessage = false,
-                unreadCount = 0,
-                lastMessageDate = System.currentTimeMillis(),
-                lastMessageText = null
+                latestMessageDate = null
             )
             chatRepository.insertChat(newChat)
 
