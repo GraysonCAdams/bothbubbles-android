@@ -3,6 +3,7 @@ package com.bothbubbles.services.socket.handlers
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.local.db.entity.rawDisplayName
 import com.bothbubbles.core.network.api.dto.MessageDto
@@ -46,6 +47,7 @@ class MessageEventHandler @Inject constructor(
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val notificationService: NotificationService,
     private val linkPreviewRepository: LinkPreviewRepository,
     private val spamRepository: SpamRepository,
@@ -115,14 +117,17 @@ class MessageEventHandler @Inject constructor(
                 ?: getAttachmentPreviewText(event.message.attachments)
                 ?: ""
 
+            // Get unified chat for notification settings
+            val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
+
             // Check if notifications are disabled for this chat
-            if (chat?.notificationsEnabled == false) {
+            if (unifiedChat?.notificationsEnabled == false) {
                 Timber.i("Notifications disabled for chat ${event.chatGuid}, skipping notification")
                 return
             }
 
             // Check if chat is snoozed - if snoozed, skip notification
-            if (chat?.isSnoozed == true) {
+            if (unifiedChat?.isSnoozed == true) {
                 Timber.i("Chat ${event.chatGuid} is snoozed, skipping notification")
                 return
             }
@@ -212,7 +217,7 @@ class MessageEventHandler @Inject constructor(
                     linkPreviewDomain = linkDomain,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
-                    groupAvatarPath = chat?.effectiveGroupPhotoPath,
+                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
                     subject = savedMessage.subject
                 )
             )
@@ -272,11 +277,12 @@ class MessageEventHandler @Inject constructor(
         val chat = chatDao.getChatByGuid(event.chatGuid)
         val senderAddress = messageDto.handle?.address
 
+        // Get unified chat for notification settings
+        val unifiedChat = chat?.unifiedChatId?.let { unifiedChatDao.getById(it) }
+
         // Check notification settings
-        if (chat?.notificationsEnabled == false) return
-        chat?.snoozeUntil?.let { snoozeUntil ->
-            if (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis()) return
-        }
+        if (unifiedChat?.notificationsEnabled == false) return
+        if (unifiedChat?.isSnoozed == true) return
 
         val (senderName, senderAvatarUri) = resolveSenderNameAndAvatar(messageDto)
         val messageText = messageDto.text ?: return // No text to show
@@ -312,7 +318,7 @@ class MessageEventHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
-                groupAvatarPath = chat?.effectiveGroupPhotoPath,
+                groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
                 subject = messageDto.subject
             )
         )

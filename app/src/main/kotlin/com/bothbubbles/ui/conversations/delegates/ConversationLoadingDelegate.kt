@@ -3,12 +3,12 @@ package com.bothbubbles.ui.conversations.delegates
 import android.app.Application
 import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.data.repository.UnifiedChatGroupRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.ui.conversations.ConversationUiModel
 import com.bothbubbles.ui.conversations.toUiModel
 import com.bothbubbles.util.PerformanceProfiler
@@ -36,7 +36,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
     private val messageRepository: MessageRepository,
     private val attachmentRepository: AttachmentRepository,
     private val linkPreviewRepository: LinkPreviewRepository,
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val unifiedGroupMappingDelegateFactory: UnifiedGroupMappingDelegate.Factory,
     @Assisted private val scope: CoroutineScope
 ) {
@@ -79,9 +79,9 @@ class ConversationLoadingDelegate @AssistedInject constructor(
 
         try {
             // Load up to INITIAL_LOAD_TARGET from each source to guarantee 100 total
-            val queryId1 = PerformanceProfiler.start("DB.getUnifiedGroups")
-            val unifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(INITIAL_LOAD_TARGET, 0)
-            PerformanceProfiler.end(queryId1, "${unifiedGroups.size} groups")
+            val queryId1 = PerformanceProfiler.start("DB.getUnifiedChats")
+            val unifiedChats = unifiedChatRepository.getActiveChats(INITIAL_LOAD_TARGET, 0)
+            PerformanceProfiler.end(queryId1, "${unifiedChats.size} unified chats")
 
             val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
             val groupChats = chatRepository.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
@@ -93,7 +93,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
 
             val buildId = PerformanceProfiler.start("ConversationList.build")
             val allConversations = buildConversationList(
-                unifiedGroups = unifiedGroups,
+                unifiedChats = unifiedChats,
                 groupChats = groupChats,
                 nonGroupChats = nonGroupChats,
                 typingChats = typingChats
@@ -103,7 +103,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             PerformanceProfiler.end(buildId, "${conversations.size} items")
 
             // Check if more data exists beyond what we're showing
-            val totalUnified = unifiedChatGroupRepository.getActiveGroupCount()
+            val totalUnified = unifiedChatRepository.getActiveCount()
             val totalGroupChats = chatRepository.getGroupChatCount()
             val totalNonGroup = chatRepository.getNonGroupChatCount()
             val totalCount = totalUnified + totalGroupChats + totalNonGroup
@@ -135,8 +135,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         val totalLoaded = (currentPage + 1) * PAGE_SIZE
 
         try {
-            // Re-fetch all loaded unified groups
-            val unifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(totalLoaded, 0)
+            // Re-fetch all loaded unified chats
+            val unifiedChats = unifiedChatRepository.getActiveChats(totalLoaded, 0)
 
             // Re-fetch all loaded group chats
             val groupChats = chatRepository.getGroupChatsPaginated(totalLoaded, 0)
@@ -145,7 +145,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             val nonGroupChats = chatRepository.getNonGroupChatsPaginated(totalLoaded, 0)
 
             val conversations = buildConversationList(
-                unifiedGroups = unifiedGroups,
+                unifiedChats = unifiedChats,
                 groupChats = groupChats,
                 nonGroupChats = nonGroupChats,
                 typingChats = typingChats
@@ -162,10 +162,10 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             }
 
             // Check if more data exists
-            val totalUnified = unifiedChatGroupRepository.getActiveGroupCount()
+            val totalUnified = unifiedChatRepository.getActiveCount()
             val totalGroupChats = chatRepository.getGroupChatCount()
             val totalNonGroup = chatRepository.getNonGroupChatCount()
-            val loadedCount = unifiedGroups.size + groupChats.size + nonGroupChats.size
+            val loadedCount = unifiedChats.size + groupChats.size + nonGroupChats.size
             val totalCount = totalUnified + totalGroupChats + totalNonGroup
             val hasMore = loadedCount < totalCount
 
@@ -195,8 +195,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             val nextPage = _currentPage.value + 1
             val offset = nextPage * PAGE_SIZE
 
-            // Load next page of unified groups
-            val moreUnifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(PAGE_SIZE, offset)
+            // Load next page of unified chats
+            val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
 
             // Load next page of group chats
             val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
@@ -205,7 +205,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
             val newConversations = buildConversationList(
-                unifiedGroups = moreUnifiedGroups,
+                unifiedChats = moreUnifiedChats,
                 groupChats = moreGroupChats,
                 nonGroupChats = moreNonGroupChats,
                 typingChats = typingChats
@@ -273,12 +273,12 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                 page++
                 val offset = page * PAGE_SIZE
 
-                val moreUnifiedGroups = unifiedChatGroupRepository.getActiveGroupsPaginated(PAGE_SIZE, offset)
+                val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
                 val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
                 val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
                 val newConversations = buildConversationList(
-                    unifiedGroups = moreUnifiedGroups,
+                    unifiedChats = moreUnifiedChats,
                     groupChats = moreGroupChats,
                     nonGroupChats = moreNonGroupChats,
                     typingChats = typingChats
@@ -336,15 +336,15 @@ class ConversationLoadingDelegate @AssistedInject constructor(
 
     /**
      * Build conversation list from paginated entities.
-     * Converts unified groups, group chats, and orphan 1:1 chats to UI models.
+     * Converts unified chats, group chats, and orphan 1:1 chats to UI models.
      *
      * OPTIMIZATION: Uses batched queries to avoid N+1 problem:
-     * 1. Collect all chat GUIDs upfront
-     * 2. Batch fetch all latest messages in one query
+     * 1. Collect all chat GUIDs upfront via foreign key lookup
+     * 2. Batch fetch all chats and participants
      * 3. Pass pre-fetched data to UI model builders
      */
     private suspend fun buildConversationList(
-        unifiedGroups: List<UnifiedChatGroupEntity>,
+        unifiedChats: List<UnifiedChatEntity>,
         groupChats: List<ChatEntity>,
         nonGroupChats: List<ChatEntity>,
         typingChats: Set<String>
@@ -352,70 +352,54 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         val conversations = mutableListOf<ConversationUiModel>()
         val handledChatGuids = mutableSetOf<String>()
 
-        // OPTIMIZATION: Batch fetch all chat GUIDs in a single query
+        // OPTIMIZATION: Batch fetch all chat GUIDs for unified chats in a single query
         val batchPrepId = PerformanceProfiler.start("BatchPrep.collectGuids")
-        val groupIds = unifiedGroups.map { it.id }
-        val allMembers = if (groupIds.isNotEmpty()) {
-            unifiedChatGroupRepository.getChatGuidsForGroups(groupIds)
+        val unifiedChatIds = unifiedChats.map { it.id }
+        val unifiedChatIdToGuids = if (unifiedChatIds.isNotEmpty()) {
+            chatRepository.getChatGuidsForUnifiedChats(unifiedChatIds)
         } else {
-            emptyList()
+            emptyMap()
         }
+        val allUnifiedChatGuids = unifiedChatIdToGuids.values.flatten()
 
-        // Build maps from batch results
-        val groupIdToGuids = allMembers.groupBy { it.groupId }.mapValues { entry ->
-            entry.value.map { it.chatGuid }
-        }
-        val allGroupChatGuids = allMembers.map { it.chatGuid }
-
-        // Track handled GUIDs
-        handledChatGuids.addAll(allGroupChatGuids)
-        unifiedGroups.forEach { handledChatGuids.add(it.primaryChatGuid) }
-        PerformanceProfiler.end(batchPrepId, "${allGroupChatGuids.size} guids")
+        // Track handled GUIDs - include source IDs and all linked chats
+        handledChatGuids.addAll(allUnifiedChatGuids)
+        unifiedChats.forEach { handledChatGuids.add(it.sourceId) }
+        PerformanceProfiler.end(batchPrepId, "${allUnifiedChatGuids.size} guids")
 
         // OPTIMIZATION: Batch fetch all chats in a single query
         val batchChatsId = PerformanceProfiler.start("DB.batchGetChats")
-        val allChatsMap = if (allGroupChatGuids.isNotEmpty()) {
-            chatRepository.getChatsByGuids(allGroupChatGuids).associateBy { it.guid }
+        val allChatsMap = if (allUnifiedChatGuids.isNotEmpty()) {
+            chatRepository.getChatsByGuids(allUnifiedChatGuids).associateBy { it.guid }
         } else {
             emptyMap()
         }
         PerformanceProfiler.end(batchChatsId, "${allChatsMap.size} chats")
 
-        // OPTIMIZATION: Batch fetch all latest messages in a single query
-        val batchMsgId = PerformanceProfiler.start("DB.batchGetLatestMessages")
-        val latestMessagesMap = if (allGroupChatGuids.isNotEmpty()) {
-            messageRepository.getLatestMessagesForChats(allGroupChatGuids)
-                .associateBy { it.chatGuid }
-        } else {
-            emptyMap()
-        }
-        PerformanceProfiler.end(batchMsgId, "${latestMessagesMap.size} messages")
-
         // OPTIMIZATION: Batch fetch all participants in a single query
         val batchParticipantsId = PerformanceProfiler.start("DB.batchGetParticipants")
-        val participantsByChatMap = chatRepository.getParticipantsGroupedByChat(allGroupChatGuids)
+        val participantsByChatMap = chatRepository.getParticipantsGroupedByChat(allUnifiedChatGuids)
         PerformanceProfiler.end(batchParticipantsId, "${participantsByChatMap.values.sumOf { it.size }} participants")
 
-        Timber.d("buildConversationList: Processing ${unifiedGroups.size} unified groups, ${groupChats.size} group chats, ${nonGroupChats.size} non-group chats")
+        Timber.d("buildConversationList: Processing ${unifiedChats.size} unified chats, ${groupChats.size} group chats, ${nonGroupChats.size} non-group chats")
 
-        // OPTIMIZATION: Batch check which non-group chats are in ANY unified group
-        // This prevents adding chats as orphans when their unified group isn't in current page
+        // OPTIMIZATION: Batch check which non-group chats are linked to ANY unified chat
+        // This prevents adding chats as orphans when their unified chat isn't in current page
         val nonGroupChatGuids = nonGroupChats.map { it.guid }
         if (nonGroupChatGuids.isNotEmpty()) {
-            val chatsInAnyUnifiedGroup = unifiedChatGroupRepository.getChatsInAnyUnifiedGroup(nonGroupChatGuids)
-            handledChatGuids.addAll(chatsInAnyUnifiedGroup)
-            Timber.d("buildConversationList: ${chatsInAnyUnifiedGroup.size} of ${nonGroupChatGuids.size} non-group chats are in unified groups")
+            val chatsLinkedToUnified = chatRepository.getChatsLinkedToUnifiedChats(nonGroupChatGuids)
+            handledChatGuids.addAll(chatsLinkedToUnified)
+            Timber.d("buildConversationList: ${chatsLinkedToUnified.size} of ${nonGroupChatGuids.size} non-group chats are linked to unified chats")
         }
 
-        // Process unified chat groups with pre-fetched data
-        for (group in unifiedGroups) {
-            val chatGuids = groupIdToGuids[group.id] ?: continue
+        // Process unified chats with pre-fetched data
+        for (unifiedChat in unifiedChats) {
+            val chatGuids = unifiedChatIdToGuids[unifiedChat.id] ?: listOf(unifiedChat.sourceId)
 
-            val uiModel = unifiedGroupMappingDelegate.unifiedGroupToUiModel(
-                group = group,
+            val uiModel = unifiedGroupMappingDelegate.unifiedChatToUiModel(
+                unifiedChat = unifiedChat,
                 chatGuids = chatGuids,
                 typingChats = typingChats,
-                latestMessagesMap = latestMessagesMap,
                 chatsMap = allChatsMap,
                 participantsMap = participantsByChatMap
             )
@@ -432,9 +416,9 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             }
         }
 
-        // Add orphan 1:1 chats not in unified groups
+        // Add orphan 1:1 chats not linked to unified chats
         for (chat in nonGroupChats) {
-            if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
+            if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null) {
                 conversations.add(chat.toUiModelWithContext(typingChats))
                 handledChatGuids.add(chat.guid)
             }
@@ -449,16 +433,16 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             )
 
         // For non-group 1:1 chats, deduplicate by contactKey
-        // This catches cases where unified group membership is broken
+        // This catches cases where unified chat linking is broken
         // (same contact appears as separate iMessage/SMS chats)
-        val (groupChats, individualChats) = sortedConversations.partition {
+        val (groupConversations, individualChats) = sortedConversations.partition {
             it.isGroup || it.contactKey.isBlank()
         }
 
         val deduplicatedIndividualChats = individualChats
             .groupBy { it.contactKey }
             .map { (contactKey, duplicates) ->
-                // Log if we're deduplicating - this indicates broken unified group membership
+                // Log if we're deduplicating - this indicates broken unified chat linking
                 if (duplicates.size > 1) {
                     Timber.w("Deduplicating ${duplicates.size} chats with same contactKey '$contactKey': ${duplicates.map { it.guid }}")
                 }
@@ -468,7 +452,7 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                     ?: duplicates.first()
             }
 
-        return (groupChats + deduplicatedIndividualChats).sortedWith(
+        return (groupConversations + deduplicatedIndividualChats).sortedWith(
             compareByDescending<ConversationUiModel> { it.isPinned }
                 .thenByDescending { it.lastMessageTimestamp }
         )

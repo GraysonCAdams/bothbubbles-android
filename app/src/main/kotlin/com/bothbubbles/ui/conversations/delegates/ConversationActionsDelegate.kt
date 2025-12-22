@@ -11,7 +11,7 @@ import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.data.repository.UnifiedChatGroupRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
 import com.bothbubbles.ui.components.conversation.SwipeActionType
@@ -38,7 +38,7 @@ class ConversationActionsDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
     private val messageRepository: MessageRepository,
     private val handleRepository: HandleRepository,
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val androidContactsService: AndroidContactsService,
     private val settingsDataStore: SettingsDataStore,
     @Assisted private val scope: CoroutineScope
@@ -172,12 +172,11 @@ class ConversationActionsDelegate @AssistedInject constructor(
                 _events.emit(ConversationEvent.ScrollToIndex(scrollIndex))
             }
 
-            // Persist to database in background - update both chats and unified_chat_groups
-            chatRepository.setPinned(chatGuid, newPinState, if (newPinState) newPinIndex else null)
-            // Also update the unified chat group for this chat
-            val group = unifiedChatGroupRepository.getGroupForChat(chatGuid)
-            if (group != null) {
-                unifiedChatGroupRepository.updatePinStatus(group.id, newPinState, if (newPinState) newPinIndex else null)
+            // Persist to database in background - update unified chat (which is the source of truth)
+            val chat = chatRepository.getChatByGuid(chatGuid)
+            val unifiedChatId = chat?.unifiedChatId
+            if (unifiedChatId != null) {
+                unifiedChatRepository.updatePinStatus(unifiedChatId, newPinState, if (newPinState) newPinIndex else null)
             }
         }
     }
@@ -213,13 +212,12 @@ class ConversationActionsDelegate @AssistedInject constructor(
             )
             _events.emit(ConversationEvent.ConversationsUpdated(updated))
 
-            // Persist to database - update both chats table and unified_chat_groups table
+            // Persist to database - update unified chats (which are the source of truth)
             reorderedGuids.forEachIndexed { index, guid ->
-                chatRepository.setPinned(guid, true, index)
-                // Also update the unified chat group for this chat
-                val group = unifiedChatGroupRepository.getGroupForChat(guid)
-                if (group != null) {
-                    unifiedChatGroupRepository.updatePinStatus(group.id, true, index)
+                val chat = chatRepository.getChatByGuid(guid)
+                val unifiedChatId = chat?.unifiedChatId
+                if (unifiedChatId != null) {
+                    unifiedChatRepository.updatePinStatus(unifiedChatId, true, index)
                 }
             }
         }

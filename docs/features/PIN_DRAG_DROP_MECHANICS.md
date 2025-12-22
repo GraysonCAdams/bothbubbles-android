@@ -113,8 +113,7 @@ ConversationActionsDelegate.reorderPins()
         │
         └──► Database Update (background):
                - For each guid in reorderedGuids:
-                   - chatRepository.setPinned(guid, true, index)
-                   - unifiedChatGroupRepository.updatePinStatus(groupId, true, index)
+                   - unifiedChatRepository.updatePinStatus(unifiedChatId, true, index)
 ```
 
 ## Drag State Variables
@@ -226,9 +225,9 @@ fun reorderPins(reorderedGuids: List<String>, conversations: List<ConversationUi
         // Database update (sequential, could be slow)
         reorderedGuids.forEachIndexed { index, guid ->
             chatRepository.setPinned(guid, true, index)
-            val group = unifiedChatGroupRepository.getGroupForChat(guid)
-            if (group != null) {
-                unifiedChatGroupRepository.updatePinStatus(group.id, true, index)
+            val unifiedChat = unifiedChatRepository.getBySourceId(guid)
+            if (unifiedChat != null) {
+                unifiedChatRepository.updatePinStatus(unifiedChat.id, true, index)
             }
         }
     }
@@ -257,13 +256,13 @@ is_pinned INTEGER NOT NULL DEFAULT 0
 pin_index INTEGER DEFAULT NULL
 ```
 
-### UnifiedChatGroups Table
+### UnifiedChats Table
 ```sql
 is_pinned INTEGER NOT NULL DEFAULT 0
 pin_index INTEGER DEFAULT NULL
 ```
 
-**Note**: Both tables are updated during reorder to maintain consistency for merged conversations (iMessage + SMS to same contact).
+**Note**: Both tables are updated during reorder to maintain consistency for unified conversations (iMessage + SMS to same contact).
 
 ## Recommendations
 

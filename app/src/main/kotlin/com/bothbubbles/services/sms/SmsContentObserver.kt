@@ -9,17 +9,17 @@ import android.provider.Telephony
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sound.SoundManager
+import com.bothbubbles.util.UnifiedChatIdGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.*
@@ -42,7 +42,7 @@ class SmsContentObserver @Inject constructor(
     private val smsContentProvider: SmsContentProvider,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val notificationService: NotificationService,
     private val activeConversationManager: ActiveConversationManager,
     private val androidContactsService: AndroidContactsService,
@@ -178,14 +178,15 @@ class SmsContentObserver @Inject constructor(
 
                     // Normalize address to prevent duplicate conversations
                     val normalizedAddress = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
-                    // Get or create chat
+                    // Get or create chat and unified chat
                     val chatGuid = "sms;-;$normalizedAddress"
-                    ensureChatExists(chatGuid, normalizedAddress, date, body)
+                    val unifiedChat = ensureChatExists(chatGuid, normalizedAddress, date, body)
 
-                    // Create message entity
+                    // Create message entity with unified_chat_id
                     val message = com.bothbubbles.data.local.db.entity.MessageEntity(
                         guid = existingGuid,
                         chatGuid = chatGuid,
+                        unifiedChatId = unifiedChat?.id,
                         text = body,
                         dateCreated = date,
                         isFromMe = isFromMe,
@@ -195,17 +196,12 @@ class SmsContentObserver @Inject constructor(
                     )
                     messageDao.insertMessage(message)
 
-                    // Update unified group timestamp so conversation appears in correct position
-                    updateUnifiedGroupTimestamp(chatGuid, date, body)
-
                     // Show notification for incoming messages
                     if (!isFromMe) {
-                        val chat = chatDao.getChatByGuid(chatGuid)
-
-                        // Check if notifications are disabled for this chat
-                        if (chat?.notificationsEnabled == false) {
+                        // Check if notifications are disabled for this chat (from unified chat)
+                        if (unifiedChat?.notificationsEnabled == false) {
                             Timber.i("Notifications disabled for chat $chatGuid, skipping SMS notification")
-                        } else if (chat?.isSnoozed == true) {
+                        } else if (unifiedChat?.isSnoozed == true) {
                             // Check if chat is snoozed
                             Timber.i("Chat $chatGuid is snoozed, skipping SMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
@@ -225,14 +221,14 @@ class SmsContentObserver @Inject constructor(
                             notificationService.showMessageNotification(
                                 com.bothbubbles.services.notifications.MessageNotificationParams(
                                     chatGuid = chatGuid,
-                                    chatTitle = chat?.displayName ?: senderName ?: address,
+                                    chatTitle = unifiedChat?.displayName ?: senderName ?: address,
                                     messageText = body ?: "",
                                     messageGuid = existingGuid,
                                     senderName = senderName,
                                     senderAddress = normalizedAddress,
                                     isGroup = false,
                                     avatarUri = senderAvatarUri,
-                                    groupAvatarPath = chat?.effectiveGroupPhotoPath
+                                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath
                                 )
                             )
                         }
@@ -336,24 +332,19 @@ class SmsContentObserver @Inject constructor(
                         }
                     }
 
-                    // Ensure chat exists
-                    ensureChatExists(chatGuid, primaryAddress, date, textContent, isGroup)
+                    // Ensure chat exists and get unified chat
+                    val unifiedChat = ensureChatExists(chatGuid, primaryAddress, date, textContent, isGroup)
 
-                    // Create message entity
-                    val message = mmsMessage.toMessageEntity(chatGuid)
+                    // Create message entity with unified_chat_id
+                    val message = mmsMessage.toMessageEntity(chatGuid, unifiedChat?.id)
                     messageDao.insertMessage(message)
-
-                    // Update unified group timestamp so conversation appears in correct position
-                    updateUnifiedGroupTimestamp(chatGuid, date, textContent)
 
                     // Show notification for incoming messages
                     if (!isFromMe) {
-                        val chat = chatDao.getChatByGuid(chatGuid)
-
-                        // Check if notifications are disabled for this chat
-                        if (chat?.notificationsEnabled == false) {
+                        // Check if notifications are disabled for this chat (from unified chat)
+                        if (unifiedChat?.notificationsEnabled == false) {
                             Timber.i("Notifications disabled for chat $chatGuid, skipping MMS notification")
-                        } else if (chat?.isSnoozed == true) {
+                        } else if (unifiedChat?.isSnoozed == true) {
                             // Check if chat is snoozed
                             Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
                         } else if (activeConversationManager.isConversationActive(chatGuid)) {
@@ -379,14 +370,14 @@ class SmsContentObserver @Inject constructor(
                             notificationService.showMessageNotification(
                                 com.bothbubbles.services.notifications.MessageNotificationParams(
                                     chatGuid = chatGuid,
-                                    chatTitle = chat?.displayName ?: senderName ?: primaryAddress,
+                                    chatTitle = unifiedChat?.displayName ?: senderName ?: primaryAddress,
                                     messageText = textContent ?: "[MMS]",
                                     messageGuid = existingGuid,
                                     senderName = if (isGroup) (senderName ?: primaryAddress) else senderName,
                                     senderAddress = primaryAddress,
                                     isGroup = isGroup,
                                     avatarUri = senderAvatarUri,
-                                    groupAvatarPath = chat?.effectiveGroupPhotoPath,
+                                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath,
                                     attachmentUri = firstMediaAttachment?.dataUri,
                                     attachmentMimeType = firstMediaAttachment?.contentType
                                 )
@@ -426,152 +417,70 @@ class SmsContentObserver @Inject constructor(
         date: Long,
         lastMessage: String?,
         isGroup: Boolean = false
-    ) {
-        val existingChat = chatDao.getChatByGuid(chatGuid)
-        val isNewChat = existingChat == null
+    ): UnifiedChatEntity? {
+        val normalizedAddress = address.replace(Regex("[^0-9+]"), "")
 
-        if (isNewChat) {
+        // Get or create unified chat for this address (skip for groups)
+        val unifiedChat = if (!isGroup && normalizedAddress.isNotBlank() && !normalizedAddress.contains("@")) {
+            try {
+                unifiedChatDao.getOrCreate(
+                    UnifiedChatEntity(
+                        id = UnifiedChatIdGenerator.generate(),
+                        normalizedAddress = normalizedAddress,
+                        sourceId = chatGuid
+                    )
+                )
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to get or create unified chat for $address")
+                null
+            }
+        } else {
+            null
+        }
+
+        val existingChat = chatDao.getChatByGuid(chatGuid)
+
+        if (existingChat == null) {
             val chat = ChatEntity(
                 guid = chatGuid,
                 chatIdentifier = address,
                 displayName = null,
                 isGroup = isGroup,
-                lastMessageDate = date,
-                lastMessageText = lastMessage,
-                unreadCount = 1
+                latestMessageDate = date,
+                unifiedChatId = unifiedChat?.id
             )
             chatDao.insertChat(chat)
         } else {
-            chatDao.updateLastMessage(chatGuid, date, lastMessage)
+            chatDao.updateLatestMessageDate(chatGuid, date)
             if (!existingChat.isGroup && isGroup) {
                 // Update to group if needed
                 chatDao.insertChat(existingChat.copy(isGroup = true))
             }
-        }
 
-        // Link new 1:1 SMS chats to unified groups for conversation merging
-        // This enables messages sent via Android Auto to appear in merged iMessage/SMS views
-        if (isNewChat && !isGroup) {
-            linkChatToUnifiedGroup(chatGuid, address)
-        }
-    }
-
-    /**
-     * Link a chat to a unified group, creating the group if necessary.
-     * This enables merging SMS and iMessage conversations for the same contact.
-     */
-    private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
-        // Skip if identifier is empty or looks like an email/RCS address (not a phone)
-        if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
-            Timber.d("linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
-            return
-        }
-
-        Timber.d("linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
-
-        try {
-            // Check if this chat is already in a unified group
-            if (unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)) {
-                Timber.d("linkChatToUnifiedGroup: $chatGuid is already in a unified group")
-                return
-            }
-
-            // Check if unified group already exists for this phone number
-            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            Timber.d("linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
-
-            if (group == null) {
-                // Check if there's an existing iMessage chat for this phone
-                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-                Timber.d("linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
-
-                // Create new unified group - prefer iMessage as primary if it exists
-                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
-                val newGroup = UnifiedChatGroupEntity(
-                    identifier = normalizedPhone,
-                    primaryChatGuid = primaryGuid,
-                    displayName = existingIMessageChat?.displayName
-                )
-
-                // Use atomic method to prevent FOREIGN KEY errors
-                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
-                Timber.d("linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
-
-                // Add existing iMessage chat to group if found (separate from SMS chat)
-                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
-                    Timber.d("linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
-                    unifiedChatGroupDao.insertMember(
-                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
-                    )
-                }
-            } else {
-                // Group exists, just add this SMS chat to it
-                Timber.d("linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
-                unifiedChatGroupDao.insertMember(
-                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-                )
-            }
-
-            Timber.d("linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
-        } catch (e: Exception) {
-            Timber.e(e, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'")
-            // Don't rethrow - unified group linking is non-critical for message storage
-        }
-    }
-
-    /**
-     * Find an existing iMessage chat for a given phone number.
-     * Searches through non-group iMessage chats and matches by participant phone.
-     */
-    private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
-        val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
-        if (nonGroupChats.isEmpty()) return null
-
-        // Batch fetch all participants for all chats in a single query
-        val chatGuids = nonGroupChats.map { it.guid }
-        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
-            .groupBy({ it.chatGuid }, { it.handle })
-
-        for (chat in nonGroupChats) {
-            val participants = participantsByChat[chat.guid] ?: emptyList()
-            for (participant in participants) {
-                val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
-                if (phonesMatch(normalized, normalizedPhone)) {
-                    return chat
-                }
+            // Link chat to unified chat if not already linked
+            if (existingChat.unifiedChatId == null && unifiedChat != null) {
+                chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
             }
         }
-        return null
-    }
 
-    /**
-     * Compare two phone numbers for equality, handling different formats.
-     */
-    private fun phonesMatch(phone1: String, phone2: String): Boolean {
-        if (phone1 == phone2) return true
-        // Strip all non-digits and compare last 10 digits
-        val digits1 = phone1.filter { it.isDigit() }.takeLast(10)
-        val digits2 = phone2.filter { it.isDigit() }.takeLast(10)
-        return digits1.length >= 7 && digits1 == digits2
-    }
-
-    /**
-     * Update the unified group's latestMessageDate when a new message is inserted.
-     * This ensures the conversation appears in the correct position in the list.
-     */
-    private suspend fun updateUnifiedGroupTimestamp(chatGuid: String, messageDate: Long, messageText: String?) {
-        try {
-            val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
-            if (group != null) {
-                val currentLatest = group.latestMessageDate ?: 0L
-                if (messageDate > currentLatest) {
-                    unifiedChatGroupDao.updateLatestMessage(group.id, messageDate, messageText)
-                    Timber.d("Updated unified group ${group.id} latestMessageDate to $messageDate")
-                }
-            }
-        } catch (e: Exception) {
-            Timber.w(e, "Failed to update unified group timestamp for $chatGuid")
+        // Update unified chat's unread count and latest message
+        unifiedChat?.let { uc ->
+            unifiedChatDao.incrementUnreadCount(uc.id)
+            unifiedChatDao.updateLatestMessageIfNewer(
+                id = uc.id,
+                date = date,
+                text = lastMessage,
+                guid = null,
+                isFromMe = false,
+                hasAttachments = false,
+                source = MessageSource.LOCAL_SMS.name,
+                dateDelivered = null,
+                dateRead = null,
+                error = 0
+            )
         }
+
+        return unifiedChat
     }
 
     private fun getLatestSmsId(): Long {
@@ -598,10 +507,11 @@ class SmsContentObserver @Inject constructor(
         } ?: 0L
     }
 
-    private fun MmsMessage.toMessageEntity(chatGuid: String): com.bothbubbles.data.local.db.entity.MessageEntity {
+    private fun MmsMessage.toMessageEntity(chatGuid: String, unifiedChatId: String?): com.bothbubbles.data.local.db.entity.MessageEntity {
         return com.bothbubbles.data.local.db.entity.MessageEntity(
             guid = "mms-$id",
             chatGuid = chatGuid,
+            unifiedChatId = unifiedChatId,
             text = textParts.joinToString("\n").takeIf { it.isNotBlank() },
             subject = subject,
             dateCreated = date,

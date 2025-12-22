@@ -37,8 +37,7 @@ class MessageRepository @Inject constructor(
     private val api: BothBubblesApi,
     private val syncRangeTracker: SyncRangeTracker,
     private val attachmentRepository: AttachmentRepository,
-    private val chatSyncOperations: ChatSyncOperations,
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository
+    private val chatSyncOperations: ChatSyncOperations
 ) {
 
     // ===== Local Query Operations =====
@@ -78,14 +77,18 @@ class MessageRepository @Inject constructor(
     }
 
     /**
-     * Resolve all chat GUIDs for a unified group containing the given chat.
+     * Resolve all chat GUIDs for a unified chat containing the given chat.
      *
-     * @return List of all chat GUIDs in the unified group, or just [chatGuid] if not in a group
+     * In the new architecture, chats have a `unifiedChatId` field. This method finds
+     * all chats that share the same unified chat ID.
+     *
+     * @return List of all chat GUIDs in the unified chat, or just [chatGuid] if not linked
      */
     suspend fun resolveUnifiedChatGuids(chatGuid: String): List<String> {
-        val group = unifiedChatGroupRepository.getGroupForChat(chatGuid)
-        return if (group != null) {
-            unifiedChatGroupRepository.getChatGuidsForGroup(group.id)
+        val chat = chatDao.getChatByGuid(chatGuid)
+        val unifiedChatId = chat?.unifiedChatId
+        return if (unifiedChatId != null) {
+            chatDao.getChatGuidsForUnifiedChat(unifiedChatId)
         } else {
             listOf(chatGuid)
         }

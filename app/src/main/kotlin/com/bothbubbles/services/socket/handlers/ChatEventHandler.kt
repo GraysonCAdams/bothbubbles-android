@@ -4,7 +4,7 @@ import android.content.Context
 import dagger.hilt.android.qualifiers.ApplicationContext
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.sync.GroupContactSyncManager
@@ -27,7 +27,7 @@ class ChatEventHandler @Inject constructor(
     @ApplicationContext private val context: Context,
     private val chatRepository: ChatRepository,
     private val chatDao: ChatDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val notifier: Notifier,
     private val activeConversationManager: ActiveConversationManager
 ) {
@@ -48,9 +48,10 @@ class ChatEventHandler @Inject constructor(
             chatDao.updateUnreadCount(event.chatGuid, 0)
             chatDao.updateUnreadStatus(event.chatGuid, false)
 
-            // Also update the unified group's unread count for badge sync
-            unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
-                unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+            // Also update the unified chat's unread count for badge sync
+            val chat = chatDao.getChatByGuid(event.chatGuid)
+            chat?.unifiedChatId?.let { unifiedChatId ->
+                unifiedChatDao.markAsRead(unifiedChatId)
             }
 
             // Cancel notification for this chat since it was read (possibly on another device)
@@ -64,9 +65,10 @@ class ChatEventHandler @Inject constructor(
             chatDao.updateUnreadCount(event.chatGuid, 1)
             chatDao.updateUnreadStatus(event.chatGuid, true)
 
-            // Also update the unified group's unread count for badge sync
-            unifiedChatGroupDao.getGroupForChat(event.chatGuid)?.let { group ->
-                unifiedChatGroupDao.updateUnreadCount(group.id, 1)
+            // Also update the unified chat's unread count for badge sync
+            val chat = chatDao.getChatByGuid(event.chatGuid)
+            chat?.unifiedChatId?.let { unifiedChatId ->
+                unifiedChatDao.updateUnreadCount(unifiedChatId, 1)
             }
         }
 

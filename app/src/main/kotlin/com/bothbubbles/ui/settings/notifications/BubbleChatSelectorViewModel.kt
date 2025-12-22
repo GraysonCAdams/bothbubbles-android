@@ -3,9 +3,9 @@ package com.bothbubbles.ui.settings.notifications
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
@@ -15,7 +15,7 @@ import javax.inject.Inject
 @HiltViewModel
 class BubbleChatSelectorViewModel @Inject constructor(
     private val settingsDataStore: SettingsDataStore,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val chatDao: ChatDao
 ) : ViewModel() {
 
@@ -29,13 +29,13 @@ class BubbleChatSelectorViewModel @Inject constructor(
     private fun observeConversations() {
         viewModelScope.launch {
             combine(
-                unifiedChatGroupDao.observeActiveGroups(),
+                unifiedChatDao.observeActive(),
                 chatDao.observeActiveGroupChats(),
                 settingsDataStore.selectedBubbleChats
-            ) { unifiedGroups, groupChats, selectedChats ->
-                Triple(unifiedGroups, groupChats, selectedChats)
-            }.collect { (unifiedGroups, groupChats, selectedChats) ->
-                val conversations = buildConversationList(unifiedGroups, groupChats, selectedChats)
+            ) { unifiedChats, groupChats, selectedChats ->
+                Triple(unifiedChats, groupChats, selectedChats)
+            }.collect { (unifiedChats, groupChats, selectedChats) ->
+                val conversations = buildConversationList(unifiedChats, groupChats, selectedChats)
                 _uiState.update {
                     it.copy(
                         conversations = conversations,
@@ -48,21 +48,21 @@ class BubbleChatSelectorViewModel @Inject constructor(
     }
 
     private fun buildConversationList(
-        unifiedGroups: List<UnifiedChatGroupEntity>,
+        unifiedChats: List<UnifiedChatEntity>,
         groupChats: List<ChatEntity>,
         selectedChats: Set<String>
     ): List<SelectableConversation> {
         val conversations = mutableListOf<SelectableConversation>()
 
-        // Add unified groups (1:1 chats)
-        for (group in unifiedGroups) {
+        // Add unified chats (1:1 chats)
+        for (chat in unifiedChats) {
             conversations.add(
                 SelectableConversation(
-                    chatGuid = group.primaryChatGuid,
-                    displayName = group.displayName ?: group.identifier,
+                    chatGuid = chat.sourceId,
+                    displayName = chat.displayName ?: chat.cachedContactName ?: chat.normalizedAddress,
                     isGroup = false,
-                    isSelected = selectedChats.contains(group.primaryChatGuid),
-                    latestMessageDate = group.latestMessageDate ?: 0L
+                    isSelected = selectedChats.contains(chat.sourceId),
+                    latestMessageDate = chat.latestMessageDate ?: 0L
                 )
             )
         }
@@ -75,7 +75,7 @@ class BubbleChatSelectorViewModel @Inject constructor(
                     displayName = chat.displayName ?: chat.chatIdentifier ?: "Group",
                     isGroup = true,
                     isSelected = selectedChats.contains(chat.guid),
-                    latestMessageDate = chat.lastMessageDate ?: 0L
+                    latestMessageDate = chat.latestMessageDate ?: 0L
                 )
             )
         }

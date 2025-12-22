@@ -24,8 +24,9 @@ typealias HandleEntity = com.bothbubbles.core.model.entity.HandleEntity
 
 // Cross-reference and junction tables
 typealias ChatHandleCrossRef = com.bothbubbles.core.model.entity.ChatHandleCrossRef
-typealias UnifiedChatGroupEntity = com.bothbubbles.core.model.entity.UnifiedChatGroupEntity
-typealias UnifiedChatMember = com.bothbubbles.core.model.entity.UnifiedChatMember
+
+// Unified chat (single source of truth for conversation state)
+typealias UnifiedChatEntity = com.bothbubbles.core.model.entity.UnifiedChatEntity
 
 // Pending message queue
 typealias PendingMessageEntity = com.bothbubbles.core.model.entity.PendingMessageEntity

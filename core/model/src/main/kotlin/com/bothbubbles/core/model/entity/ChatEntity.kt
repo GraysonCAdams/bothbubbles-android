@@ -5,145 +5,90 @@ import androidx.room.Entity
 import androidx.room.Index
 import androidx.room.PrimaryKey
 
+/**
+ * Represents a protocol-specific chat channel (iMessage, SMS, MMS, RCS).
+ *
+ * This is a "channel" within a [UnifiedChatEntity] conversation. Multiple ChatEntity
+ * records may share the same [unifiedChatId] when they represent the same contact
+ * across different protocols (e.g., iMessage + SMS for the same phone number).
+ *
+ * UI state (pinned, archived, unread, etc.) is stored in [UnifiedChatEntity].
+ * This entity only stores protocol-specific data and server-synced metadata.
+ */
 @Entity(
     tableName = "chats",
     indices = [
         Index(value = ["guid"], unique = true),
-        Index(value = ["is_pinned"]),
-        Index(value = ["is_starred"]),
-        Index(value = ["latest_message_date"]),
-        Index(value = ["is_spam"]),
-        Index(value = ["category"]),
-        Index(value = ["is_archived"])
+        Index(value = ["unified_chat_id"]),
+        Index(value = ["latest_message_date"])
     ]
 )
 data class ChatEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
 
+    /**
+     * Protocol-specific chat identifier.
+     * Format examples:
+     * - iMessage: "iMessage;-;+1234567890" or "iMessage;+;chat123456"
+     * - SMS: "sms;-;+1234567890"
+     * - MMS: "mms;-;+1234567890"
+     * - Text Forwarding: "SMS;-;+1234567890"
+     * - RCS: "RCS;-;+1234567890"
+     */
     @ColumnInfo(name = "guid")
     val guid: String,
 
+    /**
+     * References the unified conversation this chat belongs to.
+     * All chats with the same unifiedChatId are part of one logical conversation.
+     */
+    @ColumnInfo(name = "unified_chat_id")
+    val unifiedChatId: String? = null,
+
+    /**
+     * Chat identifier from the server (phone number, email, or group identifier).
+     */
     @ColumnInfo(name = "chat_identifier")
     val chatIdentifier: String? = null,
 
+    /**
+     * Display name from the server (for group chats).
+     * For 1:1 chats, this is typically null and display name comes from contacts.
+     */
     @ColumnInfo(name = "display_name")
     val displayName: String? = null,
 
-    @ColumnInfo(name = "is_pinned")
-    val isPinned: Boolean = false,
-
-    @ColumnInfo(name = "pin_index")
-    val pinIndex: Int? = null,
-
-    @ColumnInfo(name = "is_archived")
-    val isArchived: Boolean = false,
-
-    @ColumnInfo(name = "is_starred")
-    val isStarred: Boolean = false,
-
-    @ColumnInfo(name = "mute_type")
-    val muteType: String? = null,
-
-    @ColumnInfo(name = "mute_args")
-    val muteArgs: String? = null,
-
-    @ColumnInfo(name = "has_unread_message")
-    val hasUnreadMessage: Boolean = false,
-
-    @ColumnInfo(name = "unread_count")
-    val unreadCount: Int = 0,
-
+    /**
+     * iMessage style (0 = 1:1, 43 = group, 45 = group with name).
+     */
     @ColumnInfo(name = "style")
     val style: Int? = null,
 
+    /**
+     * Whether this is a group chat.
+     */
     @ColumnInfo(name = "is_group")
     val isGroup: Boolean = false,
 
-    @ColumnInfo(name = "last_message_text")
-    val lastMessageText: String? = null,
-
-    @ColumnInfo(name = "last_message_date")
-    val lastMessageDate: Long? = null,
-
-    @ColumnInfo(name = "custom_avatar_path")
-    val customAvatarPath: String? = null,
-
-    // Server-provided group photo (from iMessage group settings)
-    // The guid is used to detect changes, the path is the local downloaded file
-    @ColumnInfo(name = "server_group_photo_guid")
-    val serverGroupPhotoGuid: String? = null,
-
-    @ColumnInfo(name = "server_group_photo_path")
-    val serverGroupPhotoPath: String? = null,
-
-    // App-level notification mute toggle (independent of Android channel settings)
-    @ColumnInfo(name = "notifications_enabled", defaultValue = "1")
-    val notificationsEnabled: Boolean = true,
-
-    // Snooze notifications until timestamp (-1 = indefinite, null = not snoozed)
-    @ColumnInfo(name = "snooze_until")
-    val snoozeUntil: Long? = null,
-
-    @ColumnInfo(name = "auto_send_read_receipts")
-    val autoSendReadReceipts: Boolean? = null,
-
-    @ColumnInfo(name = "auto_send_typing_indicators")
-    val autoSendTypingIndicators: Boolean? = null,
-
-    @ColumnInfo(name = "text_field_text")
-    val textFieldText: String? = null,
-
-    @ColumnInfo(name = "lock_chat_name")
-    val lockChatName: Boolean = false,
-
-    @ColumnInfo(name = "lock_chat_icon")
-    val lockChatIcon: Boolean = false,
-
+    /**
+     * Latest message date for this specific protocol channel.
+     * Used for determining which channel was most recently active.
+     */
     @ColumnInfo(name = "latest_message_date")
     val latestMessageDate: Long? = null,
 
+    /**
+     * When this chat was created.
+     */
     @ColumnInfo(name = "date_created")
     val dateCreated: Long = System.currentTimeMillis(),
 
+    /**
+     * When this chat was soft-deleted.
+     */
     @ColumnInfo(name = "date_deleted")
-    val dateDeleted: Long? = null,
-
-    @ColumnInfo(name = "is_sms_fallback", defaultValue = "0")
-    val isSmsFallback: Boolean = false,
-
-    @ColumnInfo(name = "fallback_reason")
-    val fallbackReason: String? = null,
-
-    @ColumnInfo(name = "fallback_updated_at")
-    val fallbackUpdatedAt: Long? = null,
-
-    // Spam detection
-    @ColumnInfo(name = "is_spam", defaultValue = "0")
-    val isSpam: Boolean = false,
-
-    @ColumnInfo(name = "spam_score", defaultValue = "0")
-    val spamScore: Int = 0,
-
-    @ColumnInfo(name = "spam_reported_to_carrier", defaultValue = "0")
-    val spamReportedToCarrier: Boolean = false,
-
-    // Message categorization (ML)
-    @ColumnInfo(name = "category")
-    val category: String? = null, // "transactions", "deliveries", "promotions", "reminders"
-
-    @ColumnInfo(name = "category_confidence", defaultValue = "0")
-    val categoryConfidence: Int = 0,
-
-    @ColumnInfo(name = "category_last_updated")
-    val categoryLastUpdated: Long? = null,
-
-    // Per-chat send mode preference (iMessage vs SMS toggle)
-    @ColumnInfo(name = "preferred_send_mode")
-    val preferredSendMode: String? = null, // "imessage", "sms", or null (automatic)
-
-    @ColumnInfo(name = "send_mode_manually_set", defaultValue = "0")
-    val sendModeManuallySet: Boolean = false
+    val dateDeleted: Long? = null
 ) {
     /**
      * Whether this chat uses SMS text forwarding
@@ -176,22 +121,4 @@ data class ChatEntity(
      */
     val isIMessage: Boolean
         get() = !isTextForwarding && !isLocalSms && !isRcs
-
-    /**
-     * Whether this chat is currently snoozed.
-     * Returns true if snoozeUntil is -1 (indefinite) or a future timestamp.
-     */
-    val isSnoozed: Boolean
-        get() = snoozeUntil != null && (snoozeUntil == -1L || snoozeUntil > System.currentTimeMillis())
-
-    /**
-     * Effective group photo path with priority:
-     * 1. customAvatarPath (user-set on Android device)
-     * 2. serverGroupPhotoPath (from BlueBubbles server / iMessage)
-     * 3. null (use participant collage as fallback)
-     *
-     * Use this property everywhere group avatars are displayed for consistency.
-     */
-    val effectiveGroupPhotoPath: String?
-        get() = customAvatarPath ?: serverGroupPhotoPath
 }

@@ -86,7 +86,7 @@ class AttachmentRepository @Inject constructor(
 **Locations:**
 - `data/repository/HandleRepository.kt` (Lines 81-128)
 - `data/repository/ChatRepository.kt` (Lines 237-248)
-- `data/repository/UnifiedChatGroupRepository.kt` (Lines 104-151)
+- `data/repository/UnifiedChatRepository.kt` (Lines 104-151)
 
 **Issue:**
 ```kotlin
@@ -223,7 +223,7 @@ suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
 class MessageRepository @Inject constructor(
     private val attachmentRepository: AttachmentRepository,
     private val chatSyncOperations: ChatSyncOperations,
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     // ...
 )
 ```

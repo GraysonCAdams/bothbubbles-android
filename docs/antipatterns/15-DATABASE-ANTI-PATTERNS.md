@@ -107,11 +107,13 @@ WHERE a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%'
 
 ---
 
-### 6. Inefficient NOT IN Subquery
+### 6. ~~Inefficient NOT IN Subquery~~ **RESOLVED - Architecture Migration**
 
-**Location:** `data/local/db/dao/UnifiedChatGroupDao.kt` (Lines 313-317)
+**Previous Location:** `data/local/db/dao/UnifiedChatGroupDao.kt` (Lines 313-317)
 
-**Issue:**
+**Status:** RESOLVED - The `unified_chat_groups` and `unified_chat_members` tables were removed in database migration 50→51. The new `UnifiedChatEntity` architecture uses a single `unified_chats` table with Discord-style snowflake IDs, eliminating the junction table entirely.
+
+**Historical Issue (for reference):**
 ```kotlin
 @Query("""
     DELETE FROM unified_chat_groups
@@ -121,7 +123,7 @@ WHERE a.mime_type LIKE 'image/%' OR a.mime_type LIKE 'video/%'
 
 **Problem:** NOT IN with DISTINCT subquery is less efficient than NOT EXISTS.
 
-**Fix:**
+**Historical Fix:**
 ```kotlin
 @Query("""
     DELETE FROM unified_chat_groups
@@ -163,11 +165,13 @@ suspend fun deleteMessage(guid: String)
 
 ## Transaction Anti-Patterns
 
-### 9. Transaction Scope Too Wide
+### 9. ~~Transaction Scope Too Wide~~ **RESOLVED - Architecture Migration**
 
-**Location:** `data/local/db/dao/UnifiedChatGroupDao.kt` (Lines 133-152)
+**Previous Location:** `data/local/db/dao/UnifiedChatGroupDao.kt` (Lines 133-152)
 
-**Issue:**
+**Status:** RESOLVED - The `UnifiedChatGroupDao` was replaced with `UnifiedChatDao` in the new architecture. The new implementation uses atomic `INSERT OR IGNORE` patterns that don't require explicit transaction management.
+
+**Historical Issue (for reference):**
 ```kotlin
 @Transaction
 suspend fun getOrCreateGroup(group: UnifiedChatGroupEntity): UnifiedChatGroupEntity {
@@ -185,7 +189,7 @@ suspend fun getOrCreateGroup(group: UnifiedChatGroupEntity): UnifiedChatGroupEnt
 
 **Problem:** Holds database lock longer than necessary.
 
-**Fix:** Exit transaction before final query.
+**Fix:** Exit transaction before final query, or use atomic operations.
 
 ---
 
@@ -198,10 +202,10 @@ suspend fun getOrCreateGroup(group: UnifiedChatGroupEntity): UnifiedChatGroupEnt
 | Unnecessary DISTINCT | LOW | Query | ChatParticipantDao.kt |
 | OR prevents index | MEDIUM | Query | ChatDeleteDao.kt |
 | OR in mime_type | LOW | Query | AttachmentDao.kt |
-| NOT IN subquery | LOW | Query | UnifiedChatGroupDao.kt |
+| ~~NOT IN subquery~~ | ~~LOW~~ | ~~Query~~ | ~~UnifiedChatGroupDao.kt~~ | **RESOLVED** - Architecture migrated |
 | Missing composite indices | MEDIUM | Schema | MessageEntity.kt |
-| Duplicate DAO methods | LOW | Code | MessageDao.kt |
-| Transaction too wide | LOW | Transaction | UnifiedChatGroupDao.kt |
+| ~~Duplicate DAO methods~~ | ~~LOW~~ | ~~Code~~ | ~~MessageDao.kt~~ | **FIXED** |
+| ~~Transaction too wide~~ | ~~LOW~~ | ~~Transaction~~ | ~~UnifiedChatGroupDao.kt~~ | **RESOLVED** - Architecture migrated |
 
 ---
 

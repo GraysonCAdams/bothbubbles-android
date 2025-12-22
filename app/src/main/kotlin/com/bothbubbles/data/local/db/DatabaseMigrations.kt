@@ -1229,6 +1229,162 @@ object DatabaseMigrations {
     }
 
     /**
+     * Migration from version 49 to 50: Add unified_chats table and reset data for clean sync.
+     *
+     * This is a BREAKING migration that clears message/chat data to force a full re-sync.
+     * The new architecture requires messages to have unified_chat_id set, which can only
+     * be done during message insertion. Rather than complex data migration, we clear
+     * existing data and let the normal sync process repopulate everything correctly.
+     *
+     * The new architecture:
+     * - Single UnifiedChatEntity is the source of truth for conversation state
+     * - Messages have unified_chat_id directly for native pagination
+     * - ChatEntity simplified to protocol-specific channel with unifiedChatId foreign key
+     *
+     * What happens on app launch after this migration:
+     * 1. SyncService detects empty sync_ranges with initialSyncComplete=true
+     * 2. Resets sync flags in DataStore (initialSyncComplete, hasCompletedInitialSmsImport)
+     * 3. Triggers full re-sync of iMessage (via BlueBubbles) and SMS (if enabled)
+     * 4. User sees normal "Syncing messages..." progress UI
+     *
+     * Data preserved: handles (contacts), quick reply templates, scheduled messages
+     * Data cleared: messages, chats, attachments, sync_ranges, link_previews
+     */
+    val MIGRATION_49_50 = object : Migration(49, 50) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 49→50: Unified chat architecture with data reset")
+
+            // Create new unified_chats table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS unified_chats (
+                    id TEXT PRIMARY KEY NOT NULL,
+                    normalized_address TEXT NOT NULL,
+                    source_id TEXT NOT NULL,
+                    display_name TEXT DEFAULT NULL,
+                    custom_avatar_path TEXT DEFAULT NULL,
+                    server_group_photo_path TEXT DEFAULT NULL,
+                    server_group_photo_guid TEXT DEFAULT NULL,
+                    latest_message_date INTEGER DEFAULT NULL,
+                    latest_message_text TEXT DEFAULT NULL,
+                    latest_message_guid TEXT DEFAULT NULL,
+                    latest_message_is_from_me INTEGER NOT NULL DEFAULT 0,
+                    latest_message_has_attachments INTEGER NOT NULL DEFAULT 0,
+                    latest_message_source TEXT DEFAULT NULL,
+                    latest_message_date_delivered INTEGER DEFAULT NULL,
+                    latest_message_date_read INTEGER DEFAULT NULL,
+                    latest_message_error INTEGER NOT NULL DEFAULT 0,
+                    unread_count INTEGER NOT NULL DEFAULT 0,
+                    has_unread_message INTEGER NOT NULL DEFAULT 0,
+                    is_pinned INTEGER NOT NULL DEFAULT 0,
+                    pin_index INTEGER DEFAULT NULL,
+                    is_archived INTEGER NOT NULL DEFAULT 0,
+                    is_starred INTEGER NOT NULL DEFAULT 0,
+                    mute_type TEXT DEFAULT NULL,
+                    mute_args TEXT DEFAULT NULL,
+                    snooze_until INTEGER DEFAULT NULL,
+                    notifications_enabled INTEGER NOT NULL DEFAULT 1,
+                    is_spam INTEGER NOT NULL DEFAULT 0,
+                    spam_score INTEGER NOT NULL DEFAULT 0,
+                    spam_reported_to_carrier INTEGER NOT NULL DEFAULT 0,
+                    category TEXT DEFAULT NULL,
+                    category_confidence INTEGER NOT NULL DEFAULT 0,
+                    category_last_updated INTEGER DEFAULT NULL,
+                    is_group INTEGER NOT NULL DEFAULT 0,
+                    auto_send_read_receipts INTEGER DEFAULT NULL,
+                    auto_send_typing_indicators INTEGER DEFAULT NULL,
+                    text_field_text TEXT DEFAULT NULL,
+                    lock_chat_name INTEGER NOT NULL DEFAULT 0,
+                    lock_chat_icon INTEGER NOT NULL DEFAULT 0,
+                    preferred_send_mode TEXT DEFAULT NULL,
+                    send_mode_manually_set INTEGER NOT NULL DEFAULT 0,
+                    is_sms_fallback INTEGER NOT NULL DEFAULT 0,
+                    fallback_reason TEXT DEFAULT NULL,
+                    fallback_updated_at INTEGER DEFAULT NULL,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()},
+                    date_deleted INTEGER DEFAULT NULL
+                )
+            """.trimIndent())
+
+            // Create indexes for the new table
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_unified_chats_normalized_address ON unified_chats(normalized_address)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_unified_chats_latest_message_date ON unified_chats(latest_message_date)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_unified_chats_is_pinned_pin_index ON unified_chats(is_pinned, pin_index)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_unified_chats_is_archived ON unified_chats(is_archived)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_unified_chats_is_spam ON unified_chats(is_spam)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_unified_chats_category ON unified_chats(category)")
+
+            // Add unified_chat_id column to chats table
+            db.execSQL("ALTER TABLE chats ADD COLUMN unified_chat_id TEXT DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_chats_unified_chat_id ON chats(unified_chat_id)")
+
+            // Add unified_chat_id column to messages table for native pagination
+            db.execSQL("ALTER TABLE messages ADD COLUMN unified_chat_id TEXT DEFAULT NULL")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_unified_chat_id ON messages(unified_chat_id)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_messages_unified_chat_id_date_created ON messages(unified_chat_id, date_created)")
+
+            // === CLEAR DATA FOR CLEAN RE-SYNC ===
+            // Order matters due to foreign key constraints
+
+            // Clear link previews (references messages)
+            db.execSQL("DELETE FROM link_previews")
+            Timber.d("Cleared link_previews table")
+
+            // Clear attachments (references messages)
+            db.execSQL("DELETE FROM attachments")
+            Timber.d("Cleared attachments table")
+
+            // Clear messages
+            db.execSQL("DELETE FROM messages")
+            Timber.d("Cleared messages table")
+
+            // Clear chat-handle junction (references chats)
+            db.execSQL("DELETE FROM chat_handle_cross_ref")
+            Timber.d("Cleared chat_handle_cross_ref table")
+
+            // Clear chats
+            db.execSQL("DELETE FROM chats")
+            Timber.d("Cleared chats table")
+
+            // Clear sync ranges (triggers re-sync detection)
+            db.execSQL("DELETE FROM sync_ranges")
+            Timber.d("Cleared sync_ranges table")
+
+            // Clear seen messages (will be rebuilt)
+            db.execSQL("DELETE FROM seen_messages")
+            Timber.d("Cleared seen_messages table")
+
+            Timber.i("Migration 49→50 complete: Data cleared, app will re-sync on next launch")
+        }
+    }
+
+    /**
+     * Migration from version 50 to 51: Drop legacy unified chat tables.
+     *
+     * The old junction-table-based unified chat system (unified_chat_groups + unified_chat_members)
+     * is replaced by the new single-entity architecture (unified_chats + unifiedChatId foreign keys).
+     *
+     * This migration removes:
+     * - unified_chat_groups table (replaced by unified_chats)
+     * - unified_chat_members junction table (replaced by ChatEntity.unifiedChatId)
+     *
+     * The new architecture benefits:
+     * - Messages have unified_chat_id directly for O(1) conversation lookup
+     * - Native database pagination without stream merging
+     * - Simpler code without junction table complexity
+     */
+    val MIGRATION_50_51 = object : Migration(50, 51) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Drop the junction table first (due to foreign key)
+            db.execSQL("DROP TABLE IF EXISTS unified_chat_members")
+
+            // Drop the old unified groups table
+            db.execSQL("DROP TABLE IF EXISTS unified_chat_groups")
+
+            Timber.i("Dropped legacy unified_chat_groups and unified_chat_members tables")
+        }
+    }
+
+    /**
      * List of all migrations for use with databaseBuilder.
      *
      * IMPORTANT: Always add new migrations to this array!
@@ -1282,6 +1438,8 @@ object DatabaseMigrations {
         MIGRATION_45_46,
         MIGRATION_46_47,
         MIGRATION_47_48,
-        MIGRATION_48_49
+        MIGRATION_48_49,
+        MIGRATION_49_50,
+        MIGRATION_50_51
     )
 }

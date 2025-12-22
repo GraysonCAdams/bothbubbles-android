@@ -4,7 +4,7 @@ import android.app.Application
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
@@ -54,22 +54,20 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
     }
 
     /**
-     * Convert a unified chat group to a UI model using pre-fetched data.
+     * Convert a unified chat to a UI model using pre-fetched data.
      * Eliminates N+1 queries by receiving all data from batch queries.
      *
-     * @param group The unified chat group entity
-     * @param chatGuids List of chat GUIDs in this group
+     * @param unifiedChat The unified chat entity
+     * @param chatGuids List of chat GUIDs in this unified conversation
      * @param typingChats Set of chat GUIDs that have active typing indicators
-     * @param latestMessagesMap Pre-fetched latest messages indexed by chat GUID
      * @param chatsMap Pre-fetched chats indexed by GUID
      * @param participantsMap Pre-fetched participants grouped by chat GUID
-     * @return ConversationUiModel or null if group is invalid
+     * @return ConversationUiModel or null if invalid
      */
-    suspend fun unifiedGroupToUiModel(
-        group: UnifiedChatGroupEntity,
+    suspend fun unifiedChatToUiModel(
+        unifiedChat: UnifiedChatEntity,
         chatGuids: List<String>,
         typingChats: Set<String>,
-        latestMessagesMap: Map<String, MessageEntity>,
         chatsMap: Map<String, ChatEntity>,
         participantsMap: Map<String, List<com.bothbubbles.data.local.db.entity.HandleEntity>>
     ): ConversationUiModel? {
@@ -79,61 +77,42 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         val chats = chatGuids.mapNotNull { chatsMap[it] }
         if (chats.isEmpty()) return null
 
-        // Use pre-fetched messages instead of N queries
-        var latestMessage: MessageEntity? = null
-        var latestTimestamp = 0L
-        for (chatGuid in chatGuids) {
-            val msg = latestMessagesMap[chatGuid]
-            if (msg != null && msg.dateCreated > latestTimestamp) {
-                latestMessage = msg
-                latestTimestamp = msg.dateCreated
-            }
-        }
+        // Use cached latest message from unified chat
+        val latestTimestamp = unifiedChat.latestMessageDate ?: 0L
+        val rawMessageText = unifiedChat.cachedLatestMessageText ?: ""
+        val isFromMe = unifiedChat.cachedLatestMessageIsFromMe
 
-        // Use the primary chat for display info
-        val primaryChat = chats.find { it.guid == group.primaryChatGuid } ?: chats.first()
+        // Use the source chat for display info
+        val primaryChat = chats.find { it.guid == unifiedChat.sourceId } ?: chats.first()
 
-        // Get participants for this specific group's chats (not batched to avoid cross-contamination)
+        // Get participants for this unified chat's channels
         val groupParticipants = chatGuids.flatMap { chatGuid ->
             participantsMap[chatGuid] ?: emptyList()
         }.distinctBy { it.id }
         val primaryParticipant = chatRepository.getBestParticipant(groupParticipants)
-        val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: group.identifier
+        val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: unifiedChat.normalizedAddress
 
-        // Determine display name
-        val displayName = primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
-            ?: group.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
+        // Determine display name using unified chat's cached values
+        val displayName = unifiedChat.displayName?.takeIf { it.isNotBlank() }
+            ?: unifiedChat.cachedContactName?.takeIf { it.isNotBlank() }
+            ?: primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
             ?: primaryChat.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
             ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
             ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
-            ?: address.let { PhoneNumberFormatter.format(it) }
-
-        // Sum unread counts
-        val totalUnread = chats.sumOf { it.unreadCount }
+            ?: PhoneNumberFormatter.format(address)
 
         // Check for any typing indicators
         val anyTyping = chatGuids.any { it in typingChats }
 
-        // Check for any pinned
-        val anyPinned = chats.any { it.isPinned } || group.isPinned
-
-        // Check if all muted
-        val allMuted = chats.all { it.muteType != null } || group.muteType != null
-
-        // Check for drafts
-        val chatWithDraft = chats.find { !it.textFieldText.isNullOrBlank() }
-
-        val rawMessageText = latestMessage?.text ?: primaryChat.lastMessageText ?: ""
-        val isFromMe = latestMessage?.isFromMe ?: false
-
-        // Get attachments for the latest message
-        val attachments = if (latestMessage?.hasAttachments == true) {
-            attachmentRepository.getAttachmentsForMessage(latestMessage.guid)
+        // Get attachments for the latest message if it has any
+        val attachments = if (unifiedChat.cachedLatestMessageHasAttachments && unifiedChat.cachedLatestMessageGuid != null) {
+            attachmentRepository.getAttachmentsForMessage(unifiedChat.cachedLatestMessageGuid!!)
         } else emptyList()
         val firstAttachment = attachments.firstOrNull()
         val attachmentCount = attachments.size
 
         // Check for invisible ink effect
+        val latestMessage = unifiedChat.cachedLatestMessageGuid?.let { messageRepository.getMessageByGuid(it) }
         val isInvisibleInk = latestMessage?.expressiveSendStyleId?.contains("invisibleink", ignoreCase = true) == true
 
         // Determine message type with enhanced detection
@@ -159,7 +138,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
 
         // Get group event text
         val groupEventText = if (messageType == MessageType.GROUP_EVENT && latestMessage != null) {
-            formatGroupEvent(latestMessage, group.primaryChatGuid, handleRepository)
+            formatGroupEvent(latestMessage, unifiedChat.sourceId, handleRepository)
         } else null
 
         // Determine message status
@@ -173,21 +152,21 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         }
 
         return ConversationUiModel(
-            guid = group.primaryChatGuid,
+            guid = unifiedChat.sourceId,
             displayName = displayName,
-            avatarPath = primaryParticipant?.cachedAvatarPath,
+            avatarPath = unifiedChat.cachedAvatarPath ?: primaryParticipant?.cachedAvatarPath,
             lastMessageText = messageText,
-            lastMessageTime = formatRelativeTime(latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L, application),
-            lastMessageTimestamp = latestTimestamp.takeIf { it > 0 } ?: group.latestMessageDate ?: 0L,
-            unreadCount = totalUnread.takeIf { it > 0 } ?: group.unreadCount,
-            isPinned = anyPinned,
-            pinIndex = group.pinIndex ?: chats.mapNotNull { it.pinIndex }.minOrNull() ?: Int.MAX_VALUE,
-            isMuted = allMuted,
+            lastMessageTime = formatRelativeTime(latestTimestamp, application),
+            lastMessageTimestamp = latestTimestamp,
+            unreadCount = unifiedChat.unreadCount,
+            isPinned = unifiedChat.isPinned,
+            pinIndex = unifiedChat.pinIndex ?: Int.MAX_VALUE,
+            isMuted = unifiedChat.muteType != null,
             isGroup = false,
             isTyping = anyTyping,
             isFromMe = isFromMe,
-            hasDraft = chatWithDraft != null,
-            draftText = chatWithDraft?.textFieldText,
+            hasDraft = unifiedChat.textFieldText?.isNotBlank() == true,
+            draftText = unifiedChat.textFieldText,
             lastMessageType = messageType,
             lastMessageStatus = messageStatus,
             participantNames = groupParticipants.map { it.displayName },
@@ -196,11 +175,11 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             inferredName = primaryParticipant?.inferredName,
             lastMessageLinkTitle = linkTitle,
             lastMessageLinkDomain = linkDomain,
-            isSpam = chats.any { it.isSpam },
-            category = primaryChat.category,
-            isSnoozed = group.snoozeUntil != null,
-            snoozeUntil = group.snoozeUntil,
-            lastMessageSource = latestMessage?.messageSource,
+            isSpam = unifiedChat.isSpam,
+            category = unifiedChat.category,
+            isSnoozed = unifiedChat.isSnoozed,
+            snoozeUntil = unifiedChat.snoozeUntil,
+            lastMessageSource = unifiedChat.cachedLatestMessageSource,
             mergedChatGuids = chatGuids,
             isMerged = chatGuids.size > 1,
             contactKey = PhoneNumberFormatter.getContactKey(address),

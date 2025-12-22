@@ -24,7 +24,7 @@ import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
 import dagger.Module
@@ -120,12 +120,6 @@ object DatabaseModule {
 
     @Provides
     @Singleton
-    fun provideUnifiedChatGroupDao(database: BothBubblesDatabase): UnifiedChatGroupDao {
-        return database.unifiedChatGroupDao()
-    }
-
-    @Provides
-    @Singleton
     fun provideSeenMessageDao(database: BothBubblesDatabase): SeenMessageDao {
         return database.seenMessageDao()
     }
@@ -206,5 +200,11 @@ object DatabaseModule {
     @Singleton
     fun provideMessageEditHistoryDao(database: BothBubblesDatabase): MessageEditHistoryDao {
         return database.messageEditHistoryDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideUnifiedChatDao(database: BothBubblesDatabase): UnifiedChatDao {
+        return database.unifiedChatDao()
     }
 }

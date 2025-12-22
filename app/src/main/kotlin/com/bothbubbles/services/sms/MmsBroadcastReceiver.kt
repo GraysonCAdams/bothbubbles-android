@@ -10,17 +10,20 @@ import android.telephony.SmsManager
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
+import com.bothbubbles.data.local.db.entity.MessageSource
 import com.bothbubbles.data.local.prefs.SettingsDataStore
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.spam.SpamRepository
+import com.bothbubbles.util.UnifiedChatIdGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -92,7 +95,7 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
     lateinit var handleDao: HandleDao
 
     @Inject
-    lateinit var unifiedChatGroupDao: UnifiedChatGroupDao
+    lateinit var unifiedChatDao: UnifiedChatDao
 
     @Inject
     lateinit var notificationService: NotificationService
@@ -221,18 +224,15 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         if (mmsId != null) {
             // Ensure chat exists for this sender
             val chatGuid = "sms;-;$address"
-            ensureChatExists(chatGuid, address)
+            val unifiedChat = ensureChatExists(chatGuid, address)
 
             // Ensure handle exists
             ensureHandleExists(chatGuid, address)
 
-            // Show early notification
-            val chat = chatDao.getChatByGuid(chatGuid)
-
-            // Check if notifications are disabled for this chat
-            if (chat?.notificationsEnabled == false) {
+            // Check if notifications are disabled for this chat (from unified chat)
+            if (unifiedChat?.notificationsEnabled == false) {
                 Timber.i("Notifications disabled for chat $chatGuid, skipping MMS notification")
-            } else if (chat?.isSnoozed == true) {
+            } else if (unifiedChat?.isSnoozed == true) {
                 // Check if chat is snoozed
                 Timber.i("Chat $chatGuid is snoozed, skipping MMS notification")
             } else if (activeConversationManager.isConversationActive(chatGuid)) {
@@ -250,14 +250,14 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 notificationService.showMessageNotification(
                     com.bothbubbles.services.notifications.MessageNotificationParams(
                         chatGuid = chatGuid,
-                        chatTitle = chat?.displayName ?: senderName ?: address,
+                        chatTitle = unifiedChat?.displayName ?: senderName ?: address,
                         messageText = notificationText,
                         messageGuid = "mms-pending-$mmsId",
                         senderName = senderName,
                         senderAddress = address,
                         isGroup = false,
                         avatarUri = senderAvatarUri,
-                        groupAvatarPath = chat?.effectiveGroupPhotoPath
+                        groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath
                     )
                 )
             }
@@ -375,7 +375,24 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
         }
     }
 
-    private suspend fun ensureChatExists(chatGuid: String, address: String) {
+    private suspend fun ensureChatExists(chatGuid: String, address: String): UnifiedChatEntity? {
+        val timestamp = System.currentTimeMillis()
+        val normalizedAddress = address.replace(Regex("[^0-9+]"), "")
+
+        // Get or create unified chat for this address
+        val unifiedChat = try {
+            unifiedChatDao.getOrCreate(
+                UnifiedChatEntity(
+                    id = UnifiedChatIdGenerator.generate(),
+                    normalizedAddress = normalizedAddress,
+                    sourceId = chatGuid
+                )
+            )
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to get or create unified chat for $address")
+            null
+        }
+
         val existingChat = chatDao.getChatByGuid(chatGuid)
         if (existingChat == null) {
             val chat = ChatEntity(
@@ -383,25 +400,37 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                 chatIdentifier = address,
                 displayName = null,
                 isGroup = false,
-                lastMessageDate = System.currentTimeMillis(),
-                lastMessageText = "Incoming MMS...",
-                unreadCount = 1
+                latestMessageDate = timestamp,
+                unifiedChatId = unifiedChat?.id
             )
             chatDao.insertChat(chat)
         } else {
-            chatDao.updateUnreadCount(chatGuid, existingChat.unreadCount + 1)
-        }
+            chatDao.updateLatestMessageDate(chatGuid, timestamp)
 
-        // Also update the unified group's unread count and latestMessageDate for badge sync and sorting
-        val timestamp = System.currentTimeMillis()
-        unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
-            unifiedChatGroupDao.incrementUnreadCount(group.id)
-            // Update latestMessageDate if this message is newer
-            val currentLatest = group.latestMessageDate ?: 0L
-            if (timestamp > currentLatest) {
-                unifiedChatGroupDao.updateLatestMessage(group.id, timestamp, "Incoming MMS...")
+            // Link chat to unified chat if not already linked
+            if (existingChat.unifiedChatId == null && unifiedChat != null) {
+                chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
             }
         }
+
+        // Update unified chat's unread count and latest message
+        unifiedChat?.let { uc ->
+            unifiedChatDao.incrementUnreadCount(uc.id)
+            unifiedChatDao.updateLatestMessageIfNewer(
+                id = uc.id,
+                date = timestamp,
+                text = "Incoming MMS...",
+                guid = null,
+                isFromMe = false,
+                hasAttachments = true,
+                source = MessageSource.LOCAL_SMS.name,
+                dateDelivered = null,
+                dateRead = null,
+                error = 0
+            )
+        }
+
+        return unifiedChat
     }
 
     private suspend fun ensureHandleExists(chatGuid: String, address: String) {

@@ -76,50 +76,52 @@ interface PopularChatsDao {
     fun observePopularChats(since: Long, limit: Int): Flow<List<ChatPopularity>>
 
     /**
-     * Get message counts for unified groups (1:1 chats merged across iMessage/SMS).
-     * Sums message counts across all member chats of each unified group.
+     * Get message counts for unified chats (1:1 chats merged across iMessage/SMS).
+     * Sums message counts across all messages linked to each unified chat.
+     *
+     * Uses the new architecture where messages have unified_chat_id directly.
      *
      * @param since Timestamp (epoch ms) to count messages from
      * @param limit Maximum number of results
      */
     @Query("""
         SELECT
-            ucg.primary_chat_guid as chatGuid,
+            uc.source_id as chatGuid,
             COUNT(m.guid) as messageCount,
             MAX(m.date_created) as latestMessageDate
-        FROM unified_chat_groups ucg
-        INNER JOIN unified_chat_members ucm ON ucg.id = ucm.group_id
-        INNER JOIN messages m ON m.chat_guid = ucm.chat_guid
+        FROM unified_chats uc
+        INNER JOIN messages m ON m.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
-        AND ucg.is_archived = 0
-        GROUP BY ucg.id
+        AND uc.is_archived = 0
+        AND uc.date_deleted IS NULL
+        GROUP BY uc.id
         ORDER BY messageCount DESC, latestMessageDate DESC
         LIMIT :limit
     """)
-    suspend fun getPopularUnifiedGroups(since: Long, limit: Int): List<ChatPopularity>
+    suspend fun getPopularUnifiedChats(since: Long, limit: Int): List<ChatPopularity>
 
     /**
-     * Observe popular unified groups (reactive).
+     * Observe popular unified chats (reactive).
      */
     @Query("""
         SELECT
-            ucg.primary_chat_guid as chatGuid,
+            uc.source_id as chatGuid,
             COUNT(m.guid) as messageCount,
             MAX(m.date_created) as latestMessageDate
-        FROM unified_chat_groups ucg
-        INNER JOIN unified_chat_members ucm ON ucg.id = ucm.group_id
-        INNER JOIN messages m ON m.chat_guid = ucm.chat_guid
+        FROM unified_chats uc
+        INNER JOIN messages m ON m.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
-        AND ucg.is_archived = 0
-        GROUP BY ucg.id
+        AND uc.is_archived = 0
+        AND uc.date_deleted IS NULL
+        GROUP BY uc.id
         ORDER BY messageCount DESC, latestMessageDate DESC
         LIMIT :limit
     """)
-    fun observePopularUnifiedGroups(since: Long, limit: Int): Flow<List<ChatPopularity>>
+    fun observePopularUnifiedChats(since: Long, limit: Int): Flow<List<ChatPopularity>>
 
     /**
      * Get popular group chats (multi-participant chats).

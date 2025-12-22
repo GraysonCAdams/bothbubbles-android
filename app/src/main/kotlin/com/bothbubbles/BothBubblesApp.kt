@@ -179,6 +179,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
         // Initialize AuthInterceptor credentials cache (must happen before any network requests)
         initializeAuthInterceptor()
 
+        // Check if database migration requires sync flag reset (must run before sync logic)
+        checkMigrationState()
+
         // Initialize active conversation manager (clears active chat when app backgrounds)
         activeConversationManager.initialize()
 
@@ -231,6 +234,29 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
+    }
+
+    /**
+     * Check if a database migration occurred that requires sync flag reset.
+     *
+     * Migration 49→50 clears all message/chat data to enable the new unified chat
+     * architecture. This method detects the post-migration state (empty sync_ranges
+     * but initialSyncComplete=true) and resets the DataStore flags to trigger
+     * a full re-sync of both iMessage and SMS data.
+     *
+     * Must run early in initialization, before any sync logic.
+     */
+    private fun checkMigrationState() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val migrated = syncService.checkAndResetIfMigrated()
+                if (migrated) {
+                    Timber.i("Database migration detected - sync flags reset, will trigger full re-sync")
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Error checking migration state")
+            }
+        }
     }
 
     /**

@@ -3,7 +3,7 @@ package com.bothbubbles.ui.conversations.delegates
 import timber.log.Timber
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.UnifiedChatGroupRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.core.data.ConnectionState
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketEvent
@@ -39,7 +39,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(FlowPreview::class)
 class ConversationObserverDelegate @AssistedInject constructor(
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val chatRepository: ChatRepository,
     private val socketConnection: SocketConnection,
     private val syncService: SyncService,
@@ -132,12 +132,12 @@ class ConversationObserverDelegate @AssistedInject constructor(
 
     /**
      * Observe data changes to refresh loaded conversations reactively.
-     * Triggers on any change to unified groups, chats, typing indicators, or read status.
+     * Triggers on any change to unified chats, group chats, typing indicators, or read status.
      */
     private fun observeDataChanges() {
         scope.launch {
             combine(
-                unifiedChatGroupRepository.observeActiveGroupCount(),
+                unifiedChatRepository.observeActiveCount(),
                 chatRepository.observeGroupChatCount(),
                 chatRepository.observeNonGroupChatCount(),
                 chatRepository.observeUnreadChatCount(),  // Triggers on mark as read

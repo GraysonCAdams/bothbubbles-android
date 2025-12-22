@@ -1,7 +1,7 @@
 package com.bothbubbles.ui.conversations.delegates
 
 import com.bothbubbles.data.repository.ChatRepository
-import com.bothbubbles.data.repository.UnifiedChatGroupRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.ui.conversations.ConversationFilter
 import com.bothbubbles.ui.conversations.ConversationUiModel
 import dagger.assisted.Assisted
@@ -118,7 +118,7 @@ enum class BatchAction {
  */
 class ConversationSelectionDelegate @AssistedInject constructor(
     private val chatRepository: ChatRepository,
-    private val unifiedChatGroupRepository: UnifiedChatGroupRepository,
+    private val unifiedChatRepository: UnifiedChatRepository,
     @Assisted private val scope: CoroutineScope
 ) {
     @AssistedFactory
@@ -251,7 +251,7 @@ class ConversationSelectionDelegate @AssistedInject constructor(
         categoryFilter: String?
     ): Int {
         // Get counts from all sources
-        val unifiedGroupCount = unifiedChatGroupRepository.getFilteredGroupCount(
+        val unifiedCount = unifiedChatRepository.getFilteredCount(
             filter = filter,
             categoryFilter = categoryFilter
         )
@@ -264,7 +264,7 @@ class ConversationSelectionDelegate @AssistedInject constructor(
             categoryFilter = categoryFilter
         )
 
-        return unifiedGroupCount + groupChatCount + nonGroupChatCount
+        return unifiedCount + groupChatCount + nonGroupChatCount
     }
 
     /**
@@ -336,8 +336,8 @@ class ConversationSelectionDelegate @AssistedInject constructor(
         limit: Int,
         offset: Int
     ): List<String> {
-        // Get GUIDs from all sources
-        val unifiedGuids = unifiedChatGroupRepository.getFilteredGroupGuids(
+        // Get IDs from all sources
+        val unifiedIds = unifiedChatRepository.getFilteredIds(
             filter = filter,
             categoryFilter = categoryFilter,
             limit = limit,
@@ -356,7 +356,7 @@ class ConversationSelectionDelegate @AssistedInject constructor(
             offset = offset
         )
 
-        return (unifiedGuids + groupChatGuids + nonGroupChatGuids).distinct()
+        return (unifiedIds + groupChatGuids + nonGroupChatGuids).distinct()
     }
 
     /**

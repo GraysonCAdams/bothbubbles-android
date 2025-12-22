@@ -38,6 +38,7 @@ class SyncService @Inject constructor(
     private val messageSyncHelper: MessageSyncHelper,
     private val syncOperations: SyncOperations,
     private val smsRepository: SmsRepository,
+    private val syncRangeDao: com.bothbubbles.data.local.db.dao.SyncRangeDao,
     private val notifier: Notifier,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
@@ -453,6 +454,49 @@ class SyncService @Inject constructor(
         }
         applicationScope.launch(ioDispatcher) {
             performIncrementalSync()
+        }
+    }
+
+    /**
+     * Check if the app needs a re-sync after database migration.
+     *
+     * This detects the state where:
+     * - Database tables have been cleared by migration 49→50
+     * - But DataStore flags still indicate sync is complete
+     *
+     * If detected, resets the sync flags so the normal initial sync flow triggers.
+     * Called from BothBubblesApp.onCreate() before any sync logic runs.
+     *
+     * @return true if migration was detected and flags were reset
+     */
+    suspend fun checkAndResetIfMigrated(): Boolean {
+        try {
+            val syncRangesEmpty = syncRangeDao.isEmpty()
+            val initialSyncComplete = settingsDataStore.initialSyncComplete.first()
+
+            // Post-migration state: data cleared but flags say complete
+            if (syncRangesEmpty && initialSyncComplete) {
+                Timber.w("Detected post-migration state: sync_ranges empty but initialSyncComplete=true")
+                Timber.i("Resetting sync flags to trigger full re-sync")
+
+                // Reset iMessage sync flags (clears started, complete, and synced chat guids)
+                settingsDataStore.clearSyncProgress()
+
+                // Reset SMS import flag so SMS will also re-import
+                settingsDataStore.setHasCompletedInitialSmsImport(false)
+
+                // Clear last sync time
+                settingsDataStore.setLastSyncTime(0L)
+                _lastSyncTime.value = 0L
+
+                Timber.i("Sync flags reset complete - app will perform full initial sync")
+                return true
+            }
+
+            return false
+        } catch (e: Exception) {
+            Timber.e(e, "Error checking migration state")
+            return false
         }
     }
 

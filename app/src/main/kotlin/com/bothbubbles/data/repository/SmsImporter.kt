@@ -4,13 +4,11 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.isValidPhoneAddress
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.phonesMatch
 import com.bothbubbles.data.repository.SmsContentProviderHelpers.toMessageEntity
@@ -30,7 +28,8 @@ class SmsImporter(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val smsContentProvider: SmsContentProvider,
     private val androidContactsService: AndroidContactsService
 ) {
@@ -128,26 +127,31 @@ class SmsImporter(
             chatDao.insertChatHandleCrossRef(ChatHandleCrossRef(chatGuid, handleId))
         }
 
-        // For single contacts (not groups), link to unified group
+        // For single contacts (not groups), link to unified chat
         val validAddresses = addresses.filter { it.isNotBlank() }
         if (!isGroup && validAddresses.isNotEmpty()) {
             val normalizedPhone = validAddresses.first()
-            linkChatToUnifiedGroup(chatGuid, normalizedPhone)
+            linkChatToUnifiedChat(chatGuid, normalizedPhone)
         }
 
         // Import the most recent message so the badge displays correctly in conversation list
         importLatestMessageForThread(thread.threadId, chatGuid, isGroup)
 
-        // Update unified group's latestMessageDate if applicable
+        // Update unified chat's latestMessageDate if applicable
         if (!isGroup && validAddresses.isNotEmpty()) {
             val normalizedPhone = validAddresses.first()
-            val group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            if (group != null) {
+            val unifiedChat = unifiedChatDao.getByNormalizedAddress(normalizedPhone)
+            if (unifiedChat != null) {
                 // Update latestMessageDate if this thread's message is newer
-                val currentLatest = group.latestMessageDate ?: 0L
-                if (thread.lastMessageDate > currentLatest) {
-                    unifiedChatGroupDao.updateLatestMessage(group.id, thread.lastMessageDate, thread.snippet)
-                }
+                unifiedChatRepository.updateLatestMessageIfNewer(
+                    id = unifiedChat.id,
+                    date = thread.lastMessageDate,
+                    text = thread.snippet,
+                    guid = null,
+                    isFromMe = false,
+                    hasAttachments = false,
+                    source = "LOCAL_SMS"
+                )
             }
         }
     }
@@ -185,59 +189,55 @@ class SmsImporter(
     }
 
     /**
-     * Link a chat to a unified group, creating the group if necessary.
+     * Link a chat to a unified chat, creating the unified chat if necessary.
      * This enables merging SMS and iMessage conversations for the same contact.
      */
-    private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
+    private suspend fun linkChatToUnifiedChat(chatGuid: String, normalizedPhone: String) {
         // Skip if identifier is empty or looks like an email/RCS address (not a phone)
-        // This prevents all non-phone chats from being lumped into a single group
+        // This prevents all non-phone chats from being lumped into a single unified chat
         if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
-            Timber.d("linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
+            Timber.d("linkChatToUnifiedChat: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
             return
         }
 
-        Timber.d("linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
+        Timber.d("linkChatToUnifiedChat: Linking $chatGuid to unified chat for '$normalizedPhone'")
 
         try {
-            // Check if unified group already exists for this phone number
-            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            Timber.d("linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
+            // Check if there's an existing iMessage chat for this phone to determine source ID
+            val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+            Timber.d("linkChatToUnifiedChat: Found existing iMessage chat: ${existingIMessageChat?.guid}")
 
-            if (group == null) {
-                // Check if there's an existing iMessage chat for this phone
-                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-                Timber.d("linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
+            // Prefer iMessage as source if available
+            val sourceId = existingIMessageChat?.guid ?: chatGuid
+            val displayName = existingIMessageChat?.displayName
 
-                // Create new unified group and add this chat atomically
-                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
-                val newGroup = UnifiedChatGroupEntity(
-                    identifier = normalizedPhone,
-                    primaryChatGuid = primaryGuid,
-                    displayName = existingIMessageChat?.displayName
-                )
+            // Get or create unified chat for this phone number
+            val unifiedChat = unifiedChatRepository.getOrCreate(
+                address = normalizedPhone,
+                sourceId = sourceId,
+                displayName = displayName,
+                isGroup = false
+            )
+            Timber.d("linkChatToUnifiedChat: Got unified chat id=${unifiedChat.id}")
 
-                // Use atomic method to prevent FOREIGN KEY errors
-                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
-                Timber.d("linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
+            // Link this SMS chat to the unified chat
+            chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
 
-                // Add existing iMessage chat to group if found (separate from SMS chat)
-                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
-                    Timber.d("linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
-                    unifiedChatGroupDao.insertMember(
-                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
-                    )
+            // Also link the iMessage chat if found and not already linked
+            if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
+                if (existingIMessageChat.unifiedChatId == null) {
+                    chatDao.setUnifiedChatId(existingIMessageChat.guid, unifiedChat.id)
+                    messageDao.setUnifiedChatIdForChat(existingIMessageChat.guid, unifiedChat.id)
+                    Timber.d("linkChatToUnifiedChat: Also linked iMessage ${existingIMessageChat.guid} to unified chat ${unifiedChat.id}")
                 }
-            } else {
-                // Group exists, just add this SMS chat to it
-                Timber.d("linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
-                unifiedChatGroupDao.insertMember(
-                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-                )
             }
 
-            Timber.d("linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+            // Update messages' unified_chat_id for this chat
+            messageDao.setUnifiedChatIdForChat(chatGuid, unifiedChat.id)
+
+            Timber.d("linkChatToUnifiedChat: Successfully linked $chatGuid to unified chat ${unifiedChat.id}")
         } catch (e: Exception) {
-            Timber.e(e, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'")
+            Timber.e(e, "linkChatToUnifiedChat: FAILED to link $chatGuid to unified chat for '$normalizedPhone'")
             throw e
         }
     }

@@ -6,8 +6,9 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.core.model.entity.MessageEditHistoryEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
@@ -18,6 +19,8 @@ import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.nameinference.NameInferenceService
+import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
+import com.bothbubbles.util.UnifiedChatIdGenerator
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -42,10 +45,11 @@ class IncomingMessageHandler @Inject constructor(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val attachmentDao: AttachmentDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val messageEditHistoryDao: MessageEditHistoryDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
+    private val socialMediaDownloadService: SocialMediaDownloadService,
     private val api: BothBubblesApi,
     @ApplicationScope private val applicationScope: CoroutineScope
 ) : IncomingMessageProcessor {
@@ -57,7 +61,12 @@ class IncomingMessageHandler @Inject constructor(
      */
     override suspend fun handleIncomingMessage(messageDto: MessageDto, chatGuid: String): MessageEntity {
         val localHandleId = resolveLocalHandleId(messageDto)
-        val message = messageDto.toEntity(chatGuid, localHandleId)
+
+        // Resolve or create unified chat for this protocol channel
+        val unifiedChatId = resolveUnifiedChatId(chatGuid, messageDto)
+
+        // Create message with unified_chat_id
+        val message = messageDto.toEntity(chatGuid, localHandleId, unifiedChatId)
 
         // CRITICAL: Check if message already exists BEFORE any side effects
         // This prevents duplicate unread count increments when message arrives via both FCM and Socket.IO
@@ -80,24 +89,187 @@ class IncomingMessageHandler @Inject constructor(
         // Only this thread will execute this block for this message
         if (!message.isFromMe) {
             chatDao.updateLastMessage(chatGuid, message.dateCreated, message.text)
-            // Use atomic increment instead of read-modify-write to prevent race conditions
-            chatDao.incrementUnreadCount(chatGuid)
 
-            // Also increment the unified group's unread count for badge sync
-            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
-                unifiedChatGroupDao.incrementUnreadCount(group.id)
+            // Update unified chat's unread count and latest message
+            if (unifiedChatId != null) {
+                unifiedChatDao.incrementUnreadCount(unifiedChatId)
+                unifiedChatDao.updateLatestMessageIfNewer(
+                    id = unifiedChatId,
+                    date = message.dateCreated,
+                    text = message.text,
+                    guid = message.guid,
+                    isFromMe = false,
+                    hasAttachments = message.hasAttachments,
+                    source = message.messageSource,
+                    dateDelivered = message.dateDelivered,
+                    dateRead = message.dateRead,
+                    error = message.error
+                )
             }
 
             // Try to infer sender name from self-introduction patterns (e.g., "Hey it's John")
             message.handleId?.let { handleId ->
                 nameInferenceService.processIncomingMessage(handleId.toLong(), message.text)
             }
+        } else if (unifiedChatId != null) {
+            // For sent messages, still update latest message
+            unifiedChatDao.updateLatestMessageIfNewer(
+                id = unifiedChatId,
+                date = message.dateCreated,
+                text = message.text,
+                guid = message.guid,
+                isFromMe = true,
+                hasAttachments = message.hasAttachments,
+                source = message.messageSource,
+                dateDelivered = message.dateDelivered,
+                dateRead = message.dateRead,
+                error = message.error
+            )
         }
 
         // Sync attachments
         syncIncomingAttachments(messageDto)
 
+        // Background download social media videos if enabled
+        // Only process incoming messages (not from self) that contain text
+        if (!message.isFromMe && !message.text.isNullOrBlank()) {
+            triggerSocialMediaBackgroundDownload(
+                messageGuid = message.guid,
+                chatGuid = chatGuid,
+                text = message.text,
+                senderName = messageDto.handle?.displayName,
+                senderAddress = messageDto.handle?.address,
+                timestamp = message.dateCreated
+            )
+        }
+
         return message
+    }
+
+    /**
+     * Triggers background download of social media videos from message text.
+     * Only runs if background downloading is enabled in settings.
+     */
+    private fun triggerSocialMediaBackgroundDownload(
+        messageGuid: String,
+        chatGuid: String,
+        text: String,
+        senderName: String?,
+        senderAddress: String?,
+        timestamp: Long
+    ) {
+        applicationScope.launch {
+            try {
+                // Check if background downloading is enabled
+                if (!socialMediaDownloadService.isBackgroundDownloadEnabled()) {
+                    return@launch
+                }
+
+                // Check network conditions
+                val permission = socialMediaDownloadService.canDownload()
+                if (permission is com.bothbubbles.services.socialmedia.DownloadPermission.Blocked) {
+                    Timber.d("[SocialMedia] Background download blocked: ${permission.reason}")
+                    return@launch
+                }
+
+                // Extract URLs from the message text
+                val urlPattern = Regex("""https?://[^\s<>"]+""")
+                val urls = urlPattern.findAll(text).map { it.value }.toList()
+
+                for (url in urls) {
+                    // Check if this URL is a supported social media platform
+                    val platform = socialMediaDownloadService.detectPlatform(url) ?: continue
+
+                    // Check if link was dismissed by user
+                    if (socialMediaDownloadService.isLinkDismissed(messageGuid, url)) {
+                        continue
+                    }
+
+                    // Check if downloading is enabled for this platform
+                    if (!socialMediaDownloadService.isDownloadEnabled(platform)) {
+                        continue
+                    }
+
+                    Timber.d("[SocialMedia] Starting background download for $platform: $url")
+
+                    // Extract video URL
+                    val result = socialMediaDownloadService.extractVideoUrl(url, platform)
+                    if (result is com.bothbubbles.services.socialmedia.SocialMediaResult.Success) {
+                        // Download and cache the video
+                        socialMediaDownloadService.downloadAndCacheVideo(
+                            result = result,
+                            originalUrl = url,
+                            messageGuid = messageGuid,
+                            chatGuid = chatGuid,
+                            platform = platform,
+                            senderName = senderName,
+                            senderAddress = senderAddress,
+                            sentTimestamp = timestamp
+                        )
+                        Timber.d("[SocialMedia] Background download initiated for $platform: $url")
+                    } else {
+                        Timber.d("[SocialMedia] Failed to extract video URL: $result")
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "[SocialMedia] Error during background download")
+            }
+        }
+    }
+
+    /**
+     * Resolve or create the unified chat ID for a chat.
+     *
+     * Strategy:
+     * 1. Check if chat already has a unified_chat_id
+     * 2. Try to find existing unified chat by normalized address
+     * 3. Create new unified chat if none exists
+     */
+    private suspend fun resolveUnifiedChatId(chatGuid: String, messageDto: MessageDto): String? {
+        // Try to get chat with its unified_chat_id
+        val chat = chatDao.getChatByGuid(chatGuid)
+
+        // If chat already has a unified_chat_id, use it
+        chat?.unifiedChatId?.let { return it }
+
+        // Get the normalized address for this conversation
+        val normalizedAddress = resolveNormalizedAddress(chat?.chatIdentifier, messageDto)
+            ?: return null // Can't create unified chat without an address
+
+        // Get or create unified chat for this address
+        val unifiedChat = unifiedChatDao.getOrCreate(
+            UnifiedChatEntity(
+                id = UnifiedChatIdGenerator.generate(),
+                normalizedAddress = normalizedAddress,
+                sourceId = chatGuid // The first chat becomes the source
+            )
+        )
+
+        // Link the chat to this unified chat
+        chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
+
+        return unifiedChat.id
+    }
+
+    /**
+     * Normalize an address for unified chat lookup.
+     * Phone numbers are stripped to digits only, emails are lowercased.
+     */
+    private fun resolveNormalizedAddress(chatIdentifier: String?, messageDto: MessageDto): String? {
+        // Prefer chat identifier
+        val address = chatIdentifier
+            ?: messageDto.handle?.address
+            ?: return null
+
+        return normalizeAddress(address)
+    }
+
+    private fun normalizeAddress(address: String): String {
+        return if (address.contains("@")) {
+            address.lowercase()
+        } else {
+            address.replace(Regex("[^0-9+]"), "")
+        }
     }
 
     /**
@@ -110,7 +282,9 @@ class IncomingMessageHandler @Inject constructor(
         val existingMessage = messageDao.getMessageByGuid(messageDto.guid)
         if (existingMessage != null) {
             val localHandleId = resolveLocalHandleId(messageDto)
-            val updated = messageDto.toEntity(chatGuid, localHandleId).copy(id = existingMessage.id)
+            // Preserve the existing unified_chat_id
+            val updated = messageDto.toEntity(chatGuid, localHandleId, existingMessage.unifiedChatId)
+                .copy(id = existingMessage.id)
 
             // Check if this is a message edit (new dateEdited that differs from existing)
             val incomingDateEdited = messageDto.dateEdited
@@ -314,7 +488,7 @@ class IncomingMessageHandler @Inject constructor(
     /**
      * Convert a MessageDto to a MessageEntity
      */
-    private fun MessageDto.toEntity(chatGuid: String, localHandleId: Long?): MessageEntity {
+    private fun MessageDto.toEntity(chatGuid: String, localHandleId: Long?, unifiedChatId: String?): MessageEntity {
         // Determine message source based on handle's service or chat GUID prefix
         val source = when {
             handle?.service?.equals("SMS", ignoreCase = true) == true -> MessageSource.SERVER_SMS.name
@@ -329,6 +503,7 @@ class IncomingMessageHandler @Inject constructor(
         return MessageEntity(
             guid = guid,
             chatGuid = chatGuid,
+            unifiedChatId = unifiedChatId,
             handleId = localHandleId,
             senderAddress = handle?.address,
             text = text,

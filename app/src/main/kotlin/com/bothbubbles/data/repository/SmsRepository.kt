@@ -8,13 +8,11 @@ import com.bothbubbles.data.local.db.dao.TombstoneDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.sms.*
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -36,7 +34,8 @@ class SmsRepository @Inject constructor(
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
     private val tombstoneDao: TombstoneDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
+    private val unifiedChatRepository: UnifiedChatRepository,
     private val smsContentProvider: SmsContentProvider,
     private val smsSendService: SmsSendService,
     private val mmsSendService: MmsSendService,
@@ -49,7 +48,8 @@ class SmsRepository @Inject constructor(
         chatDao = chatDao,
         handleDao = handleDao,
         messageDao = messageDao,
-        unifiedChatGroupDao = unifiedChatGroupDao,
+        unifiedChatDao = unifiedChatDao,
+        unifiedChatRepository = unifiedChatRepository,
         smsContentProvider = smsContentProvider,
         androidContactsService = androidContactsService
     )
@@ -118,21 +118,21 @@ class SmsRepository @Inject constructor(
     }
 
     /**
-     * Repair orphaned SMS chats by linking them to unified groups.
+     * Repair orphaned SMS chats by linking them to unified chats.
      * This fixes messages sent via Android Auto or other external apps that
-     * were created before the unified group linking was added.
+     * were created before the unified chat linking was added.
      *
      * Call this on app startup to retroactively fix missing messages in merged views.
      */
     suspend fun repairOrphanedSmsChats(): Int = withContext(Dispatchers.IO) {
         try {
-            // Find all SMS/MMS chats that are not in any unified group
+            // Find all SMS/MMS chats that are not linked to a unified chat
             val allSmsChats = chatDao.getAllSmsChats()
             var repairedCount = 0
 
             for (chat in allSmsChats) {
-                // Skip if already in a unified group
-                if (unifiedChatGroupDao.isChatInUnifiedGroup(chat.guid)) {
+                // Skip if already linked to a unified chat
+                if (chat.unifiedChatId != null) {
                     continue
                 }
 
@@ -153,55 +153,46 @@ class SmsRepository @Inject constructor(
                 Timber.d("repairOrphanedSmsChats: Linking orphaned chat ${chat.guid} for '$normalizedPhone'")
 
                 try {
-                    // Check if unified group already exists for this phone number
-                    var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+                    // Check if there's an existing iMessage chat for this phone to determine display name
+                    val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+                    val displayName = existingIMessageChat?.displayName ?: chat.displayName
 
-                    if (group == null) {
-                        // Check if there's an existing iMessage chat for this phone
-                        val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+                    // Get or create unified chat for this phone number
+                    val unifiedChat = unifiedChatRepository.getOrCreate(
+                        address = normalizedPhone,
+                        sourceId = existingIMessageChat?.guid ?: chat.guid,
+                        displayName = displayName,
+                        isGroup = false
+                    )
 
-                        // Determine latestMessageDate from the most recent chat
-                        val latestDate = maxOf(
-                            chat.lastMessageDate ?: 0L,
-                            existingIMessageChat?.lastMessageDate ?: 0L
-                        )
+                    // Link this SMS chat to the unified chat
+                    chatDao.setUnifiedChatId(chat.guid, unifiedChat.id)
 
-                        // Create new unified group - prefer iMessage as primary if it exists
-                        val primaryGuid = existingIMessageChat?.guid ?: chat.guid
-                        val newGroup = UnifiedChatGroupEntity(
-                            identifier = normalizedPhone,
-                            primaryChatGuid = primaryGuid,
-                            displayName = existingIMessageChat?.displayName ?: chat.displayName,
-                            latestMessageDate = latestDate.takeIf { it > 0 }
-                        )
-
-                        // Use atomic method to prevent FOREIGN KEY errors
-                        group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chat.guid)
-                        Timber.d("repairOrphanedSmsChats: Created group ${group.id} for ${chat.guid} with latestMessageDate=$latestDate")
-
-                        // Add existing iMessage chat to group if found
-                        if (existingIMessageChat != null && existingIMessageChat.guid != chat.guid) {
-                            unifiedChatGroupDao.insertMember(
-                                UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
-                            )
-                            Timber.d("repairOrphanedSmsChats: Also linked iMessage ${existingIMessageChat.guid} to group ${group.id}")
-                        }
-                    } else {
-                        // Group exists, just add this SMS chat to it
-                        unifiedChatGroupDao.insertMember(
-                            UnifiedChatMember(groupId = group.id, chatGuid = chat.guid)
-                        )
-
-                        // Update latestMessageDate if this chat has a more recent message
-                        val chatLatestDate = chat.lastMessageDate ?: 0L
-                        val groupLatestDate = group.latestMessageDate ?: 0L
-                        if (chatLatestDate > groupLatestDate) {
-                            unifiedChatGroupDao.updateLatestMessage(group.id, chatLatestDate, chat.lastMessageText)
-                        }
-
-                        Timber.d("repairOrphanedSmsChats: Added ${chat.guid} to existing group ${group.id}")
+                    // Also link the iMessage chat if found and not already linked
+                    if (existingIMessageChat != null && existingIMessageChat.unifiedChatId == null) {
+                        chatDao.setUnifiedChatId(existingIMessageChat.guid, unifiedChat.id)
+                        messageDao.setUnifiedChatIdForChat(existingIMessageChat.guid, unifiedChat.id)
+                        Timber.d("repairOrphanedSmsChats: Also linked iMessage ${existingIMessageChat.guid} to unified chat ${unifiedChat.id}")
                     }
 
+                    // Update messages' unified_chat_id
+                    messageDao.setUnifiedChatIdForChat(chat.guid, unifiedChat.id)
+
+                    // Update unified chat's latest message if this chat has a more recent one
+                    val chatLatestDate = chat.latestMessageDate ?: 0L
+                    if (chatLatestDate > 0) {
+                        unifiedChatRepository.updateLatestMessageIfNewer(
+                            id = unifiedChat.id,
+                            date = chatLatestDate,
+                            text = null,
+                            guid = null,
+                            isFromMe = false,
+                            hasAttachments = false,
+                            source = "LOCAL_SMS"
+                        )
+                    }
+
+                    Timber.d("repairOrphanedSmsChats: Linked ${chat.guid} to unified chat ${unifiedChat.id}")
                     repairedCount++
                 } catch (e: Exception) {
                     Timber.e(e, "repairOrphanedSmsChats: Failed to link ${chat.guid}")
@@ -220,52 +211,59 @@ class SmsRepository @Inject constructor(
     }
 
     /**
-     * Repair unified group timestamps by updating latestMessageDate from member chats.
-     * This fixes groups that have an outdated timestamp (e.g., when RCS messages were
-     * received but the unified group timestamp wasn't updated).
+     * Repair unified chat timestamps by updating latestMessageDate from linked chats.
+     * This fixes unified chats that have an outdated timestamp (e.g., when RCS messages were
+     * received but the unified chat timestamp wasn't updated).
      *
      * Call this on app startup to ensure conversation list is sorted correctly.
      */
-    suspend fun repairUnifiedGroupTimestamps(): Int = withContext(Dispatchers.IO) {
+    suspend fun repairUnifiedChatTimestamps(): Int = withContext(Dispatchers.IO) {
         try {
-            // Get all unified groups
-            val allGroups = unifiedChatGroupDao.getAllGroups()
+            // Get all unified chats
+            val allUnifiedChats = unifiedChatDao.getAllChats()
             var repairedCount = 0
 
-            for (group in allGroups) {
-                // Get all member chat GUIDs for this group
-                val memberGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
-                if (memberGuids.isEmpty()) continue
+            for (unifiedChat in allUnifiedChats) {
+                // Get all chat GUIDs linked to this unified chat
+                val linkedChats = chatDao.getChatsForUnifiedChat(unifiedChat.id)
+                if (linkedChats.isEmpty()) continue
 
-                // Find the latest message date across all member chats
+                // Find the latest message date across all linked chats
                 var latestDate = 0L
                 var latestText: String? = null
 
-                for (guid in memberGuids) {
-                    val chat = chatDao.getChatByGuid(guid)
-                    val chatDate = chat?.lastMessageDate ?: 0L
+                for (chat in linkedChats) {
+                    val chatDate = chat.latestMessageDate ?: 0L
                     if (chatDate > latestDate) {
                         latestDate = chatDate
-                        latestText = chat?.lastMessageText
+                        // Note: ChatEntity no longer has lastMessageText, would need to query message
                     }
                 }
 
                 // Update if the computed date is newer than the stored date
-                val groupLatestDate = group.latestMessageDate ?: 0L
-                if (latestDate > groupLatestDate) {
-                    unifiedChatGroupDao.updateLatestMessage(group.id, latestDate, latestText)
-                    Timber.d("repairUnifiedGroupTimestamps: Updated group ${group.id} from $groupLatestDate to $latestDate")
+                val unifiedLatestDate = unifiedChat.latestMessageDate ?: 0L
+                if (latestDate > unifiedLatestDate) {
+                    unifiedChatRepository.updateLatestMessageIfNewer(
+                        id = unifiedChat.id,
+                        date = latestDate,
+                        text = latestText,
+                        guid = null,
+                        isFromMe = false,
+                        hasAttachments = false,
+                        source = null
+                    )
+                    Timber.d("repairUnifiedChatTimestamps: Updated unified chat ${unifiedChat.id} from $unifiedLatestDate to $latestDate")
                     repairedCount++
                 }
             }
 
             if (repairedCount > 0) {
-                Timber.i("repairUnifiedGroupTimestamps: Repaired $repairedCount unified group timestamps")
+                Timber.i("repairUnifiedChatTimestamps: Repaired $repairedCount unified chat timestamps")
             }
 
             repairedCount
         } catch (e: Exception) {
-            Timber.e(e, "repairUnifiedGroupTimestamps: Error repairing unified group timestamps")
+            Timber.e(e, "repairUnifiedChatTimestamps: Error repairing unified chat timestamps")
             0
         }
     }
@@ -398,10 +396,11 @@ class SmsRepository @Inject constructor(
         val result = messageOperations.markThreadAsRead(chatGuid) { guid ->
             getThreadIdForChat(guid)
         }
-        // Also update the unified group's unread count for badge sync
+        // Also update the unified chat's unread count for badge sync
         if (result.isSuccess) {
-            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
-                unifiedChatGroupDao.updateUnreadCount(group.id, 0)
+            val chat = chatDao.getChatByGuid(chatGuid)
+            chat?.unifiedChatId?.let { unifiedChatId ->
+                unifiedChatDao.markAsRead(unifiedChatId)
             }
         }
         return result

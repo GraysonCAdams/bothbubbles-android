@@ -12,11 +12,11 @@ import com.bothbubbles.MainActivity
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.ChatParticipantDao
 import com.bothbubbles.data.local.db.dao.HandleDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.util.GroupAvatarRenderer
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
 import com.bothbubbles.services.notifications.NotificationChannelManager
@@ -50,7 +50,7 @@ import javax.inject.Singleton
 @Singleton
 class ShortcutService @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val chatDao: ChatDao,
     private val chatParticipantDao: ChatParticipantDao,
     private val handleDao: HandleDao,
@@ -80,16 +80,16 @@ class ShortcutService @Inject constructor(
         Timber.d("Starting share target observation")
 
         observationJob = applicationScope.launch(ioDispatcher) {
-            // Combine unified groups (1:1 chats) and group chats into a single stream
+            // Combine unified chats (1:1 chats) and group chats into a single stream
             combine(
-                unifiedChatGroupDao.observeActiveGroups(),
+                unifiedChatDao.observeActive(),
                 chatDao.observeActiveGroupChats()
-            ) { unifiedGroups, groupChats ->
-                Pair(unifiedGroups, groupChats)
+            ) { unifiedChats, groupChats ->
+                Pair(unifiedChats, groupChats)
             }
             .distinctUntilChanged()
-            .collect { (unifiedGroups, groupChats) ->
-                debounceAndUpdate(unifiedGroups, groupChats)
+            .collect { (unifiedChats, groupChats) ->
+                debounceAndUpdate(unifiedChats, groupChats)
             }
         }
 
@@ -118,7 +118,7 @@ class ShortcutService @Inject constructor(
      * Only cancels the delay, not a running update.
      */
     private fun debounceAndUpdate(
-        unifiedGroups: List<UnifiedChatGroupEntity>,
+        unifiedChats: List<UnifiedChatEntity>,
         groupChats: List<ChatEntity>
     ) {
         // Cancel pending debounce, but let any running update complete
@@ -128,7 +128,7 @@ class ShortcutService @Inject constructor(
             // Wait for any running update to complete before starting a new one
             updateJob?.join()
             updateJob = applicationScope.launch(ioDispatcher) {
-                updateShortcuts(unifiedGroups, groupChats)
+                updateShortcuts(unifiedChats, groupChats)
             }
         }
     }
@@ -137,7 +137,7 @@ class ShortcutService @Inject constructor(
      * Update sharing shortcuts based on current conversations.
      */
     private suspend fun updateShortcuts(
-        unifiedGroups: List<UnifiedChatGroupEntity>,
+        unifiedChats: List<UnifiedChatEntity>,
         groupChats: List<ChatEntity>
     ) {
         try {
@@ -148,7 +148,7 @@ class ShortcutService @Inject constructor(
             }
 
             // Build combined list of conversations sorted by recency
-            val conversations = buildConversationList(unifiedGroups, groupChats)
+            val conversations = buildConversationList(unifiedChats, groupChats)
 
             if (conversations.isEmpty()) {
                 Timber.d("No conversations to publish as shortcuts")
@@ -175,26 +175,27 @@ class ShortcutService @Inject constructor(
     }
 
     /**
-     * Build a combined list of conversations from unified groups and group chats.
+     * Build a combined list of conversations from unified chats and group chats.
      * Looks up avatar paths from handles (for 1:1 chats) and chat entities (for groups).
      */
     private suspend fun buildConversationList(
-        unifiedGroups: List<UnifiedChatGroupEntity>,
+        unifiedChats: List<UnifiedChatEntity>,
         groupChats: List<ChatEntity>
     ): List<ConversationInfo> {
         val conversations = mutableListOf<ConversationInfo>()
 
-        // Add unified groups (1:1 chats)
-        for (group in unifiedGroups) {
-            val displayName = group.displayName
-                ?: PhoneNumberFormatter.format(group.identifier)
+        // Add unified chats (1:1 chats)
+        for (chat in unifiedChats) {
+            val displayName = chat.displayName
+                ?: chat.cachedContactName
+                ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
-            // Look up contact photo from handle by identifier (phone/email)
-            val handle = handleDao.getHandleByAddressAny(group.identifier)
-            val avatarPath = handle?.cachedAvatarPath
+            // Use cached avatar path from unified chat, or look up from handle
+            val handle = handleDao.getHandleByAddressAny(chat.normalizedAddress)
+            val avatarPath = chat.cachedAvatarPath ?: handle?.cachedAvatarPath
 
             Timber.tag(TAG).d(
-                "Unified group: identifier=${group.identifier}, " +
+                "Unified chat: identifier=${chat.normalizedAddress}, " +
                 "displayName=$displayName, " +
                 "handleFound=${handle != null}, " +
                 "avatarPath=$avatarPath"
@@ -202,10 +203,10 @@ class ShortcutService @Inject constructor(
 
             conversations.add(
                 ConversationInfo(
-                    chatGuid = group.primaryChatGuid,
+                    chatGuid = chat.sourceId,
                     displayName = displayName,
                     isGroup = false,
-                    latestMessageDate = group.latestMessageDate ?: 0L,
+                    latestMessageDate = chat.latestMessageDate ?: 0L,
                     avatarPath = avatarPath
                 )
             )

@@ -12,7 +12,8 @@ import androidx.core.content.LocusIdCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.bothbubbles.MainActivity
 import com.bothbubbles.R
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.ChatQueryDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.repository.QuickReplyTemplateRepository
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.di.IoDispatcher
@@ -38,7 +39,8 @@ class NotificationBuilder @Inject constructor(
     @ApplicationContext private val context: Context,
     private val bubbleMetadataHelper: BubbleMetadataHelper,
     private val quickReplyTemplateRepository: QuickReplyTemplateRepository,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
+    private val chatQueryDao: ChatQueryDao,
     private val activeConversationManager: ActiveConversationManager,
     @ApplicationScope private val applicationScope: CoroutineScope,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher
@@ -69,25 +71,37 @@ class NotificationBuilder @Inject constructor(
     }
 
     /**
-     * Refresh the unified group cache in the background.
-     * Called on initialization and whenever unified groups change.
+     * Refresh the unified chat cache in the background.
+     * Called on initialization and whenever unified chats change.
+     *
+     * In the new architecture, chats have a `unifiedChatId` field that links them
+     * to their unified conversation. We build a cache mapping each chat guid to
+     * all other chat guids in the same unified conversation (for merged navigation).
      */
     private suspend fun refreshUnifiedGroupCache() {
         try {
-            val allGroups = unifiedChatGroupDao.getActiveGroupsPaginated(limit = 1000, offset = 0)
-            val groupIds = allGroups.map { it.id }
-            val allMembers = unifiedChatGroupDao.getChatGuidsForGroups(groupIds)
+            // Get all active unified chats
+            val allUnifiedChats = unifiedChatDao.getActiveChats(limit = 1000, offset = 0)
+            val unifiedChatIds = allUnifiedChats.map { it.id }
 
-            // Build map of groupId -> list of chat guids
-            val groupMembersMap = allMembers.groupBy { it.groupId }
+            // Batch fetch all chat guids for these unified chats
+            val chatGuidResults = if (unifiedChatIds.isNotEmpty()) {
+                chatQueryDao.getChatGuidsForUnifiedChats(unifiedChatIds)
+            } else {
+                emptyList()
+            }
 
-            // Build map of chatGuid -> merged guids string
+            // Group by unified chat ID
+            val unifiedChatToGuids = chatGuidResults
+                .groupBy { it.unifiedChatId }
+                .mapValues { (_, list) -> list.map { it.chatGuid } }
+
+            // Build map of chatGuid -> merged guids string (only for multi-chat unified conversations)
             val newCache = mutableMapOf<String, String?>()
-            for ((groupId, members) in groupMembersMap) {
-                val chatGuids = members.map { it.chatGuid }
+            for ((_, chatGuids) in unifiedChatToGuids) {
                 if (chatGuids.size > 1) {
                     val mergedGuidsString = chatGuids.joinToString(",")
-                    // Add entry for each chat in the group
+                    // Add entry for each chat in the unified conversation
                     chatGuids.forEach { chatGuid ->
                         newCache[chatGuid] = mergedGuidsString
                     }
@@ -99,9 +113,9 @@ class NotificationBuilder @Inject constructor(
                 unifiedGroupCache.putAll(newCache)
             }
 
-            Timber.d("Refreshed unified group cache with ${newCache.size} chat mappings")
+            Timber.d("Refreshed unified chat cache with ${newCache.size} chat mappings")
         } catch (e: Exception) {
-            Timber.w(e, "Failed to refresh unified group cache")
+            Timber.w(e, "Failed to refresh unified chat cache")
         }
     }
 

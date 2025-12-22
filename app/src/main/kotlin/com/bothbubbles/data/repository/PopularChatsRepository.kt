@@ -2,10 +2,8 @@ package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.PopularChatsDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.HandleEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
@@ -35,7 +33,7 @@ import javax.inject.Singleton
 class PopularChatsRepository @Inject constructor(
     private val popularChatsDao: PopularChatsDao,
     private val chatDao: ChatDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val chatRepository: ChatRepository
 ) {
     companion object {
@@ -72,7 +70,7 @@ class PopularChatsRepository @Inject constructor(
     /**
      * Get the most popular chats based on message engagement.
      *
-     * Combines unified groups (1:1 chats) and group chats, sorted by message count.
+     * Combines unified chats (1:1 chats) and group chats, sorted by message count.
      *
      * @param limit Maximum number of chats to return
      * @param timeWindowMs Time window in milliseconds for counting messages
@@ -84,8 +82,8 @@ class PopularChatsRepository @Inject constructor(
     ): List<PopularChat> {
         val since = System.currentTimeMillis() - timeWindowMs
 
-        // Get popular unified groups (1:1 chats)
-        val popularUnified = popularChatsDao.getPopularUnifiedGroups(since, limit)
+        // Get popular unified chats (1:1 chats)
+        val popularUnified = popularChatsDao.getPopularUnifiedChats(since, limit)
 
         // Get popular group chats
         val popularGroups = popularChatsDao.getPopularGroupChats(since, limit)
@@ -119,7 +117,7 @@ class PopularChatsRepository @Inject constructor(
         val since = System.currentTimeMillis() - timeWindowMs
 
         return combine(
-            popularChatsDao.observePopularUnifiedGroups(since, limit),
+            popularChatsDao.observePopularUnifiedChats(since, limit),
             popularChatsDao.observePopularGroupChats(since, limit)
         ) { unifiedPopularity, groupPopularity ->
             val combined = (unifiedPopularity + groupPopularity)
@@ -159,7 +157,7 @@ class PopularChatsRepository @Inject constructor(
     ): List<PopularChat> {
         val since = System.currentTimeMillis() - timeWindowMs
 
-        val popularUnified = popularChatsDao.getPopularUnifiedGroups(since, limit)
+        val popularUnified = popularChatsDao.getPopularUnifiedChats(since, limit)
 
         return popularUnified.mapNotNull { popularity ->
             resolvePopularChat(popularity)
@@ -175,7 +173,7 @@ class PopularChatsRepository @Inject constructor(
     ): Flow<List<PopularChat>> {
         val since = System.currentTimeMillis() - timeWindowMs
 
-        return popularChatsDao.observePopularUnifiedGroups(since, limit)
+        return popularChatsDao.observePopularUnifiedChats(since, limit)
             .map { popularityList ->
                 popularityList.mapNotNull { popularity ->
                     resolvePopularChat(popularity)
@@ -189,18 +187,18 @@ class PopularChatsRepository @Inject constructor(
     private suspend fun resolvePopularChat(
         popularity: PopularChatsDao.ChatPopularity
     ): PopularChat? {
-        // Try as unified group first
-        val unifiedGroup = unifiedChatGroupDao.getGroupByPrimaryChatGuid(popularity.chatGuid)
-        if (unifiedGroup != null) {
+        // Try as unified chat first (by source ID)
+        val unifiedChat = unifiedChatDao.getBySourceId(popularity.chatGuid)
+        if (unifiedChat != null) {
             return PopularChat(
                 chatGuid = popularity.chatGuid,
-                displayName = unifiedGroup.displayName
-                    ?: PhoneNumberFormatter.format(unifiedGroup.identifier),
-                isGroup = false,
+                displayName = unifiedChat.displayName
+                    ?: PhoneNumberFormatter.format(unifiedChat.normalizedAddress),
+                isGroup = unifiedChat.isGroup,
                 messageCount = popularity.messageCount,
                 latestMessageDate = popularity.latestMessageDate,
-                avatarPath = null,
-                identifier = unifiedGroup.identifier
+                avatarPath = unifiedChat.effectiveAvatarPath,
+                identifier = unifiedChat.normalizedAddress
             )
         }
 
@@ -217,7 +215,7 @@ class PopularChatsRepository @Inject constructor(
             isGroup = chat.isGroup,
             messageCount = popularity.messageCount,
             latestMessageDate = popularity.latestMessageDate,
-            avatarPath = chat.effectiveGroupPhotoPath,
+            avatarPath = null,
             identifier = chat.chatIdentifier
         )
     }

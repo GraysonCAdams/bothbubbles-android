@@ -1,7 +1,8 @@
 package com.bothbubbles.services.sync
 
 import timber.log.Timber
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 import com.bothbubbles.data.repository.ChatSyncOperations
@@ -25,7 +26,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class CounterpartSyncService @Inject constructor(
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
+    private val chatDao: ChatDao,
     private val verifiedCheckDao: VerifiedCounterpartCheckDao,
     private val chatSyncOperations: ChatSyncOperations
 ) {
@@ -59,38 +61,38 @@ class CounterpartSyncService @Inject constructor(
     }
 
     /**
-     * Check and repair a unified group's counterpart chat if missing.
+     * Check and repair a unified chat's counterpart chat if missing.
      *
      * This is the main entry point for Tier 2 lazy repair. Call this when:
      * - User opens a conversation
-     * - Unified group has only one chat member
+     * - Unified chat has only one linked chat
      *
-     * @param groupId The unified group ID to check
+     * @param unifiedChatId The unified chat ID to check
      * @return The result of the check operation
      */
-    suspend fun checkAndRepairCounterpart(groupId: Long): CheckResult {
-        // Get group details
-        val group = unifiedChatGroupDao.getGroupById(groupId)
-        if (group == null) {
-            Timber.w("Group $groupId not found")
-            return CheckResult.Error("Group not found")
+    suspend fun checkAndRepairCounterpart(unifiedChatId: String): CheckResult {
+        // Get unified chat details
+        val unifiedChat = unifiedChatDao.getById(unifiedChatId)
+        if (unifiedChat == null) {
+            Timber.w("Unified chat $unifiedChatId not found")
+            return CheckResult.Error("Unified chat not found")
         }
 
-        // Get member chats for this group
-        val memberGuids = unifiedChatGroupDao.getChatGuidsForGroup(groupId)
-        if (memberGuids.size > 1) {
+        // Get linked chats for this unified chat
+        val linkedChatGuids = chatDao.getChatGuidsForUnifiedChat(unifiedChatId)
+        if (linkedChatGuids.size > 1) {
             // Already has both iMessage and SMS - nothing to repair
-            Timber.d("Group $groupId already complete (${memberGuids.size} members)")
+            Timber.d("Unified chat $unifiedChatId already complete (${linkedChatGuids.size} linked chats)")
             return CheckResult.Skipped
         }
 
-        if (memberGuids.isEmpty()) {
-            Timber.w("Group $groupId has no members")
-            return CheckResult.Error("Group has no members")
+        if (linkedChatGuids.isEmpty()) {
+            Timber.w("Unified chat $unifiedChatId has no linked chats")
+            return CheckResult.Error("Unified chat has no linked chats")
         }
 
-        val existingChatGuid = memberGuids.first()
-        val identifier = group.identifier
+        val existingChatGuid = linkedChatGuids.first()
+        val identifier = unifiedChat.normalizedAddress
 
         // Check cache first
         val cachedCheck = verifiedCheckDao.get(identifier)
@@ -113,7 +115,7 @@ class CounterpartSyncService @Inject constructor(
             val result = chatSyncOperations.fetchChat(counterpartGuid)
             result.fold(
                 onSuccess = { chat ->
-                    Timber.i("Found counterpart $counterpartGuid for group $groupId")
+                    Timber.i("Found counterpart $counterpartGuid for unified chat $unifiedChatId")
 
                     // Record positive verification
                     verifiedCheckDao.upsert(
@@ -135,17 +137,17 @@ class CounterpartSyncService @Inject constructor(
     }
 
     /**
-     * Check and repair counterpart for a unified group by its identifier.
+     * Check and repair counterpart for a unified chat by its identifier.
      *
-     * Convenience method when you have the identifier (phone number) instead of group ID.
+     * Convenience method when you have the identifier (phone number) instead of unified chat ID.
      */
     suspend fun checkAndRepairCounterpartByIdentifier(identifier: String): CheckResult {
-        val group = unifiedChatGroupDao.getGroupByIdentifier(identifier)
-        if (group == null) {
-            Timber.d("No unified group found for identifier $identifier")
-            return CheckResult.Error("No group for identifier")
+        val unifiedChat = unifiedChatDao.getByNormalizedAddress(identifier)
+        if (unifiedChat == null) {
+            Timber.d("No unified chat found for identifier $identifier")
+            return CheckResult.Error("No unified chat for identifier")
         }
-        return checkAndRepairCounterpart(group.id)
+        return checkAndRepairCounterpart(unifiedChat.id)
     }
 
     /**

@@ -4,7 +4,7 @@ import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
@@ -26,7 +26,7 @@ class SyncOperations @Inject constructor(
     private val chatDao: ChatDao,
     private val handleDao: HandleDao,
     private val messageDao: MessageDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val settingsDataStore: SettingsDataStore,
     private val categorizationRepository: CategorizationRepository,
     private val syncRangeTracker: SyncRangeTracker
@@ -37,14 +37,14 @@ class SyncOperations @Inject constructor(
     }
 
     /**
-     * Purge all data and reimport with unified chat groups.
+     * Purge all data and reimport with unified chats.
      * This creates proper iMessage/SMS conversation merging for single contacts.
      * Groups (both SMS/MMS and iMessage) remain separate.
      *
      * iMessage and SMS import run concurrently for faster sync.
-     * Race conditions on unified group creation are handled by:
-     * - Atomic getOrCreateGroup in UnifiedChatGroupDao
-     * - iMessage claiming primary status if SMS created the group first
+     * Race conditions on unified chat creation are handled by:
+     * - Atomic getOrCreate in UnifiedChatDao
+     * - iMessage claiming primary status if SMS created the unified chat first
      *
      * @param performInitialSync Function to perform initial iMessage sync
      * @param onStateUpdate Callback for updating sync state
@@ -56,12 +56,12 @@ class SyncOperations @Inject constructor(
         Timber.i("Starting unified resync - purging all data (concurrent mode)")
         onStateUpdate(SyncState.Syncing(0f, "Clearing existing data..."))
 
-        // Clear all existing data including unified groups
+        // Clear all existing data including unified chats
         messageDao.deleteAllMessages()
         chatDao.deleteAllChatHandleCrossRefs()
         chatDao.deleteAllChats()
         handleDao.deleteAllHandles()
-        unifiedChatGroupDao.deleteAllData()
+        unifiedChatDao.deleteAll()
 
         // Clear sync range tracking
         syncRangeTracker.clearAllRanges()

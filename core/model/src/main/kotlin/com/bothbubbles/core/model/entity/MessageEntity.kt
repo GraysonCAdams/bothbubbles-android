@@ -11,6 +11,7 @@ import androidx.room.PrimaryKey
     indices = [
         Index(value = ["guid"], unique = true),
         Index(value = ["chat_guid"]),
+        Index(value = ["unified_chat_id"]),
         Index(value = ["date_created"]),
         Index(value = ["handle_id"]),
         Index(value = ["associated_message_guid"]),
@@ -24,7 +25,10 @@ import androidx.room.PrimaryKey
         Index(value = ["is_reaction"]),
         // Index for cursor-based pagination: chat_guid + is_reaction + date_created + guid
         // This supports the ORDER BY date_created DESC, guid DESC LIMIT :limit pattern
-        Index(value = ["chat_guid", "is_reaction", "date_created", "guid"])
+        Index(value = ["chat_guid", "is_reaction", "date_created", "guid"]),
+        // Unified chat pagination indexes - enables native LIMIT/OFFSET across merged conversations
+        Index(value = ["unified_chat_id", "date_created", "date_deleted", "guid"]),
+        Index(value = ["unified_chat_id", "is_reaction", "date_created", "guid"])
     ],
     foreignKeys = [
         ForeignKey(
@@ -44,6 +48,14 @@ data class MessageEntity(
 
     @ColumnInfo(name = "chat_guid")
     val chatGuid: String,
+
+    /**
+     * References the unified conversation this message belongs to.
+     * Enables native pagination across merged iMessage/SMS conversations.
+     * All messages with the same unifiedChatId are part of one logical conversation.
+     */
+    @ColumnInfo(name = "unified_chat_id")
+    val unifiedChatId: String? = null,
 
     @ColumnInfo(name = "handle_id")
     val handleId: Long? = null,

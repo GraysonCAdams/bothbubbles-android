@@ -96,6 +96,20 @@ interface SyncRangeDao {
     """)
     suspend fun hasSyncedRanges(chatGuid: String): Boolean
 
+    /**
+     * Check if there are any sync ranges at all.
+     * Used to detect post-migration state (empty tables after data reset).
+     */
+    @Query("SELECT COUNT(*) FROM sync_ranges")
+    suspend fun getCount(): Int
+
+    /**
+     * Check if the sync_ranges table is empty.
+     * Returns true if no ranges exist (indicates fresh install or post-migration reset).
+     */
+    @Query("SELECT NOT EXISTS(SELECT 1 FROM sync_ranges LIMIT 1)")
+    suspend fun isEmpty(): Boolean
+
     // ===== Inserts/Updates =====
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

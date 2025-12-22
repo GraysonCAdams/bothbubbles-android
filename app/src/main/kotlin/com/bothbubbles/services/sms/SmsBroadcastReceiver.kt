@@ -13,15 +13,14 @@ import androidx.core.content.ContextCompat
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.data.local.db.entity.MessageEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.categorization.CategorizationRepository
@@ -29,6 +28,7 @@ import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.sound.SoundManager
 import com.bothbubbles.services.spam.SpamRepository
+import com.bothbubbles.util.UnifiedChatIdGenerator
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
@@ -64,7 +64,7 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     lateinit var messageDao: MessageDao
 
     @Inject
-    lateinit var unifiedChatGroupDao: UnifiedChatGroupDao
+    lateinit var unifiedChatDao: UnifiedChatDao
 
     @Inject
     lateinit var notificationService: NotificationService
@@ -171,37 +171,46 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Find or create chat for this address
             val chatGuid = "sms;-;$address"
             var chat = chatDao.getChatByGuid(chatGuid)
-            val isNewChat = chat == null
 
-            if (isNewChat) {
+            // Get or create unified chat for this address
+            val unifiedChat = getOrCreateUnifiedChat(address, chatGuid)
+
+            if (chat == null) {
                 // Create new chat for this SMS conversation
                 chat = ChatEntity(
                     guid = chatGuid,
                     chatIdentifier = address,
                     displayName = null, // Will be resolved from contacts later
                     isGroup = false,
-                    lastMessageDate = timestamp,
-                    lastMessageText = fullBody,
-                    unreadCount = 1
+                    latestMessageDate = timestamp,
+                    unifiedChatId = unifiedChat?.id
                 )
                 chatDao.insertChat(chat)
-
-                // Link new chat to unified group for conversation merging
-                linkChatToUnifiedGroup(chatGuid, address)
             } else {
-                // Update existing chat
-                chatDao.updateLastMessage(chatGuid, timestamp, fullBody)
-                chatDao.updateUnreadCount(chatGuid, chat.unreadCount + 1)
+                // Update existing chat's latest message date
+                chatDao.updateLatestMessageDate(chatGuid, timestamp)
+
+                // Link chat to unified chat if not already linked
+                if (chat.unifiedChatId == null && unifiedChat != null) {
+                    chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
+                }
             }
 
-            // Also update the unified group's unread count and latestMessageDate for badge sync and sorting
-            unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
-                unifiedChatGroupDao.incrementUnreadCount(group.id)
-                // Update latestMessageDate if this message is newer
-                val currentLatest = group.latestMessageDate ?: 0L
-                if (timestamp > currentLatest) {
-                    unifiedChatGroupDao.updateLatestMessage(group.id, timestamp, fullBody)
-                }
+            // Update unified chat's unread count and latest message
+            unifiedChat?.let { uc ->
+                unifiedChatDao.incrementUnreadCount(uc.id)
+                unifiedChatDao.updateLatestMessageIfNewer(
+                    id = uc.id,
+                    date = timestamp,
+                    text = fullBody,
+                    guid = null, // Will be set when message is created
+                    isFromMe = false,
+                    hasAttachments = false,
+                    source = MessageSource.LOCAL_SMS.name,
+                    dateDelivered = null,
+                    dateRead = null,
+                    error = 0
+                )
             }
 
             // Use raw address for system provider compatibility
@@ -210,10 +219,11 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             val messageGuid = providerResult?.let { "sms-${it.id}" }
                 ?: "sms-incoming-${System.currentTimeMillis()}-${address.hashCode()}"
 
-            // Create message entity
+            // Create message entity with unified_chat_id
             val message = MessageEntity(
                 guid = messageGuid,
                 chatGuid = chatGuid,
+                unifiedChatId = unifiedChat?.id,
                 text = fullBody,
                 dateCreated = timestamp,
                 isFromMe = false,
@@ -226,14 +236,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             // Ensure handle exists, link to chat, and try to infer sender name
             ensureHandleAndInferName(chatGuid, address, fullBody)
 
-            // Check if notifications are disabled for this chat
-            if (!chat.notificationsEnabled) {
+            // Check if notifications are disabled for this chat (from unified chat)
+            if (unifiedChat?.notificationsEnabled == false) {
                 Timber.i("Notifications disabled for chat $chatGuid, skipping SMS notification")
                 return@forEach
             }
 
-            // Check if chat is snoozed
-            if (chat.isSnoozed) {
+            // Check if chat is snoozed (from unified chat)
+            if (unifiedChat?.isSnoozed == true) {
                 Timber.i("Chat $chatGuid is snoozed, skipping SMS notification")
                 return@forEach
             }
@@ -264,14 +274,14 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
             notificationService.showMessageNotification(
                 com.bothbubbles.services.notifications.MessageNotificationParams(
                     chatGuid = chatGuid,
-                    chatTitle = chat.displayName ?: senderName ?: address,
+                    chatTitle = unifiedChat?.displayName ?: senderName ?: address,
                     messageText = fullBody,
                     messageGuid = message.guid,
                     senderName = senderName,
                     senderAddress = address,
                     isGroup = false,
                     avatarUri = senderAvatarUri,
-                    groupAvatarPath = chat.effectiveGroupPhotoPath
+                    groupAvatarPath = unifiedChat?.effectiveGroupPhotoPath
                 )
             )
 
@@ -383,101 +393,30 @@ class SmsBroadcastReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Link a chat to a unified group, creating the group if necessary.
-     * This enables merging SMS and iMessage conversations for the same contact.
+     * Get or create unified chat for a phone number.
+     * Returns null if the address is invalid.
      */
-    private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
+    private suspend fun getOrCreateUnifiedChat(normalizedPhone: String, chatGuid: String): UnifiedChatEntity? {
         // Skip if identifier is empty or looks like an email/RCS address (not a phone)
         if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
-            Timber.d("linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
-            return
+            Timber.d("getOrCreateUnifiedChat: Skipping - invalid identifier '$normalizedPhone'")
+            return null
         }
 
-        Timber.d("linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
+        return try {
+            // Normalize to digits only for consistent lookup
+            val normalizedAddress = normalizedPhone.replace(Regex("[^0-9+]"), "")
 
-        try {
-            // Check if this chat is already in a unified group
-            if (unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)) {
-                Timber.d("linkChatToUnifiedGroup: $chatGuid is already in a unified group")
-                return
-            }
-
-            // Check if unified group already exists for this phone number
-            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
-            Timber.d("linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
-
-            if (group == null) {
-                // Check if there's an existing iMessage chat for this phone
-                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
-                Timber.d("linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
-
-                // Create new unified group - prefer iMessage as primary if it exists
-                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
-                val newGroup = UnifiedChatGroupEntity(
-                    identifier = normalizedPhone,
-                    primaryChatGuid = primaryGuid,
-                    displayName = existingIMessageChat?.displayName
+            unifiedChatDao.getOrCreate(
+                UnifiedChatEntity(
+                    id = UnifiedChatIdGenerator.generate(),
+                    normalizedAddress = normalizedAddress,
+                    sourceId = chatGuid
                 )
-
-                // Use atomic method to prevent FOREIGN KEY errors
-                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
-                Timber.d("linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
-
-                // Add existing iMessage chat to group if found (separate from SMS chat)
-                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
-                    Timber.d("linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
-                    unifiedChatGroupDao.insertMember(
-                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
-                    )
-                }
-            } else {
-                // Group exists, just add this SMS chat to it
-                Timber.d("linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
-                unifiedChatGroupDao.insertMember(
-                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
-                )
-            }
-
-            Timber.d("linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+            )
         } catch (e: Exception) {
-            Timber.e(e, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'")
-            // Don't rethrow - unified group linking is non-critical for message storage
+            Timber.e(e, "getOrCreateUnifiedChat: FAILED for '$normalizedPhone'")
+            null
         }
-    }
-
-    /**
-     * Find an existing iMessage chat for a given phone number.
-     * Searches through non-group iMessage chats and matches by participant phone.
-     */
-    private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
-        val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
-        if (nonGroupChats.isEmpty()) return null
-
-        // Batch fetch all participants for all chats in a single query
-        val chatGuids = nonGroupChats.map { it.guid }
-        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
-            .groupBy({ it.chatGuid }, { it.handle })
-
-        for (chat in nonGroupChats) {
-            val participants = participantsByChat[chat.guid] ?: emptyList()
-            for (participant in participants) {
-                val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
-                if (phonesMatch(normalized, normalizedPhone)) {
-                    return chat
-                }
-            }
-        }
-        return null
-    }
-
-    /**
-     * Compare two phone numbers for equality, handling different formats.
-     */
-    private fun phonesMatch(phone1: String, phone2: String): Boolean {
-        if (phone1 == phone2) return true
-        // Strip all non-digits and compare last 10 digits
-        val digits1 = phone1.filter { it.isDigit() }.takeLast(10)
-        val digits2 = phone2.filter { it.isDigit() }.takeLast(10)
-        return digits1.length >= 7 && digits1 == digits2
     }
 }

@@ -21,7 +21,7 @@ import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.VerifiedCounterpartCheckDao
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
@@ -41,8 +41,7 @@ import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.SeenMessageEntity
 import com.bothbubbles.data.local.db.entity.SyncRangeEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatMember
+import com.bothbubbles.data.local.db.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
 import com.bothbubbles.data.local.db.entity.VerifiedCounterpartCheckEntity
 import com.bothbubbles.data.local.db.entity.MessageEditHistoryEntity
@@ -68,8 +67,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         LinkPreviewEntity::class,
         QuickReplyTemplateEntity::class,
         ScheduledMessageEntity::class,
-        UnifiedChatGroupEntity::class,
-        UnifiedChatMember::class,
+        UnifiedChatEntity::class,
         SeenMessageEntity::class,
         PendingMessageEntity::class,
         PendingAttachmentEntity::class,
@@ -83,7 +81,7 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         Life360MemberEntity::class,
         MessageEditHistoryEntity::class
     ],
-    version = 49,
+    version = 51,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -96,7 +94,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun linkPreviewDao(): LinkPreviewDao
     abstract fun quickReplyTemplateDao(): QuickReplyTemplateDao
     abstract fun scheduledMessageDao(): ScheduledMessageDao
-    abstract fun unifiedChatGroupDao(): UnifiedChatGroupDao
+    abstract fun unifiedChatDao(): UnifiedChatDao
     abstract fun seenMessageDao(): SeenMessageDao
     abstract fun pendingMessageDao(): PendingMessageDao
     abstract fun pendingAttachmentDao(): PendingAttachmentDao

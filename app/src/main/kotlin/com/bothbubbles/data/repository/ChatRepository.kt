@@ -1,58 +1,44 @@
 package com.bothbubbles.data.repository
 
-import androidx.work.Constraints
-import androidx.work.ExistingWorkPolicy
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequestBuilder
-import androidx.work.WorkManager
 import com.bothbubbles.data.local.db.dao.ChatDao
-import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.MessageDao
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.displayName
-import com.bothbubbles.core.model.entity.PendingReadStatusEntity
 import com.bothbubbles.core.network.api.BothBubblesApi
-import com.bothbubbles.services.sync.ReadStatusSyncWorker
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.flow.Flow
 import timber.log.Timber
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Main repository for chat operations.
+ * Repository for chat (protocol channel) operations.
+ *
+ * ChatEntity represents protocol-specific channels (iMessage, SMS, etc.).
+ * UI state operations (pinned, archived, starred, unread, etc.) should use
+ * [UnifiedChatRepository] instead.
+ *
  * Complex operations have been extracted to:
  * - ChatSyncOperations: Remote sync operations
  * - ChatParticipantOperations: Participant management
- * - UnifiedGroupOperations: Unified group linking
  */
 @Singleton
 class ChatRepository @Inject constructor(
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
     private val tombstoneDao: TombstoneDao,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao,
-    private val pendingReadStatusDao: PendingReadStatusDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val api: BothBubblesApi,
     private val syncOps: ChatSyncOperations,
-    private val participantOps: ChatParticipantOperations,
-    private val workManager: WorkManager
+    private val participantOps: ChatParticipantOperations
 ) {
 
     // ===== Local Query Operations =====
 
     fun observeAllChats(): Flow<List<ChatEntity>> = chatDao.getAllChats()
-
-    fun observeActiveChats(): Flow<List<ChatEntity>> = chatDao.getActiveChats()
-
-    fun observeArchivedChats(): Flow<List<ChatEntity>> = chatDao.getArchivedChats()
-
-    fun observeStarredChats(): Flow<List<ChatEntity>> = chatDao.getStarredChats()
 
     fun observeChat(guid: String): Flow<ChatEntity?> = chatDao.observeChatByGuid(guid)
 
@@ -61,14 +47,6 @@ class ChatRepository @Inject constructor(
     suspend fun getChatsByGuids(guids: List<String>): List<ChatEntity> = chatDao.getChatsByGuids(guids)
 
     suspend fun getChatCount(): Int = chatDao.getChatCount()
-
-    fun observeArchivedChatCount(): Flow<Int> = chatDao.getArchivedChatCount()
-
-    fun observeStarredChatCount(): Flow<Int> = chatDao.getStarredChatCount()
-
-    fun observeUnreadChatCount(): Flow<Int> = chatDao.getUnreadChatCount()
-
-    fun observeTotalUnreadMessageCount(): Flow<Int> = chatDao.observeTotalUnreadMessageCount()
 
     // ===== Group/Non-Group Chat Queries =====
 
@@ -157,75 +135,46 @@ class ChatRepository @Inject constructor(
         }
     }
 
-    // ===== Filtered Queries for Select All Feature =====
+    // ===== Unified Chat Operations =====
 
     /**
-     * Get count of group chats matching filter criteria.
-     * Used for Gmail-style "Select All" to count all matching conversations.
-     *
-     * @param filter The conversation filter to apply
-     * @param categoryFilter Optional category filter
-     * @return Count of matching group chats (excluding pinned)
+     * Get chats belonging to a unified conversation.
      */
-    suspend fun getFilteredGroupChatCount(
-        filter: com.bothbubbles.ui.conversations.ConversationFilter,
-        categoryFilter: String?
-    ): Int {
-        val (includeSpam, unreadOnly) = filterToParams(filter)
-        return chatDao.getFilteredGroupChatCount(includeSpam, unreadOnly, categoryFilter)
+    suspend fun getChatsForUnifiedChat(unifiedChatId: String): List<ChatEntity> =
+        chatDao.getChatsForUnifiedChat(unifiedChatId)
+
+    /**
+     * Get chat GUIDs for a unified conversation.
+     */
+    suspend fun getChatGuidsForUnifiedChat(unifiedChatId: String): List<String> =
+        chatDao.getChatGuidsForUnifiedChat(unifiedChatId)
+
+    /**
+     * Batch get chat GUIDs for multiple unified chats.
+     * Returns map of unified chat ID to list of chat GUIDs.
+     * PERF: Single query instead of N+1 pattern.
+     */
+    suspend fun getChatGuidsForUnifiedChats(unifiedChatIds: List<String>): Map<String, List<String>> {
+        if (unifiedChatIds.isEmpty()) return emptyMap()
+        return chatDao.getChatGuidsForUnifiedChats(unifiedChatIds)
+            .groupBy { it.unifiedChatId }
+            .mapValues { (_, list) -> list.map { it.chatGuid } }
     }
 
     /**
-     * Get count of non-group chats matching filter criteria.
+     * Check which chat GUIDs are linked to any unified chat.
+     * Used to filter out chats that shouldn't appear as orphans in conversation list.
      */
-    suspend fun getFilteredNonGroupChatCount(
-        filter: com.bothbubbles.ui.conversations.ConversationFilter,
-        categoryFilter: String?
-    ): Int {
-        val (includeSpam, unreadOnly) = filterToParams(filter)
-        return chatDao.getFilteredNonGroupChatCount(includeSpam, unreadOnly, categoryFilter)
+    suspend fun getChatsLinkedToUnifiedChats(chatGuids: List<String>): Set<String> {
+        if (chatGuids.isEmpty()) return emptySet()
+        return chatDao.getChatsLinkedToUnifiedChats(chatGuids).toSet()
     }
 
     /**
-     * Get GUIDs of group chats matching filter criteria (paginated).
+     * Link a chat to a unified conversation.
      */
-    suspend fun getFilteredGroupChatGuids(
-        filter: com.bothbubbles.ui.conversations.ConversationFilter,
-        categoryFilter: String?,
-        limit: Int,
-        offset: Int
-    ): List<String> {
-        val (includeSpam, unreadOnly) = filterToParams(filter)
-        return chatDao.getFilteredGroupChatGuids(includeSpam, unreadOnly, categoryFilter, limit, offset)
-    }
-
-    /**
-     * Get GUIDs of non-group chats matching filter criteria (paginated).
-     */
-    suspend fun getFilteredNonGroupChatGuids(
-        filter: com.bothbubbles.ui.conversations.ConversationFilter,
-        categoryFilter: String?,
-        limit: Int,
-        offset: Int
-    ): List<String> {
-        val (includeSpam, unreadOnly) = filterToParams(filter)
-        return chatDao.getFilteredNonGroupChatGuids(includeSpam, unreadOnly, categoryFilter, limit, offset)
-    }
-
-    /**
-     * Convert ConversationFilter to database query parameters.
-     * Note: UNKNOWN_SENDERS and KNOWN_SENDERS filters are handled at the UI layer
-     * since they require contact resolution that can't be done in SQL.
-     */
-    private fun filterToParams(filter: com.bothbubbles.ui.conversations.ConversationFilter): Pair<Boolean, Boolean> {
-        return when (filter) {
-            com.bothbubbles.ui.conversations.ConversationFilter.ALL -> false to false
-            com.bothbubbles.ui.conversations.ConversationFilter.UNREAD -> false to true
-            com.bothbubbles.ui.conversations.ConversationFilter.SPAM -> true to false
-            // For unknown/known senders, we filter on the UI side
-            com.bothbubbles.ui.conversations.ConversationFilter.UNKNOWN_SENDERS -> false to false
-            com.bothbubbles.ui.conversations.ConversationFilter.KNOWN_SENDERS -> false to false
-        }
+    suspend fun setUnifiedChatId(chatGuid: String, unifiedChatId: String): Result<Unit> = runCatching {
+        chatDao.setUnifiedChatId(chatGuid, unifiedChatId)
     }
 
     // ===== Participant Operations (delegated) =====
@@ -321,30 +270,6 @@ class ChatRepository @Inject constructor(
     suspend fun refreshAllContactInfo(): Int =
         participantOps.refreshAllContactInfo()
 
-    // ===== Unified Group Operations =====
-
-    /**
-     * Get the unified group that contains a specific chat.
-     * Used for counterpart sync to find if a chat is part of a unified group.
-     *
-     * @param chatGuid The chat GUID to find the unified group for
-     * @return The unified group entity if the chat is part of one, null otherwise
-     */
-    suspend fun getUnifiedGroupForChat(chatGuid: String) =
-        unifiedChatGroupDao.getGroupForChat(chatGuid)
-
-    /**
-     * Find the primary chat GUID for a 1:1 conversation with the given address.
-     * Uses the unified chat group system to find existing conversations.
-     *
-     * @param normalizedAddress The normalized phone number or email address
-     * @return The primary chat GUID if a conversation exists, null otherwise
-     */
-    suspend fun findChatGuidByAddress(normalizedAddress: String): String? {
-        val group = unifiedChatGroupDao.getGroupByIdentifier(normalizedAddress)
-        return group?.primaryChatGuid
-    }
-
     // ===== Local Mutation Operations =====
 
     suspend fun insertChat(chat: ChatEntity): Result<Unit> = runCatching {
@@ -353,10 +278,6 @@ class ChatRepository @Inject constructor(
 
     suspend fun updateDisplayName(chatGuid: String, displayName: String?): Result<Unit> = runCatching {
         chatDao.updateDisplayName(chatGuid, displayName)
-    }
-
-    suspend fun updateCustomAvatarPath(chatGuid: String, path: String?): Result<Unit> = runCatching {
-        chatDao.updateCustomAvatarPath(chatGuid, path)
     }
 
     suspend fun deleteAllChats(): Result<Unit> = runCatching {
@@ -404,117 +325,10 @@ class ChatRepository @Inject constructor(
     suspend fun fetchChat(guid: String): Result<ChatEntity> = syncOps.fetchChat(guid)
 
     /**
-     * Mark chat as read on server and locally.
-     *
-     * Uses optimistic local-first update for instant UI feedback.
-     * Server sync is queued via WorkManager for reliable delivery.
+     * Update the last message date for a chat
      */
-    suspend fun markChatAsRead(guid: String): Result<Unit> = runCatching {
-        // Update locally first for immediate UI feedback
-        chatDao.updateUnreadStatus(guid, false)
-        chatDao.updateUnreadCount(guid, 0)
-
-        // Also update the unified group's unread count for badge sync
-        unifiedChatGroupDao.getGroupForChat(guid)?.let { group ->
-            unifiedChatGroupDao.updateUnreadCount(group.id, 0)
-        }
-
-        // Queue server sync (WorkManager ensures reliable delivery)
-        queueReadStatusSync(guid, isRead = true)
-    }
-
-    /**
-     * Mark chat as unread on server and locally.
-     *
-     * Uses optimistic local-first update for instant UI feedback.
-     * Server sync is queued via WorkManager for reliable delivery.
-     */
-    suspend fun markChatAsUnread(guid: String): Result<Unit> = runCatching {
-        // Update locally first for immediate UI feedback
-        chatDao.updateUnreadStatus(guid, true)
-        // Set unread count to 1 to indicate there are unread messages
-        chatDao.updateUnreadCount(guid, 1)
-
-        // Also update the unified group's unread count for badge sync
-        unifiedChatGroupDao.getGroupForChat(guid)?.let { group ->
-            unifiedChatGroupDao.updateUnreadCount(group.id, 1)
-        }
-
-        // Queue server sync (WorkManager ensures reliable delivery)
-        queueReadStatusSync(guid, isRead = false)
-    }
-
-    /**
-     * Queue a read status sync for reliable delivery to the server.
-     *
-     * Uses database deduplication (unique constraint on chat_guid) to ensure
-     * only the latest read status is synced. WorkManager handles retry with
-     * exponential backoff when network is unavailable.
-     */
-    private suspend fun queueReadStatusSync(chatGuid: String, isRead: Boolean) {
-        // Insert or replace pending sync (deduplication by chat_guid)
-        pendingReadStatusDao.insert(
-            PendingReadStatusEntity(
-                chatGuid = chatGuid,
-                isRead = isRead
-            )
-        )
-
-        // Schedule worker with network constraint
-        val constraints = Constraints.Builder()
-            .setRequiredNetworkType(NetworkType.CONNECTED)
-            .build()
-
-        val workRequest = OneTimeWorkRequestBuilder<ReadStatusSyncWorker>()
-            .setConstraints(constraints)
-            .setInitialDelay(500, TimeUnit.MILLISECONDS)  // Small debounce for batch efficiency
-            .build()
-
-        // Use KEEP policy - don't duplicate if already scheduled
-        workManager.enqueueUniqueWork(
-            ReadStatusSyncWorker.UNIQUE_WORK_NAME,
-            ExistingWorkPolicy.KEEP,
-            workRequest
-        )
-    }
-
-    /**
-     * Mark all chats as read locally (batch operation)
-     */
-    suspend fun markAllChatsAsRead(): Result<Int> = runCatching {
-        val count = chatDao.markAllChatsAsRead()
-        // Also update all unified groups for badge sync
-        unifiedChatGroupDao.markAllGroupsAsRead()
-        count
-    }
-
-    /**
-     * Update chat pin status
-     */
-    suspend fun setPinned(guid: String, isPinned: Boolean, pinIndex: Int? = null): Result<Unit> = runCatching {
-        chatDao.updatePinStatus(guid, isPinned, pinIndex)
-    }
-
-    /**
-     * Update chat mute status
-     */
-    suspend fun setMuted(guid: String, isMuted: Boolean): Result<Unit> = runCatching {
-        val muteType = if (isMuted) "muted" else null
-        chatDao.updateMuteStatus(guid, muteType, null)
-    }
-
-    /**
-     * Archive a chat
-     */
-    suspend fun setArchived(guid: String, isArchived: Boolean): Result<Unit> = runCatching {
-        chatDao.updateArchiveStatus(guid, isArchived)
-    }
-
-    /**
-     * Star/unstar a chat (local only)
-     */
-    suspend fun setStarred(guid: String, isStarred: Boolean): Result<Unit> = runCatching {
-        chatDao.updateStarredStatus(guid, isStarred)
+    suspend fun updateLatestMessageDate(chatGuid: String, date: Long): Result<Unit> = runCatching {
+        chatDao.updateLatestMessageDate(chatGuid, date)
     }
 
     /**
@@ -523,66 +337,6 @@ class ChatRepository @Inject constructor(
      */
     suspend fun deleteChat(guid: String): Result<Unit> = runCatching {
         chatDao.deleteChatWithDependencies(guid, tombstoneDao, messageDao)
-    }
-
-    // ===== Per-Chat Notification Settings =====
-    // Note: Sound, vibration, importance, and other customizations are handled by
-    // Android's per-conversation notification channels. Users customize these via
-    // Android Settings > Apps > BothBubbles > Notifications > [Conversation].
-
-    suspend fun setNotificationsEnabled(guid: String, enabled: Boolean): Result<Unit> = runCatching {
-        chatDao.updateNotificationsEnabled(guid, enabled)
-    }
-
-    /**
-     * Snooze notifications for a chat until a specific time.
-     * @param guid The chat GUID
-     * @param snoozeUntil Epoch timestamp when snooze expires, -1 for indefinite, null to unsnooze
-     */
-    suspend fun setSnoozeUntil(guid: String, snoozeUntil: Long?): Result<Unit> = runCatching {
-        chatDao.updateSnoozeUntil(guid, snoozeUntil)
-    }
-
-    /**
-     * Snooze notifications for a chat for a specific duration.
-     * @param guid The chat GUID
-     * @param durationMs Duration in milliseconds, or -1 for indefinite
-     */
-    suspend fun snoozeChat(guid: String, durationMs: Long): Result<Unit> = runCatching {
-        val snoozeUntil = if (durationMs == -1L) -1L else System.currentTimeMillis() + durationMs
-        chatDao.updateSnoozeUntil(guid, snoozeUntil)
-    }
-
-    /**
-     * Unsnooze a chat (remove snooze)
-     */
-    suspend fun unsnoozeChat(guid: String): Result<Unit> = runCatching {
-        chatDao.updateSnoozeUntil(guid, null)
-    }
-
-    /**
-     * Update draft text for a chat
-     */
-    suspend fun updateDraftText(guid: String, text: String?): Result<Unit> = runCatching {
-        chatDao.updateDraftText(guid, text?.takeIf { it.isNotBlank() })
-    }
-
-    /**
-     * Update the last message info for a chat
-     */
-    suspend fun updateLastMessage(chatGuid: String, date: Long): Result<Unit> = runCatching {
-        chatDao.updateLatestMessageDate(chatGuid, date)
-    }
-
-    /**
-     * Update the preferred send mode for a chat (iMessage vs SMS toggle).
-     *
-     * @param chatGuid The chat GUID
-     * @param mode The preferred mode ("imessage", "sms", or null for automatic)
-     * @param manuallySet Whether the user manually set this preference
-     */
-    suspend fun updatePreferredSendMode(chatGuid: String, mode: String?, manuallySet: Boolean): Result<Unit> = runCatching {
-        chatDao.updatePreferredSendMode(chatGuid, mode, manuallySet)
     }
 
     // ===== Data Cleanup =====
@@ -595,10 +349,10 @@ class ChatRepository @Inject constructor(
      */
     suspend fun cleanupInvalidDisplayNames(): Result<Int> = runCatching {
         val chatCount = chatDao.clearInvalidDisplayNames()
-        val groupCount = unifiedChatGroupDao.clearInvalidDisplayNames()
-        val totalCount = chatCount + groupCount
+        val unifiedCount = unifiedChatDao.clearInvalidDisplayNames()
+        val totalCount = chatCount + unifiedCount
         if (totalCount > 0) {
-            Timber.i("Cleaned up $totalCount invalid display names (chats: $chatCount, groups: $groupCount)")
+            Timber.i("Cleaned up $totalCount invalid display names (chats: $chatCount, unified: $unifiedCount)")
         }
         totalCount
     }

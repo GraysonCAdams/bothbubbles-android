@@ -49,7 +49,7 @@ val formatted = DATE_FORMAT.format(instant.atZone(ZoneId.systemDefault()))
 fun buildMessageNotification(...): android.app.Notification {
     val mergedGuids: String? = try {
         runBlocking(ioDispatcher) {  // BLOCKING!
-            val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+            val unifiedChat = unifiedChatDao.getBySourceId(chatGuid)
             // ...
         }
     }

@@ -4,7 +4,6 @@ import android.app.Application
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
 import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
@@ -27,7 +26,7 @@ suspend fun ChatEntity.toUiModel(
     application: Application
 ): ConversationUiModel {
     val lastMessage = messageRepository.getLatestMessageForChat(guid)
-    val rawMessageText = lastMessage?.text ?: lastMessageText ?: ""
+    val rawMessageText = lastMessage?.text ?: ""
     val isFromMe = lastMessage?.isFromMe ?: false
 
     // Get participants for this chat
@@ -198,23 +197,26 @@ suspend fun ChatEntity.toUiModel(
         null
     }
 
+    // Note: ChatEntity no longer has UI state fields (moved to UnifiedChatEntity)
+    // This mapper is used for orphan chats not yet linked to unified chats
+    // UI state defaults to sensible values
     return ConversationUiModel(
         guid = guid,
         displayName = resolvedDisplayName,
         avatarPath = avatarPath,
-        chatAvatarPath = effectiveGroupPhotoPath,
+        chatAvatarPath = null, // Group photo path is now on UnifiedChatEntity
         lastMessageText = messageText,
-        lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: lastMessageDate ?: 0L, application),
-        lastMessageTimestamp = lastMessage?.dateCreated ?: lastMessageDate ?: 0L,
-        unreadCount = unreadCount,
-        isPinned = isPinned,
-        pinIndex = pinIndex ?: Int.MAX_VALUE,
-        isMuted = muteType != null,
+        lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: latestMessageDate ?: 0L, application),
+        lastMessageTimestamp = lastMessage?.dateCreated ?: latestMessageDate ?: 0L,
+        unreadCount = 0, // Unread count is now on UnifiedChatEntity
+        isPinned = false, // Pinned state is now on UnifiedChatEntity
+        pinIndex = Int.MAX_VALUE,
+        isMuted = false, // Mute state is now on UnifiedChatEntity
         isGroup = isGroup,
         isTyping = guid in typingChats,
         isFromMe = isFromMe,
-        hasDraft = !textFieldText.isNullOrBlank(),
-        draftText = textFieldText,
+        hasDraft = false, // Draft state is now on UnifiedChatEntity
+        draftText = null,
         lastMessageType = messageType,
         lastMessageStatus = messageStatus,
         participantNames = participantNames,
@@ -224,10 +226,10 @@ suspend fun ChatEntity.toUiModel(
         inferredName = primaryParticipant?.inferredName,
         lastMessageLinkTitle = linkTitle,
         lastMessageLinkDomain = linkDomain,
-        isSpam = isSpam,
-        category = category,
-        isSnoozed = isSnoozed,
-        snoozeUntil = snoozeUntil,
+        isSpam = false, // Spam state is now on UnifiedChatEntity
+        category = null, // Category is now on UnifiedChatEntity
+        isSnoozed = false, // Snooze state is now on UnifiedChatEntity
+        snoozeUntil = null,
         lastMessageSource = lastMessage?.messageSource,
         lastMessageSenderName = senderName,
         mergedChatGuids = listOf(guid), // Initially just this chat

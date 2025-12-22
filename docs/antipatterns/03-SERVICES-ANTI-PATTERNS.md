@@ -33,7 +33,7 @@ fun stopListening() {
 ```kotlin
 val mergedGuids: String? = try {
     runBlocking(ioDispatcher) {  // BLOCKING on main thread!
-        val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+        val unifiedChat = unifiedChatDao.getBySourceId(chatGuid)
         // ...
     }
 }

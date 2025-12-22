@@ -7,8 +7,11 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Basic query operations for chats.
- * Separated from main ChatDao for better organization.
+ * Basic query operations for chats (protocol channels).
+ *
+ * Note: ChatEntity is now a protocol-specific channel. UI state queries (pinned, archived,
+ * starred, unread, etc.) should use [UnifiedChatDao] instead. This DAO only handles
+ * protocol-level queries.
  */
 @Dao
 interface ChatQueryDao {
@@ -42,60 +45,34 @@ interface ChatQueryDao {
         @ColumnInfo(name = "latest_message_date") val latestMessageDate: Long
     )
 
+    // ===== Basic Chat Queries =====
+
     @Query("""
         SELECT * FROM chats
         WHERE date_deleted IS NULL
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        ORDER BY latest_message_date DESC
     """)
     fun getAllChats(): Flow<List<ChatEntity>>
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        WHERE date_deleted IS NULL AND is_group = 0
+        ORDER BY latest_message_date DESC
         LIMIT :limit OFFSET :offset
     """)
     suspend fun getNonGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity>
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
+        WHERE date_deleted IS NULL AND is_group = 0
     """)
     suspend fun getNonGroupChatCount(): Int
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 0 AND is_archived = 0
+        WHERE date_deleted IS NULL AND is_group = 0
     """)
     fun observeNonGroupChatCount(): Flow<Int>
-
-    @Query("""
-        SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_pinned = 1
-        ORDER BY pin_index ASC
-    """)
-    fun getPinnedChats(): Flow<List<ChatEntity>>
-
-    @Query("""
-        SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_archived = 0
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
-    """)
-    fun getActiveChats(): Flow<List<ChatEntity>>
-
-    @Query("""
-        SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_archived = 1
-        ORDER BY latest_message_date DESC
-    """)
-    fun getArchivedChats(): Flow<List<ChatEntity>>
-
-    @Query("""
-        SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_starred = 1
-        ORDER BY latest_message_date DESC
-    """)
-    fun getStarredChats(): Flow<List<ChatEntity>>
 
     @Query("SELECT * FROM chats WHERE guid = :guid")
     suspend fun getChatByGuid(guid: String): ChatEntity?
@@ -143,23 +120,71 @@ interface ChatQueryDao {
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_archived = 0
+        WHERE date_deleted IS NULL
         ORDER BY latest_message_date DESC
         LIMIT :limit
     """)
     suspend fun getRecentChats(limit: Int): List<ChatEntity>
 
-    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND has_unread_message = 1")
-    fun getUnreadChatCount(): Flow<Int>
+    // ===== Unified Chat Queries =====
 
-    @Query("SELECT COALESCE(SUM(unread_count), 0) FROM chats WHERE date_deleted IS NULL AND is_archived = 0")
-    fun observeTotalUnreadMessageCount(): Flow<Int>
+    /**
+     * Get all chats belonging to a unified conversation.
+     * Used to find all protocol channels for a conversation.
+     */
+    @Query("SELECT * FROM chats WHERE unified_chat_id = :unifiedChatId AND date_deleted IS NULL")
+    suspend fun getChatsForUnifiedChat(unifiedChatId: String): List<ChatEntity>
 
-    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_archived = 1")
-    fun getArchivedChatCount(): Flow<Int>
+    /**
+     * Get all chat GUIDs belonging to a unified conversation.
+     */
+    @Query("SELECT guid FROM chats WHERE unified_chat_id = :unifiedChatId AND date_deleted IS NULL")
+    suspend fun getChatGuidsForUnifiedChat(unifiedChatId: String): List<String>
 
-    @Query("SELECT COUNT(*) FROM chats WHERE date_deleted IS NULL AND is_starred = 1")
-    fun getStarredChatCount(): Flow<Int>
+    /**
+     * Batch result for unified chat to chat GUID mapping.
+     * Used to avoid N+1 queries when loading conversations.
+     */
+    data class UnifiedChatGuid(
+        @ColumnInfo(name = "unified_chat_id") val unifiedChatId: String,
+        @ColumnInfo(name = "guid") val chatGuid: String
+    )
+
+    /**
+     * Batch get chat GUIDs for multiple unified chats.
+     * Returns pairs of (unifiedChatId, chatGuid) for grouping.
+     */
+    @Query("""
+        SELECT unified_chat_id, guid
+        FROM chats
+        WHERE unified_chat_id IN (:unifiedChatIds) AND date_deleted IS NULL
+    """)
+    suspend fun getChatGuidsForUnifiedChats(unifiedChatIds: List<String>): List<UnifiedChatGuid>
+
+    /**
+     * Check which chat GUIDs are linked to any unified chat.
+     * Used to filter out chats that shouldn't appear as orphans.
+     */
+    @Query("SELECT guid FROM chats WHERE guid IN (:chatGuids) AND unified_chat_id IS NOT NULL")
+    suspend fun getChatsLinkedToUnifiedChats(chatGuids: List<String>): List<String>
+
+    /**
+     * Observe all chats for a unified conversation.
+     */
+    @Query("SELECT * FROM chats WHERE unified_chat_id = :unifiedChatId AND date_deleted IS NULL")
+    fun observeChatsForUnifiedChat(unifiedChatId: String): Flow<List<ChatEntity>>
+
+    /**
+     * Get the chat with a specific chat_identifier (phone/email).
+     */
+    @Query("SELECT * FROM chats WHERE chat_identifier = :identifier AND date_deleted IS NULL")
+    suspend fun getChatsByIdentifier(identifier: String): List<ChatEntity>
+
+    /**
+     * Update the unified_chat_id for a chat.
+     */
+    @Query("UPDATE chats SET unified_chat_id = :unifiedChatId WHERE guid = :guid")
+    suspend fun setUnifiedChatId(guid: String, unifiedChatId: String)
 
     /**
      * Find chats that need repair sync.
@@ -198,64 +223,6 @@ interface ChatQueryDao {
         AND NOT EXISTS (SELECT 1 FROM messages m WHERE m.chat_guid = c.guid AND m.date_deleted IS NULL)
     """)
     suspend fun countChatsNeedingRepair(): Int
-
-    // ===== Filtered Queries for Select All Feature =====
-
-    /**
-     * Get count of non-group chats matching filter criteria.
-     * Used for Gmail-style "Select All" to count all matching conversations.
-     *
-     * Note: UNKNOWN_SENDERS/KNOWN_SENDERS filters require contact resolution
-     * which is done at the repository level, not in SQL.
-     *
-     * @param includeSpam If true, only return spam chats. If false, exclude spam.
-     * @param unreadOnly If true, only return chats with unread messages.
-     * @param category If non-null, only return chats with this category.
-     */
-    @Query("""
-        SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL
-        AND is_group = 0
-        AND is_archived = 0
-        AND (
-            (:includeSpam = 1 AND is_spam = 1)
-            OR (:includeSpam = 0 AND is_spam = 0)
-        )
-        AND (:unreadOnly = 0 OR unread_count > 0)
-        AND (:category IS NULL OR category = :category)
-    """)
-    suspend fun getFilteredNonGroupChatCount(
-        includeSpam: Boolean,
-        unreadOnly: Boolean,
-        category: String?
-    ): Int
-
-    /**
-     * Get GUIDs of non-group chats matching filter criteria (paginated).
-     * Used for batch operations in Gmail-style "Select All".
-     * Includes both pinned and non-pinned chats.
-     */
-    @Query("""
-        SELECT guid FROM chats
-        WHERE date_deleted IS NULL
-        AND is_group = 0
-        AND is_archived = 0
-        AND (
-            (:includeSpam = 1 AND is_spam = 1)
-            OR (:includeSpam = 0 AND is_spam = 0)
-        )
-        AND (:unreadOnly = 0 OR unread_count > 0)
-        AND (:category IS NULL OR category = :category)
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
-        LIMIT :limit OFFSET :offset
-    """)
-    suspend fun getFilteredNonGroupChatGuids(
-        includeSpam: Boolean,
-        unreadOnly: Boolean,
-        category: String?,
-        limit: Int,
-        offset: Int
-    ): List<String>
 
     /**
      * Get the most recent message date for each chat identifier (phone/email).

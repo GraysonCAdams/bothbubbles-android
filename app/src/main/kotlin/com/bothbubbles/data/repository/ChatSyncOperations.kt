@@ -1,15 +1,19 @@
 package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.core.network.api.dto.ChatDto
 import com.bothbubbles.core.network.api.dto.ChatQueryRequest
 import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.UnifiedChatIdGenerator
 import com.bothbubbles.util.retryWithBackoff
 import com.bothbubbles.util.retryWithRateLimitAwareness
 import com.bothbubbles.util.error.NetworkError
 import com.bothbubbles.util.error.safeCall
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -20,9 +24,9 @@ import javax.inject.Singleton
 @Singleton
 class ChatSyncOperations @Inject constructor(
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val api: BothBubblesApi,
     private val participantOps: ChatParticipantOperations,
-    private val unifiedGroupOps: UnifiedGroupOperations,
     private val groupPhotoSyncManager: GroupPhotoSyncManager
 ) {
     companion object {
@@ -60,10 +64,15 @@ class ChatSyncOperations @Inject constructor(
             }
 
             val chatDtos = body.data.orEmpty()
-            val chats = chatDtos.map { it.toEntity() }
+
+            // Link to unified chats first, then build entities with unified_chat_id
+            val chatsWithUnifiedIds = chatDtos.map { chatDto ->
+                val unifiedChatId = linkToUnifiedChatIfNeeded(chatDto)
+                chatDto.toEntity(unifiedChatId)
+            }
 
             // Prepare all participant data
-            val participantData = chatDtos.zip(chats).map { (chatDto, chat) ->
+            val participantData = chatDtos.zip(chatsWithUnifiedIds).map { (chatDto, chat) ->
                 val handleIds = participantOps.upsertHandlesForChat(chatDto)
                 chat to handleIds
             }
@@ -71,21 +80,16 @@ class ChatSyncOperations @Inject constructor(
             // Single transactional call
             chatDao.syncChatsWithParticipants(participantData)
 
-            // Post-sync linking
-            chatDtos.forEach { chatDto ->
-                unifiedGroupOps.linkChatToUnifiedGroupIfNeeded(chatDto)
-            }
-
             // Sync group photos for group chats that have them
             val groupPhotos = chatDtos
                 .filter { it.groupPhotoGuid != null }
                 .associate { it.guid to it.groupPhotoGuid }
             if (groupPhotos.isNotEmpty()) {
-                timber.log.Timber.tag(TAG).i("Found ${groupPhotos.size} chats with group photos to sync")
+                Timber.tag(TAG).i("Found ${groupPhotos.size} chats with group photos to sync")
                 groupPhotoSyncManager.syncGroupPhotos(groupPhotos)
             }
 
-            chats
+            chatsWithUnifiedIds
         }
     }
 
@@ -110,7 +114,10 @@ class ChatSyncOperations @Inject constructor(
             }
 
             val chatDto = body.data ?: throw NetworkError.ServerError(404, "Chat not found")
-            val chat = chatDto.toEntity()
+
+            // Link to unified chat and get the ID
+            val unifiedChatId = linkToUnifiedChatIfNeeded(chatDto)
+            val chat = chatDto.toEntity(unifiedChatId)
 
             // Atomically sync chat with participants
             syncChatParticipants(chatDto, chat)
@@ -133,13 +140,46 @@ class ChatSyncOperations @Inject constructor(
 
         // Step 2: Atomically sync chat with participants (transactional)
         chatDao.syncChatWithParticipants(chat, handleIds)
-
-        // Step 3: For single-contact iMessage chats, link to unified group
-        // (This has its own transaction handling in UnifiedChatGroupDao)
-        unifiedGroupOps.linkChatToUnifiedGroupIfNeeded(chatDto)
     }
 
-    private fun ChatDto.toEntity(): ChatEntity {
+    /**
+     * Link a non-group chat to a unified chat if it represents a 1:1 conversation.
+     * @return The unified chat ID if linked, null otherwise.
+     */
+    private suspend fun linkToUnifiedChatIfNeeded(chatDto: ChatDto): String? {
+        // Only link 1:1 chats (not group chats)
+        val isGroup = (chatDto.participants?.size ?: 0) > 1
+        if (isGroup) return null
+
+        // Get the normalized address for this conversation
+        val chatIdentifier = chatDto.chatIdentifier
+        if (chatIdentifier.isNullOrBlank()) return null
+
+        // Normalize address for unified chat lookup
+        val normalizedAddress = if (chatIdentifier.contains("@")) {
+            chatIdentifier.lowercase()
+        } else {
+            chatIdentifier.replace(Regex("[^0-9+]"), "")
+        }
+
+        if (normalizedAddress.isBlank()) return null
+
+        return try {
+            val unifiedChat = unifiedChatDao.getOrCreate(
+                UnifiedChatEntity(
+                    id = UnifiedChatIdGenerator.generate(),
+                    normalizedAddress = normalizedAddress,
+                    sourceId = chatDto.guid
+                )
+            )
+            unifiedChat.id
+        } catch (e: Exception) {
+            Timber.tag(TAG).w(e, "Failed to link chat ${chatDto.guid} to unified chat")
+            null
+        }
+    }
+
+    private fun ChatDto.toEntity(unifiedChatId: String?): ChatEntity {
         // Clean the displayName: strip service suffixes and validate
         val cleanedDisplayName = displayName
             ?.let { com.bothbubbles.util.PhoneNumberFormatter.stripServiceSuffix(it) }
@@ -147,19 +187,12 @@ class ChatSyncOperations @Inject constructor(
 
         return ChatEntity(
             guid = guid,
+            unifiedChatId = unifiedChatId,
             chatIdentifier = chatIdentifier,
             displayName = cleanedDisplayName,
-            isGroup = (participants?.size ?: 0) > 1,
-            lastMessageDate = lastMessage?.dateCreated,
-            lastMessageText = lastMessage?.text,
-            latestMessageDate = lastMessage?.dateCreated,
-            unreadCount = 0,
-            hasUnreadMessage = hasUnreadMessage,
-            isPinned = isPinned,
-            isArchived = isArchived,
             style = style,
-            autoSendReadReceipts = true,
-            autoSendTypingIndicators = true
+            isGroup = (participants?.size ?: 0) > 1,
+            latestMessageDate = lastMessage?.dateCreated
         )
     }
 }

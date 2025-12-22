@@ -1,9 +1,9 @@
 package com.bothbubbles.ui.compose.delegates
 
 import timber.log.Timber
-import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
-import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.contacts.AndroidContactsService
@@ -28,7 +28,7 @@ import javax.inject.Inject
  * Delegate managing recipient suggestions in the compose screen.
  *
  * Handles:
- * - Searching unified chat groups (shows nicknames like "💛 Liz")
+ * - Searching unified chats (shows nicknames like "💛 Liz")
  * - Loading contacts from Android contacts as fallback
  * - Loading group chats from database
  * - Filtering based on search query
@@ -38,7 +38,7 @@ class SuggestionDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
     private val handleRepository: HandleRepository,
     private val androidContactsService: AndroidContactsService,
-    private val unifiedChatGroupDao: UnifiedChatGroupDao
+    private val unifiedChatDao: UnifiedChatDao
 ) {
     private val _suggestions = MutableStateFlow<ImmutableList<RecipientSuggestion>>(persistentListOf())
     val suggestions: StateFlow<ImmutableList<RecipientSuggestion>> = _suggestions.asStateFlow()
@@ -231,10 +231,10 @@ class SuggestionDelegate @Inject constructor(
     }
 
     /**
-     * Filter suggestions asynchronously, prioritizing unified groups with nicknames.
+     * Filter suggestions asynchronously, prioritizing unified chats with nicknames.
      *
      * Priority order:
-     * 1. Unified chat groups (has nicknames like "💛 Liz", most recent chats)
+     * 1. Unified chats (has nicknames like "💛 Liz", most recent chats)
      * 2. Android contacts (fallback for contacts without existing chats)
      * 3. Group chats (if allowed)
      */
@@ -243,60 +243,62 @@ class SuggestionDelegate @Inject constructor(
         val results = mutableListOf<RecipientSuggestion>()
         val matchedIdentifiers = mutableSetOf<String>()
 
-        // 1. Search unified groups first - they have proper nicknames
+        // 1. Search unified chats first - they have proper nicknames
         try {
-            Timber.d("Searching unified groups for query: '$query'")
-            val unifiedGroups = unifiedChatGroupDao.searchGroups(query, MAX_UNIFIED_SUGGESTIONS)
-            Timber.d("Found ${unifiedGroups.size} unified groups")
-            for (group in unifiedGroups) {
-                matchedIdentifiers.add(group.identifier)
+            Timber.d("Searching unified chats for query: '$query'")
+            val unifiedChats = unifiedChatDao.search(query, MAX_UNIFIED_SUGGESTIONS)
+            Timber.d("Found ${unifiedChats.size} unified chats")
+            for (chat in unifiedChats) {
+                matchedIdentifiers.add(chat.normalizedAddress)
 
                 // Look up handle for avatar (prefer any handle with avatar)
-                val handles = handleRepository.getHandlesByAddress(group.identifier)
+                val handles = handleRepository.getHandlesByAddress(chat.normalizedAddress)
                 val handle = handles.firstOrNull { it.cachedAvatarPath != null } ?: handles.firstOrNull()
 
                 // Determine service using activity-based logic (same as ContactLoadDelegate)
-                // Priority: handleServiceMap (activity-based) > primaryChatGuid prefix > SMS default
-                val normalizedIdentifier = normalizeAddress(group.identifier)
+                // Priority: handleServiceMap (activity-based) > sourceId prefix > SMS default
+                val normalizedIdentifier = normalizeAddress(chat.normalizedAddress)
                 val activityService = handleServiceMap[normalizedIdentifier]
                 val service = when {
                     activityService != null -> activityService
-                    group.primaryChatGuid.startsWith("iMessage", ignoreCase = true) -> "iMessage"
-                    group.primaryChatGuid.startsWith("RCS", ignoreCase = true) -> "RCS"
+                    chat.sourceId.startsWith("iMessage", ignoreCase = true) -> "iMessage"
+                    chat.sourceId.startsWith("RCS", ignoreCase = true) -> "RCS"
                     else -> "SMS"
                 }
-                Timber.d("Unified group service determination: identifier=${group.identifier}, activityService=$activityService, service=$service")
+                Timber.d("Unified chat service determination: identifier=${chat.normalizedAddress}, activityService=$activityService, service=$service")
 
                 // Get display name from:
-                // 1. Unified group displayName (set for group chats)
-                // 2. Handle's cachedDisplayName (contact nickname like "💛 Liz")
-                // 3. Formatted phone number as fallback
-                val displayName = group.displayName
+                // 1. Unified chat displayName
+                // 2. Cached contact name
+                // 3. Handle's cachedDisplayName (contact nickname like "💛 Liz")
+                // 4. Formatted phone number as fallback
+                val displayName = chat.displayName
+                    ?: chat.cachedContactName
                     ?: handle?.cachedDisplayName
-                    ?: PhoneNumberFormatter.format(group.identifier)
+                    ?: PhoneNumberFormatter.format(chat.normalizedAddress)
 
-                Timber.d("Unified group: identifier=${group.identifier}, displayName=$displayName")
+                Timber.d("Unified chat: identifier=${chat.normalizedAddress}, displayName=$displayName")
 
                 results.add(
                     RecipientSuggestion.Contact(
                         contactId = null,
                         displayName = displayName,
-                        address = group.identifier,
-                        formattedAddress = PhoneNumberFormatter.format(group.identifier),
+                        address = chat.normalizedAddress,
+                        formattedAddress = PhoneNumberFormatter.format(chat.normalizedAddress),
                         service = service,
-                        avatarPath = handle?.cachedAvatarPath,
-                        chatGuid = group.primaryChatGuid
+                        avatarPath = chat.cachedAvatarPath ?: handle?.cachedAvatarPath,
+                        chatGuid = chat.sourceId
                     )
                 )
             }
         } catch (e: Exception) {
-            Timber.w(e, "Failed to search unified groups")
+            Timber.w(e, "Failed to search unified chats")
         }
 
-        // 2. Filter contacts that don't already have unified groups
+        // 2. Filter contacts that don't already have unified chats
         val matchingContacts = allContacts
             .filter { contact ->
-                // Skip if already matched from unified groups
+                // Skip if already matched from unified chats
                 !matchedIdentifiers.contains(contact.normalizedAddress) &&
                 (contact.displayName.lowercase().contains(lowerQuery) ||
                     contact.address.contains(query, ignoreCase = true) ||
