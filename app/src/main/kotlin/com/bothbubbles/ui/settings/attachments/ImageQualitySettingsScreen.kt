@@ -100,6 +100,18 @@ fun ImageQualitySettingsScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // Camera capture section
+            SettingsSection(title = "Camera") {
+                SettingsToggleItem(
+                    title = "Save photos to gallery",
+                    subtitle = "Automatically save photos and videos taken in-app to your camera roll",
+                    checked = uiState.saveCapturedMediaToGallery,
+                    onCheckedChange = viewModel::setSaveCapturedMediaToGallery
+                )
+            }
+
             Spacer(modifier = Modifier.height(32.dp))
         }
     }
@@ -297,6 +309,18 @@ fun ImageQualitySettingsContent(
                 subtitle = "When you change quality while composing, use that quality for subsequent messages",
                 checked = uiState.rememberLastQuality,
                 onCheckedChange = viewModel::setRememberLastQuality
+            )
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Camera capture section
+        SettingsSection(title = "Camera") {
+            SettingsToggleItem(
+                title = "Save photos to gallery",
+                subtitle = "Automatically save photos and videos taken in-app to your camera roll",
+                checked = uiState.saveCapturedMediaToGallery,
+                onCheckedChange = viewModel::setSaveCapturedMediaToGallery
             )
         }
 

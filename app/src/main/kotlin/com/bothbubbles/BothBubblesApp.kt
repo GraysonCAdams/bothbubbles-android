@@ -295,6 +295,21 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 // Start the SMS content observer for future external SMS detection
                 smsRepository.startObserving()
 
+                // Repair any orphaned SMS chats by linking them to unified groups
+                // This fixes messages sent via Android Auto that weren't linked before
+                val repaired = smsRepository.repairOrphanedSmsChats()
+                if (repaired > 0) {
+                    Timber.i("Repaired $repaired orphaned SMS chats")
+                }
+
+                // Repair unified group timestamps from member chats
+                // This fixes groups with outdated latestMessageDate (e.g., RCS messages that arrived
+                // before the unified group timestamp update was added)
+                val timestampsRepaired = smsRepository.repairUnifiedGroupTimestamps()
+                if (timestampsRepaired > 0) {
+                    Timber.i("Repaired $timestampsRepaired unified group timestamps")
+                }
+
                 // Check if we need to do a one-time SMS re-sync (app update recovery)
                 checkAndPerformSmsResync()
             } catch (e: Exception) {

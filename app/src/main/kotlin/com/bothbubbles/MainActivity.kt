@@ -175,6 +175,31 @@ class MainActivity : ComponentActivity() {
             // Voice command intents (Google Assistant, Android Auto "send a message to...")
             Intent.ACTION_SENDTO -> {
                 val data = intent.data ?: return null
+
+                // Handle imto scheme for group chat IM contacts
+                // Format: imto://BothBubbles/{chatGuid} or imto:BothBubbles:{chatGuid}
+                if (data.scheme == "imto") {
+                    val host = data.host ?: data.schemeSpecificPart?.substringBefore(":")
+                    if (host == "BothBubbles") {
+                        // Extract chat GUID - could be in path or after second colon
+                        val chatGuid = data.pathSegments?.firstOrNull()
+                            ?: data.schemeSpecificPart?.substringAfter(":")?.substringAfter(":")
+
+                        // Extract message body from extras
+                        val messageBody = intent.getStringExtra("sms_body")
+                            ?: intent.getStringExtra(Intent.EXTRA_TEXT)
+
+                        if (!chatGuid.isNullOrBlank()) {
+                            Timber.d("Voice command IM intent: chatGuid=$chatGuid, body=${messageBody?.take(20)}...")
+                            return ShareIntentData(
+                                sharedText = messageBody,
+                                directShareChatGuid = chatGuid  // Direct to group chat
+                            )
+                        }
+                    }
+                    return null
+                }
+
                 if (data.scheme !in listOf("sms", "smsto", "mms", "mmsto")) return null
 
                 // Extract recipient from URI (format: sms:+1234567890 or smsto:+1234567890)

@@ -237,8 +237,14 @@ class ComposeViewModel @Inject constructor(
                 composerDelegate.clearInput()
                 composerDelegate.setSending(false)
 
-                // Navigate to the chat screen
-                _uiState.update { it.copy(navigateToChatGuid = chatGuid) }
+                // Navigate to the chat screen with merged GUIDs for unified view
+                val mergedGuids = conversationDelegate.foundMergedGuids.value
+                _uiState.update {
+                    it.copy(
+                        navigateToChatGuid = chatGuid,
+                        navigateToMergedGuids = mergedGuids
+                    )
+                }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to send message")
                 composerDelegate.setSending(false)
@@ -251,7 +257,7 @@ class ComposeViewModel @Inject constructor(
      * Reset navigation state after navigating.
      */
     fun onNavigated() {
-        _uiState.update { it.copy(navigateToChatGuid = null) }
+        _uiState.update { it.copy(navigateToChatGuid = null, navigateToMergedGuids = null) }
     }
 
     /**

@@ -66,6 +66,9 @@ class BackgroundSyncWorker @AssistedInject constructor(
         // Limit to 10 most recent chats to avoid excessive API calls
         private const val MAX_CHATS_TO_SYNC = 10
 
+        // Stale empty chats older than 30 days are cleaned up
+        private const val STALE_CHAT_THRESHOLD_MS = 30L * 24 * 60 * 60 * 1000
+
         /**
          * Schedule the background sync worker.
          * Should be called once when setup is complete.
@@ -131,6 +134,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
 
         return try {
             syncRecentChats()
+            cleanupStaleEmptyChats()
             Result.success()
         } catch (e: Exception) {
             Timber.e(e, "Background sync failed")
@@ -258,6 +262,7 @@ class BackgroundSyncWorker @AssistedInject constructor(
                     avatarUri = senderAvatarUri,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
+                    groupAvatarPath = chat.effectiveGroupPhotoPath,
                     subject = message.subject
                 )
             )
@@ -301,5 +306,55 @@ class BackgroundSyncWorker @AssistedInject constructor(
             }
         }
         return words.firstOrNull()?.filter { it.isLetterOrDigit() } ?: fullName
+    }
+
+    /**
+     * Clean up stale empty chats and orphaned handles.
+     *
+     * Stale empty chats are 1:1 chats that:
+     * - Were created more than 30 days ago
+     * - Have ZERO messages
+     *
+     * These are typically chats created from server sync that were never actually used
+     * (e.g., an iMessage handle existed but no conversation ever happened).
+     *
+     * After deleting stale chats, also cleans up orphaned handles that are no longer
+     * associated with any chat.
+     */
+    private suspend fun cleanupStaleEmptyChats() {
+        try {
+            val cutoffDate = System.currentTimeMillis() - STALE_CHAT_THRESHOLD_MS
+            val staleChats = chatDao.getStaleEmptyChats(cutoffDate)
+
+            if (staleChats.isEmpty()) {
+                Timber.d("No stale empty chats to clean up")
+                return
+            }
+
+            Timber.d("Found ${staleChats.size} stale empty chats to clean up")
+
+            var deletedCount = 0
+            for (chat in staleChats) {
+                try {
+                    // Soft delete the chat (sets date_deleted)
+                    chatDao.softDeleteChat(chat.guid)
+                    deletedCount++
+                    Timber.d("Cleaned up stale empty chat: ${chat.guid}")
+                } catch (e: Exception) {
+                    Timber.w(e, "Failed to delete stale chat: ${chat.guid}")
+                }
+            }
+
+            Timber.d("Deleted $deletedCount stale empty chats")
+
+            // Clean up orphaned handles (handles not associated with any chat)
+            val orphanedCount = handleDao.deleteOrphanedHandles()
+            if (orphanedCount > 0) {
+                Timber.d("Cleaned up $orphanedCount orphaned handles")
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to clean up stale empty chats")
+            // Don't throw - cleanup failure shouldn't fail the entire sync
+        }
     }
 }

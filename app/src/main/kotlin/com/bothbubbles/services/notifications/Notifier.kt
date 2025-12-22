@@ -16,6 +16,7 @@ package com.bothbubbles.services.notifications
  * @param linkPreviewDomain Optional link preview domain
  * @param participantNames List of participant names for group chats (used for group avatar collage)
  * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
+ * @param groupAvatarPath Optional path to group avatar (customAvatarPath or serverGroupPhotoPath). Takes priority over participant collage.
  * @param subject Optional message subject (for iMessage). When present, shows ONLY the subject.
  * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
  * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
@@ -33,6 +34,7 @@ data class MessageNotificationParams(
     val linkPreviewDomain: String? = null,
     val participantNames: List<String> = emptyList(),
     val participantAvatarPaths: List<String?> = emptyList(),
+    val groupAvatarPath: String? = null,
     val subject: String? = null,
     val attachmentUri: android.net.Uri? = null,
     val attachmentMimeType: String? = null

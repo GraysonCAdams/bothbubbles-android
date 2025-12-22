@@ -52,6 +52,7 @@ object GroupContactSyncManager {
     private data class GroupChatWithParticipants(
         val guid: String,
         val displayName: String,
+        val effectiveGroupPhotoPath: String?,
         val participants: List<HandleEntity>
     )
 
@@ -124,6 +125,41 @@ object GroupContactSyncManager {
     }
 
     /**
+     * Generic/default group names that should not be synced to contacts.
+     * These are not useful for voice commands since they're not unique.
+     */
+    private val GENERIC_GROUP_NAMES = setOf(
+        "group chat",
+        "group",
+        "unnamed group",
+        "new group",
+        "imessage group",
+        "mms group",
+        "group message",
+        "group text"
+    )
+
+    /**
+     * Checks if a group name is considered "named" (not generic/default).
+     * Only named groups should be synced to contacts for voice commands.
+     */
+    private fun isNamedGroup(displayName: String?): Boolean {
+        if (displayName.isNullOrBlank()) return false
+        val normalized = displayName.trim().lowercase()
+        return normalized !in GENERIC_GROUP_NAMES
+    }
+
+    /**
+     * Checks if a group chat has had recent activity (within the last year).
+     * Inactive groups are not useful for voice commands.
+     */
+    private fun isRecentlyActive(lastMessageDate: Long?): Boolean {
+        if (lastMessageDate == null || lastMessageDate == 0L) return false
+        val oneYearAgo = System.currentTimeMillis() - (365L * 24 * 60 * 60 * 1000)
+        return lastMessageDate > oneYearAgo
+    }
+
+    /**
      * Performs sync asynchronously.
      */
     suspend fun performSyncSuspend(context: Context) = withContext(Dispatchers.IO) {
@@ -141,20 +177,42 @@ object GroupContactSyncManager {
             val chatDao = entryPoint.chatDao()
 
             // Get all group chats
-            val groupChats = chatDao.getAllGroupChats()
-            Timber.d("Syncing ${groupChats.size} group chats to contacts")
+            val allGroupChats = chatDao.getAllGroupChats()
 
-            if (groupChats.isEmpty()) {
-                // No group chats - clean up any existing contacts
-                val existingContacts = getExistingSyncedContacts(context, account)
+            // Filter to only named groups that are recently active (within 1 year)
+            val eligibleGroupChats = allGroupChats.filter { chat ->
+                isNamedGroup(chat.displayName) && isRecentlyActive(chat.lastMessageDate)
+            }
+
+            // Deduplicate by display name (same group can have iMessage/SMS/MMS variants)
+            // Keep the most recently active chat for each unique display name
+            val deduplicatedGroupChats = eligibleGroupChats
+                .groupBy { it.displayName?.lowercase()?.trim() }
+                .mapNotNull { (_, chats) ->
+                    // Pick the one with most recent activity (or first if all null)
+                    chats.maxByOrNull { it.lastMessageDate ?: 0L }
+                }
+
+            val genericCount = allGroupChats.count { !isNamedGroup(it.displayName) }
+            val inactiveCount = allGroupChats.count { isNamedGroup(it.displayName) && !isRecentlyActive(it.lastMessageDate) }
+            val deduplicatedCount = eligibleGroupChats.size - deduplicatedGroupChats.size
+            Timber.d("Syncing ${deduplicatedGroupChats.size} group chats to contacts ($genericCount generic/unnamed, $inactiveCount inactive >1yr, $deduplicatedCount duplicates excluded)")
+
+            // Get existing synced contacts
+            val existingContacts = getExistingSyncedContacts(context, account)
+            Timber.d("Found ${existingContacts.size} existing synced contacts")
+
+            if (deduplicatedGroupChats.isEmpty()) {
+                // No eligible group chats - clean up all existing contacts
                 for (contact in existingContacts) {
                     deleteContact(context, contact.rawContactId)
+                    Timber.d("Deleted contact (no eligible groups): ${contact.displayName}")
                 }
                 return@withContext
             }
 
-            // Get participants for all group chats
-            val allGuids = groupChats.map { it.guid }
+            // Get participants for deduplicated group chats
+            val allGuids = deduplicatedGroupChats.map { it.guid }
             val participantsWithGuids = chatDao.getParticipantsWithChatGuids(allGuids)
             val participantsByGuid = participantsWithGuids.groupBy(
                 keySelector = { it.chatGuid },
@@ -162,35 +220,41 @@ object GroupContactSyncManager {
             )
 
             // Build group chat data with participants
-            val groupChatsWithParticipants = groupChats.map { chat ->
+            val groupChatsWithParticipants = deduplicatedGroupChats.map { chat ->
                 GroupChatWithParticipants(
                     guid = chat.guid,
                     displayName = chat.displayName ?: "Group Chat",
+                    effectiveGroupPhotoPath = chat.effectiveGroupPhotoPath,
                     participants = participantsByGuid[chat.guid] ?: emptyList()
                 )
             }
 
-            // Get existing synced contacts
-            val existingContacts = getExistingSyncedContacts(context, account)
-            Timber.d("Found ${existingContacts.size} existing synced contacts")
+            // Build set of current eligible group chat GUIDs
+            val currentEligibleGroupGuids = deduplicatedGroupChats.map { it.guid }.toSet()
 
-            // Build set of current group chat GUIDs
-            val currentGroupGuids = groupChats.map { it.guid }.toSet()
-
-            // Delete contacts for groups that no longer exist
-            val toDelete = existingContacts.filter { it.chatGuid !in currentGroupGuids }
+            // Delete contacts for groups that:
+            // 1. No longer exist
+            // 2. Were previously synced but are now generic/unnamed (migration)
+            // 3. Were previously synced but are now inactive >1 year (migration)
+            val toDelete = existingContacts.filter { contact ->
+                contact.chatGuid !in currentEligibleGroupGuids
+            }
             for (contact in toDelete) {
                 deleteContact(context, contact.rawContactId)
-                Timber.d("Deleted contact for removed group: ${contact.displayName}")
+                Timber.d("Deleted contact for ineligible group: ${contact.displayName}")
             }
 
-            // Create/update contacts for current groups
+            // Create/update contacts for current eligible groups
             for (groupChat in groupChatsWithParticipants) {
                 val displayName = formatGroupDisplayName(groupChat.displayName)
                 val existing = existingContacts.find { it.chatGuid == groupChat.guid }
 
-                // Generate avatar bitmap
-                val avatarBitmap = generateGroupAvatar(context, groupChat.participants)
+                // Generate avatar bitmap - prefer chat's photo over participant collage
+                val avatarBitmap = generateGroupAvatar(
+                    context,
+                    groupChat.effectiveGroupPhotoPath,
+                    groupChat.participants
+                )
 
                 if (existing != null) {
                     // Update if name changed
@@ -200,6 +264,8 @@ object GroupContactSyncManager {
                     }
                     // Always update the photo (in case participants changed)
                     updateContactPhoto(context, existing.rawContactId, avatarBitmap)
+                    // Ensure IM row exists (migration for contacts created before IM support)
+                    ensureImRowExists(context, existing.rawContactId, groupChat.guid)
                 } else {
                     // Create new contact with photo
                     createGroupContact(context, account, groupChat.guid, displayName, avatarBitmap)
@@ -216,9 +282,44 @@ object GroupContactSyncManager {
     }
 
     /**
-     * Generate a group avatar bitmap from participants.
+     * Generate a group avatar bitmap.
+     * Priority: effectiveGroupPhotoPath (custom/server photo) > participant collage
      */
-    private fun generateGroupAvatar(context: Context, participants: List<HandleEntity>): Bitmap? {
+    private fun generateGroupAvatar(
+        context: Context,
+        effectiveGroupPhotoPath: String?,
+        participants: List<HandleEntity>
+    ): Bitmap? {
+        // First try to load the chat's own photo (custom or server-downloaded)
+        if (effectiveGroupPhotoPath != null) {
+            try {
+                val photoFile = java.io.File(effectiveGroupPhotoPath)
+                if (photoFile.exists()) {
+                    val options = android.graphics.BitmapFactory.Options().apply {
+                        inJustDecodeBounds = true
+                    }
+                    android.graphics.BitmapFactory.decodeFile(effectiveGroupPhotoPath, options)
+
+                    // Calculate sample size for efficient loading
+                    val sampleSize = calculateSampleSize(options.outWidth, options.outHeight, AVATAR_SIZE_PX)
+                    options.inJustDecodeBounds = false
+                    options.inSampleSize = sampleSize
+
+                    val bitmap = android.graphics.BitmapFactory.decodeFile(effectiveGroupPhotoPath, options)
+                    if (bitmap != null) {
+                        // Scale and crop to circle
+                        val scaled = Bitmap.createScaledBitmap(bitmap, AVATAR_SIZE_PX, AVATAR_SIZE_PX, true)
+                        if (scaled != bitmap) bitmap.recycle()
+                        Timber.d("Loaded group photo from: $effectiveGroupPhotoPath")
+                        return createCircularBitmap(scaled)
+                    }
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to load group photo from $effectiveGroupPhotoPath, falling back to collage")
+            }
+        }
+
+        // Fall back to participant collage
         if (participants.isEmpty()) return null
 
         val names = participants.take(4).map { handle ->
@@ -237,9 +338,51 @@ object GroupContactSyncManager {
                 circleCrop = true
             )
         } catch (e: Exception) {
-            Timber.w(e, "Failed to generate group avatar")
+            Timber.w(e, "Failed to generate group avatar collage")
             null
         }
+    }
+
+    /**
+     * Calculate optimal sample size for bitmap loading.
+     */
+    private fun calculateSampleSize(width: Int, height: Int, targetSize: Int): Int {
+        var sampleSize = 1
+        while (width / sampleSize > targetSize * 2 || height / sampleSize > targetSize * 2) {
+            sampleSize *= 2
+        }
+        return sampleSize
+    }
+
+    /**
+     * Create a circular bitmap from a square/rectangular bitmap.
+     */
+    private fun createCircularBitmap(source: Bitmap): Bitmap {
+        val size = minOf(source.width, source.height)
+        val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(output)
+
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
+        val center = size / 2f
+
+        // Draw circular mask
+        canvas.drawCircle(center, center, center, paint)
+
+        // Draw source clipped to circle
+        paint.xfermode = android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.SRC_IN)
+
+        // Center-crop if not square
+        val srcLeft = (source.width - size) / 2
+        val srcTop = (source.height - size) / 2
+        canvas.drawBitmap(
+            source,
+            android.graphics.Rect(srcLeft, srcTop, srcLeft + size, srcTop + size),
+            android.graphics.Rect(0, 0, size, size),
+            paint
+        )
+
+        if (output != source) source.recycle()
+        return output
     }
 
     /**
@@ -286,7 +429,7 @@ object GroupContactSyncManager {
                 .build()
         )
 
-        // Add custom data row with chat GUID (for our intent handler)
+        // Add custom data row with chat GUID (for our intent handler when tapped in Contacts app)
         ops.add(
             ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
                 .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
@@ -294,6 +437,25 @@ object GroupContactSyncManager {
                 .withValue(ContactsContract.Data.DATA1, chatGuid)
                 .withValue(ContactsContract.Data.DATA2, "Send Message")
                 .withValue(ContactsContract.Data.DATA3, displayName)
+                .build()
+        )
+
+        // Add IM data row - this is what Google Assistant uses to identify messageable contacts
+        // Without this, Google Assistant won't recognize these contacts for "send a message to X" commands
+        ops.add(
+            ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                .withValueBackReference(ContactsContract.Data.RAW_CONTACT_ID, 0)
+                .withValue(
+                    ContactsContract.Data.MIMETYPE,
+                    ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
+                )
+                .withValue(ContactsContract.CommonDataKinds.Im.DATA, chatGuid)
+                .withValue(
+                    ContactsContract.CommonDataKinds.Im.PROTOCOL,
+                    ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM
+                )
+                .withValue(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL, "BothBubbles")
+                .withValue(ContactsContract.CommonDataKinds.Im.TYPE, ContactsContract.CommonDataKinds.Im.TYPE_OTHER)
                 .build()
         )
 
@@ -357,6 +519,52 @@ object GroupContactSyncManager {
             context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
         } catch (e: Exception) {
             Timber.e(e, "Failed to update contact photo")
+        }
+    }
+
+    /**
+     * Ensures an IM data row exists for a contact.
+     * This is needed for Google Assistant to recognize the contact as "messageable".
+     * Migration: contacts created before IM support won't have this row.
+     */
+    private fun ensureImRowExists(context: Context, rawContactId: Long, chatGuid: String) {
+        // Check if IM row already exists
+        val exists = context.contentResolver.query(
+            ContactsContract.Data.CONTENT_URI,
+            arrayOf(ContactsContract.Data._ID),
+            "${ContactsContract.Data.RAW_CONTACT_ID} = ? AND ${ContactsContract.Data.MIMETYPE} = ?",
+            arrayOf(
+                rawContactId.toString(),
+                ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
+            ),
+            null
+        )?.use { cursor -> cursor.count > 0 } ?: false
+
+        if (exists) return
+
+        // Add IM row
+        try {
+            val ops = ArrayList<ContentProviderOperation>()
+            ops.add(
+                ContentProviderOperation.newInsert(ContactsContract.Data.CONTENT_URI)
+                    .withValue(ContactsContract.Data.RAW_CONTACT_ID, rawContactId)
+                    .withValue(
+                        ContactsContract.Data.MIMETYPE,
+                        ContactsContract.CommonDataKinds.Im.CONTENT_ITEM_TYPE
+                    )
+                    .withValue(ContactsContract.CommonDataKinds.Im.DATA, chatGuid)
+                    .withValue(
+                        ContactsContract.CommonDataKinds.Im.PROTOCOL,
+                        ContactsContract.CommonDataKinds.Im.PROTOCOL_CUSTOM
+                    )
+                    .withValue(ContactsContract.CommonDataKinds.Im.CUSTOM_PROTOCOL, "BothBubbles")
+                    .withValue(ContactsContract.CommonDataKinds.Im.TYPE, ContactsContract.CommonDataKinds.Im.TYPE_OTHER)
+                    .build()
+            )
+            context.contentResolver.applyBatch(ContactsContract.AUTHORITY, ops)
+            Timber.d("Added IM row for contact $rawContactId (migration)")
+        } catch (e: Exception) {
+            Timber.e(e, "Failed to add IM row for contact $rawContactId")
         }
     }
 

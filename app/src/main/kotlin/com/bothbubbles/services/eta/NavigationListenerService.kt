@@ -281,17 +281,6 @@ class NavigationListenerService : NotificationListenerService() {
                 )
                 .setPriority(NotificationCompat.PRIORITY_DEFAULT)
                 .setCategory(NotificationCompat.CATEGORY_STATUS)
-                // Android Auto support via CarExtender
-                .extend(
-                    NotificationCompat.CarExtender()
-                        .setUnreadConversation(
-                            NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
-                                .addMessage(contentText)
-                                .setLatestTimestamp(System.currentTimeMillis())
-                                .setReplyAction(startPendingIntent, null)
-                                .build()
-                        )
-                )
                 .build()
 
             val notificationManager = getSystemService(NotificationManager::class.java)

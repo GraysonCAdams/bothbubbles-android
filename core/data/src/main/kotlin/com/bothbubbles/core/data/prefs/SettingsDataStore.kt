@@ -219,6 +219,7 @@ class SettingsDataStore @Inject constructor(
     val videoCompressionQuality: Flow<String> get() = attachmentPrefs.videoCompressionQuality
     val compressVideosBeforeUpload: Flow<Boolean> get() = attachmentPrefs.compressVideosBeforeUpload
     val maxConcurrentDownloads: Flow<Int> get() = attachmentPrefs.maxConcurrentDownloads
+    val saveCapturedMediaToGallery: Flow<Boolean> get() = attachmentPrefs.saveCapturedMediaToGallery
 
     suspend fun setAutoDownloadAttachments(enabled: Boolean) = attachmentPrefs.setAutoDownloadAttachments(enabled)
     suspend fun setDefaultImageQuality(quality: String) = attachmentPrefs.setDefaultImageQuality(quality)
@@ -226,6 +227,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setVideoCompressionQuality(quality: String) = attachmentPrefs.setVideoCompressionQuality(quality)
     suspend fun setCompressVideosBeforeUpload(enabled: Boolean) = attachmentPrefs.setCompressVideosBeforeUpload(enabled)
     suspend fun setMaxConcurrentDownloads(count: Int) = attachmentPrefs.setMaxConcurrentDownloads(count)
+    suspend fun setSaveCapturedMediaToGallery(enabled: Boolean) = attachmentPrefs.setSaveCapturedMediaToGallery(enabled)
 
     // ===== Feature Preferences (delegated to FeaturePreferences) =====
 

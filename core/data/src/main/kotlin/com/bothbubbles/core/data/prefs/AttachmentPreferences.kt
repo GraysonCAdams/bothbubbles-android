@@ -70,6 +70,18 @@ class AttachmentPreferences @Inject constructor(
         prefs[Keys.MAX_CONCURRENT_DOWNLOADS] ?: 2
     }
 
+    // ===== Camera Capture =====
+
+    /**
+     * Whether to automatically save photos/videos taken with the in-app camera to the device's gallery.
+     * When true: captured media is saved to Pictures/BothBubbles or Movies/BothBubbles.
+     * When false: captured media is only kept temporarily for sending.
+     * Default: true (save to gallery for user convenience)
+     */
+    val saveCapturedMediaToGallery: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SAVE_CAPTURED_MEDIA_TO_GALLERY] ?: true
+    }
+
     // ===== Setters =====
 
     suspend fun setAutoDownloadAttachments(enabled: Boolean) {
@@ -108,6 +120,12 @@ class AttachmentPreferences @Inject constructor(
         }
     }
 
+    suspend fun setSaveCapturedMediaToGallery(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SAVE_CAPTURED_MEDIA_TO_GALLERY] = enabled
+        }
+    }
+
     private object Keys {
         val AUTO_DOWNLOAD_ATTACHMENTS = booleanPreferencesKey("auto_download_attachments")
         val DEFAULT_IMAGE_QUALITY = stringPreferencesKey("default_image_quality")
@@ -117,5 +135,8 @@ class AttachmentPreferences @Inject constructor(
         val VIDEO_COMPRESSION_QUALITY = stringPreferencesKey("video_compression_quality")
         val COMPRESS_VIDEOS_BEFORE_UPLOAD = booleanPreferencesKey("compress_videos_before_upload")
         val MAX_CONCURRENT_DOWNLOADS = intPreferencesKey("max_concurrent_downloads")
+
+        // Camera Capture
+        val SAVE_CAPTURED_MEDIA_TO_GALLERY = booleanPreferencesKey("save_captured_media_to_gallery")
     }
 }

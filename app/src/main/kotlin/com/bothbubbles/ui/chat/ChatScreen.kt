@@ -10,8 +10,6 @@ import androidx.core.content.FileProvider
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
@@ -297,12 +295,21 @@ fun ChatScreen(
 
     // Stock camera - Photo capture
     var takePhotoUri by remember { mutableStateOf<Uri?>(null) }
+    var takePhotoFile by remember { mutableStateOf<File?>(null) }
     val takePhotoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.TakePicture()
     ) { success ->
         if (success) {
             takePhotoUri?.let { uri ->
                 viewModel.composer.addAttachment(uri)
+                // Save to gallery if enabled
+                takePhotoFile?.let { file ->
+                    viewModel.composer.saveCapturedMediaToGalleryIfEnabled(
+                        filePath = file.absolutePath,
+                        mimeType = "image/jpeg",
+                        fileName = file.name
+                    )
+                }
                 // Collapse media picker and show keyboard
                 viewModel.composer.dismissPanel()
                 viewModel.composer.requestTextFieldFocus()
@@ -312,12 +319,21 @@ fun ChatScreen(
 
     // Stock camera - Video capture
     var takeVideoUri by remember { mutableStateOf<Uri?>(null) }
+    var takeVideoFile by remember { mutableStateOf<File?>(null) }
     val takeVideoLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CaptureVideo()
     ) { success ->
         if (success) {
             takeVideoUri?.let { uri ->
                 viewModel.composer.addAttachment(uri)
+                // Save to gallery if enabled
+                takeVideoFile?.let { file ->
+                    viewModel.composer.saveCapturedMediaToGalleryIfEnabled(
+                        filePath = file.absolutePath,
+                        mimeType = "video/mp4",
+                        fileName = file.name
+                    )
+                }
                 // Collapse media picker and show keyboard
                 viewModel.composer.dismissPanel()
                 viewModel.composer.requestTextFieldFocus()
@@ -915,21 +931,27 @@ fun ChatScreen(
     CaptureTypeSheet(
         visible = state.showCaptureTypeSheet,
         onTakePhoto = {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val timestamp = java.time.format.DateTimeFormatter
+                .ofPattern("yyyyMMdd_HHmmss", Locale.US)
+                .format(java.time.LocalDateTime.now())
             // Use attachments subdirectory to match FileProvider configuration
             val attachmentsDir = File(context.cacheDir, "attachments").apply { mkdirs() }
             val file = File(attachmentsDir, "IMG_$timestamp.jpg")
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            takePhotoFile = file
             takePhotoUri = uri
             takePhotoLauncher.launch(uri)
             state.showCaptureTypeSheet = false
         },
         onRecordVideo = {
-            val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+            val timestamp = java.time.format.DateTimeFormatter
+                .ofPattern("yyyyMMdd_HHmmss", Locale.US)
+                .format(java.time.LocalDateTime.now())
             // Use attachments subdirectory to match FileProvider configuration
             val attachmentsDir = File(context.cacheDir, "attachments").apply { mkdirs() }
             val file = File(attachmentsDir, "VID_$timestamp.mp4")
             val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+            takeVideoFile = file
             takeVideoUri = uri
             takeVideoLauncher.launch(uri)
             state.showCaptureTypeSheet = false

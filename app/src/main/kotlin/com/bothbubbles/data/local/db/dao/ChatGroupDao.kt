@@ -38,6 +38,14 @@ interface ChatGroupDao {
 
     @Query("""
         SELECT * FROM chats
+        WHERE date_deleted IS NULL
+        AND (guid LIKE 'sms;%' OR guid LIKE 'mms;%' OR guid LIKE 'SMS;%' OR guid LIKE 'MMS;%' OR guid LIKE 'RCS;%' OR guid LIKE 'rcs;%')
+        ORDER BY latest_message_date DESC
+    """)
+    suspend fun getAllSmsChats(): List<ChatEntity>
+
+    @Query("""
+        SELECT * FROM chats
         WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
         ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
     """)

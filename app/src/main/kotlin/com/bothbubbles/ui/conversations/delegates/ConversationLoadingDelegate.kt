@@ -397,12 +397,19 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         PerformanceProfiler.end(batchParticipantsId, "${participantsByChatMap.values.sumOf { it.size }} participants")
 
         Timber.d("buildConversationList: Processing ${unifiedGroups.size} unified groups, ${groupChats.size} group chats, ${nonGroupChats.size} non-group chats")
-        Timber.d("buildConversationList: handledChatGuids after unified members: ${allGroupChatGuids.take(5)}...")
+
+        // OPTIMIZATION: Batch check which non-group chats are in ANY unified group
+        // This prevents adding chats as orphans when their unified group isn't in current page
+        val nonGroupChatGuids = nonGroupChats.map { it.guid }
+        if (nonGroupChatGuids.isNotEmpty()) {
+            val chatsInAnyUnifiedGroup = unifiedChatGroupRepository.getChatsInAnyUnifiedGroup(nonGroupChatGuids)
+            handledChatGuids.addAll(chatsInAnyUnifiedGroup)
+            Timber.d("buildConversationList: ${chatsInAnyUnifiedGroup.size} of ${nonGroupChatGuids.size} non-group chats are in unified groups")
+        }
 
         // Process unified chat groups with pre-fetched data
         for (group in unifiedGroups) {
             val chatGuids = groupIdToGuids[group.id] ?: continue
-            Timber.d("buildConversationList: Unified group ${group.id} (${group.identifier}) has members: $chatGuids, primaryChatGuid=${group.primaryChatGuid}")
 
             val uiModel = unifiedGroupMappingDelegate.unifiedGroupToUiModel(
                 group = group,
@@ -426,17 +433,12 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         }
 
         // Add orphan 1:1 chats not in unified groups
-        var orphanCount = 0
         for (chat in nonGroupChats) {
             if (chat.guid !in handledChatGuids && !chat.isGroup && chat.dateDeleted == null && !chat.isArchived) {
-                val uiModel = chat.toUiModelWithContext(typingChats)
-                Timber.d("buildConversationList: Adding ORPHAN chat ${chat.guid} (contactKey=${uiModel.contactKey}, displayName=${uiModel.displayName})")
-                conversations.add(uiModel)
+                conversations.add(chat.toUiModelWithContext(typingChats))
                 handledChatGuids.add(chat.guid)
-                orphanCount++
             }
         }
-        Timber.d("buildConversationList: Added $orphanCount orphan chats. Total before dedup: ${conversations.size}")
 
         // Sort: pinned first, then by last message time
         val sortedConversations = conversations

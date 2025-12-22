@@ -140,6 +140,13 @@
                 <data android:scheme="mmsto" />
             </intent-filter>
 
+            <!-- IM messaging for group chats (Google Assistant voice commands) -->
+            <intent-filter>
+                <action android:name="android.intent.action.SENDTO" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="imto" android:host="BothBubbles" />
+            </intent-filter>
+
             <!-- Share sheet - receive shared content from other apps -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

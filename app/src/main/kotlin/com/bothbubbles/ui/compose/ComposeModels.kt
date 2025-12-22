@@ -119,7 +119,9 @@ data class ComposeUiState(
     /** Error message to display */
     val error: String? = null,
     /** Chat GUID to navigate to after successful send */
-    val navigateToChatGuid: String? = null
+    val navigateToChatGuid: String? = null,
+    /** Merged GUIDs for unified conversation navigation */
+    val navigateToMergedGuids: List<String>? = null
 ) {
     /**
      * Get the effective service for all chips (for display color).

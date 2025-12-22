@@ -103,6 +103,50 @@ class ChatRepository @Inject constructor(
     }
 
     /**
+     * Get the service type from the most recently active chat that has messages.
+     * Returns null if no chat with messages exists for this address.
+     *
+     * This is used to determine the correct service for a contact based on
+     * actual conversation history, rather than trusting stale cached handles.
+     *
+     * @param normalizedAddress The normalized phone number or email address
+     * @return "iMessage" or "SMS", or null if no active chat exists
+     */
+    suspend fun getServiceFromMostRecentActiveChat(normalizedAddress: String): String? {
+        // Try the normalized address first
+        chatDao.getMostRecentActiveChatService(normalizedAddress)?.let {
+            return it.service
+        }
+        // Try with + prefix for phone numbers
+        if (!normalizedAddress.contains("@") && !normalizedAddress.startsWith("+")) {
+            chatDao.getMostRecentActiveChatService("+$normalizedAddress")?.let {
+                return it.service
+            }
+        }
+        return null
+    }
+
+    /**
+     * Get map of address -> service for all addresses with active chats (chats with messages).
+     * Used by ContactLoadDelegate and SuggestionDelegate for activity-based service display.
+     *
+     * For each address, returns the service type from the most recently active chat.
+     * Addresses with no chats that have messages are not included in the result.
+     *
+     * @return Map of normalized address to service type ("iMessage" or "SMS")
+     */
+    suspend fun getServiceMapFromActiveChats(): Map<String, String> {
+        val results = chatDao.getServiceMapFromActiveChats()
+        // Group by normalized address and pick the one with the most recent message
+        return results
+            .groupBy { normalizeAddress(it.chatIdentifier) }
+            .mapValues { (_, chats) ->
+                // Take the service from the chat with the most recent message
+                chats.maxByOrNull { it.latestMessageDate }?.service ?: "SMS"
+            }
+    }
+
+    /**
      * Normalize an address for lookup purposes.
      */
     private fun normalizeAddress(address: String): String {

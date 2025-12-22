@@ -9,8 +9,11 @@ import android.provider.Telephony
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatGroupDao
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.MessageSource
+import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.services.ActiveConversationManager
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.di.ApplicationScope
@@ -39,6 +42,7 @@ class SmsContentObserver @Inject constructor(
     private val smsContentProvider: SmsContentProvider,
     private val chatDao: ChatDao,
     private val messageDao: MessageDao,
+    private val unifiedChatGroupDao: UnifiedChatGroupDao,
     private val notificationService: NotificationService,
     private val activeConversationManager: ActiveConversationManager,
     private val androidContactsService: AndroidContactsService,
@@ -191,6 +195,9 @@ class SmsContentObserver @Inject constructor(
                     )
                     messageDao.insertMessage(message)
 
+                    // Update unified group timestamp so conversation appears in correct position
+                    updateUnifiedGroupTimestamp(chatGuid, date, body)
+
                     // Show notification for incoming messages
                     if (!isFromMe) {
                         val chat = chatDao.getChatByGuid(chatGuid)
@@ -224,7 +231,8 @@ class SmsContentObserver @Inject constructor(
                                     senderName = senderName,
                                     senderAddress = normalizedAddress,
                                     isGroup = false,
-                                    avatarUri = senderAvatarUri
+                                    avatarUri = senderAvatarUri,
+                                    groupAvatarPath = chat?.effectiveGroupPhotoPath
                                 )
                             )
                         }
@@ -335,6 +343,9 @@ class SmsContentObserver @Inject constructor(
                     val message = mmsMessage.toMessageEntity(chatGuid)
                     messageDao.insertMessage(message)
 
+                    // Update unified group timestamp so conversation appears in correct position
+                    updateUnifiedGroupTimestamp(chatGuid, date, textContent)
+
                     // Show notification for incoming messages
                     if (!isFromMe) {
                         val chat = chatDao.getChatByGuid(chatGuid)
@@ -375,6 +386,7 @@ class SmsContentObserver @Inject constructor(
                                     senderAddress = primaryAddress,
                                     isGroup = isGroup,
                                     avatarUri = senderAvatarUri,
+                                    groupAvatarPath = chat?.effectiveGroupPhotoPath,
                                     attachmentUri = firstMediaAttachment?.dataUri,
                                     attachmentMimeType = firstMediaAttachment?.contentType
                                 )
@@ -416,7 +428,9 @@ class SmsContentObserver @Inject constructor(
         isGroup: Boolean = false
     ) {
         val existingChat = chatDao.getChatByGuid(chatGuid)
-        if (existingChat == null) {
+        val isNewChat = existingChat == null
+
+        if (isNewChat) {
             val chat = ChatEntity(
                 guid = chatGuid,
                 chatIdentifier = address,
@@ -433,6 +447,130 @@ class SmsContentObserver @Inject constructor(
                 // Update to group if needed
                 chatDao.insertChat(existingChat.copy(isGroup = true))
             }
+        }
+
+        // Link new 1:1 SMS chats to unified groups for conversation merging
+        // This enables messages sent via Android Auto to appear in merged iMessage/SMS views
+        if (isNewChat && !isGroup) {
+            linkChatToUnifiedGroup(chatGuid, address)
+        }
+    }
+
+    /**
+     * Link a chat to a unified group, creating the group if necessary.
+     * This enables merging SMS and iMessage conversations for the same contact.
+     */
+    private suspend fun linkChatToUnifiedGroup(chatGuid: String, normalizedPhone: String) {
+        // Skip if identifier is empty or looks like an email/RCS address (not a phone)
+        if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
+            Timber.d("linkChatToUnifiedGroup: Skipping $chatGuid - invalid identifier '$normalizedPhone'")
+            return
+        }
+
+        Timber.d("linkChatToUnifiedGroup: Linking $chatGuid to group for '$normalizedPhone'")
+
+        try {
+            // Check if this chat is already in a unified group
+            if (unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)) {
+                Timber.d("linkChatToUnifiedGroup: $chatGuid is already in a unified group")
+                return
+            }
+
+            // Check if unified group already exists for this phone number
+            var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+            Timber.d("linkChatToUnifiedGroup: Existing group for '$normalizedPhone': ${group?.id}")
+
+            if (group == null) {
+                // Check if there's an existing iMessage chat for this phone
+                val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+                Timber.d("linkChatToUnifiedGroup: Found existing iMessage chat: ${existingIMessageChat?.guid}")
+
+                // Create new unified group - prefer iMessage as primary if it exists
+                val primaryGuid = existingIMessageChat?.guid ?: chatGuid
+                val newGroup = UnifiedChatGroupEntity(
+                    identifier = normalizedPhone,
+                    primaryChatGuid = primaryGuid,
+                    displayName = existingIMessageChat?.displayName
+                )
+
+                // Use atomic method to prevent FOREIGN KEY errors
+                group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chatGuid)
+                Timber.d("linkChatToUnifiedGroup: Created/got group id=${group.id} and added member $chatGuid")
+
+                // Add existing iMessage chat to group if found (separate from SMS chat)
+                if (existingIMessageChat != null && existingIMessageChat.guid != chatGuid) {
+                    Timber.d("linkChatToUnifiedGroup: Adding iMessage chat ${existingIMessageChat.guid} to group ${group.id}")
+                    unifiedChatGroupDao.insertMember(
+                        UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
+                    )
+                }
+            } else {
+                // Group exists, just add this SMS chat to it
+                Timber.d("linkChatToUnifiedGroup: Adding $chatGuid to existing group ${group.id}")
+                unifiedChatGroupDao.insertMember(
+                    UnifiedChatMember(groupId = group.id, chatGuid = chatGuid)
+                )
+            }
+
+            Timber.d("linkChatToUnifiedGroup: Successfully linked $chatGuid to group ${group.id}")
+        } catch (e: Exception) {
+            Timber.e(e, "linkChatToUnifiedGroup: FAILED to link $chatGuid to group for '$normalizedPhone'")
+            // Don't rethrow - unified group linking is non-critical for message storage
+        }
+    }
+
+    /**
+     * Find an existing iMessage chat for a given phone number.
+     * Searches through non-group iMessage chats and matches by participant phone.
+     */
+    private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
+        val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
+        if (nonGroupChats.isEmpty()) return null
+
+        // Batch fetch all participants for all chats in a single query
+        val chatGuids = nonGroupChats.map { it.guid }
+        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+            .groupBy({ it.chatGuid }, { it.handle })
+
+        for (chat in nonGroupChats) {
+            val participants = participantsByChat[chat.guid] ?: emptyList()
+            for (participant in participants) {
+                val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
+                if (phonesMatch(normalized, normalizedPhone)) {
+                    return chat
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Compare two phone numbers for equality, handling different formats.
+     */
+    private fun phonesMatch(phone1: String, phone2: String): Boolean {
+        if (phone1 == phone2) return true
+        // Strip all non-digits and compare last 10 digits
+        val digits1 = phone1.filter { it.isDigit() }.takeLast(10)
+        val digits2 = phone2.filter { it.isDigit() }.takeLast(10)
+        return digits1.length >= 7 && digits1 == digits2
+    }
+
+    /**
+     * Update the unified group's latestMessageDate when a new message is inserted.
+     * This ensures the conversation appears in the correct position in the list.
+     */
+    private suspend fun updateUnifiedGroupTimestamp(chatGuid: String, messageDate: Long, messageText: String?) {
+        try {
+            val group = unifiedChatGroupDao.getGroupForChat(chatGuid)
+            if (group != null) {
+                val currentLatest = group.latestMessageDate ?: 0L
+                if (messageDate > currentLatest) {
+                    unifiedChatGroupDao.updateLatestMessage(group.id, messageDate, messageText)
+                    Timber.d("Updated unified group ${group.id} latestMessageDate to $messageDate")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to update unified group timestamp for $chatGuid")
         }
     }
 

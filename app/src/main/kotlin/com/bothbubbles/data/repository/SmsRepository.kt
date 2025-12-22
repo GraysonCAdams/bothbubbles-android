@@ -13,6 +13,8 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
 import com.bothbubbles.data.local.db.entity.HandleEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
+import com.bothbubbles.data.local.db.entity.UnifiedChatGroupEntity
+import com.bothbubbles.data.local.db.entity.UnifiedChatMember
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.services.sms.*
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -113,6 +115,195 @@ class SmsRepository @Inject constructor(
      */
     fun hasSmsCapability(): Boolean {
         return context.packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_TELEPHONY)
+    }
+
+    /**
+     * Repair orphaned SMS chats by linking them to unified groups.
+     * This fixes messages sent via Android Auto or other external apps that
+     * were created before the unified group linking was added.
+     *
+     * Call this on app startup to retroactively fix missing messages in merged views.
+     */
+    suspend fun repairOrphanedSmsChats(): Int = withContext(Dispatchers.IO) {
+        try {
+            // Find all SMS/MMS chats that are not in any unified group
+            val allSmsChats = chatDao.getAllSmsChats()
+            var repairedCount = 0
+
+            for (chat in allSmsChats) {
+                // Skip if already in a unified group
+                if (unifiedChatGroupDao.isChatInUnifiedGroup(chat.guid)) {
+                    continue
+                }
+
+                // Skip group chats - only merge 1:1 conversations
+                if (chat.isGroup) {
+                    continue
+                }
+
+                // Extract and normalize the phone number from the chat identifier
+                val identifier = chat.chatIdentifier ?: continue
+                val normalizedPhone = PhoneAndCodeParsingUtils.normalizePhoneNumber(identifier)
+
+                // Skip if identifier is empty or looks like an email/RCS address
+                if (normalizedPhone.isBlank() || normalizedPhone.contains("@")) {
+                    continue
+                }
+
+                Timber.d("repairOrphanedSmsChats: Linking orphaned chat ${chat.guid} for '$normalizedPhone'")
+
+                try {
+                    // Check if unified group already exists for this phone number
+                    var group = unifiedChatGroupDao.getGroupByIdentifier(normalizedPhone)
+
+                    if (group == null) {
+                        // Check if there's an existing iMessage chat for this phone
+                        val existingIMessageChat = findIMessageChatForPhone(normalizedPhone)
+
+                        // Determine latestMessageDate from the most recent chat
+                        val latestDate = maxOf(
+                            chat.lastMessageDate ?: 0L,
+                            existingIMessageChat?.lastMessageDate ?: 0L
+                        )
+
+                        // Create new unified group - prefer iMessage as primary if it exists
+                        val primaryGuid = existingIMessageChat?.guid ?: chat.guid
+                        val newGroup = UnifiedChatGroupEntity(
+                            identifier = normalizedPhone,
+                            primaryChatGuid = primaryGuid,
+                            displayName = existingIMessageChat?.displayName ?: chat.displayName,
+                            latestMessageDate = latestDate.takeIf { it > 0 }
+                        )
+
+                        // Use atomic method to prevent FOREIGN KEY errors
+                        group = unifiedChatGroupDao.getOrCreateGroupAndAddMember(newGroup, chat.guid)
+                        Timber.d("repairOrphanedSmsChats: Created group ${group.id} for ${chat.guid} with latestMessageDate=$latestDate")
+
+                        // Add existing iMessage chat to group if found
+                        if (existingIMessageChat != null && existingIMessageChat.guid != chat.guid) {
+                            unifiedChatGroupDao.insertMember(
+                                UnifiedChatMember(groupId = group.id, chatGuid = existingIMessageChat.guid)
+                            )
+                            Timber.d("repairOrphanedSmsChats: Also linked iMessage ${existingIMessageChat.guid} to group ${group.id}")
+                        }
+                    } else {
+                        // Group exists, just add this SMS chat to it
+                        unifiedChatGroupDao.insertMember(
+                            UnifiedChatMember(groupId = group.id, chatGuid = chat.guid)
+                        )
+
+                        // Update latestMessageDate if this chat has a more recent message
+                        val chatLatestDate = chat.lastMessageDate ?: 0L
+                        val groupLatestDate = group.latestMessageDate ?: 0L
+                        if (chatLatestDate > groupLatestDate) {
+                            unifiedChatGroupDao.updateLatestMessage(group.id, chatLatestDate, chat.lastMessageText)
+                        }
+
+                        Timber.d("repairOrphanedSmsChats: Added ${chat.guid} to existing group ${group.id}")
+                    }
+
+                    repairedCount++
+                } catch (e: Exception) {
+                    Timber.e(e, "repairOrphanedSmsChats: Failed to link ${chat.guid}")
+                }
+            }
+
+            if (repairedCount > 0) {
+                Timber.i("repairOrphanedSmsChats: Repaired $repairedCount orphaned SMS chats")
+            }
+
+            repairedCount
+        } catch (e: Exception) {
+            Timber.e(e, "repairOrphanedSmsChats: Error repairing orphaned SMS chats")
+            0
+        }
+    }
+
+    /**
+     * Repair unified group timestamps by updating latestMessageDate from member chats.
+     * This fixes groups that have an outdated timestamp (e.g., when RCS messages were
+     * received but the unified group timestamp wasn't updated).
+     *
+     * Call this on app startup to ensure conversation list is sorted correctly.
+     */
+    suspend fun repairUnifiedGroupTimestamps(): Int = withContext(Dispatchers.IO) {
+        try {
+            // Get all unified groups
+            val allGroups = unifiedChatGroupDao.getAllGroups()
+            var repairedCount = 0
+
+            for (group in allGroups) {
+                // Get all member chat GUIDs for this group
+                val memberGuids = unifiedChatGroupDao.getChatGuidsForGroup(group.id)
+                if (memberGuids.isEmpty()) continue
+
+                // Find the latest message date across all member chats
+                var latestDate = 0L
+                var latestText: String? = null
+
+                for (guid in memberGuids) {
+                    val chat = chatDao.getChatByGuid(guid)
+                    val chatDate = chat?.lastMessageDate ?: 0L
+                    if (chatDate > latestDate) {
+                        latestDate = chatDate
+                        latestText = chat?.lastMessageText
+                    }
+                }
+
+                // Update if the computed date is newer than the stored date
+                val groupLatestDate = group.latestMessageDate ?: 0L
+                if (latestDate > groupLatestDate) {
+                    unifiedChatGroupDao.updateLatestMessage(group.id, latestDate, latestText)
+                    Timber.d("repairUnifiedGroupTimestamps: Updated group ${group.id} from $groupLatestDate to $latestDate")
+                    repairedCount++
+                }
+            }
+
+            if (repairedCount > 0) {
+                Timber.i("repairUnifiedGroupTimestamps: Repaired $repairedCount unified group timestamps")
+            }
+
+            repairedCount
+        } catch (e: Exception) {
+            Timber.e(e, "repairUnifiedGroupTimestamps: Error repairing unified group timestamps")
+            0
+        }
+    }
+
+    /**
+     * Find an existing iMessage chat for a given phone number.
+     * Searches through non-group iMessage chats and matches by participant phone.
+     */
+    private suspend fun findIMessageChatForPhone(normalizedPhone: String): ChatEntity? {
+        val nonGroupChats = chatDao.getAllNonGroupIMessageChats()
+        if (nonGroupChats.isEmpty()) return null
+
+        // Batch fetch all participants for all chats in a single query
+        val chatGuids = nonGroupChats.map { it.guid }
+        val participantsByChat = chatDao.getParticipantsWithChatGuids(chatGuids)
+            .groupBy({ it.chatGuid }, { it.handle })
+
+        for (chat in nonGroupChats) {
+            val participants = participantsByChat[chat.guid] ?: emptyList()
+            for (participant in participants) {
+                val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(participant.address)
+                if (phonesMatch(normalized, normalizedPhone)) {
+                    return chat
+                }
+            }
+        }
+        return null
+    }
+
+    /**
+     * Compare two phone numbers for equality, handling different formats.
+     */
+    private fun phonesMatch(phone1: String, phone2: String): Boolean {
+        if (phone1 == phone2) return true
+        // Strip all non-digits and compare last 10 digits
+        val digits1 = phone1.filter { it.isDigit() }.takeLast(10)
+        val digits2 = phone2.filter { it.isDigit() }.takeLast(10)
+        return digits1.length >= 7 && digits1 == digits2
     }
 
     // ===== Content Observer =====

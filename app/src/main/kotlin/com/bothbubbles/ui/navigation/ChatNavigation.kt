@@ -153,8 +153,11 @@ fun NavGraphBuilder.chatNavigation(navController: NavHostController) {
                     (context as? android.app.Activity)?.finish()
                 }
             },
-            onNavigateToChat = { chatGuid ->
-                navController.navigate(Screen.Chat(chatGuid)) {
+            onNavigateToChat = { chatGuid, mergedGuids ->
+                val mergedGuidsStr = if (mergedGuids != null && mergedGuids.size > 1) {
+                    mergedGuids.joinToString(",")
+                } else null
+                navController.navigate(Screen.Chat(chatGuid, mergedGuidsStr)) {
                     popUpTo(Screen.Conversations) { inclusive = false }
                 }
             },

@@ -262,6 +262,7 @@ class FcmMessageHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
+                groupAvatarPath = chat?.effectiveGroupPhotoPath,
                 subject = messageSubject
             )
         )
@@ -415,6 +416,7 @@ class FcmMessageHandler @Inject constructor(
                 avatarUri = senderAvatarUri,
                 participantNames = participantNames,
                 participantAvatarPaths = participantAvatarPaths,
+                groupAvatarPath = chat?.effectiveGroupPhotoPath,
                 subject = messageDto.subject
             )
         )

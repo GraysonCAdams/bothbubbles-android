@@ -150,6 +150,21 @@ interface HandleDao {
     @Query("DELETE FROM handles")
     suspend fun deleteAllHandles()
 
+    /**
+     * Delete orphaned handles that are not associated with any chat.
+     * These are handles that exist but have no entry in the chat_handle_cross_ref table.
+     *
+     * This is useful for cleaning up stale data when empty chats are deleted.
+     * @return Number of handles deleted
+     */
+    @Query("""
+        DELETE FROM handles
+        WHERE id NOT IN (
+            SELECT DISTINCT handle_id FROM chat_handle_cross_ref
+        )
+    """)
+    suspend fun deleteOrphanedHandles(): Int
+
     // ===== Upsert =====
 
     /**

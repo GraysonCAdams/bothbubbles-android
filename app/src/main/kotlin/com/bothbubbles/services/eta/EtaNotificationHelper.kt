@@ -56,17 +56,6 @@ object EtaNotificationHelper {
             )
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_STATUS)
-            // Android Auto support
-            .extend(
-                NotificationCompat.CarExtender()
-                    .setUnreadConversation(
-                        NotificationCompat.CarExtender.UnreadConversation.Builder(contentTitle)
-                            .addMessage(contentText)
-                            .setLatestTimestamp(System.currentTimeMillis())
-                            .setReplyAction(stopPendingIntent, null)
-                            .build()
-                    )
-            )
             .build()
 
         val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

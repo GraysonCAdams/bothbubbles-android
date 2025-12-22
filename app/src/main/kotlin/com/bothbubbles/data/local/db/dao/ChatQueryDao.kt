@@ -22,6 +22,26 @@ interface ChatQueryDao {
         @ColumnInfo(name = "latest_message_date") val latestMessageDate: Long
     )
 
+    /**
+     * Service info from a chat that has messages.
+     * Used to determine the correct service for an address based on actual conversation history.
+     */
+    data class ChatServiceInfo(
+        @ColumnInfo(name = "service") val service: String,
+        @ColumnInfo(name = "latest_message_date") val latestMessageDate: Long,
+        @ColumnInfo(name = "message_count") val messageCount: Int
+    )
+
+    /**
+     * Address to service mapping from active chats.
+     * Used for batch loading service info for contact list display.
+     */
+    data class AddressServiceFromActivity(
+        @ColumnInfo(name = "chat_identifier") val chatIdentifier: String,
+        @ColumnInfo(name = "service") val service: String,
+        @ColumnInfo(name = "latest_message_date") val latestMessageDate: Long
+    )
+
     @Query("""
         SELECT * FROM chats
         WHERE date_deleted IS NULL
@@ -251,4 +271,99 @@ interface ChatQueryDao {
         AND latest_message_date IS NOT NULL
     """)
     suspend fun getLastMessageDatePerAddress(): List<AddressLastMessageDate>
+
+    // ===== Activity-Based Service Selection =====
+
+    /**
+     * Get service info from the most recently active chat that HAS messages for an address.
+     * Returns null if no chat with messages exists for this address.
+     *
+     * Service classification:
+     * - iMessage;-; prefix → "iMessage"
+     * - SMS;-;, sms;-;, MMS;-;, mms;-;, RCS;-; prefixes → "SMS"
+     *
+     * @param address The chat identifier (phone number or email)
+     * @return ChatServiceInfo with service type, latest message date, and message count
+     */
+    @Query("""
+        SELECT
+            CASE
+                WHEN c.guid LIKE 'iMessage;%' THEN 'iMessage'
+                ELSE 'SMS'
+            END as service,
+            c.latest_message_date,
+            (SELECT COUNT(*) FROM messages m
+             WHERE m.chat_guid = c.guid
+             AND m.date_deleted IS NULL
+             AND m.is_reaction = 0) as message_count
+        FROM chats c
+        WHERE c.chat_identifier = :address
+        AND c.date_deleted IS NULL
+        AND c.is_group = 0
+        AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.chat_guid = c.guid
+            AND m.date_deleted IS NULL
+            LIMIT 1
+        )
+        ORDER BY c.latest_message_date DESC
+        LIMIT 1
+    """)
+    suspend fun getMostRecentActiveChatService(address: String): ChatServiceInfo?
+
+    /**
+     * Get service from most recent active chat per address (batch query for contact list).
+     * Only returns addresses that have at least one chat with messages.
+     *
+     * For each address, returns the service type from the most recently active chat.
+     * Used by ContactLoadDelegate and SuggestionDelegate for intelligent service display.
+     */
+    @Query("""
+        SELECT
+            c.chat_identifier,
+            CASE
+                WHEN c.guid LIKE 'iMessage;%' THEN 'iMessage'
+                ELSE 'SMS'
+            END as service,
+            c.latest_message_date
+        FROM chats c
+        WHERE c.date_deleted IS NULL
+        AND c.is_group = 0
+        AND c.chat_identifier IS NOT NULL
+        AND c.latest_message_date IS NOT NULL
+        AND EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.chat_guid = c.guid
+            AND m.date_deleted IS NULL
+            LIMIT 1
+        )
+        ORDER BY c.latest_message_date DESC
+    """)
+    suspend fun getServiceMapFromActiveChats(): List<AddressServiceFromActivity>
+
+    // ===== Stale Data Cleanup =====
+
+    /**
+     * Find stale empty chats that should be cleaned up.
+     * Returns chats that:
+     * - Are not deleted
+     * - Are 1:1 (not group)
+     * - Were created before the cutoff date
+     * - Have NO messages at all
+     *
+     * These are typically chats created from server sync that were never actually used.
+     */
+    @Query("""
+        SELECT c.* FROM chats c
+        WHERE c.date_deleted IS NULL
+        AND c.is_group = 0
+        AND c.date_created < :cutoffDate
+        AND NOT EXISTS (
+            SELECT 1 FROM messages m
+            WHERE m.chat_guid = c.guid
+            AND m.date_deleted IS NULL
+            LIMIT 1
+        )
+    """)
+    suspend fun getStaleEmptyChats(cutoffDate: Long): List<ChatEntity>
 }

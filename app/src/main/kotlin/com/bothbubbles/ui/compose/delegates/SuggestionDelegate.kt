@@ -143,13 +143,22 @@ class SuggestionDelegate @Inject constructor(
 
     private suspend fun loadContactsAndGroups() {
         try {
-            // Load handle service map for iMessage detection
+            // Load activity-based service map (most recent chat with messages wins)
+            val activityServiceMap = chatRepository.getServiceMapFromActiveChats()
+
+            // Build handle service map: activity-based, falling back to handle existence
             val allHandles = handleRepository.getAllHandlesOnce()
             handleServiceMap = mutableMapOf<String, String>().apply {
                 allHandles.forEach { handle ->
                     val normalized = normalizeAddress(handle.address)
-                    if (handle.isIMessage || !containsKey(normalized)) {
-                        put(normalized, handle.service)
+                    // Priority 1: Use service from most recent ACTIVE chat (has messages)
+                    val activityService = activityServiceMap[normalized]
+                    if (activityService != null) {
+                        put(normalized, activityService)
+                    }
+                    // Priority 2: For handles with no active chat, default to SMS (phone) or iMessage (email)
+                    else if (!containsKey(normalized)) {
+                        put(normalized, if (handle.address.contains("@")) "iMessage" else "SMS")
                     }
                 }
             }
@@ -242,20 +251,21 @@ class SuggestionDelegate @Inject constructor(
             for (group in unifiedGroups) {
                 matchedIdentifiers.add(group.identifier)
 
-                // Look up all handles for this address to find iMessage capability
+                // Look up handle for avatar (prefer any handle with avatar)
                 val handles = handleRepository.getHandlesByAddress(group.identifier)
-                val hasIMessageHandle = handles.any { it.isIMessage }
-                // Use iMessage handle for avatar if available, otherwise any handle
-                val handle = handles.find { it.isIMessage } ?: handles.firstOrNull()
+                val handle = handles.firstOrNull { it.cachedAvatarPath != null } ?: handles.firstOrNull()
 
-                // Determine service: prefer iMessage if any handle supports it
-                // Fall back to primaryChatGuid prefix if no handles found
+                // Determine service using activity-based logic (same as ContactLoadDelegate)
+                // Priority: handleServiceMap (activity-based) > primaryChatGuid prefix > SMS default
+                val normalizedIdentifier = normalizeAddress(group.identifier)
+                val activityService = handleServiceMap[normalizedIdentifier]
                 val service = when {
-                    hasIMessageHandle -> "iMessage"
+                    activityService != null -> activityService
                     group.primaryChatGuid.startsWith("iMessage", ignoreCase = true) -> "iMessage"
                     group.primaryChatGuid.startsWith("RCS", ignoreCase = true) -> "RCS"
                     else -> "SMS"
                 }
+                Timber.d("Unified group service determination: identifier=${group.identifier}, activityService=$activityService, service=$service")
 
                 // Get display name from:
                 // 1. Unified group displayName (set for group chats)

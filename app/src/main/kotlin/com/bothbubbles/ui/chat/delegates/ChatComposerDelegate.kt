@@ -773,6 +773,38 @@ class ChatComposerDelegate @AssistedInject constructor(
     }
 
     // ============================================================================
+    // CAMERA CAPTURE - SAVE TO GALLERY
+    // ============================================================================
+
+    /**
+     * Whether to automatically save captured photos/videos to the device gallery.
+     */
+    val saveCapturedMediaToGallery: StateFlow<Boolean> = settingsDataStore.saveCapturedMediaToGallery
+        .stateIn(scope, SharingStarted.Eagerly, true)
+
+    /**
+     * Save a captured photo or video to the device gallery if the preference is enabled.
+     * Called from ChatScreen after a successful camera capture.
+     *
+     * @param filePath Path to the captured file in cache
+     * @param mimeType MIME type of the file (e.g., "image/jpeg", "video/mp4")
+     * @param fileName Display name for the saved file
+     */
+    fun saveCapturedMediaToGalleryIfEnabled(filePath: String, mimeType: String?, fileName: String?) {
+        if (!saveCapturedMediaToGallery.value) return
+
+        scope.launch {
+            attachmentRepository.saveToGallery(filePath, mimeType, fileName)
+                .onSuccess { uri ->
+                    Timber.d("Saved captured media to gallery: $uri")
+                }
+                .onFailure { e ->
+                    Timber.w(e, "Failed to save captured media to gallery")
+                }
+        }
+    }
+
+    // ============================================================================
     // ATTACHMENT QUALITY
     // ============================================================================
 

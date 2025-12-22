@@ -256,7 +256,8 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
                         senderName = senderName,
                         senderAddress = address,
                         isGroup = false,
-                        avatarUri = senderAvatarUri
+                        avatarUri = senderAvatarUri,
+                        groupAvatarPath = chat?.effectiveGroupPhotoPath
                     )
                 )
             }
@@ -391,9 +392,15 @@ class MmsBroadcastReceiver : BroadcastReceiver() {
             chatDao.updateUnreadCount(chatGuid, existingChat.unreadCount + 1)
         }
 
-        // Also increment the unified group's unread count for badge sync
+        // Also update the unified group's unread count and latestMessageDate for badge sync and sorting
+        val timestamp = System.currentTimeMillis()
         unifiedChatGroupDao.getGroupForChat(chatGuid)?.let { group ->
             unifiedChatGroupDao.incrementUnreadCount(group.id)
+            // Update latestMessageDate if this message is newer
+            val currentLatest = group.latestMessageDate ?: 0L
+            if (timestamp > currentLatest) {
+                unifiedChatGroupDao.updateLatestMessage(group.id, timestamp, "Incoming MMS...")
+            }
         }
     }
 

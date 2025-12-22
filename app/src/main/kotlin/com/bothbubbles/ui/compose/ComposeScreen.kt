@@ -38,6 +38,7 @@ import android.net.Uri
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.bothbubbles.ui.chat.composer.ChatComposer
 import com.bothbubbles.ui.components.message.MessageBubble
@@ -50,7 +51,7 @@ import com.bothbubbles.ui.components.message.MessageUiModel
 @Composable
 fun ComposeScreen(
     onNavigateBack: () -> Unit,
-    onNavigateToChat: (String) -> Unit,
+    onNavigateToChat: (chatGuid: String, mergedGuids: List<String>?) -> Unit,
     sharedText: String? = null,
     sharedUris: List<Uri> = emptyList(),
     initialAddress: String? = null,
@@ -87,8 +88,9 @@ fun ComposeScreen(
     // Handle navigation after send
     LaunchedEffect(uiState.navigateToChatGuid) {
         uiState.navigateToChatGuid?.let { chatGuid ->
+            val mergedGuids = uiState.navigateToMergedGuids
             viewModel.onNavigated()
-            onNavigateToChat(chatGuid)
+            onNavigateToChat(chatGuid, mergedGuids)
         }
     }
 
@@ -130,13 +132,15 @@ fun ComposeScreen(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         contentWindowInsets = WindowInsets.ime
     ) { paddingValues ->
-        Column(
+        // Use Box to allow popup to overlay content without pushing it down
+        Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(paddingValues)
         ) {
-            // Recipient Field
-            Box {
+            // Main content column
+            Column(modifier = Modifier.fillMaxSize()) {
+                // Recipient Field
                 RecipientField(
                     chips = uiState.chips,
                     inputText = uiState.recipientInput,
@@ -148,59 +152,60 @@ fun ComposeScreen(
                     focusRequester = focusRequester
                 )
 
-                // Suggestion dropdown (positioned below recipient field)
-                RecipientSuggestionPopup(
-                    visible = uiState.showSuggestions,
-                    suggestions = uiState.suggestions,
-                    selectedIndex = 0, // TODO: Track selected index
-                    allowGroups = uiState.chips.isEmpty(),
-                    onSelect = viewModel::onSuggestionSelected,
+                HorizontalDivider()
+
+                // Conversation Area
+                Box(
                     modifier = Modifier
-                        .padding(top = 56.dp) // Position below recipient field
-                        .padding(horizontal = 8.dp)
+                        .weight(1f)
+                        .fillMaxWidth()
+                ) {
+                    when (val state = uiState.conversationState) {
+                        is ComposeConversationState.Empty -> {
+                            EmptyConversationPlaceholder()
+                        }
+                        is ComposeConversationState.Loading -> {
+                            LoadingIndicator()
+                        }
+                        is ComposeConversationState.NewConversation -> {
+                            NewConversationPlaceholder()
+                        }
+                        is ComposeConversationState.Existing -> {
+                            MessageList(
+                                messages = state.messages,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
+                }
+
+                // Full ChatComposer with GIF picker, attachments, camera, etc.
+                // Note: Don't add separate navigationBars padding - Scaffold's ime contentWindowInsets
+                // handles keyboard, and when keyboard is closed nav bars are at screen bottom.
+                // Adding explicit nav bar padding causes dead space when keyboard is open.
+                ChatComposer(
+                    state = composerState,
+                    onEvent = viewModel::onComposerEvent,
+                    gifPickerState = gifPickerState,
+                    gifSearchQuery = gifSearchQuery,
+                    onGifSearchQueryChange = viewModel::onGifSearchQueryChange,
+                    onGifSearch = viewModel::onGifSearch,
+                    onGifSelected = viewModel::onGifSelected,
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
-            HorizontalDivider()
-
-            // Conversation Area
-            Box(
+            // Suggestion dropdown - floats over content with zIndex
+            RecipientSuggestionPopup(
+                visible = uiState.showSuggestions,
+                suggestions = uiState.suggestions,
+                selectedIndex = 0, // TODO: Track selected index
+                allowGroups = uiState.chips.isEmpty(),
+                onSelect = viewModel::onSuggestionSelected,
                 modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-            ) {
-                when (val state = uiState.conversationState) {
-                    is ComposeConversationState.Empty -> {
-                        EmptyConversationPlaceholder()
-                    }
-                    is ComposeConversationState.Loading -> {
-                        LoadingIndicator()
-                    }
-                    is ComposeConversationState.NewConversation -> {
-                        NewConversationPlaceholder()
-                    }
-                    is ComposeConversationState.Existing -> {
-                        MessageList(
-                            messages = state.messages,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
-            }
-
-            // Full ChatComposer with GIF picker, attachments, camera, etc.
-            // Note: Don't add separate navigationBars padding - Scaffold's ime contentWindowInsets
-            // handles keyboard, and when keyboard is closed nav bars are at screen bottom.
-            // Adding explicit nav bar padding causes dead space when keyboard is open.
-            ChatComposer(
-                state = composerState,
-                onEvent = viewModel::onComposerEvent,
-                gifPickerState = gifPickerState,
-                gifSearchQuery = gifSearchQuery,
-                onGifSearchQueryChange = viewModel::onGifSearchQueryChange,
-                onGifSearch = viewModel::onGifSearch,
-                onGifSelected = viewModel::onGifSelected,
-                modifier = Modifier.fillMaxWidth()
+                    .padding(top = 56.dp) // Position below recipient field
+                    .padding(horizontal = 8.dp)
+                    .zIndex(1f) // Float above other content
             )
         }
     }

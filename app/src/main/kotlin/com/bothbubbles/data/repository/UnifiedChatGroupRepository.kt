@@ -92,6 +92,13 @@ class UnifiedChatGroupRepository @Inject constructor(
         unifiedChatGroupDao.isChatInUnifiedGroup(chatGuid)
 
     /**
+     * Batch check which chat GUIDs are in any unified group.
+     * Returns the subset of input GUIDs that are members of unified groups.
+     */
+    suspend fun getChatsInAnyUnifiedGroup(chatGuids: List<String>): Set<String> =
+        unifiedChatGroupDao.getChatsInAnyUnifiedGroup(chatGuids).toSet()
+
+    /**
      * Get all chat GUIDs for a specific group.
      */
     suspend fun getChatGuidsForGroup(groupId: Long): List<String> =

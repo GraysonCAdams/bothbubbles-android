@@ -84,13 +84,23 @@ class ContactLoadDelegate @Inject constructor(
         // Load contacts from phone contacts (not from handles)
         val phoneContacts = androidContactsService.getAllContacts()
 
-        // Build a lookup map for iMessage availability from cached handles
+        // Build a lookup map for service based on actual conversation activity
+        // Priority: Use service from most recent chat that HAS messages
+        // Fallback: SMS for phones, iMessage for emails (conservative defaults)
+        val activityServiceMap = chatRepository.getServiceMapFromActiveChats()
+
         val handleServiceMap = mutableMapOf<String, String>()
         handleRepository.getAllHandlesOnce().forEach { handle ->
             val normalized = normalizeAddress(handle.address)
-            // Prefer iMessage when we know it's available
-            if (handle.isIMessage || !handleServiceMap.containsKey(normalized)) {
-                handleServiceMap[normalized] = handle.service
+
+            // Priority 1: Use service from most recent ACTIVE chat (has messages)
+            val activityService = activityServiceMap[normalized]
+            if (activityService != null) {
+                handleServiceMap[normalized] = activityService
+            }
+            // Priority 2: For handles with no active chat, default to SMS (phone) or iMessage (email)
+            else if (!handleServiceMap.containsKey(normalized)) {
+                handleServiceMap[normalized] = if (handle.address.contains("@")) "iMessage" else "SMS"
             }
         }
 

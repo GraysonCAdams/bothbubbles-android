@@ -1,6 +1,7 @@
 package com.bothbubbles.services.notifications
 
 import android.Manifest
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -9,6 +10,7 @@ import android.os.Build
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
+import timber.log.Timber
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -28,8 +30,12 @@ class NotificationService @Inject constructor(
 ) : Notifier {
     private val notificationManager = NotificationManagerCompat.from(context)
 
+    // System notification manager for querying active notifications (getActiveNotifications)
+    private val systemNotificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
     // Track active notification IDs per chat for proper cancellation when stacking
     // Maps chatGuid -> Set of notification IDs
+    // Note: This is a backup for in-process cancellation; primary method uses notification tags
     private val activeNotificationIds = mutableMapOf<String, MutableSet<Int>>()
 
     /**
@@ -64,6 +70,7 @@ class NotificationService @Inject constructor(
             linkPreviewDomain = params.linkPreviewDomain,
             participantNames = params.participantNames,
             participantAvatarPaths = params.participantAvatarPaths,
+            groupAvatarPath = params.groupAvatarPath,
             subject = params.subject,
             totalUnreadCount = badgeManager.totalUnread.value,
             attachmentUri = params.attachmentUri,
@@ -73,24 +80,41 @@ class NotificationService @Inject constructor(
         // Use messageGuid for unique notification ID (enables stacking)
         val notificationId = params.messageGuid.hashCode()
 
-        // Track this notification ID for the chat
+        // Track this notification ID for the chat (for in-process cancellation)
         synchronized(activeNotificationIds) {
             activeNotificationIds.getOrPut(params.chatGuid) { mutableSetOf() }.add(notificationId)
         }
 
-        notificationManager.notify(notificationId, notification)
+        // Post with chatGuid as tag for reliable cross-process cancellation
+        // When app is killed and restarted, we can still find notifications by tag
+        notificationManager.notify(params.chatGuid, notificationId, notification)
     }
 
     /**
      * Cancel all notifications for a chat.
      * Cancels all stacked notifications that belong to this chat.
+     *
+     * Uses Android's getActiveNotifications() to find notifications by tag,
+     * which works reliably even after app process death (FCM/background notifications).
      */
     override fun cancelNotification(chatGuid: String) {
+        // Clear from in-memory map
         synchronized(activeNotificationIds) {
-            val ids = activeNotificationIds.remove(chatGuid)
-            ids?.forEach { notificationId ->
-                notificationManager.cancel(notificationId)
-            }
+            activeNotificationIds.remove(chatGuid)
+        }
+
+        // Query actual active notifications and cancel those matching our tag
+        // This works even if app was killed and restarted (map was cleared)
+        try {
+            val activeNotifications = systemNotificationManager.activeNotifications
+            activeNotifications
+                .filter { it.tag == chatGuid }
+                .forEach { statusBarNotification ->
+                    systemNotificationManager.cancel(statusBarNotification.tag, statusBarNotification.id)
+                }
+        } catch (e: SecurityException) {
+            // Fallback: shouldn't happen but be safe
+            Timber.w(e, "Failed to query active notifications")
         }
     }
 

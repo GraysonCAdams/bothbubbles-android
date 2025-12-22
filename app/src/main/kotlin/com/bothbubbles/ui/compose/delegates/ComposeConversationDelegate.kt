@@ -39,6 +39,10 @@ class ComposeConversationDelegate @Inject constructor(
     private val _foundChatGuid = MutableStateFlow<String?>(null)
     val foundChatGuid: StateFlow<String?> = _foundChatGuid.asStateFlow()
 
+    // Merged GUIDs for unified conversations (iMessage + SMS combined)
+    private val _foundMergedGuids = MutableStateFlow<List<String>?>(null)
+    val foundMergedGuids: StateFlow<List<String>?> = _foundMergedGuids.asStateFlow()
+
     private var scope: CoroutineScope? = null
 
     /**
@@ -63,6 +67,7 @@ class ComposeConversationDelegate @Inject constructor(
             chips.isEmpty() -> {
                 _conversationState.value = ComposeConversationState.Empty
                 _foundChatGuid.value = null
+                _foundMergedGuids.value = null
             }
             chips.size == 1 && chips[0].isGroup -> {
                 // Single group chip - load that group's conversation
@@ -101,6 +106,7 @@ class ComposeConversationDelegate @Inject constructor(
             if (groupChats.isEmpty()) {
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = null
+                _foundMergedGuids.value = null
                 return
             }
 
@@ -125,6 +131,7 @@ class ComposeConversationDelegate @Inject constructor(
                 Timber.d("No matching group found for participants")
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = null
+                _foundMergedGuids.value = null
                 return
             }
 
@@ -140,6 +147,7 @@ class ComposeConversationDelegate @Inject constructor(
             Timber.e(e, "Failed to load multi-recipient conversation")
             _conversationState.value = ComposeConversationState.NewConversation
             _foundChatGuid.value = null
+            _foundMergedGuids.value = null
         }
     }
 
@@ -194,18 +202,22 @@ class ComposeConversationDelegate @Inject constructor(
                 // Found existing conversation with messages
                 loadMessagesForChat(bestChat.guid)
             } else if (bestChat != null) {
-                // Found empty chat entry
+                // Found empty chat entry - still resolve merged GUIDs for consistent navigation
+                val mergedGuids = messageRepository.resolveUnifiedChatGuids(bestChat.guid)
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = bestChat.guid
+                _foundMergedGuids.value = if (mergedGuids.size > 1) mergedGuids else null
             } else {
                 // No existing conversation
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = null
+                _foundMergedGuids.value = null
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to load single recipient conversation")
             _conversationState.value = ComposeConversationState.NewConversation
             _foundChatGuid.value = null
+            _foundMergedGuids.value = null
         }
     }
 
@@ -217,23 +229,31 @@ class ComposeConversationDelegate @Inject constructor(
             if (chat != null && chat.lastMessageText != null) {
                 loadMessagesForChat(chatGuid)
             } else {
+                // Group chat with no messages - resolve merged GUIDs for consistent navigation
+                val mergedGuids = messageRepository.resolveUnifiedChatGuids(chatGuid)
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = chatGuid
+                _foundMergedGuids.value = if (mergedGuids.size > 1) mergedGuids else null
             }
         } catch (e: Exception) {
             Timber.e(e, "Failed to load group conversation")
             _conversationState.value = ComposeConversationState.NewConversation
             _foundChatGuid.value = chatGuid
+            _foundMergedGuids.value = null
         }
     }
 
     private suspend fun loadMessagesForChat(chatGuid: String) {
         try {
+            // Resolve merged GUIDs for unified conversation navigation
+            val mergedGuids = messageRepository.resolveUnifiedChatGuids(chatGuid)
+
             val messages = messageRepository.getRecentMessagesForPreview(chatGuid, limit = 20)
 
             if (messages.isEmpty()) {
                 _conversationState.value = ComposeConversationState.NewConversation
                 _foundChatGuid.value = chatGuid
+                _foundMergedGuids.value = if (mergedGuids.size > 1) mergedGuids else null
                 return
             }
 
@@ -260,10 +280,12 @@ class ComposeConversationDelegate @Inject constructor(
                 messages = uiModels.toImmutableList()
             )
             _foundChatGuid.value = chatGuid
+            _foundMergedGuids.value = if (mergedGuids.size > 1) mergedGuids else null
         } catch (e: Exception) {
             Timber.e(e, "Failed to load messages for chat")
             _conversationState.value = ComposeConversationState.NewConversation
             _foundChatGuid.value = chatGuid
+            _foundMergedGuids.value = null
         }
     }
 
@@ -273,5 +295,6 @@ class ComposeConversationDelegate @Inject constructor(
     fun reset() {
         _conversationState.value = ComposeConversationState.Empty
         _foundChatGuid.value = null
+        _foundMergedGuids.value = null
     }
 }

@@ -15,7 +15,8 @@ import javax.inject.Inject
 
 data class ImageQualitySettingsUiState(
     val selectedQuality: AttachmentQuality = AttachmentQuality.DEFAULT,
-    val rememberLastQuality: Boolean = false
+    val rememberLastQuality: Boolean = false,
+    val saveCapturedMediaToGallery: Boolean = true
 )
 
 @HiltViewModel
@@ -25,11 +26,13 @@ class ImageQualitySettingsViewModel @Inject constructor(
 
     val uiState: StateFlow<ImageQualitySettingsUiState> = combine(
         settingsDataStore.defaultImageQuality,
-        settingsDataStore.rememberLastQuality
-    ) { qualityStr, rememberLast ->
+        settingsDataStore.rememberLastQuality,
+        settingsDataStore.saveCapturedMediaToGallery
+    ) { qualityStr, rememberLast, saveToGallery ->
         ImageQualitySettingsUiState(
             selectedQuality = AttachmentQuality.fromString(qualityStr),
-            rememberLastQuality = rememberLast
+            rememberLastQuality = rememberLast,
+            saveCapturedMediaToGallery = saveToGallery
         )
     }.stateIn(
         scope = viewModelScope,
@@ -46,6 +49,12 @@ class ImageQualitySettingsViewModel @Inject constructor(
     fun setRememberLastQuality(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setRememberLastQuality(enabled)
+        }
+    }
+
+    fun setSaveCapturedMediaToGallery(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSaveCapturedMediaToGallery(enabled)
         }
     }
 }

@@ -132,6 +132,7 @@ class NotificationBuilder @Inject constructor(
      * @param senderAddress The sender's address (phone/email) used for bubble filtering
      * @param participantNames List of participant names for group chats (used for group avatar collage)
      * @param participantAvatarPaths List of avatar paths for group participants (corresponding to participantNames)
+     * @param groupAvatarPath Optional path to group avatar (customAvatarPath or serverGroupPhotoPath). Takes priority over collage.
      * @param subject Optional message subject. When present, shows ONLY the subject (not the body).
      * @param attachmentUri Optional content:// URI to an attachment image/video for inline preview
      * @param attachmentMimeType MIME type of the attachment (required if attachmentUri is provided)
@@ -150,6 +151,7 @@ class NotificationBuilder @Inject constructor(
         linkPreviewDomain: String?,
         participantNames: List<String>,
         participantAvatarPaths: List<String?> = emptyList(),
+        groupAvatarPath: String? = null,
         subject: String? = null,
         totalUnreadCount: Int,
         attachmentUri: android.net.Uri? = null,
@@ -316,7 +318,7 @@ class NotificationBuilder @Inject constructor(
             chatTitle = chatTitle,
             isGroup = isGroup,
             participantNames = participantNames,
-            chatAvatarPath = null, // No custom chat avatar from notification
+            chatAvatarPath = groupAvatarPath,
             senderAvatarPath = if (!isGroup) avatarUri else null,
             participantAvatarPaths = participantAvatarPaths
         )
@@ -334,7 +336,7 @@ class NotificationBuilder @Inject constructor(
                 chatTitle = chatTitle,
                 isGroup = isGroup,
                 participantNames = participantNames,
-                chatAvatarPath = null, // No custom chat avatar from notification
+                chatAvatarPath = groupAvatarPath,
                 senderAvatarPath = if (!isGroup) avatarUri else null,
                 participantAvatarPaths = participantAvatarPaths,
                 mergedGuids = mergedGuids // Pass unified chat guids for proper bubble navigation

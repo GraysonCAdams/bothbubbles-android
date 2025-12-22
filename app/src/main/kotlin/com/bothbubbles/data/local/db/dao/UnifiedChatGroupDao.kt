@@ -42,6 +42,9 @@ interface UnifiedChatGroupDao {
     """)
     fun observeAllGroups(): Flow<List<UnifiedChatGroupEntity>>
 
+    @Query("SELECT * FROM unified_chat_groups")
+    suspend fun getAllGroups(): List<UnifiedChatGroupEntity>
+
     @Query("""
         SELECT * FROM unified_chat_groups
         WHERE is_archived = 1
@@ -137,6 +140,18 @@ interface UnifiedChatGroupDao {
         )
     """)
     suspend fun isChatInUnifiedGroup(chatGuid: String): Boolean
+
+    /**
+     * Batch check which chat GUIDs are in any unified group.
+     * Returns the subset of input GUIDs that are members of unified groups.
+     * Used to prevent adding chats as orphans when their unified group
+     * isn't in the current pagination page.
+     */
+    @Query("""
+        SELECT chat_guid FROM unified_chat_members
+        WHERE chat_guid IN (:chatGuids)
+    """)
+    suspend fun getChatsInAnyUnifiedGroup(chatGuids: List<String>): List<String>
 
     @Query("SELECT COUNT(*) FROM unified_chat_members WHERE group_id = :groupId")
     suspend fun getMemberCount(groupId: Long): Int

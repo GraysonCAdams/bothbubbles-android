@@ -229,6 +229,7 @@ class NotificationMediaUpdater @Inject constructor(
                     avatarUri = senderAvatarUri,
                     participantNames = participantNames,
                     participantAvatarPaths = participantAvatarPaths,
+                    groupAvatarPath = chat.effectiveGroupPhotoPath,
                     subject = message.subject,
                     attachmentUri = attachmentUri,
                     attachmentMimeType = notificationMimeType

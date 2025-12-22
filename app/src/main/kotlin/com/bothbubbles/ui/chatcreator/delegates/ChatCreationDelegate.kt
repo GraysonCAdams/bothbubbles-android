@@ -1,16 +1,23 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
 import timber.log.Timber
+import com.bothbubbles.core.data.ConnectionState
+import com.bothbubbles.core.network.api.BothBubblesApi
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.prefs.SettingsDataStore
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.ui.chatcreator.ContactUiModel
 import com.bothbubbles.ui.chatcreator.GroupChatUiModel
 import com.bothbubbles.ui.chatcreator.GroupSetupNavigation
 import com.bothbubbles.ui.chatcreator.SelectedRecipient
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 
 /**
@@ -22,10 +29,20 @@ import javax.inject.Inject
  *   (BlueBubbles Private API requires a message to create a new chat)
  * - Preparing group chat setup navigation
  * - Selecting existing group chats
+ * - Determining the correct service (iMessage vs SMS) based on availability check and activity history
  */
 class ChatCreationDelegate @Inject constructor(
-    private val chatRepository: ChatRepository
+    private val chatRepository: ChatRepository,
+    private val api: BothBubblesApi,
+    private val socketConnection: SocketConnection,
+    private val settingsDataStore: SettingsDataStore
 ) {
+
+    companion object {
+        /** Timeout for iMessage availability check */
+        private const val AVAILABILITY_CHECK_TIMEOUT_MS = 3000L
+    }
+
     /**
      * Result of a chat creation operation
      */
@@ -43,11 +60,79 @@ class ChatCreationDelegate @Inject constructor(
 
     /**
      * Select a contact and create/navigate to a direct chat.
-     * Delegates to startConversationWithAddress for consistent behavior.
+     * Determines the correct service using availability check and activity history.
      */
     suspend fun selectContact(contact: ContactUiModel): ChatCreationResult {
-        Timber.d("selectContact: service=${contact.service}")
-        return startConversationWithAddress(contact.address, contact.service)
+        Timber.d("selectContact: address=${contact.address}, displayService=${contact.service}")
+
+        // Determine the actual service to use (may differ from display service)
+        val service = determineServiceForAddress(contact.address)
+        Timber.d("selectContact: determined service=$service")
+
+        return startConversationWithAddress(contact.address, service)
+    }
+
+    /**
+     * Determine the correct service (iMessage vs SMS) for an address.
+     *
+     * Priority hierarchy:
+     * 1. Check iMessage availability via API (if connected, with 3s timeout)
+     * 2. Fall back to most recent chat that HAS messages
+     * 3. Default to SMS for phone numbers, iMessage for emails
+     *
+     * @param address The phone number or email address
+     * @return "iMessage" or "SMS"
+     */
+    private suspend fun determineServiceForAddress(address: String): String {
+        // Emails are always iMessage
+        if (address.contains("@")) {
+            return "iMessage"
+        }
+
+        // Normalize phone number
+        val normalized = PhoneAndCodeParsingUtils.normalizePhoneNumber(address)
+
+        // Check if we're in SMS-only mode
+        val smsOnlyMode = settingsDataStore.smsOnlyMode.first()
+        if (smsOnlyMode) {
+            Timber.d("SMS-only mode enabled, using SMS")
+            return "SMS"
+        }
+
+        // Step 1: Try API check if connected (with timeout)
+        val isConnected = socketConnection.connectionState.value == ConnectionState.CONNECTED
+        if (isConnected) {
+            try {
+                val available = withTimeout(AVAILABILITY_CHECK_TIMEOUT_MS) {
+                    val response = api.checkIMessageAvailability(normalized)
+                    response.isSuccessful && response.body()?.data?.available == true
+                }
+                if (available) {
+                    Timber.d("iMessage availability check: AVAILABLE")
+                    return "iMessage"
+                } else {
+                    Timber.d("iMessage availability check: NOT AVAILABLE")
+                    return "SMS"
+                }
+            } catch (e: TimeoutCancellationException) {
+                Timber.w("iMessage availability check timed out, falling back to activity-based logic")
+            } catch (e: Exception) {
+                Timber.w(e, "iMessage availability check failed, falling back to activity-based logic")
+            }
+        } else {
+            Timber.d("Server not connected, using activity-based fallback")
+        }
+
+        // Step 2: Fall back to most recent chat that HAS messages
+        val activityService = chatRepository.getServiceFromMostRecentActiveChat(normalized)
+        if (activityService != null) {
+            Timber.d("Using service from most recent active chat: $activityService")
+            return activityService
+        }
+
+        // Step 3: No active chat - default to SMS for phone numbers
+        Timber.d("No active chat found, defaulting to SMS")
+        return "SMS"
     }
 
     /**
