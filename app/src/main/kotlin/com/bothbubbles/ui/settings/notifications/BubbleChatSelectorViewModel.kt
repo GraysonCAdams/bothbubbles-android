@@ -29,8 +29,8 @@ class BubbleChatSelectorViewModel @Inject constructor(
     private fun observeConversations() {
         viewModelScope.launch {
             combine(
-                unifiedChatDao.observeActive(),
-                chatDao.observeActiveGroupChats(),
+                unifiedChatDao.observeActiveChats(),
+                chatDao.observeGroupChats(),
                 settingsDataStore.selectedBubbleChats
             ) { unifiedChats, groupChats, selectedChats ->
                 Triple(unifiedChats, groupChats, selectedChats)
@@ -59,7 +59,7 @@ class BubbleChatSelectorViewModel @Inject constructor(
             conversations.add(
                 SelectableConversation(
                     chatGuid = chat.sourceId,
-                    displayName = chat.displayName ?: chat.cachedContactName ?: chat.normalizedAddress,
+                    displayName = chat.displayName ?: chat.normalizedAddress,
                     isGroup = false,
                     isSelected = selectedChats.contains(chat.sourceId),
                     latestMessageDate = chat.latestMessageDate ?: 0L

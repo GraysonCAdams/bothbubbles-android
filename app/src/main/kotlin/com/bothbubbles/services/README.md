@@ -36,7 +36,8 @@ Services Layer Organization:
 │ ├── export/       - Message export (PDF, HTML)              │
 │ ├── scheduled/    - Scheduled messages                      │
 │ ├── smartreply/   - ML smart reply suggestions              │
-│ └── linkpreview/  - URL preview generation                  │
+│ ├── linkpreview/  - URL preview generation                  │
+│ └── socialmedia/  - TikTok/Instagram video downloading      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -129,3 +130,56 @@ class ActiveConversationManager @Inject constructor(
 | `IncomingMessageHandler` | `IncomingMessageProcessor` | Process incoming messages |
 | `SocketService` | `SocketConnection` | Socket.IO management |
 | `NotificationService` | `Notifier` | Show notifications |
+
+## Notification Architecture
+
+### Per-Conversation Grouping (iOS-style)
+
+Notifications are grouped by conversation, not globally. This allows users to:
+- Dismiss all notifications from one person at once
+- See messages organized by sender in the notification shade
+- Matches iOS/Google Messages behavior
+
+```
+Notification Shade:
+├── Dad (2 messages)          <- Conversation group summary
+│   ├── "Hey are you coming?"
+│   └── "Let me know"
+├── Liz (1 message)           <- Separate conversation group
+│   └── "See you tomorrow"
+```
+
+### Implementation
+
+```kotlin
+// Each conversation gets its own group key
+val conversationGroupKey = "conversation-$chatGuid"
+
+// Individual message notification
+.setGroup(conversationGroupKey)
+
+// Conversation summary notification
+.setGroup(conversationGroupKey)
+.setGroupSummary(true)
+```
+
+### Unified Chat Handling
+
+For merged iMessage/SMS conversations, notifications use a consistent group key based on sorted merged GUIDs:
+
+```kotlin
+val conversationGroupKey = if (mergedGuids != null) {
+    "conversation-${mergedGuids.split(",").sorted().joinToString(",").hashCode()}"
+} else {
+    "conversation-$chatGuid"
+}
+```
+
+### Key Classes
+
+| Class | Purpose |
+|-------|---------|
+| `NotificationBuilder` | Builds message and summary notifications |
+| `NotificationService` | Posts notifications, tracks counts per conversation |
+| `NotificationChannelManager` | Per-conversation channels for user customization |
+| `BubbleMetadataHelper` | Android bubble support |

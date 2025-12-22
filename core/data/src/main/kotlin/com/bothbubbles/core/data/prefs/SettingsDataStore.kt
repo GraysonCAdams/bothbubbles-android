@@ -252,6 +252,14 @@ class SettingsDataStore @Inject constructor(
     val autoShareMinimumEtaMinutes: Flow<Int> get() = featurePrefs.autoShareMinimumEtaMinutes
     val androidAutoPrivacyMode: Flow<Boolean> get() = featurePrefs.androidAutoPrivacyMode
 
+    // Social Media Downloading
+    val tiktokDownloaderEnabled: Flow<Boolean> get() = featurePrefs.tiktokDownloaderEnabled
+    val instagramDownloaderEnabled: Flow<Boolean> get() = featurePrefs.instagramDownloaderEnabled
+    val socialMediaBackgroundDownloadEnabled: Flow<Boolean> get() = featurePrefs.socialMediaBackgroundDownloadEnabled
+    val socialMediaDownloadOnCellularEnabled: Flow<Boolean> get() = featurePrefs.socialMediaDownloadOnCellularEnabled
+    val tiktokVideoQuality: Flow<String> get() = featurePrefs.tiktokVideoQuality
+    val reelsFeedEnabled: Flow<Boolean> get() = featurePrefs.reelsFeedEnabled
+
     suspend fun setSpamDetectionEnabled(enabled: Boolean) = featurePrefs.setSpamDetectionEnabled(enabled)
     suspend fun setSpamThreshold(threshold: Int) = featurePrefs.setSpamThreshold(threshold)
     suspend fun setMlModelDownloaded(downloaded: Boolean) = featurePrefs.setMlModelDownloaded(downloaded)
@@ -272,6 +280,12 @@ class SettingsDataStore @Inject constructor(
     suspend fun setEtaChangeNotificationsEnabled(enabled: Boolean) = featurePrefs.setEtaChangeNotificationsEnabled(enabled)
     suspend fun setAutoShareMinimumEtaMinutes(minutes: Int) = featurePrefs.setAutoShareMinimumEtaMinutes(minutes)
     suspend fun setAndroidAutoPrivacyMode(enabled: Boolean) = featurePrefs.setAndroidAutoPrivacyMode(enabled)
+    suspend fun setTiktokDownloaderEnabled(enabled: Boolean) = featurePrefs.setTiktokDownloaderEnabled(enabled)
+    suspend fun setInstagramDownloaderEnabled(enabled: Boolean) = featurePrefs.setInstagramDownloaderEnabled(enabled)
+    suspend fun setSocialMediaBackgroundDownloadEnabled(enabled: Boolean) = featurePrefs.setSocialMediaBackgroundDownloadEnabled(enabled)
+    suspend fun setSocialMediaDownloadOnCellularEnabled(enabled: Boolean) = featurePrefs.setSocialMediaDownloadOnCellularEnabled(enabled)
+    suspend fun setTiktokVideoQuality(quality: String) = featurePrefs.setTiktokVideoQuality(quality)
+    suspend fun setReelsFeedEnabled(enabled: Boolean) = featurePrefs.setReelsFeedEnabled(enabled)
 
     // ===== Global Operations =====
 

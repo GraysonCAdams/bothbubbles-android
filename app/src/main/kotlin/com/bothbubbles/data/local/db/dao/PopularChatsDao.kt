@@ -42,11 +42,12 @@ interface PopularChatsDao {
             MAX(m.date_created) as latestMessageDate
         FROM messages m
         INNER JOIN chats c ON m.chat_guid = c.guid
+        LEFT JOIN unified_chats uc ON c.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
         AND c.date_deleted IS NULL
-        AND c.is_archived = 0
+        AND (uc.is_archived IS NULL OR uc.is_archived = 0)
         GROUP BY m.chat_guid
         ORDER BY messageCount DESC, latestMessageDate DESC
         LIMIT :limit
@@ -64,11 +65,12 @@ interface PopularChatsDao {
             MAX(m.date_created) as latestMessageDate
         FROM messages m
         INNER JOIN chats c ON m.chat_guid = c.guid
+        LEFT JOIN unified_chats uc ON c.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
         AND c.date_deleted IS NULL
-        AND c.is_archived = 0
+        AND (uc.is_archived IS NULL OR uc.is_archived = 0)
         GROUP BY m.chat_guid
         ORDER BY messageCount DESC, latestMessageDate DESC
         LIMIT :limit
@@ -134,11 +136,12 @@ interface PopularChatsDao {
             MAX(m.date_created) as latestMessageDate
         FROM chats c
         INNER JOIN messages m ON m.chat_guid = c.guid
+        LEFT JOIN unified_chats uc ON c.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
         AND c.date_deleted IS NULL
-        AND c.is_archived = 0
+        AND (uc.is_archived IS NULL OR uc.is_archived = 0)
         AND c.is_group = 1
         GROUP BY c.guid
         ORDER BY messageCount DESC, latestMessageDate DESC
@@ -156,11 +159,12 @@ interface PopularChatsDao {
             MAX(m.date_created) as latestMessageDate
         FROM chats c
         INNER JOIN messages m ON m.chat_guid = c.guid
+        LEFT JOIN unified_chats uc ON c.unified_chat_id = uc.id
         WHERE m.date_deleted IS NULL
         AND m.date_created >= :since
         AND m.is_reaction = 0
         AND c.date_deleted IS NULL
-        AND c.is_archived = 0
+        AND (uc.is_archived IS NULL OR uc.is_archived = 0)
         AND c.is_group = 1
         GROUP BY c.guid
         ORDER BY messageCount DESC, latestMessageDate DESC

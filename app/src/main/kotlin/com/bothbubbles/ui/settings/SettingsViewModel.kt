@@ -51,6 +51,7 @@ class SettingsViewModel @Inject constructor(
         observeDeveloperMode()
         observeSmsEnabled()
         observeLinkPreviews()
+        observeSocialMediaDownloaders()
         refreshSmsCapability()
         refreshContactsPermission()
     }
@@ -221,6 +222,85 @@ class SettingsViewModel @Inject constructor(
     fun setLinkPreviewsEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setLinkPreviewsEnabled(enabled)
+        }
+    }
+
+    private fun observeSocialMediaDownloaders() {
+        viewModelScope.launch {
+            combine(
+                settingsDataStore.tiktokDownloaderEnabled,
+                settingsDataStore.instagramDownloaderEnabled,
+                settingsDataStore.socialMediaBackgroundDownloadEnabled,
+                settingsDataStore.socialMediaDownloadOnCellularEnabled,
+                settingsDataStore.tiktokVideoQuality,
+                settingsDataStore.reelsFeedEnabled
+            ) { values: Array<Any?> ->
+                @Suppress("UNCHECKED_CAST")
+                SocialMediaDownloadState(
+                    tiktokEnabled = values[0] as? Boolean ?: false,
+                    instagramEnabled = values[1] as? Boolean ?: false,
+                    backgroundDownloadEnabled = values[2] as? Boolean ?: false,
+                    downloadOnCellularEnabled = values[3] as? Boolean ?: false,
+                    tiktokQuality = values[4] as? String ?: "hd",
+                    reelsFeedEnabled = values[5] as? Boolean ?: false
+                )
+            }.collect { state ->
+                _uiState.update {
+                    it.copy(
+                        tiktokDownloaderEnabled = state.tiktokEnabled,
+                        instagramDownloaderEnabled = state.instagramEnabled,
+                        socialMediaBackgroundDownloadEnabled = state.backgroundDownloadEnabled,
+                        socialMediaDownloadOnCellularEnabled = state.downloadOnCellularEnabled,
+                        tiktokVideoQuality = state.tiktokQuality,
+                        reelsFeedEnabled = state.reelsFeedEnabled
+                    )
+                }
+            }
+        }
+    }
+
+    private data class SocialMediaDownloadState(
+        val tiktokEnabled: Boolean,
+        val instagramEnabled: Boolean,
+        val backgroundDownloadEnabled: Boolean,
+        val downloadOnCellularEnabled: Boolean,
+        val tiktokQuality: String,
+        val reelsFeedEnabled: Boolean
+    )
+
+    fun setTiktokDownloaderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setTiktokDownloaderEnabled(enabled)
+        }
+    }
+
+    fun setInstagramDownloaderEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setInstagramDownloaderEnabled(enabled)
+        }
+    }
+
+    fun setSocialMediaBackgroundDownloadEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSocialMediaBackgroundDownloadEnabled(enabled)
+        }
+    }
+
+    fun setSocialMediaDownloadOnCellularEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setSocialMediaDownloadOnCellularEnabled(enabled)
+        }
+    }
+
+    fun setTiktokVideoQuality(quality: String) {
+        viewModelScope.launch {
+            settingsDataStore.setTiktokVideoQuality(quality)
+        }
+    }
+
+    fun setReelsFeedEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setReelsFeedEnabled(enabled)
         }
     }
 
@@ -418,6 +498,13 @@ data class SettingsUiState(
     val developerModeEnabled: Boolean = false,
     // Link previews
     val linkPreviewsEnabled: Boolean = false,
+    // Social media downloading
+    val tiktokDownloaderEnabled: Boolean = false,
+    val instagramDownloaderEnabled: Boolean = false,
+    val socialMediaBackgroundDownloadEnabled: Boolean = false,
+    val socialMediaDownloadOnCellularEnabled: Boolean = false,
+    val tiktokVideoQuality: String = "hd",
+    val reelsFeedEnabled: Boolean = false,
     // Contacts permission
     val hasContactsPermission: Boolean = false,
     // Find My debug data

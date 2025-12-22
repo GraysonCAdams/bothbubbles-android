@@ -130,6 +130,26 @@ class NotificationBuilder @Inject constructor(
     }
 
     /**
+     * Get merged guids for a chat synchronously (for notification posting).
+     * Returns null if chat is not part of a unified group.
+     */
+    fun getMergedGuidsSync(chatGuid: String): String? {
+        return unifiedGroupCache[chatGuid]
+    }
+
+    /**
+     * Compute the conversation group key for a chat.
+     * Used to ensure consistent grouping between message notifications and summaries.
+     */
+    fun getConversationGroupKey(chatGuid: String, mergedGuids: String?): String {
+        return if (mergedGuids != null) {
+            "conversation-${mergedGuids.split(",").sorted().joinToString(",").hashCode()}"
+        } else {
+            "conversation-$chatGuid"
+        }
+    }
+
+    /**
      * Invalidate the unified group cache and refresh in the background.
      * Call this when unified groups are created, updated, or deleted.
      */
@@ -410,13 +430,88 @@ class NotificationBuilder @Inject constructor(
             )
         }
 
+        // Use per-conversation group for iOS-style notification grouping
+        // For unified chats (merged iMessage/SMS), use consistent group key
+        val conversationGroupKey = if (mergedGuids != null) {
+            // Use sorted merged guids to ensure consistent key regardless of which chat triggers notification
+            "conversation-${mergedGuids.split(",").sorted().joinToString(",").hashCode()}"
+        } else {
+            "conversation-$chatGuid"
+        }
+
         return notificationBuilder
             .setAutoCancel(true)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-            .setGroup(NotificationChannelManager.GROUP_MESSAGES)
+            .setGroup(conversationGroupKey)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
             .build()
+    }
+
+    /**
+     * Build a per-conversation summary notification for grouping.
+     *
+     * This summary appears when there are multiple notifications from the same conversation.
+     * It groups them together iOS-style, so users can dismiss all notifications from one
+     * conversation at once.
+     *
+     * @param channelId The notification channel ID
+     * @param chatGuid The chat identifier
+     * @param chatTitle Display name for the conversation
+     * @param unreadCount Number of unread messages in this conversation
+     * @param mergedGuids Comma-separated list of merged chat guids (for unified iMessage/SMS)
+     * @return Pair of (notification, groupKey) - groupKey needed for notification ID
+     */
+    fun buildConversationSummaryNotification(
+        channelId: String,
+        chatGuid: String,
+        chatTitle: String,
+        unreadCount: Int,
+        mergedGuids: String?
+    ): Pair<android.app.Notification, String> {
+        // Use same group key logic as individual notifications
+        val conversationGroupKey = if (mergedGuids != null) {
+            "conversation-${mergedGuids.split(",").sorted().joinToString(",").hashCode()}"
+        } else {
+            "conversation-$chatGuid"
+        }
+
+        // Create intent to open the chat
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(NotificationChannelManager.EXTRA_CHAT_GUID, chatGuid)
+            if (mergedGuids != null) {
+                putExtra(NotificationChannelManager.EXTRA_MERGED_GUIDS, mergedGuids)
+            }
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            conversationGroupKey.hashCode(),
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        val summaryText = if (unreadCount == 1) {
+            "1 message"
+        } else {
+            "$unreadCount messages"
+        }
+
+        val notification = NotificationCompat.Builder(context, channelId)
+            .setSmallIcon(android.R.drawable.sym_action_chat)
+            .setContentTitle(chatTitle)
+            .setContentText(summaryText)
+            .setContentIntent(contentPendingIntent)
+            .setGroup(conversationGroupKey)
+            .setGroupSummary(true)
+            .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // Use low priority so summary doesn't alert separately
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setOnlyAlertOnce(true)
+            .build()
+
+        return Pair(notification, conversationGroupKey)
     }
 
     /**

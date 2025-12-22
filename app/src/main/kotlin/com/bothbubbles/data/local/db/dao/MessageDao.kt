@@ -328,6 +328,172 @@ interface MessageDao {
     """)
     fun observeMessageCountForChats(chatGuids: List<String>): Flow<Int>
 
+    // ===== Unified Chat Pagination Queries =====
+    // These queries use unified_chat_id for native pagination across merged conversations.
+    // No stream merging required - database handles sorting across all protocol channels.
+
+    /**
+     * Main pagination query for unified chats.
+     * Fetches messages across all protocol channels (iMessage + SMS) with a single query.
+     * EXCLUDES reactions (displayed as overlays on parent messages).
+     *
+     * @param unifiedChatId The unified conversation identifier
+     * @param limit Dynamic limit that grows as user scrolls up
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+        ORDER BY date_created DESC, guid DESC
+        LIMIT :limit
+    """)
+    fun observeMessagesForUnifiedChat(unifiedChatId: String, limit: Int): Flow<List<MessageEntity>>
+
+    /**
+     * One-shot fetch of messages for a unified chat.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        ORDER BY date_created DESC
+        LIMIT :limit OFFSET :offset
+    """)
+    suspend fun getMessagesForUnifiedChat(unifiedChatId: String, limit: Int, offset: Int): List<MessageEntity>
+
+    /**
+     * Get message count for a unified conversation.
+     * EXCLUDES reactions to match pagination count.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+    """)
+    suspend fun getMessageCountForUnifiedChat(unifiedChatId: String): Int
+
+    /**
+     * Observe message count for a unified conversation.
+     * Emits when messages are added/deleted.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+    """)
+    fun observeMessageCountForUnifiedChat(unifiedChatId: String): Flow<Int>
+
+    /**
+     * Cursor-based pagination for unified chats.
+     * Fetches messages older than a given timestamp.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+        AND date_created < :beforeTimestamp
+        ORDER BY date_created DESC, guid DESC
+        LIMIT :limit
+    """)
+    suspend fun getMessagesBeforeForUnifiedChat(
+        unifiedChatId: String,
+        beforeTimestamp: Long,
+        limit: Int
+    ): List<MessageEntity>
+
+    /**
+     * Get messages after a timestamp for a unified chat (for polling new messages).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND date_created > :afterTimestamp
+        ORDER BY date_created ASC
+    """)
+    suspend fun getMessagesAfterForUnifiedChat(unifiedChatId: String, afterTimestamp: Long): List<MessageEntity>
+
+    /**
+     * Observe messages within a time window for a unified chat.
+     * Used for jump-to-message functionality.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND is_reaction = 0
+        AND date_created >= :windowStart
+        AND date_created <= :windowEnd
+        ORDER BY date_created DESC, guid DESC
+    """)
+    fun observeMessagesInWindowForUnifiedChat(
+        unifiedChatId: String,
+        windowStart: Long,
+        windowEnd: Long
+    ): Flow<List<MessageEntity>>
+
+    /**
+     * Get the latest message for a unified chat.
+     * Used for updating the conversation preview.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND (sms_status IS NULL OR sms_status != 'draft')
+        ORDER BY date_created DESC
+        LIMIT 1
+    """)
+    suspend fun getLatestMessageForUnifiedChat(unifiedChatId: String): MessageEntity?
+
+    /**
+     * Search messages within a unified conversation.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND date_deleted IS NULL
+        AND (text LIKE '%' || :query || '%' OR subject LIKE '%' || :query || '%')
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    suspend fun searchMessagesInUnifiedChat(
+        unifiedChatId: String,
+        query: String,
+        limit: Int = 100
+    ): List<MessageEntity>
+
+    /**
+     * Get reactions for messages in a unified chat.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE unified_chat_id = :unifiedChatId
+        AND is_reaction = 1
+        AND (
+            associated_message_guid IN (:messageGuids)
+            OR (
+                associated_message_guid LIKE 'p:%/%'
+                AND SUBSTR(associated_message_guid, INSTR(associated_message_guid, '/') + 1) IN (:messageGuids)
+            )
+        )
+    """)
+    suspend fun getReactionsForMessagesInUnifiedChat(
+        unifiedChatId: String,
+        messageGuids: List<String>
+    ): List<MessageEntity>
+
+    /**
+     * Update the unified_chat_id for all messages in a chat.
+     * Used when linking a chat to a unified conversation.
+     */
+    @Query("UPDATE messages SET unified_chat_id = :unifiedChatId WHERE chat_guid = :chatGuid")
+    suspend fun setUnifiedChatIdForChat(chatGuid: String, unifiedChatId: String)
+
     // ===== Cursor-Based Pagination Queries =====
     // These queries support the new cursor-based pagination model where Room is the
     // single source of truth. The growing query limit pattern replaces BitSet pagination.

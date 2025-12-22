@@ -3,7 +3,7 @@ package com.bothbubbles.ui.share
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.UnifiedChatRepository
 import com.bothbubbles.util.PhoneNumberFormatter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.FlowPreview
@@ -14,7 +14,7 @@ import javax.inject.Inject
 @OptIn(FlowPreview::class)
 @HiltViewModel
 class SharePickerViewModel @Inject constructor(
-    private val chatRepository: ChatRepository
+    private val unifiedChatRepository: UnifiedChatRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(SharePickerUiState())
@@ -29,7 +29,7 @@ class SharePickerViewModel @Inject constructor(
     private fun loadConversations() {
         viewModelScope.launch {
             combine(
-                chatRepository.observeActiveChats(),
+                unifiedChatRepository.observeActiveChats(),
                 _searchQuery.debounce(300)
             ) { chats, query ->
                 val filtered = if (query.isBlank()) {
@@ -37,20 +37,20 @@ class SharePickerViewModel @Inject constructor(
                 } else {
                     chats.filter { chat ->
                         chat.displayName?.contains(query, ignoreCase = true) == true ||
-                            chat.chatIdentifier?.contains(query, ignoreCase = true) == true
+                            chat.normalizedAddress.contains(query, ignoreCase = true)
                     }
                 }
 
                 // Sort by last message date, most recent first
-                filtered.sortedByDescending { it.lastMessageDate ?: 0L }
+                filtered.sortedByDescending { it.latestMessageDate ?: 0L }
             }.collect { conversations ->
-                _uiState.update {
-                    it.copy(
+                _uiState.update { state ->
+                    state.copy(
                         conversations = conversations.map { chat ->
                             ShareConversationUiModel(
-                                guid = chat.guid,
-                                displayName = chat.displayName ?: chat.chatIdentifier?.let { PhoneNumberFormatter.format(it) } ?: "",
-                                avatarPath = chat.effectiveGroupPhotoPath,
+                                guid = chat.sourceId,
+                                displayName = chat.displayName ?: PhoneNumberFormatter.format(chat.normalizedAddress),
+                                avatarPath = chat.effectiveAvatarPath,
                                 isGroup = chat.isGroup,
                                 participantNames = emptyList() // Could be populated from join table
                             )

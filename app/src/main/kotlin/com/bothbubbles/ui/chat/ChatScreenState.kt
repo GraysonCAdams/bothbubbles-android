@@ -50,7 +50,8 @@ class ChatScreenState(
     showQualitySheet: Boolean = false,
     showForwardDialog: Boolean = false,
     showCaptureTypeSheet: Boolean = false,
-    showDeleteMessagesDialog: Boolean = false
+    showDeleteMessagesDialog: Boolean = false,
+    showReelsFeed: Boolean = false
 ) {
     // ===== Dialog Visibility =====
     var showDeleteDialog by mutableStateOf(showDeleteDialog)
@@ -69,6 +70,10 @@ class ChatScreenState(
     var showCaptureTypeSheet by mutableStateOf(showCaptureTypeSheet)
     /** Show confirmation dialog for deleting selected messages */
     var showDeleteMessagesDialog by mutableStateOf(showDeleteMessagesDialog)
+    /** Show the Reels feed fullscreen overlay */
+    var showReelsFeed by mutableStateOf(showReelsFeed)
+    /** Index of reel to start at when opening feed from a specific video */
+    var reelsFeedStartIndex by mutableStateOf(0)
 
     // ===== Selection / Data =====
     var pendingContactData by mutableStateOf<ContactData?>(null)
@@ -274,6 +279,7 @@ fun rememberChatScreenState(
     val showForwardDialog = rememberSaveable { mutableStateOf(false) }
     val showCaptureTypeSheet = rememberSaveable { mutableStateOf(false) }
     val showDeleteMessagesDialog = rememberSaveable { mutableStateOf(false) }
+    val showReelsFeed = rememberSaveable { mutableStateOf(false) }
 
     return remember(
         listState,
@@ -293,7 +299,8 @@ fun rememberChatScreenState(
         showQualitySheet,
         showForwardDialog,
         showCaptureTypeSheet,
-        showDeleteMessagesDialog
+        showDeleteMessagesDialog,
+        showReelsFeed
     ) {
         ChatScreenState(
             listState = listState,
@@ -313,7 +320,8 @@ fun rememberChatScreenState(
             showQualitySheet = showQualitySheet.value,
             showForwardDialog = showForwardDialog.value,
             showCaptureTypeSheet = showCaptureTypeSheet.value,
-            showDeleteMessagesDialog = showDeleteMessagesDialog.value
+            showDeleteMessagesDialog = showDeleteMessagesDialog.value,
+            showReelsFeed = showReelsFeed.value
         ).apply {
             // Mark if scroll position needs restoration
             scrollRestored = effectiveScrollPosition.first == 0 && effectiveScrollPosition.second == 0

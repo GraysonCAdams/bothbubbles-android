@@ -30,6 +30,7 @@ fun NavGraphBuilder.settingsNavigation(
             onImageQualityClick = { navController.navigate(Screen.ImageQualitySettings(returnToSettings = true)) },
             onEtaSharingClick = { navController.navigate(Screen.EtaSharingSettings(returnToSettings = true)) },
             onLife360Click = { navController.navigate(Screen.Life360Settings(returnToSettings = true)) },
+            onStorageClick = { navController.navigate(Screen.StorageManagement(returnToSettings = true)) },
             onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
         )
     }
@@ -247,6 +248,16 @@ fun NavGraphBuilder.settingsNavigation(
     composable<Screen.DeveloperEventLog> {
         com.bothbubbles.ui.settings.developer.DeveloperEventLogScreen(
             onNavigateBack = { navController.popBackStack() }
+        )
+    }
+
+    // Storage Management
+    composable<Screen.StorageManagement> { backStackEntry ->
+        val route: Screen.StorageManagement = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.storage.StorageManagementScreen(
+            onBackClick = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            }
         )
     }
 }

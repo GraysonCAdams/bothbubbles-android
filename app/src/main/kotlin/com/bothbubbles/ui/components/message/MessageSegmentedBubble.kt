@@ -80,6 +80,7 @@ import com.bothbubbles.ui.components.attachment.AttachmentContent
 import com.bothbubbles.ui.components.attachment.BorderlessMediaContent
 import com.bothbubbles.ui.components.attachment.YouTubeAttachment
 import com.bothbubbles.ui.components.common.BorderlessLinkPreview
+import com.bothbubbles.ui.components.common.SmartLinkPreview
 import com.bothbubbles.ui.components.common.buildAnnotatedStringWithClickables
 import com.bothbubbles.ui.components.common.buildSearchHighlightedText
 import com.bothbubbles.ui.components.common.copyToClipboard
@@ -545,8 +546,9 @@ internal fun SegmentedMessageBubble(
                                 }
 
                                 is MessageSegment.LinkPreviewSegment -> {
-                                    BorderlessLinkPreview(
+                                    SmartLinkPreview(
                                         url = segment.url,
+                                        messageGuid = message.guid,
                                         isFromMe = message.isFromMe,
                                         maxWidth = 240.dp,
                                         onLongPress = {

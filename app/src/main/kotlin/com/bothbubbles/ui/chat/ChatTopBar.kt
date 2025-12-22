@@ -7,6 +7,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.Subscriptions
 import androidx.compose.material.icons.outlined.Snooze
 import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.*
@@ -26,7 +27,7 @@ import com.bothbubbles.util.PhoneNumberFormatter
 
 /**
  * Top app bar for the chat screen with internal state collection.
- * Displays chat title, avatar, and action buttons (video call, overflow menu).
+ * Displays chat title, avatar, and action buttons (video call, reels, overflow menu).
  *
  * PERF FIX: This signature collects state internally from delegates to avoid
  * ChatScreen recomposition when top bar state changes.
@@ -34,6 +35,8 @@ import com.bothbubbles.util.PhoneNumberFormatter
  * @param operationsDelegate Delegate for operations state (internal collection)
  * @param chatInfoDelegate Delegate for chat info state (internal collection)
  * @param sendModeManager Manager for send mode state (for menu visibility)
+ * @param reelsFeedEnabled Whether the Reels feed feature is enabled
+ * @param hasReelVideos Whether there are cached reel videos for this chat
  * @param isBubbleMode When true, shows simplified UI for Android conversation bubbles
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -46,9 +49,12 @@ fun ChatTopBar(
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onReelsClick: () -> Unit,
     onLife360MapClick: (participantAddress: String) -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
+    reelsFeedEnabled: Boolean = false,
+    hasReelVideos: Boolean = false,
     isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
@@ -76,9 +82,12 @@ fun ChatTopBar(
         showSendModeSwitch = showSendModeSwitch,
         currentSendMode = currentSendMode,
         locationSubtext = infoState.locationSubtext,
+        reelsFeedEnabled = reelsFeedEnabled,
+        hasReelVideos = hasReelVideos,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
+        onReelsClick = onReelsClick,
         onLocationClick = {
             // Navigate to contact details page
             onDetailsClick()
@@ -109,9 +118,12 @@ private fun ChatTopBarContent(
     showSendModeSwitch: Boolean,
     currentSendMode: ChatSendMode,
     locationSubtext: String?,
+    reelsFeedEnabled: Boolean,
+    hasReelVideos: Boolean,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
+    onReelsClick: () -> Unit,
     onLocationClick: () -> Unit,
     onMenuAction: (ChatMenuAction) -> Unit,
     modifier: Modifier = Modifier,
@@ -207,6 +219,13 @@ private fun ChatTopBarContent(
                 // Video call button
                 IconButton(onClick = onVideoCallClick) {
                     Icon(Icons.Outlined.Videocam, contentDescription = "Video call")
+                }
+
+                // Reels button - only show when enabled and there are videos
+                if (reelsFeedEnabled && hasReelVideos) {
+                    IconButton(onClick = onReelsClick) {
+                        Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+                    }
                 }
 
                 // Overflow menu button

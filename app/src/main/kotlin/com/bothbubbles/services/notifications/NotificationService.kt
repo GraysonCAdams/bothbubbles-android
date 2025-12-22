@@ -38,6 +38,10 @@ class NotificationService @Inject constructor(
     // Note: This is a backup for in-process cancellation; primary method uses notification tags
     private val activeNotificationIds = mutableMapOf<String, MutableSet<Int>>()
 
+    // Track notification counts per conversation group for summary updates
+    // Maps conversationGroupKey -> count of active notifications
+    private val conversationNotificationCounts = mutableMapOf<String, Int>()
+
     /**
      * Show a notification for a new message.
      *
@@ -46,6 +50,9 @@ class NotificationService @Inject constructor(
      *
      * Uses unique notification IDs per message to enable stacking (multiple
      * notifications per chat that don't replace each other).
+     *
+     * Also posts a per-conversation summary notification for iOS-style grouping,
+     * allowing users to dismiss all notifications from one conversation at once.
      */
     override fun showMessageNotification(params: MessageNotificationParams) {
         if (!hasNotificationPermission()) return
@@ -55,6 +62,10 @@ class NotificationService @Inject constructor(
             chatGuid = params.chatGuid,
             chatTitle = params.chatTitle
         )
+
+        // Get merged guids for unified chat grouping
+        val mergedGuids = notificationBuilder.getMergedGuidsSync(params.chatGuid)
+        val conversationGroupKey = notificationBuilder.getConversationGroupKey(params.chatGuid, mergedGuids)
 
         val notification = notificationBuilder.buildMessageNotification(
             channelId = channelId,
@@ -85,14 +96,34 @@ class NotificationService @Inject constructor(
             activeNotificationIds.getOrPut(params.chatGuid) { mutableSetOf() }.add(notificationId)
         }
 
+        // Update conversation notification count
+        val newCount = synchronized(conversationNotificationCounts) {
+            val count = (conversationNotificationCounts[conversationGroupKey] ?: 0) + 1
+            conversationNotificationCounts[conversationGroupKey] = count
+            count
+        }
+
         // Post with chatGuid as tag for reliable cross-process cancellation
         // When app is killed and restarted, we can still find notifications by tag
         notificationManager.notify(params.chatGuid, notificationId, notification)
+
+        // Post conversation summary for iOS-style per-conversation grouping
+        val (summaryNotification, _) = notificationBuilder.buildConversationSummaryNotification(
+            channelId = channelId,
+            chatGuid = params.chatGuid,
+            chatTitle = params.chatTitle,
+            unreadCount = newCount,
+            mergedGuids = mergedGuids
+        )
+        // Use conversation group key hash as stable summary ID
+        val summaryId = conversationGroupKey.hashCode()
+        notificationManager.notify("summary-$conversationGroupKey", summaryId, summaryNotification)
     }
 
     /**
      * Cancel all notifications for a chat.
-     * Cancels all stacked notifications that belong to this chat.
+     * Cancels all stacked notifications that belong to this chat,
+     * plus the conversation summary notification.
      *
      * Uses Android's getActiveNotifications() to find notifications by tag,
      * which works reliably even after app process death (FCM/background notifications).
@@ -103,12 +134,31 @@ class NotificationService @Inject constructor(
             activeNotificationIds.remove(chatGuid)
         }
 
+        // Get conversation group key for this chat (handles unified chats)
+        val mergedGuids = notificationBuilder.getMergedGuidsSync(chatGuid)
+        val conversationGroupKey = notificationBuilder.getConversationGroupKey(chatGuid, mergedGuids)
+
+        // Reset notification count for this conversation
+        synchronized(conversationNotificationCounts) {
+            conversationNotificationCounts.remove(conversationGroupKey)
+        }
+
         // Query actual active notifications and cancel those matching our tag
         // This works even if app was killed and restarted (map was cleared)
         try {
             val activeNotifications = systemNotificationManager.activeNotifications
+
+            // Cancel individual message notifications for this chat
             activeNotifications
                 .filter { it.tag == chatGuid }
+                .forEach { statusBarNotification ->
+                    systemNotificationManager.cancel(statusBarNotification.tag, statusBarNotification.id)
+                }
+
+            // Cancel the conversation summary notification
+            val summaryTag = "summary-$conversationGroupKey"
+            activeNotifications
+                .filter { it.tag == summaryTag }
                 .forEach { statusBarNotification ->
                     systemNotificationManager.cancel(statusBarNotification.tag, statusBarNotification.id)
                 }
@@ -124,6 +174,9 @@ class NotificationService @Inject constructor(
     override fun cancelAllNotifications() {
         synchronized(activeNotificationIds) {
             activeNotificationIds.clear()
+        }
+        synchronized(conversationNotificationCounts) {
+            conversationNotificationCounts.clear()
         }
         notificationManager.cancelAll()
     }

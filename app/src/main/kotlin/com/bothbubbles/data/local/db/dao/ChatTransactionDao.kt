@@ -1,7 +1,6 @@
 package com.bothbubbles.data.local.db.dao
 
 import androidx.room.Dao
-import androidx.room.Query
 import androidx.room.Transaction
 import com.bothbubbles.data.local.db.entity.ChatEntity
 import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
@@ -12,13 +11,6 @@ import com.bothbubbles.data.local.db.entity.ChatHandleCrossRef
  */
 @Dao
 interface ChatTransactionDao : ChatUpdateDao, ChatParticipantDao, ChatDeleteDao {
-
-    @Query("""
-        SELECT guid, fallback_reason AS reason, fallback_updated_at AS updatedAt
-        FROM chats
-        WHERE is_sms_fallback = 1
-    """)
-    suspend fun getChatsInFallback(): List<ChatFallbackProjection>
 
     @Transaction
     suspend fun insertChatWithParticipants(chat: ChatEntity, participantIds: List<Long>) {
@@ -66,11 +58,4 @@ interface ChatTransactionDao : ChatUpdateDao, ChatParticipantDao, ChatDeleteDao 
         messageDao.deleteMessagesForChat(guid)
         deleteChatByGuid(guid)
     }
-
 }
-
-data class ChatFallbackProjection(
-    val guid: String,
-    val reason: String?,
-    val updatedAt: Long?
-)

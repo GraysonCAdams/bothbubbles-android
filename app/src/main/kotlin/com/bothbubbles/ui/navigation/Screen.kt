@@ -160,6 +160,9 @@ sealed interface Screen {
     data class ExportMessages(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class StorageManagement(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data object DeveloperEventLog : Screen
 
     /**

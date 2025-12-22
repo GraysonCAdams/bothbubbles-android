@@ -6,8 +6,10 @@ import com.bothbubbles.data.local.db.entity.ChatEntity
 import kotlinx.coroutines.flow.Flow
 
 /**
- * Group and unified chat query operations.
- * Separated from main ChatDao for better organization.
+ * Group and protocol-based chat query operations.
+ *
+ * Note: UI state queries (pinned, archived, starred, unread, spam, category) should use
+ * [UnifiedChatDao]. This DAO only handles protocol-level group queries.
  */
 @Dao
 interface ChatGroupDao {
@@ -46,81 +48,28 @@ interface ChatGroupDao {
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        WHERE date_deleted IS NULL AND is_group = 1
+        ORDER BY latest_message_date DESC
     """)
-    fun observeActiveGroupChats(): Flow<List<ChatEntity>>
+    fun observeGroupChats(): Flow<List<ChatEntity>>
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
+        WHERE date_deleted IS NULL AND is_group = 1
+        ORDER BY latest_message_date DESC
         LIMIT :limit OFFSET :offset
     """)
     suspend fun getGroupChatsPaginated(limit: Int, offset: Int): List<ChatEntity>
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
+        WHERE date_deleted IS NULL AND is_group = 1
     """)
     suspend fun getGroupChatCount(): Int
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1 AND is_archived = 0
+        WHERE date_deleted IS NULL AND is_group = 1
     """)
     fun observeGroupChatCount(): Flow<Int>
-
-    // ===== Filtered Queries for Select All Feature =====
-
-    /**
-     * Get count of group chats matching filter criteria.
-     * Used for Gmail-style "Select All" to count all matching conversations.
-     * Group chats are always considered "known senders".
-     * Includes both pinned and non-pinned group chats.
-     */
-    @Query("""
-        SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL
-        AND is_group = 1
-        AND is_archived = 0
-        AND (
-            (:includeSpam = 1 AND is_spam = 1)
-            OR (:includeSpam = 0 AND is_spam = 0)
-        )
-        AND (:unreadOnly = 0 OR unread_count > 0)
-        AND (:category IS NULL OR category = :category)
-    """)
-    suspend fun getFilteredGroupChatCount(
-        includeSpam: Boolean,
-        unreadOnly: Boolean,
-        category: String?
-    ): Int
-
-    /**
-     * Get GUIDs of group chats matching filter criteria (paginated).
-     * Used for batch operations in Gmail-style "Select All".
-     * Includes both pinned and non-pinned group chats.
-     */
-    @Query("""
-        SELECT guid FROM chats
-        WHERE date_deleted IS NULL
-        AND is_group = 1
-        AND is_archived = 0
-        AND (
-            (:includeSpam = 1 AND is_spam = 1)
-            OR (:includeSpam = 0 AND is_spam = 0)
-        )
-        AND (:unreadOnly = 0 OR unread_count > 0)
-        AND (:category IS NULL OR category = :category)
-        ORDER BY is_pinned DESC, pin_index ASC, latest_message_date DESC
-        LIMIT :limit OFFSET :offset
-    """)
-    suspend fun getFilteredGroupChatGuids(
-        includeSpam: Boolean,
-        unreadOnly: Boolean,
-        category: String?,
-        limit: Int,
-        offset: Int
-    ): List<String>
 }

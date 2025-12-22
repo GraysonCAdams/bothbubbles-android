@@ -19,6 +19,7 @@ import com.bothbubbles.ui.chat.delegates.ChatConnectionDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEffectsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatEtaSharingDelegate
 import com.bothbubbles.ui.chat.delegates.ChatInfoDelegate
+import com.bothbubbles.ui.chat.delegates.ChatReelsDelegate
 import com.bothbubbles.ui.chat.delegates.CursorChatMessageListDelegate
 import com.bothbubbles.ui.chat.delegates.ChatOperationsDelegate
 import com.bothbubbles.ui.chat.delegates.ChatScheduledMessageDelegate
@@ -100,7 +101,9 @@ class ChatViewModel @Inject constructor(
     private val chatInfoFactory: ChatInfoDelegate.Factory,
     private val connectionFactory: ChatConnectionDelegate.Factory,
     // Media playback
-    val exoPlayerPool: ExoPlayerPool
+    val exoPlayerPool: ExoPlayerPool,
+    // Reels delegate - initialized with chatGuid in init block
+    private val reelsDelegate: ChatReelsDelegate
 ) : ViewModel() {
 
     companion object {
@@ -170,6 +173,11 @@ class ChatViewModel @Inject constructor(
     val connection: ChatConnectionDelegate = connectionFactory.create(
         chatGuid, viewModelScope, sendMode, mergedChatGuids
     )
+
+    // Reels delegate - public accessor
+    val reels: ChatReelsDelegate = reelsDelegate.also {
+        it.initialize(chatGuid, viewModelScope)
+    }
 
     val composer: ChatComposerDelegate = composerFactory.create(
         chatGuid = chatGuid,

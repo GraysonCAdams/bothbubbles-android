@@ -134,6 +134,56 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.LIFE360_PAUSE_SYNCING] ?: false
     }
 
+    // ===== Social Media Downloading =====
+
+    /**
+     * Whether TikTok video downloading is enabled.
+     * When enabled, TikTok links will fetch the video stream instead of opening in browser.
+     */
+    val tiktokDownloaderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.TIKTOK_DOWNLOADER_ENABLED] ?: false
+    }
+
+    /**
+     * Whether Instagram video downloading is enabled.
+     * When enabled, Instagram Reels/video links will fetch the video stream instead of opening in browser.
+     */
+    val instagramDownloaderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.INSTAGRAM_DOWNLOADER_ENABLED] ?: false
+    }
+
+    /**
+     * Whether to automatically download social media videos in the background when messages are received.
+     * When disabled, videos are only fetched when the user opens the chat and views the message.
+     */
+    val socialMediaBackgroundDownloadEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SOCIAL_MEDIA_BACKGROUND_DOWNLOAD_ENABLED] ?: false
+    }
+
+    /**
+     * Whether to allow social media video downloads over cellular data.
+     * When disabled, downloads will only occur on Wi-Fi.
+     */
+    val socialMediaDownloadOnCellularEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.SOCIAL_MEDIA_DOWNLOAD_ON_CELLULAR_ENABLED] ?: false
+    }
+
+    /**
+     * Video quality preference for TikTok downloads.
+     * Options: "sd" (standard), "hd" (high definition)
+     */
+    val tiktokVideoQuality: Flow<String> = dataStore.data.map { prefs ->
+        prefs[Keys.TIKTOK_VIDEO_QUALITY] ?: "hd"
+    }
+
+    /**
+     * Whether the vertical swipe Reels feed is enabled.
+     * Only functional when background downloading is also enabled.
+     */
+    val reelsFeedEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REELS_FEED_ENABLED] ?: false
+    }
+
     // ===== Auto-Responder =====
 
     val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -282,6 +332,42 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setTiktokDownloaderEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.TIKTOK_DOWNLOADER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setInstagramDownloaderEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.INSTAGRAM_DOWNLOADER_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSocialMediaBackgroundDownloadEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SOCIAL_MEDIA_BACKGROUND_DOWNLOAD_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setSocialMediaDownloadOnCellularEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.SOCIAL_MEDIA_DOWNLOAD_ON_CELLULAR_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setTiktokVideoQuality(quality: String) {
+        dataStore.edit { prefs ->
+            prefs[Keys.TIKTOK_VIDEO_QUALITY] = quality
+        }
+    }
+
+    suspend fun setReelsFeedEnabled(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REELS_FEED_ENABLED] = enabled
+        }
+    }
+
     suspend fun setAutoResponderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
@@ -345,5 +431,13 @@ class FeaturePreferences @Inject constructor(
         val LIFE360_ENABLED = booleanPreferencesKey("life360_enabled")
         val LIFE360_POLL_INTERVAL = intPreferencesKey("life360_poll_interval")
         val LIFE360_PAUSE_SYNCING = booleanPreferencesKey("life360_pause_syncing")
+
+        // Social Media Downloading
+        val TIKTOK_DOWNLOADER_ENABLED = booleanPreferencesKey("tiktok_downloader_enabled")
+        val INSTAGRAM_DOWNLOADER_ENABLED = booleanPreferencesKey("instagram_downloader_enabled")
+        val SOCIAL_MEDIA_BACKGROUND_DOWNLOAD_ENABLED = booleanPreferencesKey("social_media_background_download_enabled")
+        val SOCIAL_MEDIA_DOWNLOAD_ON_CELLULAR_ENABLED = booleanPreferencesKey("social_media_download_on_cellular_enabled")
+        val TIKTOK_VIDEO_QUALITY = stringPreferencesKey("tiktok_video_quality")
+        val REELS_FEED_ENABLED = booleanPreferencesKey("reels_feed_enabled")
     }
 }

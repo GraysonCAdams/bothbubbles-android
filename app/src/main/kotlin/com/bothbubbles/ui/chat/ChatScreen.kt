@@ -59,8 +59,13 @@ import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
+import com.bothbubbles.ui.components.reels.ReelItem
+import com.bothbubbles.ui.components.reels.ReelsFeedScreen
+import com.bothbubbles.ui.components.reels.ReelsTapback
+import com.bothbubbles.ui.components.message.Tapback
 import com.bothbubbles.ui.effects.MessageEffect
 import com.bothbubbles.ui.effects.screen.ScreenEffectOverlay
+import com.bothbubbles.services.socialmedia.CachedVideo
 import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -475,6 +480,9 @@ fun ChatScreen(
                         }
                     )
                 } else {
+                    // Collect reels state for top bar
+                    val reelsState by viewModel.reels.state.collectAsStateWithLifecycle()
+
                     // Wave 2: ChatTopBar uses delegates for internal state collection
                     ChatTopBar(
                         operationsDelegate = viewModel.operations,
@@ -487,7 +495,13 @@ fun ChatScreen(
                         },
                         onDetailsClick = onDetailsClick,
                         onVideoCallClick = { state.showVideoCallDialog = true },
+                        onReelsClick = {
+                            state.reelsFeedStartIndex = 0
+                            state.showReelsFeed = true
+                        },
                         onLife360MapClick = onLife360MapClick,
+                        reelsFeedEnabled = reelsState.isEnabled,
+                        hasReelVideos = reelsState.reelItems.isNotEmpty(),
                         isBubbleMode = isBubbleMode,
                         onMenuAction = { action ->
                             when (action) {
@@ -975,6 +989,41 @@ fun ChatScreen(
             )
         }
         else -> { /* Idle or FetchingDestination - no dialog */ }
+    }
+
+    // Reels feed fullscreen overlay
+    if (state.showReelsFeed) {
+        val reelsState by viewModel.reels.state.collectAsStateWithLifecycle()
+
+        ReelsFeedScreen(
+            reels = reelsState.reelItems,
+            initialIndex = state.reelsFeedStartIndex,
+            onClose = { state.showReelsFeed = false },
+            onTapback = { messageGuid, url, tapback ->
+                // Update local state
+                viewModel.reels.updateTapback(messageGuid, url, tapback)
+                // Send tapback to the original message (iMessage only)
+                // Only send if chat is iMessage (not local SMS)
+                if (!chatInfoState.isLocalSmsChat) {
+                    viewModel.toggleReaction(
+                        messageGuid = messageGuid,
+                        tapback = when (tapback) {
+                            ReelsTapback.LIKE -> Tapback.THUMBS_UP
+                            ReelsTapback.LAUGH -> Tapback.HAHA
+                            ReelsTapback.LOVE -> Tapback.HEART
+                            ReelsTapback.DISLIKE -> Tapback.THUMBS_DOWN
+                        }
+                    )
+                }
+            },
+            onVideoViewed = { originalUrl ->
+                viewModel.reels.markVideoAsViewed(originalUrl)
+            },
+            onStartDownload = { originalUrl ->
+                viewModel.reels.startDownload(originalUrl)
+            },
+            modifier = Modifier.fillMaxSize()
+        )
     }
 }
 

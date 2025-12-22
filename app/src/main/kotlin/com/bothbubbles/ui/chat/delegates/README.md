@@ -16,6 +16,7 @@ Delegate classes that decompose ChatViewModel into focused, testable units. Each
 | `ChatInfoDelegate.kt` | Chat metadata and participants |
 | `ChatMessageListDelegate.kt` | Message list loading and display |
 | `ChatOperationsDelegate.kt` | Archive, star, delete, spam, block |
+| `ChatReelsDelegate.kt` | Reels feed state and tapback management |
 | `ChatScheduledMessageDelegate.kt` | Scheduled messages |
 | `ChatSearchDelegate.kt` | In-chat message search |
 | `ChatSendDelegate.kt` | Send, retry, forward operations |

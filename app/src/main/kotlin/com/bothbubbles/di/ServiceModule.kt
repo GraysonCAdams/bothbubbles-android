@@ -21,6 +21,10 @@ import com.bothbubbles.services.messaging.MessageSender
 import com.bothbubbles.services.messaging.MessageSendingService
 import com.bothbubbles.services.notifications.NotificationService
 import com.bothbubbles.services.notifications.Notifier
+import com.bothbubbles.services.socialmedia.SocialMediaCacher
+import com.bothbubbles.services.socialmedia.SocialMediaCacheManager
+import com.bothbubbles.services.socialmedia.SocialMediaDownloader
+import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
 import com.bothbubbles.services.socket.SocketConnection
 import com.bothbubbles.services.socket.SocketService
 import com.bothbubbles.services.sound.SoundManager
@@ -180,4 +184,24 @@ abstract class ServiceModule {
     abstract fun bindLife360Service(
         life360ServiceImpl: Life360ServiceImpl
     ): Life360Service
+
+    /**
+     * Binds [SocialMediaDownloadService] to the [SocialMediaDownloader] interface.
+     * Use SocialMediaDownloader in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSocialMediaDownloader(
+        socialMediaDownloadService: SocialMediaDownloadService
+    ): SocialMediaDownloader
+
+    /**
+     * Binds [SocialMediaCacheManager] to the [SocialMediaCacher] interface.
+     * Use SocialMediaCacher in consumers for testability.
+     */
+    @Binds
+    @Singleton
+    abstract fun bindSocialMediaCacher(
+        socialMediaCacheManager: SocialMediaCacheManager
+    ): SocialMediaCacher
 }
