@@ -71,6 +71,32 @@ interface MessageDao {
     fun getRepliesForMessage(messageGuid: String): Flow<List<MessageEntity>>
 
     /**
+     * Get count of thread replies for a message.
+     */
+    @Query("""
+        SELECT COUNT(*) FROM messages
+        WHERE thread_originator_guid = :messageGuid AND date_deleted IS NULL
+    """)
+    suspend fun getReplyCountForMessage(messageGuid: String): Int
+
+    /**
+     * Get reactions for a message (one-time suspend version).
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE is_reaction = 1 AND date_deleted IS NULL
+        AND (
+            associated_message_guid = :messageGuid
+            OR (
+                associated_message_guid LIKE 'p:%/%'
+                AND SUBSTR(associated_message_guid, INSTR(associated_message_guid, '/') + 1) = :messageGuid
+            )
+        )
+        ORDER BY date_created ASC
+    """)
+    suspend fun getReactionsForMessageOnce(messageGuid: String): List<MessageEntity>
+
+    /**
      * Batch fetch messages by their GUIDs.
      * Used for efficiently loading reply preview data.
      */
@@ -296,6 +322,21 @@ interface MessageDao {
 
     @Query("SELECT COUNT(*) FROM messages WHERE date_deleted IS NULL")
     suspend fun getTotalMessageCount(): Int
+
+    /**
+     * Get recent messages that have text content.
+     * Used for scanning messages for social media links to auto-cache.
+     * Orders by most recent first.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND text IS NOT NULL
+        AND text != ''
+        ORDER BY date_created DESC
+        LIMIT :limit
+    """)
+    suspend fun getRecentMessagesWithText(limit: Int): List<MessageEntity>
 
     // ===== BitSet Pagination Queries =====
     // Note: These queries EXCLUDE reactions to ensure count/position consistency.
@@ -647,6 +688,46 @@ interface MessageDao {
         AND (text LIKE '%http://%' OR text LIKE '%https://%' OR text LIKE '%www.%')
     """)
     suspend fun countMessagesWithUrlsForChat(chatGuid: String): Int
+
+    /**
+     * Find messages containing social media URLs (Instagram Reels/posts, TikTok).
+     * Used for recovering metadata for orphaned cached videos.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND (
+            text LIKE '%instagram.com/reel/%'
+            OR text LIKE '%instagram.com/p/%'
+            OR text LIKE '%instagram.com/reels/%'
+            OR text LIKE '%tiktok.com/%/video/%'
+            OR text LIKE '%vm.tiktok.com/%'
+        )
+        ORDER BY date_created DESC
+    """)
+    suspend fun getMessagesWithSocialMediaUrls(): List<MessageEntity>
+
+    /**
+     * Find messages containing social media URLs for a specific chat.
+     * Used for showing pending (not-yet-downloaded) videos in the Reels feed.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE chat_guid = :chatGuid
+        AND date_deleted IS NULL
+        AND (
+            text LIKE '%instagram.com/reel/%'
+            OR text LIKE '%instagram.com/p/%'
+            OR text LIKE '%instagram.com/reels/%'
+            OR text LIKE '%instagram.com/share/reel/%'
+            OR text LIKE '%instagram.com/share/p/%'
+            OR text LIKE '%tiktok.com/%/video/%'
+            OR text LIKE '%vm.tiktok.com/%'
+            OR text LIKE '%vt.tiktok.com/%'
+        )
+        ORDER BY date_created DESC
+    """)
+    suspend fun getMessagesWithSocialMediaUrlsForChat(chatGuid: String): List<MessageEntity>
 
     /**
      * Find a matching message by content and timestamp within a tolerance window.

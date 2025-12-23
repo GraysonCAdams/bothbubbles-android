@@ -204,6 +204,11 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             message?.dateDeleted != null -> MessageType.DELETED
             message?.isReaction == true -> MessageType.REACTION
             message?.isGroupEvent == true -> MessageType.GROUP_EVENT
+            // Check for links early - balloonBundleId is also set for rich link previews
+            rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
+            // Check for app messages (balloonBundleId) BEFORE attachments
+            // iMessage apps send plugin payload attachments that we don't want to display as files
+            !message?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
             firstAttachment != null -> when {
                 firstAttachment.isSticker -> MessageType.STICKER
                 isVLocation(firstAttachment) -> MessageType.LOCATION
@@ -217,9 +222,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
                 isDocumentType(firstAttachment.mimeType) -> MessageType.DOCUMENT
                 else -> MessageType.ATTACHMENT
             }
-            !message?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
             rawMessageText.containsLocation() -> MessageType.LOCATION
-            rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
             else -> MessageType.TEXT
         }
     }

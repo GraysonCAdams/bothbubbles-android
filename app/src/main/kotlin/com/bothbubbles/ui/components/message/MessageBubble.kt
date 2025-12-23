@@ -131,7 +131,9 @@ fun MessageBubble(
     // Multi-message selection support
     isSelectionMode: Boolean = false,
     isSelected: Boolean = false,
-    onSelectionToggle: (() -> Unit)? = null
+    onSelectionToggle: (() -> Unit)? = null,
+    // Social media video fullscreen - opens Reels feed
+    onOpenReelsFeed: (() -> Unit)? = null
 ) {
     // Detect first URL in message text for link preview
     val firstUrl = remember(message.text) {
@@ -256,6 +258,7 @@ fun MessageBubble(
                     replyPreview = message.replyPreview,
                     onReplyQuoteTap = onReplyQuoteTap,
                     onReplyQuoteLongPress = onReplyQuoteLongPress,
+                    onOpenReelsFeed = onOpenReelsFeed,
                     modifier = Modifier.weight(1f)
                 )
             } else {

@@ -130,6 +130,9 @@ sealed interface Screen {
     data class Life360Settings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable
+    data class CalendarSettings(val returnToSettings: Boolean = false) : Screen
+
+    @Serializable
     data class ImageQualitySettings(val returnToSettings: Boolean = false) : Screen
 
     @Serializable

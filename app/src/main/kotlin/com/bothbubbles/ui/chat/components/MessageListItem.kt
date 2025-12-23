@@ -63,7 +63,8 @@ data class MessageItemCallbacks(
     val onClearHighlight: () -> Unit,
     val onDownloadAttachment: ((guid: String) -> Unit)?,
     val onStopSharingEta: () -> Unit,
-    val onAvatarClick: ((MessageUiModel) -> Unit)?
+    val onAvatarClick: ((MessageUiModel) -> Unit)?,
+    val onOpenReelsFeed: (() -> Unit)?
 )
 
 /**
@@ -227,6 +228,7 @@ fun MessageListItem(
 
     Column(
         modifier = Modifier
+            .fillMaxWidth()
             .graphicsLayer {
                 clip = false
                 scaleX = focusScale
@@ -244,7 +246,8 @@ fun MessageListItem(
             .materialAttentionHighlight(
                 shouldHighlight = isHighlighted,
                 onHighlightFinished = { callbacks.onClearHighlight() }
-            )
+            ),
+        horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
     ) {
         if (showTimeSeparator) {
             DateSeparator(
@@ -363,7 +366,8 @@ fun MessageListItem(
                     } else null,
                     onAvatarClick = if (showAvatar && callbacks.onAvatarClick != null) {
                         { callbacks.onAvatarClick.invoke(message) }
-                    } else null
+                    } else null,
+                    onOpenReelsFeed = callbacks.onOpenReelsFeed
                 )
             }
         }

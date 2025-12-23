@@ -59,9 +59,15 @@ sealed class SettingsPanelPage {
     /** Life360 integration settings */
     data object Life360 : SettingsPanelPage()
 
+    /** Social media video settings (TikTok, Instagram, Reels) */
+    data object SocialMedia : SettingsPanelPage()
+
     /** About screen */
     data object About : SettingsPanelPage()
 
     /** Open source licenses (nested from About) */
     data object OpenSourceLicenses : SettingsPanelPage()
+
+    /** Storage management */
+    data object Storage : SettingsPanelPage()
 }

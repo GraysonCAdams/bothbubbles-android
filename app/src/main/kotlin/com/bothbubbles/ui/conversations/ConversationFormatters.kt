@@ -280,6 +280,10 @@ fun getAttachmentPreviewText(mimeType: String?, extension: String?): String {
     val ext = extension?.lowercase() ?: ""
 
     return when {
+        // Handle iMessage plugin/app attachments that slip through
+        // These have UTI-like extensions like "pluginpayloadattachment"
+        ext.contains("plugin") || ext.contains("payload") -> "App message"
+
         // Archive types
         type.contains("zip") || ext == "zip" -> "Zip file"
         type.contains("rar") || ext == "rar" -> "RAR archive"

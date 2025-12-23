@@ -1,17 +1,23 @@
 package com.bothbubbles.ui.chat.delegates
 
+import com.bothbubbles.core.data.prefs.SyncPreferences
+import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
 import com.bothbubbles.services.socialmedia.SocialMediaCacheManager
 import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
 import com.bothbubbles.services.socialmedia.SocialMediaResult
+import com.bothbubbles.ui.components.message.ReactionUiModel
+import com.bothbubbles.ui.components.message.parseReactionType
 import com.bothbubbles.ui.components.reels.ReelItem
 import com.bothbubbles.ui.components.reels.ReelsTapback
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import timber.log.Timber
 import javax.inject.Inject
@@ -27,10 +33,16 @@ import javax.inject.Inject
  */
 class ChatReelsDelegate @Inject constructor(
     private val downloadService: SocialMediaDownloadService,
-    private val cacheManager: SocialMediaCacheManager
+    private val cacheManager: SocialMediaCacheManager,
+    private val syncPreferences: SyncPreferences,
+    private val handleRepository: HandleRepository,
+    private val messageDao: MessageDao
 ) {
     private lateinit var scope: CoroutineScope
     private var chatGuid: String = ""
+
+    /** Timestamp when initial sync completed. Videos before this are historical. */
+    private var initialSyncCompleteTimestamp: Long = 0L
 
     private val _state = MutableStateFlow(ReelsState())
     val state: StateFlow<ReelsState> = _state.asStateFlow()
@@ -48,35 +60,122 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
-     * Loads the reels state including settings and cached videos for this chat.
+     * Loads the reels state including settings, cached videos, and pending videos for this chat.
      * Videos are sorted: unread (oldest→newest) then read (newest→oldest).
+     * Also calculates unwatched count for videos received after initial sync.
      */
     private fun loadReelsState() {
         scope.launch {
+            // Get timestamp when initial sync completed
+            initialSyncCompleteTimestamp = syncPreferences.initialSyncCompleteTimestamp.first()
+
+            // Recover any orphaned cached videos (from before metadata persistence was added)
+            val recoveredCount = cacheManager.recoverOrphanedMetadata()
+            if (recoveredCount > 0) {
+                Timber.d("[Reels] Recovered $recoveredCount orphaned video metadata entries")
+            }
+
             val isEnabled = downloadService.isReelsFeedEnabled()
             val cachedVideos = cacheManager.getCachedVideosForChat(chatGuid)
+
+            // Find pending videos (social media links not yet cached)
+            val pendingItems = findPendingVideos(cachedVideos)
+
+            // Debug logging
+            Timber.d("[Reels] chatGuid=$chatGuid, isEnabled=$isEnabled, cachedVideos=${cachedVideos.size}, pendingItems=${pendingItems.size}")
+
+            // Count unwatched videos received AFTER initial sync
+            val unwatchedCount = cachedVideos.count { video ->
+                !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
+            }
+
+            // Combine cached and pending items
+            val cachedReelItems = sortAndMapVideos(cachedVideos)
+            val allItems = cachedReelItems + pendingItems
 
             _state.value = ReelsState(
                 isEnabled = isEnabled,
                 cachedVideos = cachedVideos,
-                reelItems = sortAndMapVideos(cachedVideos)
+                reelItems = allItems,
+                unwatchedCount = unwatchedCount
             )
         }
     }
 
     /**
-     * Sorts videos and maps to ReelItems.
-     * Order: unread (oldest→newest) then read (newest→oldest).
+     * Finds social media links in messages that haven't been cached yet.
+     * These will show as pending items in the Reels feed.
      */
-    private fun sortAndMapVideos(videos: List<CachedVideo>): List<ReelItem> {
-        val (unread, read) = videos.partition { !it.viewedInReels }
+    private suspend fun findPendingVideos(cachedVideos: List<CachedVideo>): List<ReelItem> {
+        val cachedUrls = cachedVideos.map { it.originalUrl }.toSet()
+        val pendingItems = mutableListOf<ReelItem>()
 
-        // Unread: oldest first (ascending by timestamp)
-        val sortedUnread = unread.sortedBy { it.sentTimestamp }
-        // Read: newest first (descending by timestamp)
-        val sortedRead = read.sortedByDescending { it.sentTimestamp }
+        try {
+            val messagesWithLinks = messageDao.getMessagesWithSocialMediaUrlsForChat(chatGuid)
+            Timber.d("[Reels] Found ${messagesWithLinks.size} messages with social media links")
 
-        val combined = sortedUnread + sortedRead
+            for (message in messagesWithLinks) {
+                val text = message.text ?: continue
+                val urls = extractSocialMediaUrls(text)
+
+                for (url in urls) {
+                    // Skip if already cached
+                    if (cachedUrls.contains(url)) continue
+                    // Skip if already in pending list
+                    if (pendingItems.any { it.originalUrl == url }) continue
+
+                    val platform = downloadService.detectPlatform(url) ?: continue
+
+                    // Look up sender info
+                    val handle = message.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+
+                    pendingItems.add(
+                        ReelItem.pending(
+                            url = url,
+                            platform = platform,
+                            messageGuid = message.guid,
+                            chatGuid = chatGuid,
+                            senderName = handle?.cachedDisplayName ?: handle?.inferredName,
+                            senderAddress = message.senderAddress,
+                            sentTimestamp = message.dateCreated
+                        )
+                    )
+                    Timber.d("[Reels] Added pending item: $url from message ${message.guid}")
+                }
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "[Reels] Failed to find pending videos")
+        }
+
+        // Sort pending items newest first
+        return pendingItems.sortedByDescending { it.sentTimestamp }
+    }
+
+    /**
+     * Extracts social media URLs from text.
+     */
+    private fun extractSocialMediaUrls(text: String): List<String> {
+        val urls = mutableListOf<String>()
+        val urlPattern = Regex("""https?://[^\s<>"{}|\\^`\[\]]+""", RegexOption.IGNORE_CASE)
+
+        for (match in urlPattern.findAll(text)) {
+            val url = match.value.trimEnd('.', ',', ')', ']', '!', '?')
+            if (downloadService.detectPlatform(url) != null) {
+                urls.add(url)
+            }
+        }
+
+        return urls
+    }
+
+    /**
+     * Sorts videos and maps to ReelItems.
+     * Reverse chronological order: newest first.
+     * Looks up contact info (avatar, display name), reactions, and reply count from handles.
+     */
+    private suspend fun sortAndMapVideos(videos: List<CachedVideo>): List<ReelItem> {
+        // Reverse chronological order - newest first
+        val combined = videos.sortedByDescending { it.sentTimestamp }
 
         return combined.map { video ->
             // Preserve existing tapback if we have one
@@ -84,19 +183,75 @@ class ChatReelsDelegate @Inject constructor(
                 .find { it.originalUrl == video.originalUrl }
                 ?.currentTapback
 
-            ReelItem.fromCached(video, existingTapback)
+            // Look up contact info from handle
+            val senderAddress = video.senderAddress
+            val handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+            val avatarPath = handle?.cachedAvatarPath
+            val displayName = handle?.cachedDisplayName ?: handle?.inferredName
+
+            // Fetch reactions and reply count for the message
+            val messageGuid = video.messageGuid
+            val reactionMessages = try {
+                messageDao.getReactionsForMessageOnce(messageGuid)
+            } catch (e: Exception) {
+                Timber.w(e, "[Reels] Failed to fetch reactions for $messageGuid")
+                emptyList()
+            }
+            val replyCount = try {
+                messageDao.getReplyCountForMessage(messageGuid)
+            } catch (e: Exception) {
+                Timber.w(e, "[Reels] Failed to fetch reply count for $messageGuid")
+                0
+            }
+
+            // Convert reaction messages to ReactionUiModel
+            val reactions = reactionMessages.mapNotNull { reaction ->
+                val tapback = parseReactionType(reaction.associatedMessageType)
+                if (tapback != null) {
+                    // Look up sender name for the reaction
+                    val reactionHandle = reaction.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+                    ReactionUiModel(
+                        tapback = tapback,
+                        isFromMe = reaction.isFromMe,
+                        senderName = reactionHandle?.cachedDisplayName ?: reactionHandle?.inferredName
+                    )
+                } else null
+            }
+
+            ReelItem.fromCached(
+                video = video,
+                currentTapback = existingTapback,
+                avatarPath = avatarPath,
+                displayName = displayName,
+                reactions = reactions,
+                replyCount = replyCount
+            )
         }
     }
 
     /**
-     * Refreshes the cached videos list and re-sorts.
+     * Refreshes the cached videos list, re-sorts, and recalculates unwatched count.
      */
     fun refreshCachedVideos() {
         scope.launch {
             val cachedVideos = cacheManager.getCachedVideosForChat(chatGuid)
+
+            // Find pending videos (social media links not yet cached)
+            val pendingItems = findPendingVideos(cachedVideos)
+
+            // Recalculate unwatched count for videos received AFTER initial sync
+            val unwatchedCount = cachedVideos.count { video ->
+                !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
+            }
+
+            // Combine cached and pending items
+            val cachedReelItems = sortAndMapVideos(cachedVideos)
+            val allItems = cachedReelItems + pendingItems
+
             _state.value = _state.value.copy(
                 cachedVideos = cachedVideos,
-                reelItems = sortAndMapVideos(cachedVideos)
+                reelItems = allItems,
+                unwatchedCount = unwatchedCount
             )
         }
     }
@@ -104,11 +259,34 @@ class ChatReelsDelegate @Inject constructor(
     /**
      * Marks a video as viewed in the Reels feed.
      * Called when user spends time on a video.
+     *
+     * NOTE: We don't refresh/re-sort here to avoid changing the list order mid-viewing.
+     * The sort will be applied next time the Reels feed is opened.
      */
     fun markVideoAsViewed(originalUrl: String) {
         cacheManager.markVideoAsViewed(originalUrl)
-        // Refresh to update sort order
-        refreshCachedVideos()
+
+        // Update the viewed state in-place without re-sorting
+        val currentItems = _state.value.reelItems.toMutableList()
+        val index = currentItems.indexOfFirst { it.originalUrl == originalUrl }
+        if (index >= 0 && currentItems[index].isCached) {
+            val item = currentItems[index]
+            val updatedVideo = item.cachedVideo?.copy(viewedInReels = true)
+            if (updatedVideo != null) {
+                currentItems[index] = item.copy(cachedVideo = updatedVideo)
+
+                // Recalculate unwatched count
+                val unwatchedCount = currentItems.count { reel ->
+                    reel.isCached && !reel.isViewed &&
+                    reel.sentTimestamp > initialSyncCompleteTimestamp
+                }
+
+                _state.value = _state.value.copy(
+                    reelItems = currentItems,
+                    unwatchedCount = unwatchedCount
+                )
+            }
+        }
     }
 
     /**
@@ -261,5 +439,7 @@ class ChatReelsDelegate @Inject constructor(
 data class ReelsState(
     val isEnabled: Boolean = false,
     val cachedVideos: List<CachedVideo> = emptyList(),
-    val reelItems: List<ReelItem> = emptyList()
+    val reelItems: List<ReelItem> = emptyList(),
+    /** Count of unwatched videos received after initial sync (for badge display). */
+    val unwatchedCount: Int = 0
 )

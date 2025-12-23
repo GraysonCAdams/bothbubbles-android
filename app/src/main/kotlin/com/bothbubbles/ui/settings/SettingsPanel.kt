@@ -67,6 +67,7 @@ import com.bothbubbles.ui.settings.sms.SmsSettingsContent
 import com.bothbubbles.ui.settings.sms.SmsSettingsViewModel
 import com.bothbubbles.ui.settings.spam.SpamSettingsContent
 import com.bothbubbles.ui.settings.swipe.SwipeSettingsContent
+import com.bothbubbles.ui.settings.storage.StorageContent
 import com.bothbubbles.ui.settings.sync.SyncSettingsContent
 import com.bothbubbles.ui.settings.templates.QuickReplyTemplatesContent
 import com.bothbubbles.ui.settings.eta.EtaSharingSettingsContent
@@ -112,8 +113,10 @@ fun SettingsPanel(
         SettingsPanelPage.AutoResponder -> "Auto-responder"
         SettingsPanelPage.EtaSharing -> "ETA sharing"
         SettingsPanelPage.Life360 -> "Life360"
+        SettingsPanelPage.SocialMedia -> "Social media videos"
         SettingsPanelPage.About -> "About"
         SettingsPanelPage.OpenSourceLicenses -> "Open source licenses"
+        SettingsPanelPage.Storage -> "Storage"
     }
 
     // MD3: Use surfaceContainerLow for panel to distinguish from main content
@@ -249,6 +252,8 @@ fun SettingsPanel(
                             onAutoResponderClick = { navigator.navigateTo(SettingsPanelPage.AutoResponder) },
                             onEtaSharingClick = { navigator.navigateTo(SettingsPanelPage.EtaSharing) },
                             onLife360Click = { navigator.navigateTo(SettingsPanelPage.Life360) },
+                            onSocialMediaClick = { navigator.navigateTo(SettingsPanelPage.SocialMedia) },
+                            onStorageClick = { navigator.navigateTo(SettingsPanelPage.Storage) },
                             onAboutClick = { navigator.navigateTo(SettingsPanelPage.About) },
                             viewModel = viewModel
                         )
@@ -311,6 +316,9 @@ fun SettingsPanel(
                     SettingsPanelPage.Life360 -> {
                         com.bothbubbles.ui.settings.life360.Life360SettingsContent()
                     }
+                    SettingsPanelPage.SocialMedia -> {
+                        SocialMediaSettingsContent()
+                    }
                     SettingsPanelPage.About -> {
                         AboutContent(
                             onOpenSourceLicensesClick = { navigator.navigateTo(SettingsPanelPage.OpenSourceLicenses) }
@@ -318,6 +326,9 @@ fun SettingsPanel(
                     }
                     SettingsPanelPage.OpenSourceLicenses -> {
                         OpenSourceLicensesContent()
+                    }
+                    SettingsPanelPage.Storage -> {
+                        StorageContent()
                     }
                 }
             }

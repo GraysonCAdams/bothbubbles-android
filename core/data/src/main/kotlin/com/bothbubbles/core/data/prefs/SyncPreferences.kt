@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -32,6 +33,15 @@ class SyncPreferences @Inject constructor(
      */
     val initialSyncComplete: Flow<Boolean> = dataStore.data.map { prefs ->
         prefs[Keys.INITIAL_SYNC_COMPLETE] ?: false
+    }
+
+    /**
+     * Timestamp when initial sync completed (milliseconds since epoch).
+     * Used to distinguish between historical data and new incoming data
+     * (e.g., for counting unwatched Reels received after initial sync).
+     */
+    val initialSyncCompleteTimestamp: Flow<Long> = dataStore.data.map { prefs ->
+        prefs[Keys.INITIAL_SYNC_COMPLETE_TIMESTAMP] ?: 0L
     }
 
     /**
@@ -88,6 +98,10 @@ class SyncPreferences @Inject constructor(
     suspend fun setInitialSyncComplete(complete: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.INITIAL_SYNC_COMPLETE] = complete
+            // Record timestamp when sync completes
+            if (complete && prefs[Keys.INITIAL_SYNC_COMPLETE_TIMESTAMP] == null) {
+                prefs[Keys.INITIAL_SYNC_COMPLETE_TIMESTAMP] = System.currentTimeMillis()
+            }
         }
     }
 
@@ -197,6 +211,7 @@ class SyncPreferences @Inject constructor(
         // Initial Sync Progress (Resumable)
         val INITIAL_SYNC_STARTED = booleanPreferencesKey("initial_sync_started")
         val INITIAL_SYNC_COMPLETE = booleanPreferencesKey("initial_sync_complete")
+        val INITIAL_SYNC_COMPLETE_TIMESTAMP = longPreferencesKey("initial_sync_complete_timestamp")
         val SYNCED_CHAT_GUIDS = stringPreferencesKey("synced_chat_guids")
         val INITIAL_SYNC_MESSAGES_PER_CHAT = intPreferencesKey("initial_sync_messages_per_chat")
 

@@ -30,6 +30,7 @@ fun NavGraphBuilder.settingsNavigation(
             onImageQualityClick = { navController.navigate(Screen.ImageQualitySettings(returnToSettings = true)) },
             onEtaSharingClick = { navController.navigate(Screen.EtaSharingSettings(returnToSettings = true)) },
             onLife360Click = { navController.navigate(Screen.Life360Settings(returnToSettings = true)) },
+            onCalendarClick = { navController.navigate(Screen.CalendarSettings(returnToSettings = true)) },
             onStorageClick = { navController.navigate(Screen.StorageManagement(returnToSettings = true)) },
             onAboutClick = { navController.navigate(Screen.About(returnToSettings = true)) }
         )
@@ -218,6 +219,16 @@ fun NavGraphBuilder.settingsNavigation(
     composable<Screen.Life360Settings> { backStackEntry ->
         val route: Screen.Life360Settings = backStackEntry.toRoute()
         com.bothbubbles.ui.settings.life360.Life360SettingsScreen(
+            onNavigateBack = {
+                popBackStackReturningToSettings(route.returnToSettings)
+            }
+        )
+    }
+
+    // Calendar Settings
+    composable<Screen.CalendarSettings> { backStackEntry ->
+        val route: Screen.CalendarSettings = backStackEntry.toRoute()
+        com.bothbubbles.ui.settings.calendar.CalendarSettingsScreen(
             onNavigateBack = {
                 popBackStackReturningToSettings(route.returnToSettings)
             }

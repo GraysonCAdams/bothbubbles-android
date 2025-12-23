@@ -152,6 +152,7 @@ data class ThreadChain(
 @Stable
 data class MessageUiModel(
     val guid: String,
+    val chatGuid: String? = null,
     val text: String?,
     val subject: String? = null,
     val dateCreated: Long,

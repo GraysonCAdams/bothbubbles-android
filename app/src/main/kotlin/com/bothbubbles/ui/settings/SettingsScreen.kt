@@ -69,6 +69,8 @@ fun SettingsScreen(
     onAutoResponderClick: () -> Unit = {},
     onEtaSharingClick: () -> Unit = {},
     onLife360Click: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onSocialMediaClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel()
@@ -157,6 +159,8 @@ fun SettingsScreen(
             onAutoResponderClick = onAutoResponderClick,
             onEtaSharingClick = onEtaSharingClick,
             onLife360Click = onLife360Click,
+            onCalendarClick = onCalendarClick,
+            onSocialMediaClick = onSocialMediaClick,
             onStorageClick = onStorageClick,
             onAboutClick = onAboutClick,
             onRequestContactsPermission = {
@@ -195,6 +199,8 @@ fun SettingsContent(
     onAutoResponderClick: () -> Unit,
     onEtaSharingClick: () -> Unit = {},
     onLife360Click: () -> Unit = {},
+    onCalendarClick: () -> Unit = {},
+    onSocialMediaClick: () -> Unit = {},
     onStorageClick: () -> Unit = {},
     onAboutClick: () -> Unit,
     onRequestContactsPermission: () -> Unit = {},
@@ -624,6 +630,16 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
+                // Calendar Integrations
+                SettingsMenuItem(
+                    icon = Icons.Default.CalendarMonth,
+                    title = "Calendar integrations",
+                    subtitle = "Show contact calendars in chat headers",
+                    onClick = onCalendarClick
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 // Link previews toggle
                 SettingsMenuItem(
                     icon = Icons.Default.Link,
@@ -641,139 +657,18 @@ fun SettingsContent(
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-                // TikTok video downloading
+                // Social media videos
                 SettingsMenuItem(
-                    icon = Icons.Default.PlayCircle,
-                    title = "TikTok video playback",
-                    subtitle = if (uiState.tiktokDownloaderEnabled) {
-                        "Play TikTok videos inline"
-                    } else {
-                        "Open TikTok links in browser"
+                    icon = Icons.Default.VideoLibrary,
+                    title = "Social media videos",
+                    subtitle = when {
+                        uiState.tiktokDownloaderEnabled && uiState.instagramDownloaderEnabled -> "TikTok and Instagram enabled"
+                        uiState.tiktokDownloaderEnabled -> "TikTok enabled"
+                        uiState.instagramDownloaderEnabled -> "Instagram enabled"
+                        else -> "Play videos inline in chat"
                     },
-                    onClick = { viewModel.setTiktokDownloaderEnabled(!uiState.tiktokDownloaderEnabled) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.tiktokDownloaderEnabled,
-                            onCheckedChange = { viewModel.setTiktokDownloaderEnabled(it) },
-                            showIcons = false
-                        )
-                    }
+                    onClick = onSocialMediaClick
                 )
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                // Instagram video downloading
-                SettingsMenuItem(
-                    icon = Icons.Default.PlayCircle,
-                    title = "Instagram video playback",
-                    subtitle = if (uiState.instagramDownloaderEnabled) {
-                        "Play Instagram Reels inline"
-                    } else {
-                        "Open Instagram links in browser"
-                    },
-                    onClick = { viewModel.setInstagramDownloaderEnabled(!uiState.instagramDownloaderEnabled) },
-                    trailingContent = {
-                        SettingsSwitch(
-                            checked = uiState.instagramDownloaderEnabled,
-                            onCheckedChange = { viewModel.setInstagramDownloaderEnabled(it) },
-                            showIcons = false
-                        )
-                    }
-                )
-
-                // Show additional social media options when either platform is enabled
-                if (uiState.tiktokDownloaderEnabled || uiState.instagramDownloaderEnabled) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    // Background download on receipt
-                    SettingsMenuItem(
-                        icon = Icons.Default.CloudDownload,
-                        title = "Auto-download videos",
-                        subtitle = if (uiState.socialMediaBackgroundDownloadEnabled) {
-                            "Videos download automatically when received. Uses ~5-50MB per video."
-                        } else {
-                            "Videos download only when you tap to play. Saves bandwidth."
-                        },
-                        onClick = { viewModel.setSocialMediaBackgroundDownloadEnabled(!uiState.socialMediaBackgroundDownloadEnabled) },
-                        trailingContent = {
-                            SettingsSwitch(
-                                checked = uiState.socialMediaBackgroundDownloadEnabled,
-                                onCheckedChange = { viewModel.setSocialMediaBackgroundDownloadEnabled(it) },
-                                showIcons = false
-                            )
-                        }
-                    )
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    // Download on cellular
-                    SettingsMenuItem(
-                        icon = Icons.Default.SignalCellularAlt,
-                        title = "Download on cellular",
-                        subtitle = if (uiState.socialMediaDownloadOnCellularEnabled) {
-                            "Downloads use Wi-Fi and mobile data. May incur data charges."
-                        } else {
-                            "Downloads only on Wi-Fi. Videos show loading on cellular until you're on Wi-Fi."
-                        },
-                        onClick = { viewModel.setSocialMediaDownloadOnCellularEnabled(!uiState.socialMediaDownloadOnCellularEnabled) },
-                        trailingContent = {
-                            SettingsSwitch(
-                                checked = uiState.socialMediaDownloadOnCellularEnabled,
-                                onCheckedChange = { viewModel.setSocialMediaDownloadOnCellularEnabled(it) },
-                                showIcons = false
-                            )
-                        }
-                    )
-
-                    // TikTok video quality (only shown when TikTok is enabled)
-                    if (uiState.tiktokDownloaderEnabled) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                        SettingsMenuItem(
-                            icon = Icons.Default.Hd,
-                            title = "TikTok video quality",
-                            subtitle = if (uiState.tiktokVideoQuality == "hd") {
-                                "HD - Higher quality, larger downloads (~20-50MB)"
-                            } else {
-                                "SD - Lower quality, faster downloads (~5-15MB)"
-                            },
-                            onClick = {
-                                val newQuality = if (uiState.tiktokVideoQuality == "hd") "sd" else "hd"
-                                viewModel.setTiktokVideoQuality(newQuality)
-                            },
-                            trailingContent = {
-                                Text(
-                                    text = if (uiState.tiktokVideoQuality == "hd") "HD" else "SD",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                            }
-                        )
-                    }
-
-                    // Reels feed (only shown when background download is enabled)
-                    if (uiState.socialMediaBackgroundDownloadEnabled) {
-                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                        SettingsMenuItem(
-                            icon = Icons.Default.Slideshow,
-                            title = "Reels experience",
-                            subtitle = if (uiState.reelsFeedEnabled) {
-                                "Swipe vertically through videos. New videos shown first, then recent rewatches."
-                            } else {
-                                "Videos play inline in the chat. No full-screen swiping."
-                            },
-                            onClick = { viewModel.setReelsFeedEnabled(!uiState.reelsFeedEnabled) },
-                            trailingContent = {
-                                SettingsSwitch(
-                                    checked = uiState.reelsFeedEnabled,
-                                    onCheckedChange = { viewModel.setReelsFeedEnabled(it) },
-                                    showIcons = false
-                                )
-                            }
-                        )
-                    }
-                }
 
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
@@ -1332,6 +1227,236 @@ private fun FindMyDebugDialog(
             }
         }
     )
+}
+
+/**
+ * Social media settings content for use in SettingsPanel.
+ * Contains TikTok, Instagram video playback settings with section headers.
+ */
+@Composable
+fun SocialMediaSettingsContent(
+    modifier: Modifier = Modifier,
+    viewModel: SettingsViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    // Determine section enabled states
+    val downloadSectionEnabled = uiState.tiktokDownloaderEnabled || uiState.instagramDownloaderEnabled
+    val tiktokQualityEnabled = uiState.tiktokDownloaderEnabled
+    val reelsSectionEnabled = uiState.socialMediaBackgroundDownloadEnabled
+
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+    ) {
+        // Reels concept preview
+        item {
+            com.bothbubbles.ui.settings.socialmedia.ReelsConceptPreview(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+            )
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION: Platforms
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Platforms")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // TikTok video downloading
+                SettingsMenuItem(
+                    icon = Icons.Default.PlayCircle,
+                    title = "TikTok video playback",
+                    subtitle = if (uiState.tiktokDownloaderEnabled) {
+                        "Play TikTok videos inline"
+                    } else {
+                        "Open TikTok links in browser"
+                    },
+                    onClick = { viewModel.setTiktokDownloaderEnabled(!uiState.tiktokDownloaderEnabled) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.tiktokDownloaderEnabled,
+                            onCheckedChange = viewModel::setTiktokDownloaderEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Instagram video downloading
+                SettingsMenuItem(
+                    icon = Icons.Default.PlayCircle,
+                    title = "Instagram video playback",
+                    subtitle = if (uiState.instagramDownloaderEnabled) {
+                        "Play Instagram Reels inline"
+                    } else {
+                        "Open Instagram links in browser"
+                    },
+                    onClick = { viewModel.setInstagramDownloaderEnabled(!uiState.instagramDownloaderEnabled) },
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.instagramDownloaderEnabled,
+                            onCheckedChange = viewModel::setInstagramDownloaderEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION: Download behavior
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Download behavior")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Auto-download videos
+                SettingsMenuItem(
+                    icon = Icons.Default.CloudDownload,
+                    title = "Auto-download videos",
+                    subtitle = if (!downloadSectionEnabled) {
+                        "Enable TikTok or Instagram first"
+                    } else if (uiState.socialMediaBackgroundDownloadEnabled) {
+                        "Videos download automatically when received"
+                    } else {
+                        "Videos download only when you tap to play"
+                    },
+                    onClick = {
+                        if (downloadSectionEnabled) {
+                            viewModel.setSocialMediaBackgroundDownloadEnabled(!uiState.socialMediaBackgroundDownloadEnabled)
+                        }
+                    },
+                    enabled = downloadSectionEnabled,
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.socialMediaBackgroundDownloadEnabled,
+                            onCheckedChange = {
+                                if (downloadSectionEnabled) viewModel.setSocialMediaBackgroundDownloadEnabled(it)
+                            },
+                            enabled = downloadSectionEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Download on cellular
+                SettingsMenuItem(
+                    icon = Icons.Default.SignalCellularAlt,
+                    title = "Download on cellular",
+                    subtitle = if (!downloadSectionEnabled) {
+                        "Enable TikTok or Instagram first"
+                    } else if (uiState.socialMediaDownloadOnCellularEnabled) {
+                        "Downloads use Wi-Fi and mobile data"
+                    } else {
+                        "Downloads only on Wi-Fi"
+                    },
+                    onClick = {
+                        if (downloadSectionEnabled) {
+                            viewModel.setSocialMediaDownloadOnCellularEnabled(!uiState.socialMediaDownloadOnCellularEnabled)
+                        }
+                    },
+                    enabled = downloadSectionEnabled,
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.socialMediaDownloadOnCellularEnabled,
+                            onCheckedChange = {
+                                if (downloadSectionEnabled) viewModel.setSocialMediaDownloadOnCellularEnabled(it)
+                            },
+                            enabled = downloadSectionEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // TikTok video quality
+                SettingsMenuItem(
+                    icon = Icons.Default.Hd,
+                    title = "TikTok video quality",
+                    subtitle = if (!tiktokQualityEnabled) {
+                        "Enable TikTok first"
+                    } else if (uiState.tiktokVideoQuality == "hd") {
+                        "HD - Higher quality, larger downloads"
+                    } else {
+                        "SD - Lower quality, faster downloads"
+                    },
+                    onClick = {
+                        if (tiktokQualityEnabled) {
+                            val newQuality = if (uiState.tiktokVideoQuality == "hd") "sd" else "hd"
+                            viewModel.setTiktokVideoQuality(newQuality)
+                        }
+                    },
+                    enabled = tiktokQualityEnabled,
+                    trailingContent = {
+                        Text(
+                            text = if (uiState.tiktokVideoQuality == "hd") "HD" else "SD",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (tiktokQualityEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                            }
+                        )
+                    }
+                )
+            }
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION: Viewing experience
+        // ═══════════════════════════════════════════════════════════════
+        item {
+            SettingsSectionTitle(title = "Viewing experience")
+        }
+
+        item {
+            SettingsCard(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+            ) {
+                // Reels feed
+                SettingsMenuItem(
+                    icon = Icons.Default.Slideshow,
+                    title = "Reels experience",
+                    subtitle = if (!reelsSectionEnabled) {
+                        "Enable auto-download first"
+                    } else if (uiState.reelsFeedEnabled) {
+                        "Swipe vertically through videos full-screen"
+                    } else {
+                        "Videos play inline in the chat"
+                    },
+                    onClick = {
+                        if (reelsSectionEnabled) {
+                            viewModel.setReelsFeedEnabled(!uiState.reelsFeedEnabled)
+                        }
+                    },
+                    enabled = reelsSectionEnabled,
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.reelsFeedEnabled,
+                            onCheckedChange = {
+                                if (reelsSectionEnabled) viewModel.setReelsFeedEnabled(it)
+                            },
+                            enabled = reelsSectionEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+            }
+        }
+    }
 }
 
 /**

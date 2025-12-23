@@ -129,15 +129,15 @@ class IncomingMessageHandler @Inject constructor(
         syncIncomingAttachments(messageDto)
 
         // Background download social media videos if enabled
-        // Only process incoming messages (not from self) that contain text
+        // Process both incoming and outgoing messages that contain text
         val messageText = message.text
-        if (!message.isFromMe && !messageText.isNullOrBlank()) {
+        if (!messageText.isNullOrBlank()) {
             triggerSocialMediaBackgroundDownload(
                 messageGuid = message.guid,
                 chatGuid = chatGuid,
                 text = messageText,
-                senderName = messageDto.handle?.formattedAddress,
-                senderAddress = messageDto.handle?.address,
+                senderName = if (message.isFromMe) "You" else messageDto.handle?.formattedAddress,
+                senderAddress = if (message.isFromMe) null else messageDto.handle?.address,
                 timestamp = message.dateCreated
             )
         }

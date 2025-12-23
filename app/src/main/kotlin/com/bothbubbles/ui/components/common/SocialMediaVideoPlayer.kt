@@ -1,10 +1,12 @@
 package com.bothbubbles.ui.components.common
 
+import timber.log.Timber
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,12 +19,18 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.VolumeOff
+import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
@@ -43,6 +51,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
@@ -114,12 +123,14 @@ private const val FETCH_TIMEOUT_MS = 15_000L
 fun SocialMediaVideoPlayer(
     url: String,
     messageGuid: String,
+    chatGuid: String?,
     platform: SocialMediaPlatform,
     downloader: SocialMediaDownloadService,
     isFromMe: Boolean,
     onShowOriginal: () -> Unit,
     onOpenInBrowser: () -> Unit,
     onOpenReelsFeed: (() -> Unit)? = null,
+    onLongPress: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     var state by remember { mutableStateOf<SocialMediaVideoState>(SocialMediaVideoState.Idle) }
@@ -157,6 +168,7 @@ fun SocialMediaVideoPlayer(
                             result = result,
                             originalUrl = url,
                             messageGuid = messageGuid,
+                            chatGuid = chatGuid,
                             platform = platform
                         )
 
@@ -174,12 +186,15 @@ fun SocialMediaVideoPlayer(
                     }
                     is SocialMediaResult.Error -> {
                         timeoutJob.cancel()
+                        Timber.w("[SmartLink] extractVideoUrl returned Error for $url: ${result.message}")
                         state = SocialMediaVideoState.Error(result.message)
                     }
                     is SocialMediaResult.NotSupported -> {
                         timeoutJob.cancel()
-                        state = SocialMediaVideoState.Dismissed
-                        onShowOriginal()
+                        Timber.w("[SmartLink] extractVideoUrl returned NotSupported for $url")
+                        // Don't dismiss - show as error so user can still try to open in browser
+                        // This happens when Instagram content requires login or is a photo post
+                        state = SocialMediaVideoState.Error("Content not available. May require login or be a photo post.")
                     }
                 }
             } catch (e: Exception) {
@@ -196,18 +211,36 @@ fun SocialMediaVideoPlayer(
         }
     }
 
-    Surface(
-        modifier = modifier
-            .widthIn(max = 280.dp)
-            .clip(RoundedCornerShape(12.dp)),
-        color = if (isFromMe) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            MaterialTheme.colorScheme.surfaceVariant
-        },
-        tonalElevation = 1.dp
+    val hapticFeedback = androidx.compose.ui.platform.LocalHapticFeedback.current
+
+    Column(
+        modifier = modifier.widthIn(max = 280.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
     ) {
-        Column {
+        // Video content surface with long-press support
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .pointerInput(onLongPress) {
+                    if (onLongPress != null) {
+                        detectTapGestures(
+                            onLongPress = {
+                                hapticFeedback.performHapticFeedback(
+                                    androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress
+                                )
+                                onLongPress()
+                            }
+                        )
+                    }
+                },
+            color = if (isFromMe) {
+                MaterialTheme.colorScheme.primaryContainer
+            } else {
+                MaterialTheme.colorScheme.surfaceVariant
+            },
+            tonalElevation = 1.dp
+        ) {
             AnimatedContent(
                 targetState = state,
                 transitionSpec = { fadeIn() togetherWith fadeOut() },
@@ -256,6 +289,7 @@ fun SocialMediaVideoPlayer(
                     is SocialMediaVideoState.Playing -> {
                         VideoPlayerView(
                             videoUrl = currentState.videoPath,
+                            onFullscreen = onOpenReelsFeed ?: onOpenInBrowser,  // Prefer Reels feed for fullscreen
                             modifier = Modifier.fillMaxWidth()
                         )
                     }
@@ -269,6 +303,7 @@ fun SocialMediaVideoPlayer(
                                     retryFetch(
                                         url = url,
                                         messageGuid = messageGuid,
+                                        chatGuid = chatGuid,
                                         platform = platform,
                                         downloader = downloader,
                                         onStateChange = { state = it },
@@ -276,8 +311,7 @@ fun SocialMediaVideoPlayer(
                                         onShowOriginal = onShowOriginal
                                     )
                                 }
-                            },
-                            onOpenInBrowser = onOpenInBrowser
+                            }
                         )
                     }
 
@@ -289,6 +323,7 @@ fun SocialMediaVideoPlayer(
                                     retryFetch(
                                         url = url,
                                         messageGuid = messageGuid,
+                                        chatGuid = chatGuid,
                                         platform = platform,
                                         downloader = downloader,
                                         onStateChange = { state = it },
@@ -296,8 +331,7 @@ fun SocialMediaVideoPlayer(
                                         onShowOriginal = onShowOriginal
                                     )
                                 }
-                            },
-                            onOpenInBrowser = onOpenInBrowser
+                            }
                         )
                     }
 
@@ -307,25 +341,22 @@ fun SocialMediaVideoPlayer(
                     }
                 }
             }
+        }
 
-            // "Show Original" button - always visible except when dismissed
-            if (state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle) {
-                TextButton(
-                    onClick = {
+        // "Show Original" link - outside Surface with no background, centered below video
+        if (state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle) {
+            Text(
+                text = "Show Original",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .clickable {
                         fetchJob?.cancel()
                         state = SocialMediaVideoState.Dismissed
                         onShowOriginal()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp, vertical = 4.dp)
-                ) {
-                    Text(
-                        text = "Show Original",
-                        style = MaterialTheme.typography.labelMedium
-                    )
-                }
-            }
+                    }
+                    .padding(top = 4.dp, bottom = 8.dp)
+            )
         }
     }
 }
@@ -333,6 +364,7 @@ fun SocialMediaVideoPlayer(
 private suspend fun retryFetch(
     url: String,
     messageGuid: String,
+    chatGuid: String?,
     platform: SocialMediaPlatform,
     downloader: SocialMediaDownloadService,
     onStateChange: (SocialMediaVideoState) -> Unit,
@@ -356,6 +388,7 @@ private suspend fun retryFetch(
                     result = result,
                     originalUrl = url,
                     messageGuid = messageGuid,
+                    chatGuid = chatGuid,
                     platform = platform
                 )
 
@@ -378,8 +411,8 @@ private suspend fun retryFetch(
             }
             is SocialMediaResult.NotSupported -> {
                 timeoutJob.cancel()
-                onStateChange(SocialMediaVideoState.Dismissed)
-                onShowOriginal()
+                // Don't dismiss - show as error so user can still try to open in browser
+                onStateChange(SocialMediaVideoState.Error("Content not available. May require login or be a photo post."))
             }
         }
     } catch (e: Exception) {
@@ -505,8 +538,7 @@ private fun DownloadingOverlay(
 @Composable
 private fun ErrorOverlay(
     message: String,
-    onRetry: () -> Unit,
-    onOpenInBrowser: () -> Unit
+    onRetry: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -539,26 +571,14 @@ private fun ErrorOverlay(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = onRetry) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
-                }
-
-                FilledTonalButton(onClick = onOpenInBrowser) {
-                    Icon(
-                        Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Open")
-                }
+            FilledTonalButton(onClick = onRetry) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Retry")
             }
         }
     }
@@ -566,8 +586,7 @@ private fun ErrorOverlay(
 
 @Composable
 private fun TimeoutOverlay(
-    onRetry: () -> Unit,
-    onOpenInBrowser: () -> Unit
+    onRetry: () -> Unit
 ) {
     Box(
         modifier = Modifier
@@ -597,44 +616,55 @@ private fun TimeoutOverlay(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilledTonalButton(onClick = onRetry) {
-                    Icon(
-                        Icons.Default.Refresh,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Retry")
-                }
-
-                FilledTonalButton(onClick = onOpenInBrowser) {
-                    Icon(
-                        Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Open")
-                }
+            FilledTonalButton(onClick = onRetry) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Retry")
             }
         }
     }
 }
 
+/**
+ * Video player with simple controls: play/pause overlay, mute button, and fullscreen button.
+ * Uses the same pattern as VideoAttachment for consistency.
+ */
 @Composable
 private fun VideoPlayerView(
     videoUrl: String,
+    onFullscreen: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    var isPlaying by remember { mutableStateOf(false) }
+    var isMuted by remember { mutableStateOf(true) }
 
     val exoPlayer = remember {
         ExoPlayer.Builder(context).build().apply {
             setMediaItem(MediaItem.fromUri(videoUrl))
             prepare()
-            playWhenReady = true
+            playWhenReady = false
             repeatMode = Player.REPEAT_MODE_ONE
+            volume = 0f  // Start muted
+        }
+    }
+
+    // Sync mute state
+    LaunchedEffect(isMuted) {
+        exoPlayer.volume = if (isMuted) 0f else 1f
+    }
+
+    // Sync play state
+    LaunchedEffect(isPlaying) {
+        if (isPlaying) {
+            exoPlayer.play()
+        } else {
+            exoPlayer.pause()
         }
     }
 
@@ -649,16 +679,82 @@ private fun VideoPlayerView(
             .fillMaxWidth()
             .aspectRatio(9f / 16f) // Vertical video
             .clip(RoundedCornerShape(8.dp))
+            .background(Color.Black)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { isPlaying = !isPlaying }
+                )
+            },
+        contentAlignment = Alignment.Center
     ) {
+        // Video surface
         AndroidView(
             factory = { ctx ->
                 PlayerView(ctx).apply {
                     player = exoPlayer
-                    useController = true
+                    useController = false  // Custom controls
                     setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING)
                 }
             },
             modifier = Modifier.fillMaxSize()
         )
+
+        // Mute/Unmute button (top-left)
+        Surface(
+            onClick = { isMuted = !isMuted },
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.6f),
+            modifier = Modifier
+                .align(Alignment.TopStart)
+                .padding(8.dp)
+                .size(32.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (isMuted) Icons.Default.VolumeOff else Icons.Default.VolumeUp,
+                    contentDescription = if (isMuted) "Unmute" else "Mute",
+                    tint = Color.White,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        // Fullscreen button (top-right)
+        if (onFullscreen != null) {
+            Surface(
+                onClick = onFullscreen,
+                shape = CircleShape,
+                color = Color.Black.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(32.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Fullscreen,
+                        contentDescription = "Fullscreen",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        // Play/Pause indicator (center)
+        Surface(
+            shape = CircleShape,
+            color = Color.Black.copy(alpha = 0.5f),
+            modifier = Modifier.size(56.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = Color.White,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        }
     }
 }

@@ -37,6 +37,18 @@ class SettingsDataStore @Inject constructor(
     private val attachmentPrefs = AttachmentPreferences(dataStore)
     private val featurePrefs = FeaturePreferences(dataStore)
 
+    /**
+     * Exposes the internal FeaturePreferences instance for DI.
+     * This ensures all code uses the same instance and DataStore file.
+     */
+    fun getFeaturePreferences(): FeaturePreferences = featurePrefs
+
+    /**
+     * Exposes the internal SyncPreferences instance for DI.
+     * This ensures all code uses the same instance and DataStore file.
+     */
+    fun getSyncPreferences(): SyncPreferences = syncPrefs
+
     // ===== Server Connection (delegated to ServerPreferences) =====
 
     override val serverAddress: Flow<String> get() = serverPrefs.serverAddress

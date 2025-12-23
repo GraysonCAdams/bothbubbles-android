@@ -503,6 +503,7 @@ fun ChatScreen(
                         onLife360MapClick = onLife360MapClick,
                         reelsFeedEnabled = reelsState.isEnabled,
                         hasReelVideos = reelsState.reelItems.isNotEmpty(),
+                        unwatchedReelsCount = reelsState.unwatchedCount,
                         isBubbleMode = isBubbleMode,
                         onMenuAction = { action ->
                             when (action) {

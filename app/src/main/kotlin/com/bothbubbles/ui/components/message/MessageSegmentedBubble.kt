@@ -135,7 +135,9 @@ internal fun SegmentedMessageBubble(
     // Inline reply quote support
     replyPreview: ReplyPreviewData? = null,
     onReplyQuoteTap: (() -> Unit)? = null,
-    onReplyQuoteLongPress: (() -> Unit)? = null
+    onReplyQuoteLongPress: (() -> Unit)? = null,
+    // Social media video fullscreen
+    onOpenReelsFeed: (() -> Unit)? = null
 ) {
     val bubbleColors = BothBubblesTheme.bubbleColors
     val isIMessage = message.messageSource == MessageSource.IMESSAGE.name
@@ -420,7 +422,8 @@ internal fun SegmentedMessageBubble(
                         }
                 ) {
                     Column(
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalAlignment = if (message.isFromMe) Alignment.End else Alignment.Start
                     ) {
                         // Reply quote as standalone bubble when first segment is NOT media
                         if (replyPreview != null && !firstSegmentIsMedia) {
@@ -549,12 +552,14 @@ internal fun SegmentedMessageBubble(
                                     SmartLinkPreview(
                                         url = segment.url,
                                         messageGuid = message.guid,
+                                        chatGuid = message.chatGuid,
                                         isFromMe = message.isFromMe,
                                         maxWidth = 240.dp,
                                         onLongPress = {
                                             HapticUtils.onLongPress(hapticFeedback)
                                             onLongPress()
-                                        }
+                                        },
+                                        onOpenReelsFeed = onOpenReelsFeed
                                     )
                                 }
 

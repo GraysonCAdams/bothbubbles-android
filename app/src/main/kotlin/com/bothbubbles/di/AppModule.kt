@@ -1,19 +1,17 @@
 package com.bothbubbles.di
 
 import android.content.Context
-import androidx.datastore.core.DataStore
-import androidx.datastore.preferences.core.Preferences
-import androidx.datastore.preferences.preferencesDataStore
 import androidx.work.WorkManager
 import coil.ImageLoader
+import com.bothbubbles.core.data.prefs.FeaturePreferences
+import com.bothbubbles.core.data.prefs.SettingsDataStore
+import com.bothbubbles.core.data.prefs.SyncPreferences
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
-
-private val Context.featureDataStore: DataStore<Preferences> by preferencesDataStore(name = "feature_preferences")
 
 /**
  * Hilt module providing application-scoped utilities.
@@ -39,9 +37,25 @@ object AppModule {
         return (context.applicationContext as coil.ImageLoaderFactory).newImageLoader()
     }
 
+    /**
+     * Provides FeaturePreferences from SettingsDataStore to ensure all code uses the same
+     * DataStore instance. This avoids the bug where settings saved via SettingsDataStore
+     * (using "settings" file) would not be visible to code that injected FeaturePreferences
+     * directly (which was using a different "feature_preferences" file).
+     */
     @Provides
     @Singleton
-    fun provideFeatureDataStore(@ApplicationContext context: Context): DataStore<Preferences> {
-        return context.featureDataStore
+    fun provideFeaturePreferences(settingsDataStore: SettingsDataStore): FeaturePreferences {
+        return settingsDataStore.getFeaturePreferences()
+    }
+
+    /**
+     * Provides SyncPreferences from SettingsDataStore to ensure all code uses the same
+     * DataStore instance.
+     */
+    @Provides
+    @Singleton
+    fun provideSyncPreferences(settingsDataStore: SettingsDataStore): SyncPreferences {
+        return settingsDataStore.getSyncPreferences()
     }
 }

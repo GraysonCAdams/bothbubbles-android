@@ -2,6 +2,7 @@ package com.bothbubbles.data.repository
 
 import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
+import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import timber.log.Timber
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -33,6 +34,7 @@ import javax.inject.Singleton
 class MessageRepository @Inject constructor(
     private val messageDao: MessageDao,
     private val chatDao: ChatDao,
+    private val unifiedChatDao: UnifiedChatDao,
     private val tombstoneDao: TombstoneDao,
     private val api: BothBubblesApi,
     private val syncRangeTracker: SyncRangeTracker,
@@ -356,6 +358,30 @@ class MessageRepository @Inject constructor(
 
             // Batch insert messages (more efficient than individual inserts)
             messageDao.insertMessages(messages)
+
+            // Update unified chat preview with the newest message
+            // This ensures conversation list shows correct preview after sync
+            if (messages.isNotEmpty()) {
+                val newestMessage = messages.maxByOrNull { it.dateCreated }
+                if (newestMessage != null) {
+                    val chat = chatDao.getChatByGuid(chatGuid)
+                    val unifiedChatId = chat?.unifiedChatId
+                    if (unifiedChatId != null) {
+                        unifiedChatDao.updateLatestMessageIfNewer(
+                            id = unifiedChatId,
+                            date = newestMessage.dateCreated,
+                            text = newestMessage.text,
+                            guid = newestMessage.guid,
+                            isFromMe = newestMessage.isFromMe,
+                            hasAttachments = newestMessage.hasAttachments,
+                            source = newestMessage.messageSource,
+                            dateDelivered = newestMessage.dateDelivered,
+                            dateRead = newestMessage.dateRead,
+                            error = newestMessage.error
+                        )
+                    }
+                }
+            }
 
             // Sync attachments via AttachmentRepository (data layer, no service dependency)
             body.data.orEmpty().forEach { messageDto ->

@@ -3,6 +3,7 @@ package com.bothbubbles.ui.components.reels
 import android.content.Intent
 import android.net.Uri
 import android.view.HapticFeedbackConstants
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
@@ -40,7 +41,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,7 +52,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -61,7 +61,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
@@ -77,10 +76,24 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.ui.PlayerView
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.PlayCircle
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.style.TextAlign
+import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
+import com.bothbubbles.ui.components.common.Avatar
+import com.bothbubbles.ui.components.message.ReactionsDisplay
+import com.bothbubbles.ui.components.message.ReactionUiModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
@@ -109,12 +122,88 @@ fun ReelsFeedScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+
+    // Unwatched only filter toggle (default off)
+    var unwatchedOnly by remember { mutableStateOf(false) }
+
+    // Filter reels based on toggle
+    val filteredReels = remember(reels, unwatchedOnly) {
+        if (unwatchedOnly) {
+            reels.filter { !it.isViewed }
+        } else {
+            reels
+        }
+    }
+
     val pagerState = rememberPagerState(
-        initialPage = initialIndex.coerceIn(0, (reels.size - 1).coerceAtLeast(0)),
-        pageCount = { reels.size }
+        initialPage = initialIndex.coerceIn(0, (filteredReels.size - 1).coerceAtLeast(0)),
+        pageCount = { filteredReels.size }
     )
 
-    if (reels.isEmpty()) {
+    // Handle back gesture/button to close reels instead of navigating back
+    BackHandler(enabled = true) {
+        onClose()
+    }
+
+    // Show "All caught up!" when unwatched only is on but no unwatched videos
+    if (unwatchedOnly && filteredReels.isEmpty() && reels.isNotEmpty()) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .background(Color.Black),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    text = "All caught up!",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(modifier = Modifier.height(24.dp))
+                FilledTonalButton(
+                    onClick = { unwatchedOnly = false }
+                ) {
+                    Text("Show all videos")
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                OutlinedButton(
+                    onClick = onClose
+                ) {
+                    Text("Close")
+                }
+            }
+
+            // Close button
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier
+                    .align(Alignment.TopStart)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(16.dp)
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
+            }
+
+            // Toggle button (still visible)
+            UnwatchedOnlyToggle(
+                isEnabled = unwatchedOnly,
+                onToggle = { unwatchedOnly = it },
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .windowInsetsPadding(WindowInsets.statusBars)
+                    .padding(top = 16.dp)
+            )
+        }
+        return
+    }
+
+    if (filteredReels.isEmpty()) {
         Box(
             modifier = modifier
                 .fillMaxSize()
@@ -155,23 +244,23 @@ fun ReelsFeedScreen(
     }
 
     // Track viewed status when settling on a page
-    LaunchedEffect(pagerState.currentPage) {
-        val currentReel = reels.getOrNull(pagerState.currentPage)
+    LaunchedEffect(pagerState.currentPage, filteredReels) {
+        val currentReel = filteredReels.getOrNull(pagerState.currentPage)
         if (currentReel != null && currentReel.isCached && !currentReel.isViewed) {
             // Wait 2 seconds before marking as viewed
             delay(2000)
             // Only mark if still on same page
-            if (pagerState.currentPage == reels.indexOf(currentReel)) {
+            if (pagerState.currentPage == filteredReels.indexOf(currentReel)) {
                 onVideoViewed(currentReel.originalUrl)
             }
         }
     }
 
     // Prefetch nearby pending videos
-    LaunchedEffect(pagerState.currentPage) {
+    LaunchedEffect(pagerState.currentPage, filteredReels) {
         // Prefetch 1 ahead and 1 behind
         listOf(pagerState.currentPage - 1, pagerState.currentPage + 1).forEach { prefetchIndex ->
-            val prefetchReel = reels.getOrNull(prefetchIndex)
+            val prefetchReel = filteredReels.getOrNull(prefetchIndex)
             if (prefetchReel != null && prefetchReel.isPending && !prefetchReel.isDownloading) {
                 onStartDownload(prefetchReel.originalUrl)
             }
@@ -187,7 +276,7 @@ fun ReelsFeedScreen(
             state = pagerState,
             modifier = Modifier.fillMaxSize()
         ) { page ->
-            val reel = reels[page]
+            val reel = filteredReels[page]
             if (reel.isCached) {
                 ReelPage(
                     reel = reel,
@@ -198,6 +287,13 @@ fun ReelsFeedScreen(
                     onOpenInBrowser = {
                         val intent = Intent(Intent.ACTION_VIEW, Uri.parse(reel.originalUrl))
                         context.startActivity(intent)
+                    },
+                    onShare = {
+                        val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, reel.originalUrl)
+                        }
+                        context.startActivity(Intent.createChooser(shareIntent, "Share video link"))
                     }
                 )
             } else {
@@ -231,19 +327,39 @@ fun ReelsFeedScreen(
             )
         }
 
-        // Page indicator - top right
-        Box(
+        // Unwatched only toggle - top center
+        UnwatchedOnlyToggle(
+            isEnabled = unwatchedOnly,
+            onToggle = { unwatchedOnly = it },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .windowInsetsPadding(WindowInsets.statusBars)
+                .padding(top = 16.dp)
+        )
+
+        // Share button - top right
+        IconButton(
+            onClick = {
+                val currentReel = filteredReels.getOrNull(pagerState.currentPage)
+                if (currentReel != null) {
+                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                        type = "text/plain"
+                        putExtra(Intent.EXTRA_TEXT, currentReel.originalUrl)
+                    }
+                    context.startActivity(Intent.createChooser(shareIntent, "Share video link"))
+                }
+            },
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .windowInsetsPadding(WindowInsets.statusBars)
                 .padding(16.dp)
-                .background(Color.Black.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .background(Color.Black.copy(alpha = 0.3f), CircleShape)
         ) {
-            Text(
-                text = "${pagerState.currentPage + 1} / ${reels.size}",
-                style = MaterialTheme.typography.labelMedium,
-                color = Color.White
+            Icon(
+                Icons.Default.Share,
+                contentDescription = "Share",
+                tint = Color.White,
+                modifier = Modifier.size(24.dp)
             )
         }
     }
@@ -254,7 +370,8 @@ private fun ReelPage(
     reel: ReelItem,
     isCurrentPage: Boolean,
     onTapback: (ReelsTapback) -> Unit,
-    onOpenInBrowser: () -> Unit
+    onOpenInBrowser: () -> Unit,
+    onShare: () -> Unit
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -453,10 +570,14 @@ private fun ReelPage(
         SenderInfoBadge(
             senderName = reel.senderName,
             senderAddress = reel.senderAddress,
+            avatarPath = reel.avatarPath,
             platform = reel.platform,
             timestamp = reel.sentTimestamp,
             currentTapback = reel.currentTapback,
+            reactions = reel.reactions,
+            replyCount = reel.replyCount,
             onOpenInBrowser = onOpenInBrowser,
+            onReplyClick = { /* TODO: Show thread modal */ },
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.systemBars)
@@ -533,34 +654,18 @@ private fun PendingReelPage(
         ) {
             when {
                 reel.downloadError != null -> {
-                    // Error state
-                    Icon(
-                        Icons.Default.CloudDownload,
-                        contentDescription = null,
-                        tint = Color.White.copy(alpha = 0.5f),
-                        modifier = Modifier.size(64.dp)
-                    )
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = "Download failed",
-                        style = MaterialTheme.typography.titleMedium,
-                        color = Color.White
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Surface(
-                        onClick = {
+                    // Error state - show link preview card
+                    FailedReelCard(
+                        reel = reel,
+                        onRetry = {
                             view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
                             onStartDownload()
                         },
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.primary
-                    ) {
-                        Text(
-                            text = "Retry",
-                            modifier = Modifier.padding(horizontal = 24.dp, vertical = 12.dp),
-                            color = MaterialTheme.colorScheme.onPrimary
-                        )
-                    }
+                        onOpenInBrowser = {
+                            view.performHapticFeedback(HapticFeedbackConstants.CONFIRM)
+                            onOpenInBrowser()
+                        }
+                    )
                 }
 
                 reel.isDownloading || downloadProgress != null -> {
@@ -625,15 +730,152 @@ private fun PendingReelPage(
         SenderInfoBadge(
             senderName = reel.senderName,
             senderAddress = reel.senderAddress,
+            avatarPath = reel.avatarPath,
             platform = reel.platform,
             timestamp = reel.sentTimestamp,
             currentTapback = null, // No tapback for pending items
+            reactions = reel.reactions,
+            replyCount = reel.replyCount,
             onOpenInBrowser = onOpenInBrowser,
+            onReplyClick = { /* TODO: Show thread modal */ },
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(start = 16.dp, bottom = 24.dp)
         )
+    }
+}
+
+/**
+ * Card displayed when a reel fails to download.
+ * Shows a styled preview card with platform info, error message, and options to retry or open externally.
+ */
+@Composable
+private fun FailedReelCard(
+    reel: ReelItem,
+    onRetry: () -> Unit,
+    onOpenInBrowser: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val context = LocalContext.current
+
+    Card(
+        modifier = modifier
+            .widthIn(max = 300.dp)
+            .padding(horizontal = 24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh
+        ),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column {
+            // Platform thumbnail header
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(160.dp)
+                    .background(
+                        when (reel.platform) {
+                            SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C).copy(alpha = 0.15f)
+                            SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA).copy(alpha = 0.15f)
+                        }
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    // Platform-styled play icon
+                    Icon(
+                        Icons.Default.PlayCircle,
+                        contentDescription = null,
+                        modifier = Modifier.size(64.dp),
+                        tint = when (reel.platform) {
+                            SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C)
+                            SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA)
+                        }
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    // Error indicator
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            Icons.Default.CloudOff,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp),
+                            tint = MaterialTheme.colorScheme.error
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = "Download failed",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.error
+                        )
+                    }
+                }
+            }
+
+            // Content section
+            Column(
+                modifier = Modifier.padding(16.dp)
+            ) {
+                // Platform name
+                Text(
+                    text = reel.platform.displayName.uppercase(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Title - extract from URL if possible
+                val title = remember(reel.originalUrl) {
+                    when (reel.platform) {
+                        SocialMediaPlatform.INSTAGRAM -> "Instagram Reel"
+                        SocialMediaPlatform.TIKTOK -> "TikTok Video"
+                    }
+                }
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+
+                Spacer(modifier = Modifier.height(4.dp))
+
+                // Description/context
+                Text(
+                    text = "Couldn't download this video. You can try again or open it in your browser.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Action buttons
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onRetry,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Retry")
+                    }
+                    FilledTonalButton(
+                        onClick = onOpenInBrowser,
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Open")
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -726,92 +968,132 @@ private fun VideoScrubber(
 private fun SenderInfoBadge(
     senderName: String?,
     senderAddress: String?,
+    avatarPath: String?,
     platform: SocialMediaPlatform,
     timestamp: Long,
     currentTapback: ReelsTapback?,
+    reactions: List<ReactionUiModel>,
+    replyCount: Int,
     onOpenInBrowser: () -> Unit,
+    onReplyClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Use display name or address for avatar
+    val displayName = senderName ?: senderAddress ?: "Unknown"
+
     Surface(
         modifier = modifier,
         shape = RoundedCornerShape(12.dp),
         color = Color.Black.copy(alpha = 0.6f)
     ) {
-        Row(
-            modifier = Modifier.padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(12.dp)
         ) {
-            // Avatar placeholder
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .background(Color.Gray.copy(alpha = 0.5f), CircleShape),
-                contentAlignment = Alignment.Center
+            Row(
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    Icons.Default.Person,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                // Sender name
-                Text(
-                    text = senderName ?: senderAddress ?: "Unknown",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                // Avatar using actual contact photo or generated avatar
+                Avatar(
+                    name = displayName,
+                    avatarPath = avatarPath,
+                    size = 40.dp,
+                    hasContactInfo = avatarPath != null || senderName != null
                 )
 
-                // Platform and time
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    // Sender name
                     Text(
-                        text = platform.displayName,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.8f)
+                        text = senderName ?: senderAddress ?: "Unknown",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Text(
-                        text = " \u2022 ",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.6f)
-                    )
-                    Text(
-                        text = formatRelativeTime(timestamp),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.7f)
-                    )
+
+                    // Platform and time
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = platform.displayName,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.8f)
+                        )
+                        Text(
+                            text = " \u2022 ",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.6f)
+                        )
+                        Text(
+                            text = formatRelativeTime(timestamp),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.7f)
+                        )
+                    }
+
+                    // Current tapback if any
+                    if (currentTapback != null) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "${currentTapback.emoji} ${currentTapback.label}",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
+                    }
                 }
 
-                // Current tapback if any
-                if (currentTapback != null) {
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text(
-                        text = "${currentTapback.emoji} ${currentTapback.label}",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = Color.White
+                // Open in browser button
+                IconButton(
+                    onClick = onOpenInBrowser,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Color.White.copy(alpha = 0.2f), CircleShape)
+                ) {
+                    Icon(
+                        Icons.Default.OpenInNew,
+                        contentDescription = "Open in browser",
+                        tint = Color.White,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
 
-            // Open in browser button
-            IconButton(
-                onClick = onOpenInBrowser,
-                modifier = Modifier
-                    .size(36.dp)
-                    .background(Color.White.copy(alpha = 0.2f), CircleShape)
-            ) {
-                Icon(
-                    Icons.Default.OpenInNew,
-                    contentDescription = "Open in browser",
-                    tint = Color.White,
-                    modifier = Modifier.size(18.dp)
-                )
+            // Reactions and reply section
+            if (reactions.isNotEmpty() || replyCount > 0) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Reactions display
+                    if (reactions.isNotEmpty()) {
+                        ReactionsDisplay(
+                            reactions = reactions,
+                            isFromMe = false, // Always show as received in Reels context
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.weight(1f))
+                    }
+
+                    // Reply count/button
+                    if (replyCount > 0) {
+                        Surface(
+                            onClick = onReplyClick,
+                            shape = RoundedCornerShape(12.dp),
+                            color = Color.White.copy(alpha = 0.15f)
+                        ) {
+                            Text(
+                                text = "$replyCount ${if (replyCount == 1) "reply" else "replies"}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.White,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -950,5 +1232,38 @@ private fun formatRelativeTime(timestamp: Long): String {
             val dateFormat = SimpleDateFormat("MMM d", Locale.getDefault())
             dateFormat.format(Date(timestamp))
         }
+    }
+}
+
+/**
+ * Toggle chip for filtering to unwatched videos only.
+ */
+@Composable
+private fun UnwatchedOnlyToggle(
+    isEnabled: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        onClick = { onToggle(!isEnabled) },
+        shape = RoundedCornerShape(20.dp),
+        color = if (isEnabled) {
+            MaterialTheme.colorScheme.primaryContainer
+        } else {
+            Color.Black.copy(alpha = 0.5f)
+        },
+        modifier = modifier
+    ) {
+        Text(
+            text = "Unwatched only",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (isEnabled) FontWeight.Bold else FontWeight.Normal,
+            color = if (isEnabled) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+            } else {
+                Color.White
+            },
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+        )
     }
 }

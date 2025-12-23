@@ -138,6 +138,57 @@ class StorageManagementViewModel @Inject constructor(
     fun formatBytes(bytes: Long): String = storageService.formatBytes(bytes)
 }
 
+/**
+ * Storage content for embedding in SettingsPanel.
+ * Provides the same functionality as StorageManagementScreen without the scaffold.
+ */
+@Composable
+fun StorageContent(
+    modifier: Modifier = Modifier,
+    viewModel: StorageManagementViewModel = hiltViewModel()
+) {
+    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Show success snackbar
+    LaunchedEffect(uiState.showClearSuccess) {
+        if (uiState.showClearSuccess) {
+            val message = "Cleared ${viewModel.formatBytes(uiState.lastClearedBytes)}"
+            snackbarHostState.showSnackbar(message)
+            viewModel.dismissClearSuccess()
+        }
+    }
+
+    Box(modifier = modifier.fillMaxSize()) {
+        if (uiState.isLoading) {
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator()
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Calculating storage usage...")
+                }
+            }
+        } else {
+            StorageManagementContent(
+                modifier = Modifier.fillMaxSize(),
+                breakdown = uiState.breakdown,
+                isClearing = uiState.isClearing,
+                clearingCategory = uiState.clearingCategory,
+                onClearCategory = viewModel::clearCategory,
+                formatBytes = viewModel::formatBytes
+            )
+        }
+
+        SnackbarHost(
+            hostState = snackbarHostState,
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StorageManagementScreen(

@@ -10,7 +10,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -308,17 +307,10 @@ fun EtaStopSharingLink(
         Text(
             text = "Stop Sharing ETA",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.primary,
-            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier
-                .padding(top = 8.dp, bottom = 4.dp) // Separation from message above
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null // No ripple - cleaner look for small text link
-                ) {
-                    onStopSharing()
-                }
-                .padding(horizontal = 8.dp, vertical = 4.dp) // Touch target padding
+                .clickable { onStopSharing() }
+                .padding(top = 4.dp, bottom = 8.dp)
         )
     }
 }

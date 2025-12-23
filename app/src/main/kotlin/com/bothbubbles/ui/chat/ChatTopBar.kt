@@ -15,6 +15,8 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -40,6 +42,7 @@ import com.bothbubbles.util.PhoneNumberFormatter
  * @param sendModeManager Manager for send mode state (for menu visibility)
  * @param reelsFeedEnabled Whether the Reels feed feature is enabled
  * @param hasReelVideos Whether there are cached reel videos for this chat
+ * @param unwatchedReelsCount Count of unwatched Reels received after initial sync (for badge)
  * @param isBubbleMode When true, shows simplified UI for Android conversation bubbles
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -59,6 +62,7 @@ fun ChatTopBar(
     modifier: Modifier = Modifier,
     reelsFeedEnabled: Boolean = false,
     hasReelVideos: Boolean = false,
+    unwatchedReelsCount: Int = 0,
     isBubbleMode: Boolean = false
 ) {
     // Collect state internally from delegates to avoid ChatScreen recomposition
@@ -89,6 +93,7 @@ fun ChatTopBar(
         onLife360Click = { onLife360MapClick(firstParticipantAddress) },
         reelsFeedEnabled = reelsFeedEnabled,
         hasReelVideos = hasReelVideos,
+        unwatchedReelsCount = unwatchedReelsCount,
         onBackClick = onBackClick,
         onDetailsClick = onDetailsClick,
         onVideoCallClick = onVideoCallClick,
@@ -122,6 +127,7 @@ private fun ChatTopBarContent(
     onLife360Click: () -> Unit,
     reelsFeedEnabled: Boolean,
     hasReelVideos: Boolean,
+    unwatchedReelsCount: Int,
     onBackClick: () -> Unit,
     onDetailsClick: () -> Unit,
     onVideoCallClick: () -> Unit,
@@ -214,15 +220,40 @@ private fun ChatTopBarContent(
                     Icon(Icons.Default.OpenInFull, contentDescription = "Open in app")
                 }
             } else {
-                // Video call button
-                IconButton(onClick = onVideoCallClick) {
-                    Icon(Icons.Outlined.Videocam, contentDescription = "Video call")
+                // Reels button - shown for all chats when enabled and has videos
+                // Shows badge with unwatched count in bottom-right
+                if (reelsFeedEnabled && hasReelVideos) {
+                    BadgedBox(
+                        badge = {
+                            if (unwatchedReelsCount > 0) {
+                                Badge(
+                                    containerColor = MaterialTheme.colorScheme.error,
+                                    contentColor = MaterialTheme.colorScheme.onError,
+                                    modifier = Modifier.semantics {
+                                        contentDescription = "$unwatchedReelsCount unwatched reels"
+                                    }
+                                ) {
+                                    Text(
+                                        text = if (unwatchedReelsCount > 99) "99+" else unwatchedReelsCount.toString(),
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    ) {
+                        IconButton(onClick = onReelsClick) {
+                            Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+                        }
+                    }
                 }
 
-                // Reels button - only show when enabled and there are videos
-                if (reelsFeedEnabled && hasReelVideos) {
-                    IconButton(onClick = onReelsClick) {
-                        Icon(Icons.Default.Subscriptions, contentDescription = "Reels feed")
+                // Video call button - only shown for 1:1 chats
+                if (!isGroup) {
+                    IconButton(onClick = onVideoCallClick) {
+                        Icon(
+                            Icons.Outlined.Videocam,
+                            contentDescription = "Video call"
+                        )
                     }
                 }
 

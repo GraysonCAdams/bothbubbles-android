@@ -100,6 +100,7 @@ object MessageTransformationUtils {
 
         return MessageUiModel(
             guid = guid,
+            chatGuid = chatGuid,
             text = text,
             subject = subject,
             dateCreated = dateCreated,

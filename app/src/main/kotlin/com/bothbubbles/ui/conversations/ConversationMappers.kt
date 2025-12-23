@@ -58,6 +58,13 @@ suspend fun ChatEntity.toUiModel(
         // Check for group events
         lastMessage?.isGroupEvent == true -> MessageType.GROUP_EVENT
 
+        // Check for links early - balloonBundleId is also set for rich link previews
+        rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
+
+        // Check for app messages (balloonBundleId) BEFORE attachments
+        // iMessage apps send plugin payload attachments that we don't want to display as files
+        !lastMessage?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
+
         // Attachment-based types
         firstAttachment != null -> when {
             firstAttachment.isSticker -> MessageType.STICKER
@@ -73,14 +80,8 @@ suspend fun ChatEntity.toUiModel(
             else -> MessageType.ATTACHMENT
         }
 
-        // Check for app messages (balloonBundleId)
-        !lastMessage?.balloonBundleId.isNullOrBlank() -> MessageType.APP_MESSAGE
-
         // Check for location in text
         rawMessageText.containsLocation() -> MessageType.LOCATION
-
-        // Check for links
-        rawMessageText.contains("http://") || rawMessageText.contains("https://") -> MessageType.LINK
 
         else -> MessageType.TEXT
     }

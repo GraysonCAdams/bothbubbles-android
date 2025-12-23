@@ -65,6 +65,14 @@ class ChatSyncOperations @Inject constructor(
 
             val chatDtos = body.data.orEmpty()
 
+            // Log group chats with names for debugging sync issues
+            val namedGroups = chatDtos.filter {
+                (it.participants?.size ?: 0) > 1 && !it.displayName.isNullOrBlank()
+            }
+            if (namedGroups.isNotEmpty()) {
+                Timber.tag(TAG).d("Synced ${namedGroups.size} named group chats: ${namedGroups.map { it.displayName }.joinToString(", ")}")
+            }
+
             // Link to unified chats first, then build entities with unified_chat_id
             val chatsWithUnifiedIds = chatDtos.map { chatDto ->
                 val unifiedChatId = linkToUnifiedChatIfNeeded(chatDto)

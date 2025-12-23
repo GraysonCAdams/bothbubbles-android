@@ -1,6 +1,7 @@
 package com.bothbubbles.services.socialmedia
 
 import android.content.Context
+import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -44,7 +45,9 @@ data class CachedVideo(
     val sentTimestamp: Long = 0L,
     val cachedAt: Long = System.currentTimeMillis(),
     /** Whether this video has been viewed in the Reels feed */
-    val viewedInReels: Boolean = false
+    val viewedInReels: Boolean = false,
+    /** Timestamp when video was last viewed in Reels feed (0 if never viewed) */
+    val lastViewedAt: Long = 0L
 )
 
 /**
@@ -93,6 +96,17 @@ interface SocialMediaCacher {
 
     /** Removes a specific cached video. */
     suspend fun removeFromCache(originalUrl: String): Boolean
+
+    /** Gets the last viewed timestamp for a video (0 if never viewed). */
+    fun getLastViewedAt(originalUrl: String): Long
+
+    /**
+     * Cleans up stale cached videos based on view status and age.
+     * - Watched videos not re-watched in 1 week are deleted
+     * - Unwatched videos older than 2 weeks are deleted
+     * @return Number of videos deleted
+     */
+    suspend fun cleanupStaleVideos(): Int
 }
 
 /**
@@ -102,7 +116,8 @@ interface SocialMediaCacher {
 @Singleton
 class SocialMediaCacheManager @Inject constructor(
     @ApplicationContext private val context: Context,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val messageDao: MessageDao
 ) : SocialMediaCacher {
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -126,11 +141,198 @@ class SocialMediaCacheManager @Inject constructor(
         context.getSharedPreferences(VIEWED_PREFS_NAME, Context.MODE_PRIVATE)
     }
 
+    // SharedPreferences for persisting video metadata
+    private val metadataPrefs by lazy {
+        context.getSharedPreferences(METADATA_PREFS_NAME, Context.MODE_PRIVATE)
+    }
+
     companion object {
         private const val CACHE_DIR_NAME = "social_media_videos"
         private const val VIDEO_EXTENSION = ".mp4"
         private const val MAX_CACHE_SIZE_BYTES = 500L * 1024 * 1024 // 500 MB
         private const val VIEWED_PREFS_NAME = "social_media_viewed"
+        private const val METADATA_PREFS_NAME = "social_media_metadata"
+        private const val LAST_VIEWED_PREFIX = "last_viewed_"
+        // Cleanup thresholds
+        private const val WATCHED_STALE_THRESHOLD_MS = 7L * 24 * 60 * 60 * 1000 // 1 week
+        private const val UNWATCHED_STALE_THRESHOLD_MS = 14L * 24 * 60 * 60 * 1000 // 2 weeks
+    }
+
+    init {
+        // Load persisted metadata on initialization
+        loadPersistedMetadata()
+    }
+
+    /**
+     * Load video metadata from SharedPreferences into memory cache.
+     */
+    private fun loadPersistedMetadata() {
+        try {
+            metadataPrefs.all.forEach { (hash, json) ->
+                if (json is String) {
+                    parseMetadataJson(hash, json)?.let { video ->
+                        // Only add if the video file still exists
+                        val file = File(cacheDir, "$hash$VIDEO_EXTENSION")
+                        if (file.exists() && file.length() > 0) {
+                            videoMetadataCache[hash] = video
+                        }
+                    }
+                }
+            }
+            Timber.d("[SocialMediaCache] Loaded ${videoMetadataCache.size} cached video metadata entries")
+        } catch (e: Exception) {
+            Timber.e(e, "[SocialMediaCache] Failed to load persisted metadata")
+        }
+    }
+
+    /**
+     * Recovers metadata for orphaned cached videos by matching them to messages in the database.
+     * This is needed when videos were cached before metadata persistence was added.
+     * Should be called once at startup or when Reels feed is first accessed.
+     *
+     * @return Number of videos recovered
+     */
+    suspend fun recoverOrphanedMetadata(): Int = withContext(ioDispatcher) {
+        try {
+            // Get all cached video files
+            val cachedFiles = cacheDir.listFiles()
+                ?.filter { it.isFile && it.extension == "mp4" }
+                ?.associate { it.nameWithoutExtension to it.absolutePath }
+                ?: return@withContext 0
+
+            // Find orphaned files (files without metadata)
+            val orphanedHashes = cachedFiles.keys.filter { hash ->
+                !videoMetadataCache.containsKey(hash)
+            }
+
+            if (orphanedHashes.isEmpty()) {
+                Timber.d("[SocialMediaCache] No orphaned cache files found")
+                return@withContext 0
+            }
+
+            Timber.d("[SocialMediaCache] Found ${orphanedHashes.size} orphaned cache files, attempting recovery")
+
+            // Query messages with social media URLs
+            val messagesWithUrls = messageDao.getMessagesWithSocialMediaUrls()
+            Timber.d("[SocialMediaCache] Found ${messagesWithUrls.size} messages with social media URLs")
+
+            var recoveredCount = 0
+
+            // Extract URLs from messages and try to match with orphaned files
+            for (message in messagesWithUrls) {
+                val text = message.text ?: continue
+                val urls = extractSocialMediaUrls(text)
+
+                for (url in urls) {
+                    val hash = hashUrl(url)
+                    if (hash in orphanedHashes && cachedFiles.containsKey(hash)) {
+                        // Found a match! Recover metadata
+                        val platform = detectPlatform(url) ?: SocialMediaPlatform.INSTAGRAM
+                        val cachedVideo = CachedVideo(
+                            originalUrl = url,
+                            messageGuid = message.guid,
+                            chatGuid = message.chatGuid,
+                            platform = platform,
+                            localPath = cachedFiles[hash]!!,
+                            senderName = null, // Not available from message
+                            senderAddress = message.senderAddress,
+                            sentTimestamp = message.dateCreated,
+                            cachedAt = System.currentTimeMillis()
+                        )
+                        videoMetadataCache[hash] = cachedVideo
+                        persistMetadata(hash, cachedVideo)
+                        recoveredCount++
+                        Timber.d("[SocialMediaCache] Recovered metadata for: ${url.take(50)}... -> chat=${message.chatGuid}")
+                    }
+                }
+            }
+
+            Timber.i("[SocialMediaCache] Recovered $recoveredCount orphaned video metadata entries")
+            recoveredCount
+        } catch (e: Exception) {
+            Timber.e(e, "[SocialMediaCache] Failed to recover orphaned metadata")
+            0
+        }
+    }
+
+    /**
+     * Extract social media URLs from text.
+     */
+    private fun extractSocialMediaUrls(text: String): List<String> {
+        val urls = mutableListOf<String>()
+        // Instagram patterns
+        val instagramPattern = Regex("""https?://(?:www\.)?instagram\.com/(?:reel|reels|p)/[A-Za-z0-9_-]+[^\s]*""")
+        urls.addAll(instagramPattern.findAll(text).map { it.value })
+
+        // TikTok patterns
+        val tiktokPattern = Regex("""https?://(?:www\.|vm\.)?tiktok\.com/[^\s]+""")
+        urls.addAll(tiktokPattern.findAll(text).map { it.value })
+
+        return urls
+    }
+
+    /**
+     * Detect platform from URL.
+     */
+    private fun detectPlatform(url: String): SocialMediaPlatform? {
+        return when {
+            url.contains("instagram.com") -> SocialMediaPlatform.INSTAGRAM
+            url.contains("tiktok.com") -> SocialMediaPlatform.TIKTOK
+            else -> null
+        }
+    }
+
+    /**
+     * Save video metadata to SharedPreferences.
+     */
+    private fun persistMetadata(hash: String, video: CachedVideo) {
+        try {
+            val json = buildMetadataJson(video)
+            metadataPrefs.edit().putString(hash, json).apply()
+        } catch (e: Exception) {
+            Timber.e(e, "[SocialMediaCache] Failed to persist metadata for $hash")
+        }
+    }
+
+    /**
+     * Remove video metadata from SharedPreferences.
+     */
+    private fun removePersistedMetadata(hash: String) {
+        metadataPrefs.edit().remove(hash).apply()
+    }
+
+    private fun buildMetadataJson(video: CachedVideo): String {
+        return org.json.JSONObject().apply {
+            put("originalUrl", video.originalUrl)
+            put("messageGuid", video.messageGuid)
+            put("chatGuid", video.chatGuid ?: "")
+            put("platform", video.platform.name)
+            put("localPath", video.localPath)
+            put("senderName", video.senderName ?: "")
+            put("senderAddress", video.senderAddress ?: "")
+            put("sentTimestamp", video.sentTimestamp)
+            put("cachedAt", video.cachedAt)
+        }.toString()
+    }
+
+    private fun parseMetadataJson(hash: String, json: String): CachedVideo? {
+        return try {
+            val obj = org.json.JSONObject(json)
+            CachedVideo(
+                originalUrl = obj.getString("originalUrl"),
+                messageGuid = obj.getString("messageGuid"),
+                chatGuid = obj.optString("chatGuid").takeIf { it.isNotBlank() },
+                platform = SocialMediaPlatform.valueOf(obj.getString("platform")),
+                localPath = obj.getString("localPath"),
+                senderName = obj.optString("senderName").takeIf { it.isNotBlank() },
+                senderAddress = obj.optString("senderAddress").takeIf { it.isNotBlank() },
+                sentTimestamp = obj.optLong("sentTimestamp", 0L),
+                cachedAt = obj.optLong("cachedAt", System.currentTimeMillis())
+            )
+        } catch (e: Exception) {
+            Timber.w(e, "[SocialMediaCache] Failed to parse metadata JSON for $hash")
+            null
+        }
     }
 
     /**
@@ -155,14 +357,17 @@ class SocialMediaCacheManager @Inject constructor(
     }
 
     /**
-     * Gets all cached videos ordered by most recent, with viewed status populated.
+     * Gets all cached videos ordered by most recent, with viewed status and last viewed timestamp populated.
      */
     override suspend fun getAllCachedVideos(): List<CachedVideo> = withContext(ioDispatcher) {
         videoMetadataCache.values
             .sortedByDescending { it.cachedAt }
             .filter { File(it.localPath).exists() }
             .map { video ->
-                video.copy(viewedInReels = isVideoViewed(video.originalUrl))
+                video.copy(
+                    viewedInReels = isVideoViewed(video.originalUrl),
+                    lastViewedAt = getLastViewedAt(video.originalUrl)
+                )
             }
     }
 
@@ -174,14 +379,18 @@ class SocialMediaCacheManager @Inject constructor(
     }
 
     /**
-     * Marks a video as viewed in the Reels feed.
+     * Marks a video as viewed in the Reels feed and updates last viewed timestamp.
      */
     override fun markVideoAsViewed(originalUrl: String) {
         val hash = hashUrl(originalUrl)
-        viewedPrefs.edit().putBoolean(hash, true).apply()
+        val now = System.currentTimeMillis()
+        viewedPrefs.edit()
+            .putBoolean(hash, true)
+            .putLong(LAST_VIEWED_PREFIX + hash, now)
+            .apply()
         // Update in-memory cache
         videoMetadataCache[hash]?.let { video ->
-            videoMetadataCache[hash] = video.copy(viewedInReels = true)
+            videoMetadataCache[hash] = video.copy(viewedInReels = true, lastViewedAt = now)
         }
     }
 
@@ -191,6 +400,14 @@ class SocialMediaCacheManager @Inject constructor(
     override fun isVideoViewed(originalUrl: String): Boolean {
         val hash = hashUrl(originalUrl)
         return viewedPrefs.getBoolean(hash, false)
+    }
+
+    /**
+     * Gets the last viewed timestamp for a video (0 if never viewed).
+     */
+    override fun getLastViewedAt(originalUrl: String): Long {
+        val hash = hashUrl(originalUrl)
+        return viewedPrefs.getLong(LAST_VIEWED_PREFIX + hash, 0L)
     }
 
     /**
@@ -300,6 +517,7 @@ class SocialMediaCacheManager @Inject constructor(
                         sentTimestamp = sentTimestamp
                     )
                     videoMetadataCache[hash] = cachedVideo
+                    persistMetadata(hash, cachedVideo)
 
                     progressFlow.value = DownloadProgress(
                         bytesDownloaded = bytesDownloaded,
@@ -347,6 +565,8 @@ class SocialMediaCacheManager @Inject constructor(
         cacheDir.deleteRecursively()
         cacheDir.mkdirs()
         videoMetadataCache.clear()
+        metadataPrefs.edit().clear().apply()
+        viewedPrefs.edit().clear().apply()
         freedBytes
     }
 
@@ -357,11 +577,63 @@ class SocialMediaCacheManager @Inject constructor(
         val hash = hashUrl(originalUrl)
         val file = File(cacheDir, "$hash$VIDEO_EXTENSION")
         videoMetadataCache.remove(hash)
+        removePersistedMetadata(hash)
+        // Clean up viewed status prefs
+        viewedPrefs.edit()
+            .remove(hash)
+            .remove(LAST_VIEWED_PREFIX + hash)
+            .apply()
         file.delete()
+    }
+
+    /**
+     * Cleans up stale cached videos based on view status and age.
+     * - Watched videos not re-watched in 1 week are deleted
+     * - Unwatched videos older than 2 weeks are deleted
+     * @return Number of videos deleted
+     */
+    override suspend fun cleanupStaleVideos(): Int = withContext(ioDispatcher) {
+        val now = System.currentTimeMillis()
+        val allVideos = getAllCachedVideos()
+        var deletedCount = 0
+
+        for (video in allVideos) {
+            val shouldDelete = if (video.viewedInReels) {
+                // Watched videos: delete if not re-watched in 1 week
+                val lastViewed = video.lastViewedAt
+                lastViewed > 0 && (now - lastViewed) > WATCHED_STALE_THRESHOLD_MS
+            } else {
+                // Unwatched videos: delete if cached more than 2 weeks ago
+                (now - video.cachedAt) > UNWATCHED_STALE_THRESHOLD_MS
+            }
+
+            if (shouldDelete) {
+                val hash = hashUrl(video.originalUrl)
+                val file = File(video.localPath)
+                if (file.delete()) {
+                    videoMetadataCache.remove(hash)
+                    removePersistedMetadata(hash)
+                    viewedPrefs.edit()
+                        .remove(hash)
+                        .remove(LAST_VIEWED_PREFIX + hash)
+                        .apply()
+                    deletedCount++
+                    Timber.d("Cleaned up stale video: ${video.originalUrl.take(50)}...")
+                }
+            }
+        }
+
+        if (deletedCount > 0) {
+            Timber.i("Cleaned up $deletedCount stale cached videos")
+        }
+        deletedCount
     }
 
     private fun cleanupCacheIfNeeded() {
         try {
+            // First, clean up stale videos (watched not re-watched in 1 week, unwatched after 2 weeks)
+            cleanupStaleVideosSync()
+
             var totalSize = cacheDir.walkTopDown()
                 .filter { it.isFile }
                 .sumOf { it.length() }
@@ -382,11 +654,54 @@ class SocialMediaCacheManager @Inject constructor(
                 if (file.delete()) {
                     totalSize -= size
                     videoMetadataCache.remove(hash)
+                    removePersistedMetadata(hash)
+                    viewedPrefs.edit()
+                        .remove(hash)
+                        .remove(LAST_VIEWED_PREFIX + hash)
+                        .apply()
                     Timber.d("Cleaned up cached video: ${file.name}")
                 }
             }
         } catch (e: Exception) {
             Timber.e(e, "Error during cache cleanup")
+        }
+    }
+
+    /**
+     * Synchronous version of stale cleanup for internal use.
+     */
+    private fun cleanupStaleVideosSync() {
+        val now = System.currentTimeMillis()
+        var deletedCount = 0
+
+        for ((hash, video) in videoMetadataCache.entries.toList()) {
+            val isViewed = viewedPrefs.getBoolean(hash, false)
+            val lastViewedAt = viewedPrefs.getLong(LAST_VIEWED_PREFIX + hash, 0L)
+
+            val shouldDelete = if (isViewed) {
+                // Watched videos: delete if not re-watched in 1 week
+                lastViewedAt > 0 && (now - lastViewedAt) > WATCHED_STALE_THRESHOLD_MS
+            } else {
+                // Unwatched videos: delete if cached more than 2 weeks ago
+                (now - video.cachedAt) > UNWATCHED_STALE_THRESHOLD_MS
+            }
+
+            if (shouldDelete) {
+                val file = File(video.localPath)
+                if (file.exists() && file.delete()) {
+                    videoMetadataCache.remove(hash)
+                    removePersistedMetadata(hash)
+                    viewedPrefs.edit()
+                        .remove(hash)
+                        .remove(LAST_VIEWED_PREFIX + hash)
+                        .apply()
+                    deletedCount++
+                }
+            }
+        }
+
+        if (deletedCount > 0) {
+            Timber.i("Cleaned up $deletedCount stale cached videos during cache maintenance")
         }
     }
 

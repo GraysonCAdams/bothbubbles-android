@@ -3,6 +3,7 @@ package com.bothbubbles.ui.components.reels
 import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
+import com.bothbubbles.ui.components.message.ReactionUiModel
 import kotlinx.coroutines.flow.StateFlow
 
 /**
@@ -46,6 +47,12 @@ data class ReelItem(
     // === Common fields ===
     /** Current tapback reaction on this reel, if any */
     val currentTapback: ReelsTapback? = null,
+    /** Avatar path for the sender (contact photo) */
+    val avatarPath: String? = null,
+    /** Reactions from others on the original message */
+    val reactions: List<ReactionUiModel> = emptyList(),
+    /** Number of thread replies to this message */
+    val replyCount: Int = 0,
 
     // === Download state (for pending items) ===
     /** Whether this item is currently being downloaded */
@@ -86,10 +93,24 @@ data class ReelItem(
         /**
          * Creates a ReelItem from a CachedVideo.
          */
-        fun fromCached(video: CachedVideo, currentTapback: ReelsTapback? = null): ReelItem {
+        fun fromCached(
+            video: CachedVideo,
+            currentTapback: ReelsTapback? = null,
+            avatarPath: String? = null,
+            displayName: String? = null,
+            reactions: List<ReactionUiModel> = emptyList(),
+            replyCount: Int = 0
+        ): ReelItem {
             return ReelItem(
-                cachedVideo = video,
-                currentTapback = currentTapback
+                cachedVideo = if (displayName != null) {
+                    video.copy(senderName = displayName)
+                } else {
+                    video
+                },
+                currentTapback = currentTapback,
+                avatarPath = avatarPath,
+                reactions = reactions,
+                replyCount = replyCount
             )
         }
 

@@ -126,6 +126,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     lateinit var authInterceptor: AuthInterceptor
 
     @Inject
+    lateinit var socialMediaDownloadService: com.bothbubbles.services.socialmedia.SocialMediaDownloadService
+
+    @Inject
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
@@ -231,6 +234,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
         // Sync group chats to system contacts for Google Assistant voice commands
         initializeGroupContactSync()
+
+        // Auto-cache recent social media videos (when Reels enabled and on WiFi)
+        initializeSocialMediaCache()
 
         PerformanceProfiler.end(startupId)
         Timber.d("App.onCreate complete - print stats with: adb logcat | grep PerfProfiler")
@@ -558,6 +564,29 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
                 Timber.d("Group contact sync completed")
             } catch (e: Exception) {
                 Timber.w(e, "Error syncing group contacts")
+            }
+        }
+    }
+
+    /**
+     * Auto-cache recent social media videos when Reels is enabled.
+     * Runs in background, only on WiFi (unless cellular downloads are enabled).
+     */
+    private fun initializeSocialMediaCache() {
+        applicationScope.launch(ioDispatcher) {
+            try {
+                val setupComplete = settingsDataStore.isSetupComplete.first()
+                if (!setupComplete) return@launch
+
+                // Small delay to let other startup tasks complete first
+                kotlinx.coroutines.delay(2000)
+
+                val cached = socialMediaDownloadService.cacheRecentVideos(maxVideos = 5)
+                if (cached > 0) {
+                    Timber.d("Auto-cached $cached social media videos")
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Error auto-caching social media videos")
             }
         }
     }

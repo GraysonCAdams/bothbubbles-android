@@ -1,7 +1,14 @@
 package com.bothbubbles.ui.chat.details
 
+import android.Manifest
+import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -13,6 +20,12 @@ import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
+import androidx.core.content.PermissionChecker
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -57,6 +70,58 @@ fun ConversationDetailsScreen(
     var showCalendarPickerDialog by remember { mutableStateOf(false) }
     var showLife360ActionsSheet by remember { mutableStateOf(false) }
     var selectedParticipant by remember { mutableStateOf<HandleEntity?>(null) }
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+
+    // Calendar permission state
+    var hasCalendarPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_CALENDAR
+            ) == PermissionChecker.PERMISSION_GRANTED
+        )
+    }
+
+    // Calendar permission launcher
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasCalendarPermission = granted
+        if (granted) {
+            // Permission granted, show the calendar picker
+            showCalendarPickerDialog = true
+        } else {
+            // Check if we should show rationale - if false, user permanently denied
+            val activity = context.findActivity()
+            val shouldShowRationale = activity?.let {
+                ActivityCompat.shouldShowRequestPermissionRationale(it, Manifest.permission.READ_CALENDAR)
+            } ?: true
+
+            if (!shouldShowRationale) {
+                // Permission permanently denied - open app settings
+                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", context.packageName, null)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(intent)
+            }
+        }
+    }
+
+    // Re-check calendar permission when returning from system settings
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                hasCalendarPermission = ContextCompat.checkSelfPermission(
+                    context,
+                    Manifest.permission.READ_CALENDAR
+                ) == PermissionChecker.PERMISSION_GRANTED
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     // Handle action states
     LaunchedEffect(actionState) {
@@ -188,7 +253,6 @@ fun ConversationDetailsScreen(
 
                 // Action buttons row (4 buttons: Call, Video, Contact, Search)
                 item {
-                    val context = LocalContext.current
                     ActionButtonsRow(
                         hasContact = uiState.hasContact,
                         onCallClick = {
@@ -293,7 +357,13 @@ fun ConversationDetailsScreen(
                             calendarAssociation = uiState.calendarAssociation,
                             onDiscordEditClick = { showDiscordSetupDialog = true },
                             onDiscordClearClick = { viewModel.clearDiscordChannelId() },
-                            onCalendarEditClick = { showCalendarPickerDialog = true },
+                            onCalendarEditClick = {
+                                if (hasCalendarPermission) {
+                                    showCalendarPickerDialog = true
+                                } else {
+                                    calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                                }
+                            },
                             onCalendarClearClick = { viewModel.clearCalendarAssociation() }
                         )
                     }
@@ -431,7 +501,6 @@ fun ConversationDetailsScreen(
     }
 
     // Video call method dialog
-    val context = LocalContext.current
     if (showVideoCallDialog) {
         VideoCallMethodDialog(
             onGoogleMeet = {
@@ -509,4 +578,13 @@ fun ConversationDetailsScreen(
             getCalendars = viewModel::getAvailableCalendars
         )
     }
+}
+
+private fun Context.findActivity(): Activity? {
+    var context = this
+    while (context is ContextWrapper) {
+        if (context is Activity) return context
+        context = context.baseContext
+    }
+    return null
 }

@@ -27,6 +27,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import timber.log.Timber
 import javax.inject.Inject
 
 /**
@@ -47,7 +48,9 @@ class SocialMediaLinkViewModel @Inject constructor(
      * Detects the platform for a URL.
      */
     fun detectPlatform(url: String): SocialMediaPlatform? {
-        return downloader.detectPlatform(url)
+        val platform = downloader.detectPlatform(url)
+        Timber.w("[SmartLink] detectPlatform($url) = $platform")
+        return platform
     }
 
     /**
@@ -99,10 +102,12 @@ class SocialMediaLinkViewModel @Inject constructor(
 fun SmartLinkPreview(
     url: String,
     messageGuid: String,
+    chatGuid: String?,
     isFromMe: Boolean,
     modifier: Modifier = Modifier,
     maxWidth: Dp = 280.dp,
     onLongPress: (() -> Unit)? = null,
+    onOpenReelsFeed: (() -> Unit)? = null,
     viewModel: SocialMediaLinkViewModel = hiltViewModel(),
     linkPreviewViewModel: LinkPreviewViewModel = hiltViewModel()
 ) {
@@ -134,6 +139,7 @@ fun SmartLinkPreview(
         SocialMediaVideoPlayer(
             url = url,
             messageGuid = messageGuid,
+            chatGuid = chatGuid,
             platform = platform,
             downloader = viewModel.getDownloader(),
             isFromMe = isFromMe,
@@ -146,6 +152,8 @@ fun SmartLinkPreview(
                 val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
                 context.startActivity(intent)
             },
+            onOpenReelsFeed = onOpenReelsFeed,
+            onLongPress = onLongPress,
             modifier = modifier
         )
     } else {

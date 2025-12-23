@@ -47,6 +47,7 @@ class ChatSyncHelper @Inject constructor(
 
             val chats = result.getOrThrow()
             progressTracker.totalChatsFound.addAndGet(chats.size)
+            Timber.tag(TAG).d("Fetched page at offset $offset: ${chats.size} chats (total: ${progressTracker.totalChatsFound.get()})")
             offset += CHAT_PAGE_SIZE
 
             // Queue each chat for message syncing

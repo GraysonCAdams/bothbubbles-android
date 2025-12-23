@@ -48,10 +48,11 @@ import timber.log.Timber
  */
 class ChatHeaderIntegrationsDelegate @AssistedInject constructor(
     private val integrations: Set<@JvmSuppressWildcards ChatHeaderIntegration>,
-    @Assisted private val participantAddresses: Set<String>,
+    @Assisted initialParticipantAddresses: Set<String>,
     @Assisted private val isGroup: Boolean,
     @Assisted private val scope: CoroutineScope
 ) {
+    private var participantAddresses: Set<String> = initialParticipantAddresses
     @AssistedFactory
     interface Factory {
         fun create(
@@ -101,7 +102,8 @@ class ChatHeaderIntegrationsDelegate @AssistedInject constructor(
     fun updateParticipants(addresses: Set<String>) {
         if (addresses == participantAddresses) return
         Timber.tag(TAG).d("Participants updated: $addresses")
-        // Re-initialize with new addresses
+        // Update the addresses and re-initialize integrations
+        participantAddresses = addresses
         observeIntegrations()
     }
 
