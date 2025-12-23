@@ -6,8 +6,11 @@ import com.bothbubbles.data.local.db.dao.ChatDao
 import com.bothbubbles.data.local.db.dao.HandleDao
 import com.bothbubbles.data.local.db.dao.MessageDao
 import com.bothbubbles.data.local.db.dao.MessageEditHistoryDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
 import com.bothbubbles.core.model.entity.MessageEditHistoryEntity
+import com.bothbubbles.core.model.entity.SocialMediaLinkEntity
+import com.bothbubbles.core.model.entity.SocialMediaPlatform
 import com.bothbubbles.core.model.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.AttachmentEntity
 import com.bothbubbles.data.local.db.entity.MessageEntity
@@ -21,9 +24,11 @@ import com.bothbubbles.di.ApplicationScope
 import com.bothbubbles.services.nameinference.NameInferenceService
 import com.bothbubbles.services.socialmedia.SocialMediaDownloadService
 import com.bothbubbles.util.UnifiedChatIdGenerator
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -47,12 +52,25 @@ class IncomingMessageHandler @Inject constructor(
     private val attachmentDao: AttachmentDao,
     private val unifiedChatDao: UnifiedChatDao,
     private val messageEditHistoryDao: MessageEditHistoryDao,
+    private val socialMediaLinkDao: SocialMediaLinkDao,
     private val settingsDataStore: SettingsDataStore,
     private val nameInferenceService: NameInferenceService,
     private val socialMediaDownloadService: SocialMediaDownloadService,
     private val api: BothBubblesApi,
     @ApplicationScope private val applicationScope: CoroutineScope
 ) : IncomingMessageProcessor {
+
+    companion object {
+        // Instagram URL patterns
+        private val INSTAGRAM_PATTERN = Regex(
+            """https?://(?:www\.)?instagram\.com/(?:reel|reels|p|share/reel|share/p)/[A-Za-z0-9_-]+[^\s]*"""
+        )
+
+        // TikTok URL patterns
+        private val TIKTOK_PATTERN = Regex(
+            """https?://(?:www\.|vm\.|vt\.)?tiktok\.com/[^\s]+"""
+        )
+    }
     /**
      * Handle a new message from server (via Socket.IO or push)
      *
@@ -128,9 +146,19 @@ class IncomingMessageHandler @Inject constructor(
         // Sync attachments
         syncIncomingAttachments(messageDto)
 
+        // Store social media links for Reels feed (only for non-reaction messages)
+        // Reactions are excluded because they quote the URL but weren't the sender
+        val messageText = message.text
+        if (!messageText.isNullOrBlank() && messageDto.associatedMessageType == null) {
+            storeSocialMediaLinks(
+                message = message,
+                chatGuid = chatGuid,
+                senderAddress = messageDto.handle?.address
+            )
+        }
+
         // Background download social media videos if enabled
         // Process both incoming and outgoing messages that contain text
-        val messageText = message.text
         if (!messageText.isNullOrBlank()) {
             triggerSocialMediaBackgroundDownload(
                 messageGuid = message.guid,
@@ -143,6 +171,77 @@ class IncomingMessageHandler @Inject constructor(
         }
 
         return message
+    }
+
+    /**
+     * Detects and stores social media links from message text.
+     * This populates the social_media_links table for the Reels feed.
+     *
+     * Only called for non-reaction messages to ensure correct sender attribution.
+     */
+    private suspend fun storeSocialMediaLinks(
+        message: MessageEntity,
+        chatGuid: String,
+        senderAddress: String?
+    ) {
+        val text = message.text ?: return
+        val links = mutableListOf<SocialMediaLinkEntity>()
+
+        // Find Instagram URLs
+        for (match in INSTAGRAM_PATTERN.findAll(text)) {
+            val url = match.value
+            links.add(
+                SocialMediaLinkEntity(
+                    urlHash = hashUrl(url),
+                    url = url,
+                    messageGuid = message.guid,
+                    chatGuid = chatGuid,
+                    platform = SocialMediaPlatform.INSTAGRAM.name,
+                    senderAddress = if (message.isFromMe) null else senderAddress,
+                    isFromMe = message.isFromMe,
+                    sentTimestamp = message.dateCreated,
+                    isDownloaded = false,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        // Find TikTok URLs
+        for (match in TIKTOK_PATTERN.findAll(text)) {
+            val url = match.value
+            links.add(
+                SocialMediaLinkEntity(
+                    urlHash = hashUrl(url),
+                    url = url,
+                    messageGuid = message.guid,
+                    chatGuid = chatGuid,
+                    platform = SocialMediaPlatform.TIKTOK.name,
+                    senderAddress = if (message.isFromMe) null else senderAddress,
+                    isFromMe = message.isFromMe,
+                    sentTimestamp = message.dateCreated,
+                    isDownloaded = false,
+                    createdAt = System.currentTimeMillis()
+                )
+            )
+        }
+
+        if (links.isNotEmpty()) {
+            try {
+                socialMediaLinkDao.insertAll(links)
+                Timber.d("[SocialMedia] Stored ${links.size} social media link(s) from message ${message.guid}")
+            } catch (e: Exception) {
+                Timber.w(e, "[SocialMedia] Failed to store social media links")
+            }
+        }
+    }
+
+    /**
+     * Hash URL for deduplication (matches SocialMediaCacheManager.hashUrl).
+     */
+    private fun hashUrl(url: String): String {
+        val md = MessageDigest.getInstance("SHA-256")
+        val digest = md.digest(url.toByteArray())
+        return digest.joinToString("") { "%02x".format(it) }.take(32)
     }
 
     /**
@@ -219,26 +318,34 @@ class IncomingMessageHandler @Inject constructor(
     /**
      * Resolve or create the unified chat ID for a chat.
      *
-     * Strategy:
-     * 1. Skip unified chat creation for group chats (they don't merge)
-     * 2. Check if chat already has a unified_chat_id
-     * 3. Try to find existing unified chat by normalized address
-     * 4. Create new unified chat if none exists
+     * Strategy for 1:1 chats:
+     * 1. Check if chat already has a unified_chat_id
+     * 2. Try to find existing unified chat by normalized address (enables iMessage/SMS merging)
+     * 3. Create new unified chat if none exists
+     *
+     * Strategy for group chats:
+     * 1. Check if chat already has a unified_chat_id
+     * 2. Create new unified chat using chat GUID as identifier (groups don't merge)
      */
     private suspend fun resolveUnifiedChatId(chatGuid: String, messageDto: MessageDto): String? {
         // Try to get chat with its unified_chat_id
         val chat = chatDao.getChatByGuid(chatGuid)
 
-        // Group chats should NOT be linked to unified chats
-        // Unified chats are for merging 1:1 iMessage/SMS conversations
-        if (chat?.isGroup == true) return null
-
         // If chat already has a unified_chat_id, use it
         chat?.unifiedChatId?.let { return it }
 
-        // Get the normalized address for this conversation
-        val normalizedAddress = resolveNormalizedAddress(chat?.chatIdentifier, messageDto)
-            ?: return null // Can't create unified chat without an address
+        // For group chats, use the chat GUID as the normalized address
+        // Group chats don't merge (each group is unique), but they still need unified IDs
+        // for consistent identification in contacts sync and deep links
+        val isGroup = chat?.isGroup == true
+        val normalizedAddress = if (isGroup) {
+            // Use chat GUID as identifier for groups (they're already unique)
+            chatGuid
+        } else {
+            // For 1:1 chats, use the normalized phone/email for potential iMessage/SMS merging
+            resolveNormalizedAddress(chat?.chatIdentifier, messageDto)
+                ?: return null // Can't create unified chat without an address
+        }
 
         // Get or create unified chat for this address
         val unifiedChat = unifiedChatDao.getOrCreate(
@@ -248,6 +355,21 @@ class IncomingMessageHandler @Inject constructor(
                 sourceId = chatGuid // The first chat becomes the source
             )
         )
+
+        // For 1:1 chats: if existing unified chat has SMS source but this chat is iMessage, prefer iMessage
+        // This ensures users navigate to iMessage when available for better experience
+        if (!isGroup) {
+            val currentSourceId = unifiedChat.sourceId
+            val isCurrentSourceSms = currentSourceId.startsWith("sms;", ignoreCase = true) ||
+                                      currentSourceId.startsWith("mms;", ignoreCase = true)
+            val isNewChatIMessage = !chatGuid.startsWith("sms;", ignoreCase = true) &&
+                                     !chatGuid.startsWith("mms;", ignoreCase = true)
+
+            if (isCurrentSourceSms && isNewChatIMessage) {
+                unifiedChatDao.updateSourceId(unifiedChat.id, chatGuid)
+                Timber.i("Upgraded unified chat ${unifiedChat.id} source from SMS to iMessage: $chatGuid")
+            }
+        }
 
         // Link the chat to this unified chat
         chatDao.setUnifiedChatId(chatGuid, unifiedChat.id)
@@ -510,8 +632,8 @@ class IncomingMessageHandler @Inject constructor(
             unifiedChatId = unifiedChatId,
             handleId = localHandleId,
             senderAddress = handle?.address,
-            text = text,
-            subject = subject,
+            text = HtmlEntityDecoder.decode(text),
+            subject = HtmlEntityDecoder.decode(subject),
             dateCreated = dateCreated ?: System.currentTimeMillis(),
             dateRead = dateRead,
             dateDelivered = dateDelivered,

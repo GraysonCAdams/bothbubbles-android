@@ -2,6 +2,7 @@ package com.bothbubbles.services.socialmedia
 
 import android.content.Context
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -101,6 +102,14 @@ interface SocialMediaCacher {
     fun getLastViewedAt(originalUrl: String): Long
 
     /**
+     * Updates cached video metadata (for repairing incorrect sender info).
+     * @param originalUrl The original post URL
+     * @param senderName The corrected sender display name
+     * @param senderAddress The corrected sender address (phone/email)
+     */
+    fun updateVideoMetadata(originalUrl: String, senderName: String?, senderAddress: String?)
+
+    /**
      * Cleans up stale cached videos based on view status and age.
      * - Watched videos not re-watched in 1 week are deleted
      * - Unwatched videos older than 2 weeks are deleted
@@ -117,7 +126,8 @@ interface SocialMediaCacher {
 class SocialMediaCacheManager @Inject constructor(
     @ApplicationContext private val context: Context,
     @IoDispatcher private val ioDispatcher: CoroutineDispatcher,
-    private val messageDao: MessageDao
+    private val messageDao: MessageDao,
+    private val socialMediaLinkDao: SocialMediaLinkDao
 ) : SocialMediaCacher {
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -418,6 +428,30 @@ class SocialMediaCacheManager @Inject constructor(
     }
 
     /**
+     * Updates cached video metadata (for repairing incorrect sender info).
+     *
+     * This is used by SocialMediaLinkMigrationHelper to fix videos that were
+     * incorrectly attributed to "You" due to tapback messages.
+     */
+    override fun updateVideoMetadata(originalUrl: String, senderName: String?, senderAddress: String?) {
+        val hash = hashUrl(originalUrl)
+        val existingVideo = videoMetadataCache[hash] ?: return
+
+        val updatedVideo = existingVideo.copy(
+            senderName = senderName,
+            senderAddress = senderAddress
+        )
+
+        // Update in-memory cache
+        videoMetadataCache[hash] = updatedVideo
+
+        // Persist to SharedPreferences
+        persistMetadata(hash, updatedVideo)
+
+        Timber.d("[SocialMediaCache] Updated metadata for $hash: senderName='$senderName'")
+    }
+
+    /**
      * Downloads and caches a video, returning the local path.
      * Provides progress updates via the returned StateFlow.
      *
@@ -519,6 +553,13 @@ class SocialMediaCacheManager @Inject constructor(
                     videoMetadataCache[hash] = cachedVideo
                     persistMetadata(hash, cachedVideo)
 
+                    // Mark the link as downloaded in the social_media_links table
+                    try {
+                        socialMediaLinkDao.markAsDownloaded(hash)
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to mark link as downloaded: $originalUrl")
+                    }
+
                     progressFlow.value = DownloadProgress(
                         bytesDownloaded = bytesDownloaded,
                         totalBytes = totalBytes,
@@ -562,11 +603,27 @@ class SocialMediaCacheManager @Inject constructor(
      */
     override suspend fun clearCache(): Long = withContext(ioDispatcher) {
         val freedBytes = getCacheSize()
+
+        // Get all URL hashes before clearing
+        val allHashes = videoMetadataCache.keys.toList()
+
         cacheDir.deleteRecursively()
         cacheDir.mkdirs()
         videoMetadataCache.clear()
         metadataPrefs.edit().clear().apply()
         viewedPrefs.edit().clear().apply()
+
+        // Mark all links as not downloaded so they show as pending again
+        if (allHashes.isNotEmpty()) {
+            try {
+                for (hash in allHashes) {
+                    socialMediaLinkDao.markAsNotDownloaded(hash)
+                }
+            } catch (e: Exception) {
+                Timber.w(e, "Failed to mark links as not downloaded after cache clear")
+            }
+        }
+
         freedBytes
     }
 
@@ -583,6 +640,14 @@ class SocialMediaCacheManager @Inject constructor(
             .remove(hash)
             .remove(LAST_VIEWED_PREFIX + hash)
             .apply()
+
+        // Mark link as not downloaded so it shows as pending again
+        try {
+            socialMediaLinkDao.markAsNotDownloaded(hash)
+        } catch (e: Exception) {
+            Timber.w(e, "Failed to mark link as not downloaded: $originalUrl")
+        }
+
         file.delete()
     }
 
@@ -617,6 +682,14 @@ class SocialMediaCacheManager @Inject constructor(
                         .remove(hash)
                         .remove(LAST_VIEWED_PREFIX + hash)
                         .apply()
+
+                    // Mark link as not downloaded so it can be re-cached if needed
+                    try {
+                        socialMediaLinkDao.markAsNotDownloaded(hash)
+                    } catch (e: Exception) {
+                        Timber.w(e, "Failed to mark link as not downloaded during cleanup")
+                    }
+
                     deletedCount++
                     Timber.d("Cleaned up stale video: ${video.originalUrl.take(50)}...")
                 }

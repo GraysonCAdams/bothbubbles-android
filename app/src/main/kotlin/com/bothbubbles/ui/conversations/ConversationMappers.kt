@@ -11,6 +11,7 @@ import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.LinkPreviewRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.util.PhoneNumberFormatter
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.parsing.UrlParsingUtils
 
 /**
@@ -26,7 +27,8 @@ suspend fun ChatEntity.toUiModel(
     application: Application
 ): ConversationUiModel {
     val lastMessage = messageRepository.getLatestMessageForChat(guid)
-    val rawMessageText = lastMessage?.text ?: ""
+    // Decode HTML entities in case old messages weren't decoded when stored
+    val rawMessageText = HtmlEntityDecoder.decode(lastMessage?.text) ?: ""
     val isFromMe = lastMessage?.isFromMe ?: false
 
     // Get participants for this chat
@@ -205,7 +207,7 @@ suspend fun ChatEntity.toUiModel(
         guid = guid,
         displayName = resolvedDisplayName,
         avatarPath = avatarPath,
-        chatAvatarPath = null, // Group photo path is now on UnifiedChatEntity
+        chatAvatarPath = serverGroupPhotoPath, // Server group photo for group chats
         lastMessageText = messageText,
         lastMessageTime = formatRelativeTime(lastMessage?.dateCreated ?: latestMessageDate ?: 0L, application),
         lastMessageTimestamp = lastMessage?.dateCreated ?: latestMessageDate ?: 0L,

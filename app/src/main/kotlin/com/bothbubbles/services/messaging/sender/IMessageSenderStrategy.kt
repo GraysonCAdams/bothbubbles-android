@@ -33,6 +33,7 @@ import com.bothbubbles.services.messaging.AttachmentPersistenceManager
 import com.bothbubbles.services.messaging.MessageDeliveryMode
 import com.bothbubbles.util.error.AttachmentErrorState
 import com.bothbubbles.util.error.MessageError
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.error.MessageErrorCode
 import com.bothbubbles.util.error.NetworkError
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -612,8 +613,8 @@ class IMessageSenderStrategy @Inject constructor(
             chatGuid = chatGuid,
             handleId = handleId,
             senderAddress = handle?.address,
-            text = text,
-            subject = subject,
+            text = HtmlEntityDecoder.decode(text),
+            subject = HtmlEntityDecoder.decode(subject),
             dateCreated = dateCreated ?: System.currentTimeMillis(),
             dateRead = dateRead,
             dateDelivered = dateDelivered,

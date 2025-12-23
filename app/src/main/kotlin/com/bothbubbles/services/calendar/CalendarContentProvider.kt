@@ -84,48 +84,45 @@ class CalendarContentProvider @Inject constructor(
      * Get current and upcoming events for a calendar within a time window.
      *
      * @param calendarId The calendar to query
-     * @param windowHours How far ahead to look (default 4 hours)
+     * @param windowHours How far ahead to look (default 12 hours)
      * @return List of events starting from now, sorted by start time
      */
     suspend fun getUpcomingEvents(
         calendarId: Long,
-        windowHours: Int = 4
+        windowHours: Int = 12
     ): List<CalendarEvent> = withContext(Dispatchers.IO) {
         if (!permissionStateMonitor.hasCalendarPermission()) {
+            Timber.tag(TAG).d("Calendar permission not granted")
             return@withContext emptyList()
         }
 
         val now = System.currentTimeMillis()
         val windowEnd = now + (windowHours * 60 * 60 * 1000L)
+
         val events = mutableListOf<CalendarEvent>()
 
-        val projection = arrayOf(
-            CalendarContract.Events._ID,
-            CalendarContract.Events.TITLE,
-            CalendarContract.Events.DTSTART,
-            CalendarContract.Events.DTEND,
-            CalendarContract.Events.ALL_DAY,
-            CalendarContract.Events.EVENT_LOCATION,
-            CalendarContract.Events.CALENDAR_COLOR
-        )
-
-        // Query events that:
-        // 1. Belong to the specified calendar
-        // 2. Start before window end AND end after now (overlapping or upcoming)
-        val selection = """
-            ${CalendarContract.Events.CALENDAR_ID} = ?
-            AND ${CalendarContract.Events.DTSTART} < ?
-            AND ${CalendarContract.Events.DTEND} > ?
-            AND ${CalendarContract.Events.DELETED} = 0
-        """.trimIndent()
-
+        // Query INSTANCES table - this includes recurring event occurrences
+        // The Events table only has master recurring events, not individual occurrences
         try {
+            val instancesUri = CalendarContract.Instances.CONTENT_URI.buildUpon()
+                .appendPath(now.toString())
+                .appendPath(windowEnd.toString())
+                .build()
+
             contentResolver.query(
-                CalendarContract.Events.CONTENT_URI,
-                projection,
-                selection,
-                arrayOf(calendarId.toString(), windowEnd.toString(), now.toString()),
-                "${CalendarContract.Events.DTSTART} ASC LIMIT 5"
+                instancesUri,
+                arrayOf(
+                    CalendarContract.Instances.EVENT_ID,
+                    CalendarContract.Instances.TITLE,
+                    CalendarContract.Instances.BEGIN,
+                    CalendarContract.Instances.END,
+                    CalendarContract.Instances.ALL_DAY,
+                    CalendarContract.Instances.EVENT_LOCATION,
+                    CalendarContract.Instances.CALENDAR_COLOR
+                ),
+                "${CalendarContract.Instances.CALENDAR_ID} = ?",
+                arrayOf(calendarId.toString()),
+                "${CalendarContract.Instances.BEGIN} ASC LIMIT 5"
             )?.use { cursor ->
                 while (cursor.moveToNext()) {
                     events.add(
@@ -142,7 +139,7 @@ class CalendarContentProvider @Inject constructor(
                 }
             }
         } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "Failed to query events for calendar $calendarId")
+            Timber.tag(TAG).e(e, "Failed to query instances for calendar $calendarId")
         }
 
         events
@@ -156,7 +153,7 @@ class CalendarContentProvider @Inject constructor(
      */
     suspend fun getCurrentOrNextEvent(
         calendarId: Long,
-        lookaheadHours: Int = 4
+        lookaheadHours: Int = 12
     ): CurrentEventState = withContext(Dispatchers.IO) {
         if (!permissionStateMonitor.hasCalendarPermission()) {
             return@withContext CurrentEventState.NoPermission
@@ -169,9 +166,10 @@ class CalendarContentProvider @Inject constructor(
             return@withContext CurrentEventState.NoUpcomingEvents
         }
 
-        val currentEvent = events.firstOrNull { event ->
-            event.startTime <= now && event.endTime > now
-        }
+        // Find all currently active events, then pick the one that started most recently
+        val currentEvent = events
+            .filter { event -> event.startTime <= now && event.endTime > now }
+            .maxByOrNull { it.startTime }  // Most recently started
 
         if (currentEvent != null) {
             return@withContext CurrentEventState.InEvent(currentEvent)

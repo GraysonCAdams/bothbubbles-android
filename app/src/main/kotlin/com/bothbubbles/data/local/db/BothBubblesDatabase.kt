@@ -22,6 +22,7 @@ import com.bothbubbles.data.local.db.dao.PopularChatsDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
@@ -41,6 +42,7 @@ import com.bothbubbles.data.local.db.entity.PendingReadStatusEntity
 import com.bothbubbles.data.local.db.entity.QuickReplyTemplateEntity
 import com.bothbubbles.data.local.db.entity.ScheduledMessageEntity
 import com.bothbubbles.data.local.db.entity.SeenMessageEntity
+import com.bothbubbles.data.local.db.entity.SocialMediaLinkEntity
 import com.bothbubbles.data.local.db.entity.SyncRangeEntity
 import com.bothbubbles.data.local.db.entity.UnifiedChatEntity
 import com.bothbubbles.data.local.db.entity.TombstoneEntity
@@ -82,9 +84,10 @@ import com.bothbubbles.core.model.entity.Life360MemberEntity
         TombstoneEntity::class,
         Life360MemberEntity::class,
         MessageEditHistoryEntity::class,
-        ContactCalendarAssociationEntity::class
+        ContactCalendarAssociationEntity::class,
+        SocialMediaLinkEntity::class
     ],
-    version = 54,
+    version = 57,
     exportSchema = true
 )
 abstract class BothBubblesDatabase : RoomDatabase() {
@@ -113,6 +116,7 @@ abstract class BothBubblesDatabase : RoomDatabase() {
     abstract fun popularChatsDao(): PopularChatsDao
     abstract fun messageEditHistoryDao(): MessageEditHistoryDao
     abstract fun contactCalendarDao(): ContactCalendarDao
+    abstract fun socialMediaLinkDao(): SocialMediaLinkDao
 
     companion object {
         const val DATABASE_NAME = "bothbubbles.db"

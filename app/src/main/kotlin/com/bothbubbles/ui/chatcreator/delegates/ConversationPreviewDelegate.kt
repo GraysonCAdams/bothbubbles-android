@@ -1,11 +1,17 @@
 package com.bothbubbles.ui.chatcreator.delegates
 
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
+import com.bothbubbles.data.local.db.entity.displayName
+import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
+import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.data.repository.MessageRepository
 import com.bothbubbles.ui.chatcreator.ConversationPreviewState
-import com.bothbubbles.ui.chatcreator.MessagePreview
 import com.bothbubbles.ui.chatcreator.SelectedRecipient
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.normalizeAddress
+import com.bothbubbles.ui.components.message.toUiModel
 import com.bothbubbles.util.PhoneNumberFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -20,12 +26,16 @@ import javax.inject.Inject
  *
  * This delegate handles:
  * - Finding existing conversations for selected recipients
- * - Loading recent messages for preview display
+ * - Loading recent messages with full details (reactions, attachments, contact info)
  * - Determining if this will be a new conversation or existing one
+ *
+ * Uses the same MessageUiModel transformation as the main chat for consistent rendering.
  */
 class ConversationPreviewDelegate @Inject constructor(
     private val chatRepository: ChatRepository,
-    private val messageRepository: MessageRepository
+    private val messageRepository: MessageRepository,
+    private val attachmentRepository: AttachmentRepository,
+    private val handleRepository: HandleRepository
 ) {
     companion object {
         /** Maximum number of messages to show in preview */
@@ -69,21 +79,17 @@ class ConversationPreviewDelegate @Inject constructor(
                     val messages = messageRepository.getRecentMessagesForPreview(chatGuid, MAX_PREVIEW_MESSAGES)
 
                     if (messages.isNotEmpty()) {
-                        val previews = messages.map { message ->
-                            MessagePreview(
-                                guid = message.guid,
-                                text = message.text,
-                                isFromMe = message.isFromMe,
-                                timestamp = message.dateCreated ?: System.currentTimeMillis(),
-                                hasAttachments = message.hasAttachments,
-                                attachmentPreviewText = if (message.hasAttachments && message.text.isNullOrBlank()) {
-                                    getAttachmentPreviewText(message.associatedMessageType)
-                                } else null
-                            )
-                        }
+                        // Get chat info to determine if it's a group
+                        val chat = chatRepository.getChat(chatGuid)
+                        val isGroup = chat?.isGroup ?: false
+
+                        // Transform to full MessageUiModel using same logic as main chat
+                        val uiModels = transformToUiModels(chatGuid, messages, isGroup)
+
                         _conversationPreview.value = ConversationPreviewState.Existing(
                             chatGuid = chatGuid,
-                            messages = previews
+                            messages = uiModels,
+                            isGroup = isGroup
                         )
                     } else {
                         // Chat exists but has no messages yet
@@ -101,6 +107,49 @@ class ConversationPreviewDelegate @Inject constructor(
     }
 
     /**
+     * Load conversation preview for a specific chat GUID.
+     * Used by ShareSheet when navigating to an existing conversation.
+     *
+     * @param chatGuid The chat GUID to load preview for
+     * @param scope CoroutineScope to launch the loading operation
+     */
+    fun loadPreviewForChat(chatGuid: String, scope: CoroutineScope) {
+        // Cancel any pending load
+        loadJob?.cancel()
+
+        // Set loading state
+        _conversationPreview.value = ConversationPreviewState.Loading
+
+        loadJob = scope.launch {
+            try {
+                // Load recent messages for the conversation
+                val messages = messageRepository.getRecentMessagesForPreview(chatGuid, MAX_PREVIEW_MESSAGES)
+
+                if (messages.isNotEmpty()) {
+                    // Get chat info to determine if it's a group
+                    val chat = chatRepository.getChat(chatGuid)
+                    val isGroup = chat?.isGroup ?: false
+
+                    // Transform to full MessageUiModel
+                    val uiModels = transformToUiModels(chatGuid, messages, isGroup)
+
+                    _conversationPreview.value = ConversationPreviewState.Existing(
+                        chatGuid = chatGuid,
+                        messages = uiModels,
+                        isGroup = isGroup
+                    )
+                } else {
+                    // Chat exists but has no messages yet
+                    _conversationPreview.value = ConversationPreviewState.NewConversation
+                }
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to load conversation preview for chat $chatGuid")
+                _conversationPreview.value = ConversationPreviewState.NewConversation
+            }
+        }
+    }
+
+    /**
      * Clear the conversation preview.
      */
     fun clearPreview() {
@@ -109,35 +158,75 @@ class ConversationPreviewDelegate @Inject constructor(
     }
 
     /**
+     * Transform message entities to UI models with full details.
+     * Uses the same transformation logic as the main chat.
+     */
+    private suspend fun transformToUiModels(
+        chatGuid: String,
+        messages: List<com.bothbubbles.data.local.db.entity.MessageEntity>,
+        isGroup: Boolean
+    ): List<MessageUiModel> {
+        if (messages.isEmpty()) return emptyList()
+
+        // Load participants for contact resolution
+        val participants = chatRepository.observeParticipantsForChats(listOf(chatGuid)).first()
+        val handleIdToName: Map<Long, String> = participants.associate { it.id to it.displayName }
+        val addressToName: Map<String, String> = participants.associate { normalizeAddress(it.address) to it.displayName }
+        val addressToAvatarPath: Map<String, String?> = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+
+        // Fetch reactions for all messages
+        val messageGuids = messages.map { it.guid }
+        val reactions = messageRepository.getReactionsForMessages(messageGuids)
+        val reactionsByMessage = reactions.groupBy { reaction ->
+            reaction.associatedMessageGuid?.let { guid ->
+                if (guid.contains("/")) guid.substringAfter("/") else guid
+            }
+        }
+
+        // Batch load attachments
+        val allAttachments = attachmentRepository.getAttachmentsForMessages(messageGuids)
+            .groupBy { it.messageGuid }
+
+        // Transform each message
+        return messages.mapNotNull { entity ->
+            // Skip reaction messages
+            if (entity.associatedMessageType?.contains("reaction") == true) {
+                return@mapNotNull null
+            }
+
+            val entityReactions = entity.guid.let { guid ->
+                reactionsByMessage[guid] ?: emptyList()
+            }
+            val entityAttachments = allAttachments[entity.guid] ?: emptyList()
+
+            entity.toUiModel(
+                reactions = entityReactions,
+                attachments = entityAttachments,
+                handleIdToName = handleIdToName,
+                addressToName = addressToName,
+                addressToAvatarPath = addressToAvatarPath
+            )
+        }
+    }
+
+    /**
      * Find the chat GUID for a single recipient.
      */
     private suspend fun findChatForSingleRecipient(recipient: SelectedRecipient): String? {
-        val normalizedAddress = normalizeAddress(recipient.address)
+        val normalizedAddress = normalizeAddressForLookup(recipient.address)
         return chatRepository.findChatGuidByAddress(normalizedAddress)
     }
 
     /**
      * Normalize an address for lookup.
      */
-    private fun normalizeAddress(address: String): String {
+    private fun normalizeAddressForLookup(address: String): String {
         return if (address.contains("@")) {
             // Email - just lowercase
             address.lowercase()
         } else {
             // Phone number - normalize using PhoneNumberFormatter
             PhoneNumberFormatter.normalize(address) ?: address
-        }
-    }
-
-    /**
-     * Get a user-friendly description for attachment-only messages.
-     */
-    private fun getAttachmentPreviewText(associatedMessageType: String?): String {
-        return when {
-            associatedMessageType?.contains("image", ignoreCase = true) == true -> "Photo"
-            associatedMessageType?.contains("video", ignoreCase = true) == true -> "Video"
-            associatedMessageType?.contains("audio", ignoreCase = true) == true -> "Audio"
-            else -> "Attachment"
         }
     }
 }

@@ -36,6 +36,7 @@ class BubbleActivity : ComponentActivity() {
     lateinit var activeConversationManager: ActiveConversationManager
 
     private var currentChatGuid: String? = null
+    private var currentMergedGuids: Set<String> = emptySet()
 
     companion object {
         // Note: We use EXTRA_CHAT_GUID for notification compatibility
@@ -82,8 +83,17 @@ class BubbleActivity : ComponentActivity() {
 
         currentChatGuid = chatGuid
 
+        // Parse merged GUIDs for unified chat support (includes primary GUID)
+        val mergedGuidsStr = intent.getStringExtra(SAVED_STATE_MERGED_GUIDS)
+        currentMergedGuids = if (mergedGuidsStr.isNullOrBlank()) {
+            setOf(chatGuid)
+        } else {
+            mergedGuidsStr.split(",").filter { it.isNotBlank() }.toSet()
+        }
+
         // Register this bubble as the active conversation to suppress notifications
-        activeConversationManager.setActiveConversation(chatGuid)
+        // Pass merged GUIDs so notifications for ALL source chats in unified chat are suppressed
+        activeConversationManager.setActiveConversation(chatGuid, currentMergedGuids)
 
         setContent {
             BothBubblesTheme {
@@ -101,8 +111,9 @@ class BubbleActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         // Re-register when bubble becomes visible again
+        // Include merged GUIDs so notifications for ALL source chats in unified chat are suppressed
         currentChatGuid?.let { chatGuid ->
-            activeConversationManager.setActiveConversation(chatGuid)
+            activeConversationManager.setActiveConversation(chatGuid, currentMergedGuids)
         }
     }
 

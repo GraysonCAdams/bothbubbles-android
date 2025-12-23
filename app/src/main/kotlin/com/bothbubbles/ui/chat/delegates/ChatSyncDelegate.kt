@@ -116,6 +116,12 @@ class ChatSyncDelegate @AssistedInject constructor(
             while (true) {
                 delay(POLL_INTERVAL_MS)
 
+                // Skip all operations when app is backgrounded to avoid binder traffic
+                // that causes Android to kill the process when trying to freeze it
+                if (!appLifecycleTracker.isAppInForeground) {
+                    continue
+                }
+
                 // Only poll if socket has been quiet for a while
                 val timeSinceLastSocketMessage = System.currentTimeMillis() - lastSocketMessageTime
                 if (timeSinceLastSocketMessage < SOCKET_QUIET_THRESHOLD_MS) {

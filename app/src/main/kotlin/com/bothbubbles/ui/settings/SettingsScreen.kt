@@ -699,12 +699,15 @@ fun SettingsContent(
                     icon = Icons.Default.Contacts,
                     title = "Contacts access",
                     subtitle = if (uiState.hasContactsPermission) {
-                        "Showing names and photos in conversations"
+                        "Tap to refresh contact names and photos"
                     } else {
                         "Tap to enable contact names and photos"
                     },
                     onClick = {
-                        if (!uiState.hasContactsPermission) {
+                        if (uiState.hasContactsPermission) {
+                            // Force refresh contact info
+                            viewModel.forceRefreshContactInfo()
+                        } else {
                             onRequestContactsPermission()
                         }
                     },
@@ -1450,6 +1453,34 @@ fun SocialMediaSettingsContent(
                                 if (reelsSectionEnabled) viewModel.setReelsFeedEnabled(it)
                             },
                             enabled = reelsSectionEnabled,
+                            showIcons = false
+                        )
+                    }
+                )
+
+                // Include video attachments in reels
+                val reelsAttachmentsEnabled = uiState.reelsFeedEnabled
+                SettingsMenuItem(
+                    icon = Icons.Default.AttachFile,
+                    title = "Include video attachments",
+                    subtitle = if (uiState.reelsIncludeVideoAttachments) {
+                        "All videos in chat appear in Reels"
+                    } else {
+                        "Only social media videos in Reels"
+                    },
+                    onClick = {
+                        if (reelsAttachmentsEnabled) {
+                            viewModel.setReelsIncludeVideoAttachments(!uiState.reelsIncludeVideoAttachments)
+                        }
+                    },
+                    enabled = reelsAttachmentsEnabled,
+                    trailingContent = {
+                        SettingsSwitch(
+                            checked = uiState.reelsIncludeVideoAttachments,
+                            onCheckedChange = {
+                                if (reelsAttachmentsEnabled) viewModel.setReelsIncludeVideoAttachments(it)
+                            },
+                            enabled = reelsAttachmentsEnabled,
                             showIcons = false
                         )
                     }

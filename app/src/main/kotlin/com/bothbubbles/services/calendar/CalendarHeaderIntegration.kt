@@ -53,11 +53,7 @@ class CalendarHeaderIntegration @Inject constructor(
         isGroup: Boolean
     ): Flow<ChatHeaderContent?> {
         // Only for 1:1 chats
-        if (isGroup) {
-            return flowOf(null)
-        }
-
-        if (participantAddresses.isEmpty()) {
+        if (isGroup || participantAddresses.isEmpty()) {
             return flowOf(null)
         }
 

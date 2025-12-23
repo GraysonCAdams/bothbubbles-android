@@ -142,7 +142,8 @@ data class ReplyPreviewData(
  */
 @Stable
 data class ThreadChain(
-    val originMessage: MessageUiModel?,      // The root message being replied to (null if deleted/not found)
+    val originGuid: String,                  // GUID of the thread origin (needed for replying)
+    val originMessage: MessageUiModel?,      // The root message being replied to (null if excluded/deleted)
     val replies: StableList<MessageUiModel>        // All replies in chronological order
 )
 

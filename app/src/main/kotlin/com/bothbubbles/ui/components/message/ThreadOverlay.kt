@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.message
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -17,27 +18,51 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.bothbubbles.ui.chat.ChatSendMode
+import com.bothbubbles.ui.chat.composer.AttachmentItem
+import com.bothbubbles.ui.chat.composer.ChatComposer
+import com.bothbubbles.ui.chat.composer.ComposerEvent
+import com.bothbubbles.ui.chat.composer.ComposerPanel
+import com.bothbubbles.ui.chat.composer.ComposerState
 import com.bothbubbles.ui.chat.delegates.ChatThreadDelegate
-import com.bothbubbles.ui.components.message.MessageGroupPosition
-import com.bothbubbles.ui.components.message.MessageUiModel
-import com.bothbubbles.ui.components.message.ThreadChain
+import java.util.UUID
+
+/**
+ * Data class for thread reply with text and attachments.
+ */
+data class ThreadReplyData(
+    val text: String,
+    val attachments: List<Uri>
+)
 
 /**
  * Full-screen overlay showing a thread of messages (original + replies).
  * Tapping any message dismisses the overlay and scrolls to that message in the main chat.
  * Tapping the scrim (background) dismisses the overlay without scrolling.
+ *
+ * @param threadChain The thread chain containing origin and replies
+ * @param onMessageClick Callback when a message is tapped (scrolls to it in main chat)
+ * @param onDismiss Callback when the overlay is dismissed
+ * @param onSendReply Optional callback to send a reply with text and attachments (shown only when origin is excluded, e.g., from Reels)
+ * @param onCameraClick Optional callback when camera button is clicked
+ * @param modifier Modifier for the overlay
+ * @param bottomPadding Bottom padding above composer bar (unused when composer is shown inside overlay)
  */
 @Composable
 fun ThreadOverlay(
     threadChain: ThreadChain,
     onMessageClick: (String) -> Unit,
     onDismiss: () -> Unit,
+    onSendReply: ((ThreadReplyData) -> Unit)? = null,
+    onCameraClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
@@ -47,8 +72,13 @@ fun ThreadOverlay(
         addAll(threadChain.replies)
     }
 
+    // Determine if we're in "replies only" mode (origin was excluded, e.g., from Reels)
+    val isRepliesOnly = threadChain.originMessage == null
+
     Box(
-        modifier = modifier.fillMaxSize()
+        modifier = modifier
+            .fillMaxSize()
+            .imePadding() // Handle keyboard insets
     ) {
         // Semi-transparent scrim - tapping dismisses
         Box(
@@ -61,18 +91,17 @@ fun ThreadOverlay(
                 ) { onDismiss() }
         )
 
-        // Content card - positioned above the chat compose bar with padding
+        // Content card - positioned at bottom, resizes with keyboard
         Surface(
             modifier = Modifier
                 .fillMaxWidth()
-                .fillMaxHeight(0.85f)
+                .fillMaxHeight(if (isRepliesOnly && onSendReply != null) 0.9f else 0.85f)
                 .align(Alignment.BottomCenter)
-                .padding(bottom = bottomPadding + 8.dp) // Gap above compose bar
                 .clickable(
                     indication = null,
                     interactionSource = remember { MutableInteractionSource() }
                 ) { /* Consume click to prevent dismissing when tapping content */ },
-            shape = RoundedCornerShape(20.dp),
+            shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 3.dp
         ) {
@@ -80,6 +109,7 @@ fun ThreadOverlay(
                 // Header
                 ThreadOverlayHeader(
                     messageCount = allMessages.size,
+                    isRepliesOnly = isRepliesOnly,
                     onClose = onDismiss
                 )
 
@@ -90,12 +120,13 @@ fun ThreadOverlay(
                     // Empty state
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .weight(1f)
+                            .fillMaxWidth()
                             .padding(32.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = "Thread not found",
+                            text = if (isRepliesOnly) "No replies yet" else "Thread not found",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -103,7 +134,8 @@ fun ThreadOverlay(
                 } else {
                     LazyColumn(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .weight(1f)
+                            .fillMaxWidth()
                             .padding(horizontal = 8.dp),
                         contentPadding = PaddingValues(vertical = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -120,14 +152,153 @@ fun ThreadOverlay(
                         }
                     }
                 }
+
+                // Full composer - shown when accessed from Reels (isRepliesOnly) and callback provided
+                if (isRepliesOnly && onSendReply != null) {
+                    HorizontalDivider()
+                    ThreadComposerHost(
+                        onSendReply = onSendReply,
+                        onCameraClick = onCameraClick
+                    )
+                }
             }
         }
     }
 }
 
+/**
+ * Full-featured composer host for the thread overlay.
+ * Uses the same ChatComposer component as the main chat for consistent UX.
+ * Manages its own local state for text and attachments.
+ */
+@Composable
+private fun ThreadComposerHost(
+    onSendReply: (ThreadReplyData) -> Unit,
+    onCameraClick: (() -> Unit)? = null,
+    modifier: Modifier = Modifier
+) {
+    // Local composer state - independent from main chat
+    var composerText by remember { mutableStateOf("") }
+    var attachments by remember { mutableStateOf<List<AttachmentItem>>(emptyList()) }
+    var activePanel by remember { mutableStateOf(ComposerPanel.None) }
+    var isTextFieldFocused by remember { mutableStateOf(false) }
+
+    // Build ComposerState for ChatComposer
+    val composerState = remember(composerText, attachments, activePanel, isTextFieldFocused) {
+        ComposerState(
+            text = composerText,
+            attachments = attachments,
+            activePanel = activePanel,
+            isTextFieldFocused = isTextFieldFocused,
+            sendMode = ChatSendMode.IMESSAGE, // Default to iMessage for thread replies
+            canToggleSendMode = false, // No mode toggle in thread context
+            isGroupChat = false // Mentions not supported in thread overlay
+        )
+    }
+
+    // Handle send action
+    val handleSend = {
+        if (composerText.isNotBlank() || attachments.isNotEmpty()) {
+            onSendReply(ThreadReplyData(
+                text = composerText.trim(),
+                attachments = attachments.map { it.uri }
+            ))
+            // Clear after sending
+            composerText = ""
+            attachments = emptyList()
+            activePanel = ComposerPanel.None
+        }
+    }
+
+    // Handle composer events
+    val onEvent: (ComposerEvent) -> Unit = { event ->
+        when (event) {
+            is ComposerEvent.TextChanged -> {
+                composerText = event.text
+            }
+            is ComposerEvent.TextFieldFocusChanged -> {
+                isTextFieldFocused = event.isFocused
+                // Close panel when text field gains focus
+                if (event.isFocused && activePanel != ComposerPanel.None) {
+                    activePanel = ComposerPanel.None
+                }
+            }
+            is ComposerEvent.Send -> {
+                handleSend()
+            }
+            is ComposerEvent.AddAttachments -> {
+                val newAttachments = event.uris.map { uri ->
+                    AttachmentItem(
+                        id = UUID.randomUUID().toString(),
+                        uri = uri,
+                        mimeType = null,
+                        displayName = uri.lastPathSegment,
+                        sizeBytes = null
+                    )
+                }
+                attachments = attachments + newAttachments
+            }
+            is ComposerEvent.RemoveAttachment -> {
+                attachments = attachments.filter { it.id != event.attachment.id }
+            }
+            is ComposerEvent.ClearAllAttachments -> {
+                attachments = emptyList()
+            }
+            is ComposerEvent.ToggleMediaPicker -> {
+                activePanel = when (activePanel) {
+                    ComposerPanel.MediaPicker, ComposerPanel.GifPicker -> ComposerPanel.None
+                    else -> ComposerPanel.MediaPicker
+                }
+            }
+            is ComposerEvent.ToggleEmojiPicker -> {
+                activePanel = if (activePanel == ComposerPanel.EmojiKeyboard) {
+                    ComposerPanel.None
+                } else {
+                    ComposerPanel.EmojiKeyboard
+                }
+            }
+            is ComposerEvent.ToggleGifPicker -> {
+                activePanel = if (activePanel == ComposerPanel.GifPicker) {
+                    ComposerPanel.None
+                } else {
+                    ComposerPanel.GifPicker
+                }
+            }
+            is ComposerEvent.DismissPanel -> {
+                activePanel = ComposerPanel.None
+            }
+            is ComposerEvent.OpenCamera -> {
+                onCameraClick?.invoke()
+            }
+            // Ignore events not relevant to thread context
+            else -> {}
+        }
+    }
+
+    ChatComposer(
+        state = composerState,
+        onEvent = onEvent,
+        onMediaSelected = { uris ->
+            val newAttachments = uris.map { uri ->
+                AttachmentItem(
+                    id = UUID.randomUUID().toString(),
+                    uri = uri,
+                    mimeType = null,
+                    displayName = uri.lastPathSegment,
+                    sizeBytes = null
+                )
+            }
+            attachments = attachments + newAttachments
+        },
+        onCameraClick = { onCameraClick?.invoke() },
+        modifier = modifier
+    )
+}
+
 @Composable
 private fun ThreadOverlayHeader(
     messageCount: Int,
+    isRepliesOnly: Boolean = false,
     onClose: () -> Unit
 ) {
     Row(
@@ -139,11 +310,15 @@ private fun ThreadOverlayHeader(
     ) {
         Column {
             Text(
-                text = "Thread",
+                text = if (isRepliesOnly) "Replies" else "Thread",
                 style = MaterialTheme.typography.titleMedium
             )
             Text(
-                text = "$messageCount ${if (messageCount == 1) "message" else "messages"}",
+                text = if (isRepliesOnly) {
+                    "$messageCount ${if (messageCount == 1) "reply" else "replies"}"
+                } else {
+                    "$messageCount ${if (messageCount == 1) "message" else "messages"}"
+                },
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -222,12 +397,16 @@ private fun ThreadMessageItem(
  * @param threadDelegate Delegate for internal state collection
  * @param onMessageClick Callback when a message is clicked (scrolls to it in main chat)
  * @param onDismiss Callback when the overlay is dismissed
+ * @param onSendReply Optional callback to send a reply with text and attachments (for Reels context)
+ * @param onCameraClick Optional callback when camera button is clicked
  */
 @Composable
 fun AnimatedThreadOverlay(
     threadDelegate: ChatThreadDelegate,
     onMessageClick: (String) -> Unit,
     onDismiss: () -> Unit,
+    onSendReply: ((ThreadReplyData) -> Unit)? = null,
+    onCameraClick: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     bottomPadding: androidx.compose.ui.unit.Dp = 0.dp
 ) {
@@ -248,6 +427,8 @@ fun AnimatedThreadOverlay(
                 threadChain = threadChain,
                 onMessageClick = onMessageClick,
                 onDismiss = onDismiss,
+                onSendReply = onSendReply,
+                onCameraClick = onCameraClick,
                 bottomPadding = bottomPadding
             )
         }

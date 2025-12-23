@@ -336,15 +336,20 @@
         </service>
 
         <!-- Group Contact Intent Handler -->
-        <!-- Handles taps on BothBubbles group contacts to open the chat -->
+        <!-- Handles taps on custom MIME type data rows in Contacts app -->
+        <!-- Note: imto:// scheme is handled by MainActivity for both voice commands and IM row taps -->
         <activity
             android:name=".services.contacts.sync.GroupContactIntentActivity"
             android:exported="true"
             android:theme="@android:style/Theme.NoDisplay">
+            <!-- Handle taps on custom MIME type data rows -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
-                <data android:mimeType="vnd.android.cursor.item/vnd.com.bothbubbles.group" />
+                <data
+                    android:scheme="content"
+                    android:host="com.android.contacts"
+                    android:mimeType="vnd.android.cursor.item/vnd.com.bothbubbles.group" />
             </intent-filter>
         </activity>
 

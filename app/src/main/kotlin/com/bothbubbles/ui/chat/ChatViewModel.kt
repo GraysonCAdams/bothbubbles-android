@@ -162,7 +162,7 @@ class ChatViewModel @Inject constructor(
 
     val operations: ChatOperationsDelegate = operationsFactory.create(chatGuid, viewModelScope)
     val sync: ChatSyncDelegate = syncFactory.create(chatGuid, viewModelScope, mergedChatGuids)
-    val send: ChatSendDelegate = sendFactory.create(chatGuid, viewModelScope)
+    val send: ChatSendDelegate = sendFactory.create(chatGuid, viewModelScope, mergedChatGuids)
 
     // Message list delegate - cursor-based pagination with Room as single source of truth
     val messageList: CursorChatMessageListDelegate = messageListFactory.create(
@@ -729,6 +729,56 @@ class ChatViewModel @Inject constructor(
      */
     fun clearReply() {
         send.clearReply()
+    }
+
+    /**
+     * Send a reply to a thread from the thread overlay.
+     * Used when replying from the Reels context where we have our own composer.
+     *
+     * @param text The reply text
+     * @param originGuid The GUID of the message being replied to
+     * @param attachments Optional list of attachment URIs
+     */
+    fun sendThreadReply(text: String, originGuid: String, attachments: List<android.net.Uri> = emptyList()) {
+        val trimmedText = text.trim()
+        if (trimmedText.isBlank() && attachments.isEmpty()) return
+
+        // Get send mode and chat info
+        val currentSendMode = connection.state.value.currentSendMode
+        val isLocalSmsChat = chatInfo.state.value.isLocalSmsChat
+
+        // Set the reply target so it's included in the queued message
+        send.setReplyTo(originGuid)
+
+        viewModelScope.launch {
+            // Convert URIs to PendingAttachmentInput
+            val pendingAttachments = attachments.map { uri ->
+                com.bothbubbles.data.model.PendingAttachmentInput(
+                    uri = uri,
+                    mimeType = null, // Will be resolved during send
+                    name = uri.lastPathSegment,
+                    size = null
+                )
+            }
+
+            // Queue message with attachments
+            val result = send.queueMessageForSending(
+                text = trimmedText,
+                attachments = pendingAttachments,
+                currentSendMode = currentSendMode,
+                isLocalSmsChat = isLocalSmsChat
+            )
+
+            result.onSuccess { queuedInfo ->
+                // Insert optimistic message
+                messageList.insertOptimisticMessage(queuedInfo)
+
+                // Refresh thread overlay to show new reply
+                thread.loadThread(originGuid, excludeOrigin = true)
+            }.onFailure { error ->
+                Timber.e(error, "Failed to queue thread reply")
+            }
+        }
     }
 
     /**

@@ -536,13 +536,20 @@ class ConversationsViewModel @Inject constructor(
 
     /**
      * Refresh all contact info from device contacts.
+     * Called when contacts permission is granted or contacts change.
      */
     fun refreshAllContacts() {
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 loadUserProfile()
-                // Note: chatRepository.refreshAllContactInfo() is called from the repository
+                // Refresh cached contact names and photos for all handles
+                val updated = chatRepository.refreshAllContactInfo()
+                if (updated > 0) {
+                    Timber.d("Refreshed contact info for $updated handles")
+                }
             }
+            // Reload conversations to pick up the updated contact info
+            refreshAllLoadedPages()
         }
     }
 

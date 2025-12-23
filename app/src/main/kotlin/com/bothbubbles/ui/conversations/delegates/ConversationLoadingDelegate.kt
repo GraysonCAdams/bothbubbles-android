@@ -16,9 +16,11 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 
 private const val PAGE_SIZE = 25
 private const val INITIAL_LOAD_TARGET = 100 // Target number of conversations for instant display on boot
@@ -69,47 +71,55 @@ class ConversationLoadingDelegate @AssistedInject constructor(
     /**
      * Load the first page of conversations on startup.
      * Uses paginated queries to avoid loading all conversations at once.
+     *
+     * IMPORTANT: All database operations run on Dispatchers.IO to avoid blocking main thread.
      */
     suspend fun loadInitialConversations(typingChats: Set<String>): LoadResult {
         val loadId = PerformanceProfiler.start("ConversationList.loadInitial")
         _isLoading.value = true
 
-        // Clean up invalid display names before loading (runs once, fast, idempotent)
-        chatRepository.cleanupInvalidDisplayNames()
-
         try {
-            // Load up to INITIAL_LOAD_TARGET from each source to guarantee 100 total
-            val queryId1 = PerformanceProfiler.start("DB.getUnifiedChats")
-            val unifiedChats = unifiedChatRepository.getActiveChats(INITIAL_LOAD_TARGET, 0)
-            PerformanceProfiler.end(queryId1, "${unifiedChats.size} unified chats")
+            // Run all database operations on IO dispatcher
+            val result = withContext(Dispatchers.IO) {
+                // Clean up invalid display names before loading (runs once, fast, idempotent)
+                chatRepository.cleanupInvalidDisplayNames()
 
-            val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
-            val groupChats = chatRepository.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
-            PerformanceProfiler.end(queryId2, "${groupChats.size} chats")
+                // Load up to INITIAL_LOAD_TARGET from each source to guarantee 100 total
+                val queryId1 = PerformanceProfiler.start("DB.getUnifiedChats")
+                val unifiedChats = unifiedChatRepository.getActiveChats(INITIAL_LOAD_TARGET, 0)
+                PerformanceProfiler.end(queryId1, "${unifiedChats.size} unified chats")
 
-            val queryId3 = PerformanceProfiler.start("DB.getNonGroupChats")
-            val nonGroupChats = chatRepository.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
-            PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
+                val queryId2 = PerformanceProfiler.start("DB.getGroupChats")
+                val groupChats = chatRepository.getGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
+                PerformanceProfiler.end(queryId2, "${groupChats.size} chats")
 
-            val buildId = PerformanceProfiler.start("ConversationList.build")
-            val allConversations = buildConversationList(
-                unifiedChats = unifiedChats,
-                groupChats = groupChats,
-                nonGroupChats = nonGroupChats,
-                typingChats = typingChats
-            )
-            // Take only the first INITIAL_LOAD_TARGET for initial display
-            val conversations = allConversations.take(INITIAL_LOAD_TARGET)
-            PerformanceProfiler.end(buildId, "${conversations.size} items")
+                val queryId3 = PerformanceProfiler.start("DB.getNonGroupChats")
+                val nonGroupChats = chatRepository.getNonGroupChatsPaginated(INITIAL_LOAD_TARGET, 0)
+                PerformanceProfiler.end(queryId3, "${nonGroupChats.size} chats")
 
-            // Check if more data exists beyond what we're showing
-            val totalUnified = unifiedChatRepository.getActiveCount()
-            val totalGroupChats = chatRepository.getGroupChatCount()
-            val totalNonGroup = chatRepository.getNonGroupChatCount()
-            val totalCount = totalUnified + totalGroupChats + totalNonGroup
-            // More exists if we have more combined items than we're showing, or if DB has more
-            val hasMore = allConversations.size > conversations.size || totalCount > allConversations.size
+                val buildId = PerformanceProfiler.start("ConversationList.build")
+                val allConversations = buildConversationList(
+                    unifiedChats = unifiedChats,
+                    groupChats = groupChats,
+                    nonGroupChats = nonGroupChats,
+                    typingChats = typingChats
+                )
+                // Take only the first INITIAL_LOAD_TARGET for initial display
+                val conversations = allConversations.take(INITIAL_LOAD_TARGET)
+                PerformanceProfiler.end(buildId, "${conversations.size} items")
 
+                // Check if more data exists beyond what we're showing
+                val totalUnified = unifiedChatRepository.getActiveCount()
+                val totalGroupChats = chatRepository.getGroupChatCount()
+                val totalNonGroup = chatRepository.getNonGroupChatCount()
+                val totalCount = totalUnified + totalGroupChats + totalNonGroup
+                // More exists if we have more combined items than we're showing, or if DB has more
+                val hasMore = allConversations.size > conversations.size || totalCount > allConversations.size
+
+                Triple(conversations, hasMore, allConversations.size)
+            }
+
+            val (conversations, hasMore, _) = result
             _isLoading.value = false
             _canLoadMore.value = hasMore
             _currentPage.value = 0
@@ -128,6 +138,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
     /**
      * Refresh all currently loaded pages to pick up data changes.
      * Called when sync updates data or when new messages arrive.
+     *
+     * IMPORTANT: All database operations run on Dispatchers.IO to avoid blocking main thread.
      */
     suspend fun refreshAllLoadedPages(typingChats: Set<String>, searchQuery: String): List<ConversationUiModel> {
         val refreshId = PerformanceProfiler.start("ConversationList.refresh")
@@ -135,23 +147,38 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         val totalLoaded = (currentPage + 1) * PAGE_SIZE
 
         try {
-            // Re-fetch all loaded unified chats
-            val unifiedChats = unifiedChatRepository.getActiveChats(totalLoaded, 0)
+            // Run all database operations on IO dispatcher
+            val result = withContext(Dispatchers.IO) {
+                // Re-fetch all loaded unified chats
+                val unifiedChats = unifiedChatRepository.getActiveChats(totalLoaded, 0)
 
-            // Re-fetch all loaded group chats
-            val groupChats = chatRepository.getGroupChatsPaginated(totalLoaded, 0)
+                // Re-fetch all loaded group chats
+                val groupChats = chatRepository.getGroupChatsPaginated(totalLoaded, 0)
 
-            // Re-fetch all loaded non-group chats
-            val nonGroupChats = chatRepository.getNonGroupChatsPaginated(totalLoaded, 0)
+                // Re-fetch all loaded non-group chats
+                val nonGroupChats = chatRepository.getNonGroupChatsPaginated(totalLoaded, 0)
 
-            val conversations = buildConversationList(
-                unifiedChats = unifiedChats,
-                groupChats = groupChats,
-                nonGroupChats = nonGroupChats,
-                typingChats = typingChats
-            )
+                val conversations = buildConversationList(
+                    unifiedChats = unifiedChats,
+                    groupChats = groupChats,
+                    nonGroupChats = nonGroupChats,
+                    typingChats = typingChats
+                )
 
-            // Apply search filter if active
+                // Check if more data exists
+                val totalUnified = unifiedChatRepository.getActiveCount()
+                val totalGroupChats = chatRepository.getGroupChatCount()
+                val totalNonGroup = chatRepository.getNonGroupChatCount()
+                val loadedCount = unifiedChats.size + groupChats.size + nonGroupChats.size
+                val totalCount = totalUnified + totalGroupChats + totalNonGroup
+                val hasMore = loadedCount < totalCount
+
+                Triple(conversations, hasMore, loadedCount)
+            }
+
+            val (conversations, hasMore, _) = result
+
+            // Apply search filter if active (can run on main thread - just filtering in-memory list)
             val filtered = if (searchQuery.isBlank()) {
                 conversations
             } else {
@@ -160,14 +187,6 @@ class ConversationLoadingDelegate @AssistedInject constructor(
                     conv.address.contains(searchQuery, ignoreCase = true)
                 }
             }
-
-            // Check if more data exists
-            val totalUnified = unifiedChatRepository.getActiveCount()
-            val totalGroupChats = chatRepository.getGroupChatCount()
-            val totalNonGroup = chatRepository.getNonGroupChatCount()
-            val loadedCount = unifiedChats.size + groupChats.size + nonGroupChats.size
-            val totalCount = totalUnified + totalGroupChats + totalNonGroup
-            val hasMore = loadedCount < totalCount
 
             _canLoadMore.value = hasMore
 
@@ -182,6 +201,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
 
     /**
      * Load more conversations when user scrolls near the bottom.
+     *
+     * IMPORTANT: All database operations run on Dispatchers.IO to avoid blocking main thread.
      */
     suspend fun loadMoreConversations(
         currentConversations: List<ConversationUiModel>,
@@ -195,23 +216,26 @@ class ConversationLoadingDelegate @AssistedInject constructor(
             val nextPage = _currentPage.value + 1
             val offset = nextPage * PAGE_SIZE
 
-            // Load next page of unified chats
-            val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
+            // Run all database operations on IO dispatcher
+            val newConversations = withContext(Dispatchers.IO) {
+                // Load next page of unified chats
+                val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
 
-            // Load next page of group chats
-            val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
+                // Load next page of group chats
+                val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
 
-            // Load next page of non-group chats
-            val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
+                // Load next page of non-group chats
+                val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
-            val newConversations = buildConversationList(
-                unifiedChats = moreUnifiedChats,
-                groupChats = moreGroupChats,
-                nonGroupChats = moreNonGroupChats,
-                typingChats = typingChats
-            )
+                buildConversationList(
+                    unifiedChats = moreUnifiedChats,
+                    groupChats = moreGroupChats,
+                    nonGroupChats = moreNonGroupChats,
+                    typingChats = typingChats
+                )
+            }
 
-            // Merge with existing, deduplicate by guid first
+            // Merge with existing, deduplicate by guid first (in-memory operations, OK on main thread)
             val existingGuids = currentConversations.map { it.guid }.toSet()
             val uniqueNew = newConversations.filter { it.guid !in existingGuids }
             val combined = (currentConversations + uniqueNew).distinctBy { it.guid }
@@ -254,6 +278,8 @@ class ConversationLoadingDelegate @AssistedInject constructor(
      * Load all remaining pages at once.
      * Used when a filter is active - filters work on client-side data,
      * so we need all conversations loaded to show all matching items.
+     *
+     * IMPORTANT: All database operations run on Dispatchers.IO to avoid blocking main thread.
      */
     suspend fun loadAllRemainingPages(
         currentConversations: List<ConversationUiModel>,
@@ -265,36 +291,43 @@ class ConversationLoadingDelegate @AssistedInject constructor(
         _isLoadingMore.value = true
 
         try {
-            var allConversations = currentConversations.toMutableList()
-            var page = _currentPage.value
+            // Run all database operations on IO dispatcher
+            val result = withContext(Dispatchers.IO) {
+                val allConversations = currentConversations.toMutableList()
+                var page = _currentPage.value
 
-            // Load pages until no more data
-            while (true) {
-                page++
-                val offset = page * PAGE_SIZE
+                // Load pages until no more data
+                while (true) {
+                    page++
+                    val offset = page * PAGE_SIZE
 
-                val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
-                val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
-                val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
+                    val moreUnifiedChats = unifiedChatRepository.getActiveChats(PAGE_SIZE, offset)
+                    val moreGroupChats = chatRepository.getGroupChatsPaginated(PAGE_SIZE, offset)
+                    val moreNonGroupChats = chatRepository.getNonGroupChatsPaginated(PAGE_SIZE, offset)
 
-                val newConversations = buildConversationList(
-                    unifiedChats = moreUnifiedChats,
-                    groupChats = moreGroupChats,
-                    nonGroupChats = moreNonGroupChats,
-                    typingChats = typingChats
-                )
+                    val newConversations = buildConversationList(
+                        unifiedChats = moreUnifiedChats,
+                        groupChats = moreGroupChats,
+                        nonGroupChats = moreNonGroupChats,
+                        typingChats = typingChats
+                    )
 
-                if (newConversations.isEmpty()) {
-                    break // No more data
+                    if (newConversations.isEmpty()) {
+                        break // No more data
+                    }
+
+                    // Merge with existing
+                    val existingGuids = allConversations.map { it.guid }.toSet()
+                    val uniqueNew = newConversations.filter { it.guid !in existingGuids }
+                    allConversations.addAll(uniqueNew)
                 }
 
-                // Merge with existing
-                val existingGuids = allConversations.map { it.guid }.toSet()
-                val uniqueNew = newConversations.filter { it.guid !in existingGuids }
-                allConversations.addAll(uniqueNew)
+                Pair(allConversations.toList(), page)
             }
 
-            // Sort and deduplicate final result
+            val (allConversations, page) = result
+
+            // Sort and deduplicate final result (in-memory operations, OK on main thread)
             val uniqueByGuid = allConversations.distinctBy { it.guid }
 
             // Deduplicate by contactKey for 1:1 chats (same logic as buildConversationList)

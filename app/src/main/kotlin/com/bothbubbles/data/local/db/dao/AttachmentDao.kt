@@ -72,6 +72,45 @@ interface AttachmentDao {
     fun getVideosForChat(chatGuid: String): Flow<List<AttachmentEntity>>
 
     /**
+     * Data class for video attachment with sender information, used for Reels feed.
+     */
+    data class VideoWithSender(
+        @androidx.room.Embedded val attachment: AttachmentEntity,
+        @androidx.room.ColumnInfo(name = "chat_guid") val chatGuid: String,
+        @androidx.room.ColumnInfo(name = "is_from_me") val isFromMe: Boolean,
+        @androidx.room.ColumnInfo(name = "sender_address") val senderAddress: String?,
+        @androidx.room.ColumnInfo(name = "date_created") val dateCreated: Long,
+        @androidx.room.ColumnInfo(name = "cached_display_name") val displayName: String?,
+        @androidx.room.ColumnInfo(name = "cached_avatar_path") val avatarPath: String?,
+        @androidx.room.ColumnInfo(name = "formatted_address") val formattedAddress: String?
+    )
+
+    /**
+     * Get video attachments with sender information for Reels feed.
+     * Only returns downloaded videos (local_path IS NOT NULL) that are not hidden.
+     */
+    @Query("""
+        SELECT
+            a.*,
+            m.chat_guid,
+            m.is_from_me,
+            m.sender_address,
+            m.date_created,
+            h.cached_display_name,
+            h.cached_avatar_path,
+            h.formatted_address
+        FROM attachments a
+        INNER JOIN messages m ON a.message_guid = m.guid
+        LEFT JOIN handles h ON m.handle_id = h.id
+        WHERE m.chat_guid = :chatGuid
+          AND a.mime_type LIKE 'video/%'
+          AND a.hide_attachment = 0
+          AND a.local_path IS NOT NULL
+        ORDER BY m.date_created DESC
+    """)
+    suspend fun getVideoAttachmentsWithSenderForChat(chatGuid: String): List<VideoWithSender>
+
+    /**
      * Get media attachments (images and videos) with their message dates for gallery grouping.
      */
     @Query("""

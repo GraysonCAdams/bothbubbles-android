@@ -25,6 +25,7 @@ import com.bothbubbles.util.error.MessageError
 import com.bothbubbles.util.error.NetworkError
 import com.bothbubbles.util.error.SmsError
 import com.bothbubbles.util.error.safeCall
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -576,9 +577,13 @@ class MessageSendingService @Inject constructor(
         hasAttachments: Boolean
     ): MessageDeliveryMode {
         val chat = chatDao.getChatByGuid(chatGuid)
+        val isInFallback = chatFallbackTracker.isInFallbackMode(chatGuid)
+        val fallbackReason = chatFallbackTracker.getFallbackReason(chatGuid)
+        Timber.tag("SendDebug").i("determineDeliveryMode: chatGuid=$chatGuid, isInFallback=$isInFallback, fallbackReason=$fallbackReason")
 
         // Check if SMS-only mode is enabled in settings
         if (settingsDataStore.smsOnlyMode.first()) {
+            Timber.tag("SendDebug").i("determineDeliveryMode: SMS-only mode enabled")
             return if (chat?.isGroup == true || hasAttachments) {
                 MessageDeliveryMode.LOCAL_MMS
             } else {
@@ -587,9 +592,10 @@ class MessageSendingService @Inject constructor(
         }
 
         // Check if chat is in SMS fallback mode (due to previous iMessage failure)
-        if (chatFallbackTracker.isInFallbackMode(chatGuid)) {
+        if (isInFallback) {
             val address = extractAddressFromChatGuid(chatGuid)
             if (address?.isPhoneNumber() == true) {
+                Timber.tag("SendDebug").i("determineDeliveryMode: In fallback mode, using SMS")
                 return if (chat?.isGroup == true || hasAttachments) {
                     MessageDeliveryMode.LOCAL_MMS
                 } else {
@@ -704,8 +710,8 @@ class MessageSendingService @Inject constructor(
             chatGuid = chatGuid,
             handleId = handleId,
             senderAddress = handle?.address,
-            text = text,
-            subject = subject,
+            text = HtmlEntityDecoder.decode(text),
+            subject = HtmlEntityDecoder.decode(subject),
             dateCreated = dateCreated ?: System.currentTimeMillis(),
             dateRead = dateRead,
             dateDelivered = dateDelivered,

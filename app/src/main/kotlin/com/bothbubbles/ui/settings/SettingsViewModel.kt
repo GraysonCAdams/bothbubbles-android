@@ -19,8 +19,9 @@ import com.bothbubbles.util.PermissionStateMonitor
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import javax.inject.Inject
 
@@ -79,12 +80,40 @@ class SettingsViewModel @Inject constructor(
     }
 
     /**
-     * Refresh contacts permission status. Called on screen resume to ensure
-     * up-to-date status after returning from permission request or system settings.
+     * Refresh contacts permission status and contact data.
+     * Called on screen resume to ensure up-to-date status after returning from
+     * permission request or system settings. If permission is now granted,
+     * refreshes cached contact info (names, photos) for all handles.
      */
     fun refreshContactsPermission() {
+        val hasPermission = permissionStateMonitor.hasContactsPermission()
+        val hadPermissionBefore = _uiState.value.hasContactsPermission
+
         _uiState.update {
-            it.copy(hasContactsPermission = permissionStateMonitor.hasContactsPermission())
+            it.copy(hasContactsPermission = hasPermission)
+        }
+
+        // If permission was just granted, refresh all contact info
+        if (hasPermission && !hadPermissionBefore) {
+            viewModelScope.launch {
+                val updated = chatRepository.refreshAllContactInfo()
+                timber.log.Timber.i("Contacts permission granted - refreshed $updated handles")
+            }
+        }
+    }
+
+    /**
+     * Force refresh all contact info from device contacts.
+     * Can be called manually to re-sync contact names and photos.
+     */
+    fun forceRefreshContactInfo() {
+        if (!permissionStateMonitor.hasContactsPermission()) {
+            timber.log.Timber.w("Cannot refresh contacts - permission not granted")
+            return
+        }
+        viewModelScope.launch {
+            val updated = chatRepository.refreshAllContactInfo()
+            timber.log.Timber.i("Force refreshed contact info for $updated handles")
         }
     }
 
@@ -233,7 +262,8 @@ class SettingsViewModel @Inject constructor(
                 settingsDataStore.socialMediaBackgroundDownloadEnabled,
                 settingsDataStore.socialMediaDownloadOnCellularEnabled,
                 settingsDataStore.tiktokVideoQuality,
-                settingsDataStore.reelsFeedEnabled
+                settingsDataStore.reelsFeedEnabled,
+                settingsDataStore.reelsIncludeVideoAttachments
             ) { values: Array<Any?> ->
                 @Suppress("UNCHECKED_CAST")
                 SocialMediaDownloadState(
@@ -242,7 +272,8 @@ class SettingsViewModel @Inject constructor(
                     backgroundDownloadEnabled = values[2] as? Boolean ?: false,
                     downloadOnCellularEnabled = values[3] as? Boolean ?: false,
                     tiktokQuality = values[4] as? String ?: "hd",
-                    reelsFeedEnabled = values[5] as? Boolean ?: false
+                    reelsFeedEnabled = values[5] as? Boolean ?: false,
+                    reelsIncludeVideoAttachments = values[6] as? Boolean ?: true
                 )
             }.collect { state ->
                 _uiState.update {
@@ -252,7 +283,8 @@ class SettingsViewModel @Inject constructor(
                         socialMediaBackgroundDownloadEnabled = state.backgroundDownloadEnabled,
                         socialMediaDownloadOnCellularEnabled = state.downloadOnCellularEnabled,
                         tiktokVideoQuality = state.tiktokQuality,
-                        reelsFeedEnabled = state.reelsFeedEnabled
+                        reelsFeedEnabled = state.reelsFeedEnabled,
+                        reelsIncludeVideoAttachments = state.reelsIncludeVideoAttachments
                     )
                 }
             }
@@ -265,7 +297,8 @@ class SettingsViewModel @Inject constructor(
         val backgroundDownloadEnabled: Boolean,
         val downloadOnCellularEnabled: Boolean,
         val tiktokQuality: String,
-        val reelsFeedEnabled: Boolean
+        val reelsFeedEnabled: Boolean,
+        val reelsIncludeVideoAttachments: Boolean
     )
 
     fun setTiktokDownloaderEnabled(enabled: Boolean) {
@@ -301,6 +334,12 @@ class SettingsViewModel @Inject constructor(
     fun setReelsFeedEnabled(enabled: Boolean) {
         viewModelScope.launch {
             settingsDataStore.setReelsFeedEnabled(enabled)
+        }
+    }
+
+    fun setReelsIncludeVideoAttachments(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsDataStore.setReelsIncludeVideoAttachments(enabled)
         }
     }
 
@@ -460,8 +499,9 @@ class SettingsViewModel @Inject constructor(
             diff < 3600_000 -> "${diff / 60_000} minutes ago"
             diff < 86400_000 -> "${diff / 3600_000} hours ago"
             else -> {
-                val dateFormat = SimpleDateFormat("MMM d, yyyy", Locale.getDefault())
-                dateFormat.format(Date(timestamp))
+                val formatter = DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault())
+                val instant = Instant.ofEpochMilli(timestamp)
+                formatter.format(instant.atZone(ZoneId.systemDefault()))
             }
         }
     }
@@ -505,6 +545,7 @@ data class SettingsUiState(
     val socialMediaDownloadOnCellularEnabled: Boolean = false,
     val tiktokVideoQuality: String = "hd",
     val reelsFeedEnabled: Boolean = false,
+    val reelsIncludeVideoAttachments: Boolean = true,
     // Contacts permission
     val hasContactsPermission: Boolean = false,
     // Find My debug data

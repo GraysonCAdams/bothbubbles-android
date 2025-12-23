@@ -75,7 +75,9 @@ class SoundManager @Inject constructor(
     private var popReceiveId: Int = 0
 
     init {
+        Timber.d("[SoundManager] init started")
         initializeSoundPool()
+        Timber.d("[SoundManager] init complete")
     }
 
     private fun initializeSoundPool() {

@@ -52,6 +52,8 @@ typealias VerifiedCounterpartCheckEntity = com.bothbubbles.core.model.entity.Ver
 typealias AutoShareContactEntity = com.bothbubbles.core.model.entity.AutoShareContactEntity
 typealias TombstoneEntity = com.bothbubbles.core.model.entity.TombstoneEntity
 typealias MessageEditHistoryEntity = com.bothbubbles.core.model.entity.MessageEditHistoryEntity
+typealias SocialMediaLinkEntity = com.bothbubbles.core.model.entity.SocialMediaLinkEntity
+typealias SocialMediaPlatform = com.bothbubbles.core.model.entity.SocialMediaPlatform
 
 // Enums and utility types
 typealias MessageSource = com.bothbubbles.core.model.entity.MessageSource

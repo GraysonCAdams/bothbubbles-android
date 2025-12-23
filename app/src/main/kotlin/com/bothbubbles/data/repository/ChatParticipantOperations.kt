@@ -8,9 +8,11 @@ import timber.log.Timber
 import com.bothbubbles.core.network.api.dto.ChatDto
 import com.bothbubbles.services.contacts.AndroidContactsService
 import com.bothbubbles.util.PhoneNumberFormatter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -117,33 +119,41 @@ class ChatParticipantOperations @Inject constructor(
             return 0
         }
 
-        return try {
-            val allHandles = handleDao.getAllHandlesOnce()
-            Timber.d("refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
+        // IMPORTANT: Run on IO dispatcher to avoid blocking main thread
+        // This iterates through all handles (potentially thousands) doing contact lookups
+        return withContext(Dispatchers.IO) {
+            try {
+                val allHandles = handleDao.getAllHandlesOnce()
+                Timber.d("refreshAllContactInfo: Refreshing contact info for ${allHandles.size} handles")
 
-            // Collect updates - contact lookups are still O(N) but unavoidable
-            val updates = allHandles.mapNotNull { handle ->
-                val displayName = androidContactsService.getContactDisplayName(handle.address)
-                val photoUri = androidContactsService.getContactPhotoUri(handle.address)
+                // Collect updates - contact lookups are still O(N) but unavoidable
+                var handlesWithPhotos = 0
+                val updates = allHandles.mapNotNull { handle ->
+                    val displayName = androidContactsService.getContactDisplayName(handle.address)
+                    val photoUri = androidContactsService.getContactPhotoUri(handle.address)
 
-                // Only include if contact info changed
-                if (displayName != handle.cachedDisplayName || photoUri != handle.cachedAvatarPath) {
-                    ContactInfoUpdate(handle.id, displayName, photoUri)
-                } else {
-                    null
+                    if (photoUri != null) handlesWithPhotos++
+
+                    // Only include if contact info changed
+                    if (displayName != handle.cachedDisplayName || photoUri != handle.cachedAvatarPath) {
+                        ContactInfoUpdate(handle.id, displayName, photoUri)
+                    } else {
+                        null
+                    }
                 }
-            }
+                Timber.d("refreshAllContactInfo: Found $handlesWithPhotos handles with contact photos")
 
-            // Batch update in single transaction
-            if (updates.isNotEmpty()) {
-                handleDao.updateCachedContactInfoBatch(updates)
-            }
+                // Batch update in single transaction
+                if (updates.isNotEmpty()) {
+                    handleDao.updateCachedContactInfoBatch(updates)
+                }
 
-            Timber.d("refreshAllContactInfo: Updated ${updates.size} handles")
-            updates.size
-        } catch (e: Exception) {
-            Timber.e(e, "refreshAllContactInfo: Error refreshing contact info")
-            0
+                Timber.d("refreshAllContactInfo: Updated ${updates.size} handles")
+                updates.size
+            } catch (e: Exception) {
+                Timber.e(e, "refreshAllContactInfo: Error refreshing contact info")
+                0
+            }
         }
     }
 

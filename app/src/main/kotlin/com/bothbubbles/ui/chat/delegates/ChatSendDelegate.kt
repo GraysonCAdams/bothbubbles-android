@@ -66,12 +66,13 @@ class ChatSendDelegate @AssistedInject constructor(
     private val socketConnection: SocketConnection,
     private val soundPlayer: SoundPlayer,
     @Assisted private val chatGuid: String,
-    @Assisted private val scope: CoroutineScope
+    @Assisted private val scope: CoroutineScope,
+    @Assisted private val mergedChatGuids: List<String>
 ) {
 
     @AssistedFactory
     interface Factory {
-        fun create(chatGuid: String, scope: CoroutineScope): ChatSendDelegate
+        fun create(chatGuid: String, scope: CoroutineScope, mergedChatGuids: List<String>): ChatSendDelegate
     }
 
 
@@ -148,12 +149,35 @@ class ChatSendDelegate @AssistedInject constructor(
         // Clear reply state (this is internal to send delegate)
         _state.update { it.copy(replyingToGuid = null) }
 
+        // For merged chats: if user selected iMessage mode but we're viewing an SMS chat,
+        // find the iMessage chat GUID from merged chats to use for sending
+        val effectiveChatGuid = if (currentSendMode == ChatSendMode.IMESSAGE && isLocalSmsChat && mergedChatGuids.size > 1) {
+            // Find an iMessage chat from the merged chats
+            val iMessageGuid = mergedChatGuids.find { guid ->
+                !guid.startsWith("sms;", ignoreCase = true) &&
+                !guid.startsWith("mms;", ignoreCase = true)
+            }
+            if (iMessageGuid != null) {
+                Timber.tag("SendDebug").i("Merged chat: switching from SMS ($chatGuid) to iMessage ($iMessageGuid) for send")
+                iMessageGuid
+            } else {
+                chatGuid
+            }
+        } else {
+            chatGuid
+        }
+
+        // Use the effective chat GUID to determine if this is an SMS chat
+        val effectiveIsLocalSmsChat = effectiveChatGuid.startsWith("sms;", ignoreCase = true) ||
+                                       effectiveChatGuid.startsWith("mms;", ignoreCase = true)
+
         // Determine delivery mode based on chat type and current send mode
         val deliveryMode = determineDeliveryMode(
-            isLocalSmsChat = isLocalSmsChat,
+            isLocalSmsChat = effectiveIsLocalSmsChat,
             currentSendMode = currentSendMode,
             hasAttachments = attachments.isNotEmpty()
         )
+        Timber.tag("SendDebug").i("sendMessage: chatGuid=$chatGuid, effectiveChatGuid=$effectiveChatGuid, isLocalSmsChat=$isLocalSmsChat, currentSendMode=$currentSendMode, deliveryMode=$deliveryMode")
 
         // Generate GUID for optimistic UI
         val tempGuid = "temp-${java.util.UUID.randomUUID()}"
@@ -199,7 +223,7 @@ class ChatSendDelegate @AssistedInject constructor(
         // Queue message for offline-first delivery via WorkManager (on IO dispatcher)
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             pendingMessageSource.queueMessage(
-                chatGuid = chatGuid,
+                chatGuid = effectiveChatGuid,
                 text = trimmedText,
                 replyToGuid = replyToGuid,
                 effectId = effectId,

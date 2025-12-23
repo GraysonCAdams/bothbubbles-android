@@ -103,7 +103,8 @@ data class PopularChatUiModel(
 )
 
 /**
- * Represents the state of the conversation preview section
+ * Represents the state of the conversation preview section.
+ * Uses full MessageUiModel for consistent rendering with the main chat.
  */
 sealed class ConversationPreviewState {
     /** Loading the conversation preview */
@@ -112,24 +113,13 @@ sealed class ConversationPreviewState {
     /** No existing conversation - will be a new chat */
     data object NewConversation : ConversationPreviewState()
 
-    /** Existing conversation with message previews */
+    /** Existing conversation with full message models */
     data class Existing(
         val chatGuid: String,
-        val messages: List<MessagePreview>
+        val messages: List<com.bothbubbles.ui.components.message.MessageUiModel>,
+        val isGroup: Boolean = false
     ) : ConversationPreviewState()
 }
-
-/**
- * A single message preview for the conversation preview section
- */
-data class MessagePreview(
-    val guid: String,
-    val text: String?,
-    val isFromMe: Boolean,
-    val timestamp: Long,
-    val hasAttachments: Boolean = false,
-    val attachmentPreviewText: String? = null  // e.g., "Photo", "Video", "Audio"
-)
 
 /**
  * Serializable model for group chat participants (used for navigation)

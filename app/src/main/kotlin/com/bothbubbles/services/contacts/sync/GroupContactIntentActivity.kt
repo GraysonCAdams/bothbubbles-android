@@ -4,12 +4,6 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.provider.ContactsContract
-import com.bothbubbles.data.local.db.dao.UnifiedChatDao
-import dagger.hilt.EntryPoint
-import dagger.hilt.InstallIn
-import dagger.hilt.android.EntryPointAccessors
-import dagger.hilt.components.SingletonComponent
-import kotlinx.coroutines.runBlocking
 import timber.log.Timber
 
 /**
@@ -19,15 +13,9 @@ import timber.log.Timber
  * taps "Send Message" on a group contact synced by BothBubbles.
  *
  * The intent contains our custom MIME type with the unified chat ID, which we
- * resolve to a chat GUID and use to open the correct chat in the main app.
+ * use to open the correct chat in the main app via deep link.
  */
 class GroupContactIntentActivity : Activity() {
-
-    @EntryPoint
-    @InstallIn(SingletonComponent::class)
-    interface IntentEntryPoint {
-        fun unifiedChatDao(): UnifiedChatDao
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -49,19 +37,26 @@ class GroupContactIntentActivity : Activity() {
             return
         }
 
-        // Extract the unified chat ID from the contact data
+        // Handle imto:// scheme (tapped on IM row in Contacts)
+        // Format: imto://BothBubbles/{unifiedChatId}
+        if (data.scheme == "imto" && data.host == "BothBubbles") {
+            val unifiedChatId = data.pathSegments?.firstOrNull()
+            if (unifiedChatId != null) {
+                Timber.d("Opening group chat from IM row tap: unifiedChatId=$unifiedChatId")
+                launchMainActivity(unifiedChatId)
+            } else {
+                Timber.w("Could not extract unified chat ID from imto URI: $data")
+                launchMainActivity(null)
+            }
+            return
+        }
+
+        // Handle content:// scheme (tapped on custom data row in Contacts)
         val unifiedChatId = extractUnifiedChatId(data)
 
         if (unifiedChatId != null) {
-            // Resolve unified chat ID to chat GUID (sourceId)
-            val chatGuid = resolveToChatGuid(unifiedChatId)
-            if (chatGuid != null) {
-                Timber.d("Opening group chat from contact tap: unifiedId=$unifiedChatId, chatGuid=$chatGuid")
-                launchMainActivity(chatGuid)
-            } else {
-                Timber.w("Could not resolve unified chat ID to chat GUID: $unifiedChatId")
-                launchMainActivity(null)
-            }
+            Timber.d("Opening group chat from contact tap: unifiedChatId=$unifiedChatId")
+            launchMainActivity(unifiedChatId)
         } else {
             Timber.w("Could not extract unified chat ID from contact data: $data")
             launchMainActivity(null)
@@ -101,35 +96,16 @@ class GroupContactIntentActivity : Activity() {
         }
     }
 
-    /**
-     * Resolve unified chat ID to the primary chat GUID (sourceId).
-     */
-    private fun resolveToChatGuid(unifiedChatId: String): String? {
-        return try {
-            val entryPoint = EntryPointAccessors.fromApplication(
-                applicationContext,
-                IntentEntryPoint::class.java
-            )
-            val unifiedChatDao = entryPoint.unifiedChatDao()
-
-            // Use runBlocking since this is a quick DB lookup and we're about to finish anyway
-            runBlocking {
-                unifiedChatDao.getById(unifiedChatId)?.sourceId
-            }
-        } catch (e: Exception) {
-            Timber.e(e, "Error resolving unified chat ID to chat GUID")
-            null
-        }
-    }
-
-    private fun launchMainActivity(chatGuid: String?) {
+    private fun launchMainActivity(unifiedChatId: String?) {
         val mainIntent = Intent(this, com.bothbubbles.MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
 
-            if (chatGuid != null) {
-                // Pass chat GUID as deep link
-                action = Intent.ACTION_VIEW
-                this.data = android.net.Uri.parse("bothbubbles://chat/$chatGuid")
+            if (unifiedChatId != null) {
+                // Use imto:// scheme which MainActivity already handles for voice commands
+                // Format: imto://BothBubbles/{unifiedChatId}
+                // MainActivity.parseShareIntent resolves this to the chat GUID
+                action = Intent.ACTION_SENDTO
+                this.data = android.net.Uri.parse("imto://BothBubbles/$unifiedChatId")
             }
         }
 

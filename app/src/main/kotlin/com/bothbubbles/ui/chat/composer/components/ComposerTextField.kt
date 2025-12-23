@@ -1,17 +1,32 @@
 package com.bothbubbles.ui.chat.composer.components
 
+import android.content.Context
+import android.graphics.drawable.GradientDrawable
+import android.text.Editable
+import android.text.InputType
+import android.text.SpannableStringBuilder
+import android.text.Spanned
+import android.text.TextWatcher
+import android.text.style.ForegroundColorSpan
+import android.text.style.StyleSpan
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.View
+import android.view.ViewGroup
+import android.view.inputmethod.EditorInfo
+import android.widget.EditText
+import androidx.core.content.res.ResourcesCompat
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -21,28 +36,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.bothbubbles.R
 import com.bothbubbles.ui.chat.ChatSendMode
-import timber.log.Timber
 import com.bothbubbles.ui.chat.composer.MentionSpan
 import com.bothbubbles.ui.chat.composer.animations.ComposerMotionTokens
 import com.bothbubbles.ui.theme.BothBubblesTheme
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.collections.immutable.persistentListOf
+import timber.log.Timber
 
 /**
  * Material Design 3 styled text input field for the chat composer.
@@ -86,46 +92,10 @@ fun ComposerTextField(
     modifier: Modifier = Modifier
 ) {
     val inputColors = BothBubblesTheme.bubbleColors
-    val focusRequester = remember { FocusRequester() }
-    var isFocused by remember { mutableStateOf(false) }
+    val density = LocalDensity.current
+
     // Track line count to force height updates when text wraps
     var lineCount by remember { mutableIntStateOf(1) }
-
-    // Use TextFieldValue to track both text and cursor position
-    // rememberSaveable ensures text survives process death and configuration changes
-    var textFieldValue by rememberSaveable(
-        stateSaver = TextFieldValue.Saver
-    ) { mutableStateOf(TextFieldValue(text)) }
-
-    // Request focus when triggered (e.g., after camera capture)
-    LaunchedEffect(shouldRequestFocus) {
-        if (shouldRequestFocus) {
-            focusRequester.requestFocus()
-            onFocusRequested()
-        }
-    }
-
-    // Sync external text changes (e.g., when mention is inserted)
-    // [DICTATION_DEBUG] This may interrupt voice dictation by resetting TextFieldValue
-    LaunchedEffect(text) {
-        if (textFieldValue.text != text) {
-            Timber.tag("DICTATION_DEBUG").w(
-                "External text sync triggered! " +
-                "Current TFV: '${textFieldValue.text.takeLast(20)}' (len=${textFieldValue.text.length}, cursor=${textFieldValue.selection.start}) -> " +
-                "New text: '${text.takeLast(20)}' (len=${text.length}). " +
-                "This resets TextFieldValue and may interrupt dictation."
-            )
-            // Keep cursor at end when text changes externally
-            textFieldValue = TextFieldValue(
-                text = text,
-                selection = TextRange(text.length)
-            )
-        }
-    }
-
-    // Calculate minimum height based on line count
-    // Line height ~24dp, base height 40dp for single line
-    val calculatedMinHeight = (40 + (lineCount - 1) * 24).dp
 
     // Placeholder text based on send mode and enabled state
     val placeholderText = when {
@@ -134,8 +104,50 @@ fun ComposerTextField(
         else -> stringResource(R.string.message_placeholder_imessage)
     }
 
-    // Mention color for visual transformation
-    val mentionColor = MaterialTheme.colorScheme.primary
+    // Colors for the EditText
+    val textColor = inputColors.inputText.toArgb()
+    val hintColor = inputColors.inputPlaceholder.toArgb()
+    val mentionColor = MaterialTheme.colorScheme.primary.toArgb()
+    val cursorColor = MaterialTheme.colorScheme.primary.toArgb()
+
+    // Calculate minimum height based on line count
+    // Line height ~24dp, base height 40dp for single line
+    val calculatedMinHeight = (40 + (lineCount - 1) * 24).dp
+
+    // Keep reference to EditText for external updates
+    var editTextRef by remember { mutableStateOf<EditText?>(null) }
+
+    // Handle focus requests
+    LaunchedEffect(shouldRequestFocus) {
+        if (shouldRequestFocus) {
+            editTextRef?.requestFocus()
+            onFocusRequested()
+        }
+    }
+
+    // Sync external text changes (e.g., when mention is inserted)
+    LaunchedEffect(text) {
+        editTextRef?.let { editText ->
+            if (editText.text.toString() != text) {
+                // Preserve selection position or move to end
+                val wasAtEnd = editText.selectionEnd == editText.text.length
+                editText.setText(applyMentionSpans(text, mentions, mentionColor))
+                editText.setSelection(if (wasAtEnd) text.length else minOf(editText.selectionEnd, text.length))
+            }
+        }
+    }
+
+    // Update mention styling when mentions change
+    LaunchedEffect(mentions) {
+        editTextRef?.let { editText ->
+            val currentText = editText.text.toString()
+            if (currentText == text) {
+                val cursorPos = editText.selectionStart
+                editText.setText(applyMentionSpans(currentText, mentions, mentionColor))
+                editText.setSelection(minOf(cursorPos, currentText.length))
+            }
+        }
+    }
 
     Surface(
         modifier = modifier
@@ -164,22 +176,8 @@ fun ComposerTextField(
                 }
             }
 
-            // Text field with placeholder
-            BasicTextField(
-                value = textFieldValue,
-                onValueChange = { newValue ->
-                    if (isEnabled) {
-                        // [DICTATION_DEBUG] Log user input changes
-                        Timber.tag("DICTATION_DEBUG").d(
-                            "onValueChange: '${newValue.text.takeLast(15)}' (len=${newValue.text.length}, cursor=${newValue.selection.start})"
-                        )
-                        textFieldValue = newValue
-                        onTextChange(newValue.text)
-                        // Notify about cursor position for mention detection
-                        onTextChangedWithCursor?.invoke(newValue.text, newValue.selection.start)
-                    }
-                },
-                enabled = isEnabled,
+            // Native EditText with spell checking support
+            AndroidView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(
@@ -187,52 +185,48 @@ fun ComposerTextField(
                         end = if (trailingContent != null) 72.dp else 12.dp,
                         top = 8.dp,
                         bottom = 8.dp
-                    )
-                    .focusRequester(focusRequester)
-                    .onFocusChanged { focusState ->
-                        // [DICTATION_DEBUG] Log focus changes - loss of focus kills dictation
-                        if (isFocused != focusState.isFocused) {
-                            Timber.tag("DICTATION_DEBUG").w(
-                                "TextField focus changed: $isFocused -> ${focusState.isFocused}"
-                            )
+                    ),
+                factory = { context ->
+                    createSpellCheckEditText(
+                        context = context,
+                        density = density.density,
+                        textColor = textColor,
+                        hintColor = hintColor,
+                        cursorColor = cursorColor,
+                        hint = placeholderText,
+                        initialText = text,
+                        mentions = mentions,
+                        mentionColor = mentionColor,
+                        isEnabled = isEnabled,
+                        onTextChange = onTextChange,
+                        onTextChangedWithCursor = onTextChangedWithCursor,
+                        onFocusChanged = onFocusChanged,
+                        onLineCountChanged = { newCount ->
+                            val clampedCount = newCount.coerceIn(1, 4)
+                            if (clampedCount != lineCount) {
+                                lineCount = clampedCount
+                            }
                         }
-                        isFocused = focusState.isFocused
-                        onFocusChanged(focusState.isFocused)
-                    },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = if (isEnabled) {
-                        inputColors.inputText
-                    } else {
-                        inputColors.inputText.copy(alpha = 0.5f)
-                    }
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                keyboardOptions = KeyboardOptions(
-                    capitalization = KeyboardCapitalization.Sentences,
-                    imeAction = ImeAction.Default
-                ),
-                minLines = 1,
-                maxLines = 4,
-                onTextLayout = { textLayoutResult ->
-                    // Track line count changes to trigger recomposition for height
-                    val newLineCount = textLayoutResult.lineCount.coerceIn(1, 4)
-                    if (newLineCount != lineCount) {
-                        lineCount = newLineCount
-                    }
+                    ).also { editTextRef = it }
                 },
-                visualTransformation = MentionVisualTransformation(mentions, mentionColor),
-                decorationBox = { innerTextField ->
-                    Box {
-                        if (text.isEmpty()) {
-                            Text(
-                                text = placeholderText,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = inputColors.inputPlaceholder.copy(
-                                    alpha = if (isEnabled) 1f else 0.5f
-                                )
-                            )
-                        }
-                        innerTextField()
+                update = { editText ->
+                    // Update enabled state
+                    editText.isEnabled = isEnabled
+                    editText.alpha = if (isEnabled) 1f else 0.5f
+
+                    // Update hint text
+                    editText.hint = placeholderText
+
+                    // Update colors
+                    editText.setTextColor(textColor)
+                    editText.setHintTextColor(if (isEnabled) hintColor else (hintColor and 0x00FFFFFF) or 0x80000000.toInt())
+
+                    // Sync text if changed externally (only if different to avoid cursor jump)
+                    val currentText = editText.text.toString()
+                    if (currentText != text) {
+                        val cursorPos = editText.selectionStart.coerceIn(0, text.length)
+                        editText.setText(applyMentionSpans(text, mentions, mentionColor))
+                        editText.setSelection(cursorPos)
                     }
                 }
             )
@@ -248,58 +242,141 @@ fun ComposerTextField(
 }
 
 /**
- * Build an AnnotatedString with mention spans styled.
+ * Creates a native EditText with spell checking enabled.
  */
-@Composable
-private fun buildMentionAnnotatedString(
-    text: String,
+private fun createSpellCheckEditText(
+    context: Context,
+    density: Float,
+    textColor: Int,
+    hintColor: Int,
+    cursorColor: Int,
+    hint: String,
+    initialText: String,
     mentions: ImmutableList<MentionSpan>,
-    mentionColor: androidx.compose.ui.graphics.Color
-): androidx.compose.ui.text.AnnotatedString {
-    return buildAnnotatedString {
-        append(text)
-        mentions.forEach { mention ->
-            if (mention.startIndex >= 0 && mention.endIndex <= text.length) {
-                addStyle(
-                    style = SpanStyle(
-                        color = mentionColor,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    start = mention.startIndex,
-                    end = mention.endIndex
-                )
+    mentionColor: Int,
+    isEnabled: Boolean,
+    onTextChange: (String) -> Unit,
+    onTextChangedWithCursor: ((String, Int) -> Unit)?,
+    onFocusChanged: (Boolean) -> Unit,
+    onLineCountChanged: (Int) -> Unit
+): EditText {
+    return EditText(context).apply {
+        // Layout params
+        layoutParams = ViewGroup.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+
+        // Text appearance - match Material bodyLarge (16sp)
+        setTextSize(TypedValue.COMPLEX_UNIT_SP, 16f)
+        setTextColor(textColor)
+        setHintTextColor(hintColor)
+        setHint(hint)
+
+        // Apply Google Sans Flex font to match app typography
+        ResourcesCompat.getFont(context, R.font.googlesansflex_regular)?.let {
+            typeface = it
+        }
+
+        // Remove default EditText styling
+        background = null
+        setPadding(0, 0, 0, 0)
+
+        // Enable spell checking and autocorrect with sentence capitalization
+        inputType = InputType.TYPE_CLASS_TEXT or
+                InputType.TYPE_TEXT_FLAG_AUTO_CORRECT or
+                InputType.TYPE_TEXT_FLAG_CAP_SENTENCES or
+                InputType.TYPE_TEXT_FLAG_MULTI_LINE
+
+        // Don't let IME take over with action button - we handle send ourselves
+        imeOptions = EditorInfo.IME_FLAG_NO_ENTER_ACTION
+
+        // Max 4 lines, expandable
+        minLines = 1
+        maxLines = 4
+        setHorizontallyScrolling(false)
+
+        // Gravity for vertical centering when single line
+        gravity = Gravity.CENTER_VERTICAL or Gravity.START
+
+        // Set initial text with mention styling
+        setText(applyMentionSpans(initialText, mentions, mentionColor))
+        setSelection(initialText.length)
+
+        // Enabled state
+        this.isEnabled = isEnabled
+        alpha = if (isEnabled) 1f else 0.5f
+
+        // Text change listener
+        addTextChangedListener(object : TextWatcher {
+            private var isUpdating = false
+
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+
+            override fun afterTextChanged(s: Editable?) {
+                if (isUpdating) return
+                isUpdating = true
+
+                val newText = s?.toString() ?: ""
+                onTextChange(newText)
+                onTextChangedWithCursor?.invoke(newText, selectionStart)
+
+                // Track line count for height expansion
+                post {
+                    onLineCountChanged(lineCount)
+                }
+
+                isUpdating = false
             }
+        })
+
+        // Focus listener
+        setOnFocusChangeListener { _, hasFocus ->
+            onFocusChanged(hasFocus)
+        }
+
+        // Try to set cursor color via reflection (works on most devices)
+        try {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+                textCursorDrawable?.setTint(cursorColor)
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "Could not set cursor color")
         }
     }
 }
 
 /**
- * Visual transformation that applies mention styling to text.
+ * Applies mention styling to text using SpannableStringBuilder.
  */
-private class MentionVisualTransformation(
-    private val mentions: ImmutableList<MentionSpan>,
-    private val mentionColor: androidx.compose.ui.graphics.Color
-) : androidx.compose.ui.text.input.VisualTransformation {
+private fun applyMentionSpans(
+    text: String,
+    mentions: ImmutableList<MentionSpan>,
+    mentionColor: Int
+): SpannableStringBuilder {
+    val spannable = SpannableStringBuilder(text)
 
-    override fun filter(text: androidx.compose.ui.text.AnnotatedString): androidx.compose.ui.text.input.TransformedText {
-        val builder = androidx.compose.ui.text.AnnotatedString.Builder(text)
-
-        mentions.forEach { mention ->
-            if (mention.startIndex >= 0 && mention.endIndex <= text.length) {
-                builder.addStyle(
-                    style = SpanStyle(
-                        color = mentionColor,
-                        fontWeight = FontWeight.SemiBold
-                    ),
-                    start = mention.startIndex,
-                    end = mention.endIndex
-                )
-            }
+    mentions.forEach { mention ->
+        if (mention.startIndex >= 0 && mention.endIndex <= text.length) {
+            // Apply color
+            spannable.setSpan(
+                ForegroundColorSpan(mentionColor),
+                mention.startIndex,
+                mention.endIndex,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
+            // Apply bold style
+            spannable.setSpan(
+                StyleSpan(android.graphics.Typeface.BOLD),
+                mention.startIndex,
+                mention.endIndex,
+                Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+            )
         }
-
-        return androidx.compose.ui.text.input.TransformedText(
-            builder.toAnnotatedString(),
-            androidx.compose.ui.text.input.OffsetMapping.Identity
-        )
     }
+
+    return spannable
 }
+

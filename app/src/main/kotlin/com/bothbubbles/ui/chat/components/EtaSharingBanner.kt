@@ -307,10 +307,10 @@ fun EtaStopSharingLink(
         Text(
             text = "Stop Sharing ETA",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = MaterialTheme.colorScheme.primary,
             modifier = Modifier
                 .clickable { onStopSharing() }
-                .padding(top = 4.dp, bottom = 8.dp)
+                .padding(top = 4.dp)
         )
     }
 }

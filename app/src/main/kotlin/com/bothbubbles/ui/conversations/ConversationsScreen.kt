@@ -387,7 +387,9 @@ fun ConversationsScreen(
                                     viewModel.setCategoryFilter(category?.name)
                                 },
                                 onSearchClick = { isSearchActive = true },
-                                onSettingsClick = { isSettingsOpen = true },
+                                onSettingsClick = {
+                                    isSettingsOpen = true
+                                },
                                 onTitleClick = {
                                     coroutineScope.launch {
                                         listState.animateScrollToItem(0)

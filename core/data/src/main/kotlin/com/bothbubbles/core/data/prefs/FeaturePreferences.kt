@@ -184,6 +184,15 @@ class FeaturePreferences @Inject constructor(
         prefs[Keys.REELS_FEED_ENABLED] ?: false
     }
 
+    /**
+     * Whether to include regular video attachments in the Reels feed.
+     * When enabled, videos sent as attachments in the chat will appear alongside
+     * social media videos in the swipe-up Reels experience.
+     */
+    val reelsIncludeVideoAttachments: Flow<Boolean> = dataStore.data.map { prefs ->
+        prefs[Keys.REELS_INCLUDE_VIDEO_ATTACHMENTS] ?: true
+    }
+
     // ===== Auto-Responder =====
 
     val autoResponderEnabled: Flow<Boolean> = dataStore.data.map { prefs ->
@@ -368,6 +377,12 @@ class FeaturePreferences @Inject constructor(
         }
     }
 
+    suspend fun setReelsIncludeVideoAttachments(enabled: Boolean) {
+        dataStore.edit { prefs ->
+            prefs[Keys.REELS_INCLUDE_VIDEO_ATTACHMENTS] = enabled
+        }
+    }
+
     suspend fun setAutoResponderEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
             prefs[Keys.AUTO_RESPONDER_ENABLED] = enabled
@@ -439,5 +454,6 @@ class FeaturePreferences @Inject constructor(
         val SOCIAL_MEDIA_DOWNLOAD_ON_CELLULAR_ENABLED = booleanPreferencesKey("social_media_download_on_cellular_enabled")
         val TIKTOK_VIDEO_QUALITY = stringPreferencesKey("tiktok_video_quality")
         val REELS_FEED_ENABLED = booleanPreferencesKey("reels_feed_enabled")
+        val REELS_INCLUDE_VIDEO_ATTACHMENTS = booleanPreferencesKey("reels_include_video_attachments")
     }
 }

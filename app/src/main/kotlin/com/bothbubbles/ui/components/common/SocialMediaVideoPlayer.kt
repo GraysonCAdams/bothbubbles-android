@@ -215,7 +215,7 @@ fun SocialMediaVideoPlayer(
 
     Column(
         modifier = modifier.widthIn(max = 280.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+        horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start
     ) {
         // Video content surface with long-press support
         Surface(
@@ -343,19 +343,19 @@ fun SocialMediaVideoPlayer(
             }
         }
 
-        // "Show Original" link - outside Surface with no background, centered below video
+        // "Show Original" link - outside Surface with no background, aligned to message side
         if (state !is SocialMediaVideoState.Dismissed && state !is SocialMediaVideoState.Idle) {
             Text(
                 text = "Show Original",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .clickable {
                         fetchJob?.cancel()
                         state = SocialMediaVideoState.Dismissed
                         onShowOriginal()
                     }
-                    .padding(top = 4.dp, bottom = 8.dp)
+                    .padding(top = 4.dp)
             )
         }
     }

@@ -261,6 +261,7 @@ class MessageSendWorker @AssistedInject constructor(
                 // IMESSAGE and AUTO should be re-evaluated by unified routing logic
                 MessageDeliveryMode.IMESSAGE, MessageDeliveryMode.AUTO -> MessageDeliveryMode.AUTO
             }
+            Timber.tag("SendDebug").i("Worker: chatGuid=${pendingMessage.chatGuid}, queuedMode=$queuedMode, deliveryMode=$deliveryMode")
 
             // Send via MessageSendingService
             // Pass localId as tempGuid to ensure same ID is used across retries

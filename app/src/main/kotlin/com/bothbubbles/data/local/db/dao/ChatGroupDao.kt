@@ -48,14 +48,14 @@ interface ChatGroupDao {
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1
+        WHERE date_deleted IS NULL AND is_group = 1 AND unified_chat_id IS NULL
         ORDER BY latest_message_date DESC
     """)
     fun observeGroupChats(): Flow<List<ChatEntity>>
 
     @Query("""
         SELECT * FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1
+        WHERE date_deleted IS NULL AND is_group = 1 AND unified_chat_id IS NULL
         ORDER BY latest_message_date DESC
         LIMIT :limit OFFSET :offset
     """)
@@ -63,13 +63,13 @@ interface ChatGroupDao {
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1
+        WHERE date_deleted IS NULL AND is_group = 1 AND unified_chat_id IS NULL
     """)
     suspend fun getGroupChatCount(): Int
 
     @Query("""
         SELECT COUNT(*) FROM chats
-        WHERE date_deleted IS NULL AND is_group = 1
+        WHERE date_deleted IS NULL AND is_group = 1 AND unified_chat_id IS NULL
     """)
     fun observeGroupChatCount(): Flow<Int>
 }

@@ -1,7 +1,10 @@
 package com.bothbubbles.ui.chat.delegates
 
+import com.bothbubbles.core.data.prefs.FeaturePreferences
 import com.bothbubbles.core.data.prefs.SyncPreferences
+import com.bothbubbles.data.local.db.dao.AttachmentDao
 import com.bothbubbles.data.local.db.dao.MessageDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.repository.HandleRepository
 import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
@@ -11,6 +14,7 @@ import com.bothbubbles.services.socialmedia.SocialMediaPlatform
 import com.bothbubbles.services.socialmedia.SocialMediaResult
 import com.bothbubbles.ui.components.message.ReactionUiModel
 import com.bothbubbles.ui.components.message.parseReactionType
+import com.bothbubbles.ui.components.reels.AttachmentVideoData
 import com.bothbubbles.ui.components.reels.ReelItem
 import com.bothbubbles.ui.components.reels.ReelsTapback
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +28,7 @@ import javax.inject.Inject
 
 /**
  * Delegate for managing Reels feed state in ChatScreen.
- * Handles loading cached videos, checking settings, managing tapbacks,
+ * Handles loading cached videos, video attachments, checking settings, managing tapbacks,
  * and orchestrating video downloads.
  *
  * Sorting order for Reels feed:
@@ -35,8 +39,11 @@ class ChatReelsDelegate @Inject constructor(
     private val downloadService: SocialMediaDownloadService,
     private val cacheManager: SocialMediaCacheManager,
     private val syncPreferences: SyncPreferences,
+    private val featurePreferences: FeaturePreferences,
     private val handleRepository: HandleRepository,
-    private val messageDao: MessageDao
+    private val messageDao: MessageDao,
+    private val attachmentDao: AttachmentDao,
+    private val socialMediaLinkDao: SocialMediaLinkDao
 ) {
     private lateinit var scope: CoroutineScope
     private var chatGuid: String = ""
@@ -60,7 +67,7 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
-     * Loads the reels state including settings, cached videos, and pending videos for this chat.
+     * Loads the reels state including settings, cached videos, video attachments, and pending videos for this chat.
      * Videos are sorted: unread (oldest→newest) then read (newest→oldest).
      * Also calculates unwatched count for videos received after initial sync.
      */
@@ -76,22 +83,31 @@ class ChatReelsDelegate @Inject constructor(
             }
 
             val isEnabled = downloadService.isReelsFeedEnabled()
+            val includeAttachments = featurePreferences.reelsIncludeVideoAttachments.first()
             val cachedVideos = cacheManager.getCachedVideosForChat(chatGuid)
 
             // Find pending videos (social media links not yet cached)
             val pendingItems = findPendingVideos(cachedVideos)
 
-            // Debug logging
-            Timber.d("[Reels] chatGuid=$chatGuid, isEnabled=$isEnabled, cachedVideos=${cachedVideos.size}, pendingItems=${pendingItems.size}")
+            // Load video attachments if setting is enabled
+            val attachmentItems = if (includeAttachments) {
+                loadVideoAttachments()
+            } else {
+                emptyList()
+            }
 
-            // Count unwatched videos received AFTER initial sync
+            // Debug logging
+            Timber.d("[Reels] chatGuid=$chatGuid, isEnabled=$isEnabled, cachedVideos=${cachedVideos.size}, pendingItems=${pendingItems.size}, attachments=${attachmentItems.size}")
+
+            // Count unwatched videos received AFTER initial sync (social media only for now)
             val unwatchedCount = cachedVideos.count { video ->
                 !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
             }
 
-            // Combine cached and pending items
+            // Combine cached social media and attachment items, then sort by timestamp
             val cachedReelItems = sortAndMapVideos(cachedVideos)
-            val allItems = cachedReelItems + pendingItems
+            val allItems = (cachedReelItems + attachmentItems + pendingItems)
+                .sortedByDescending { it.sentTimestamp }
 
             _state.value = ReelsState(
                 isEnabled = isEnabled,
@@ -103,45 +119,41 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
-     * Finds social media links in messages that haven't been cached yet.
-     * These will show as pending items in the Reels feed.
+     * Finds social media links that haven't been cached yet.
+     * Uses the social_media_links table for correct sender attribution.
      */
     private suspend fun findPendingVideos(cachedVideos: List<CachedVideo>): List<ReelItem> {
         val cachedUrls = cachedVideos.map { it.originalUrl }.toSet()
         val pendingItems = mutableListOf<ReelItem>()
 
         try {
-            val messagesWithLinks = messageDao.getMessagesWithSocialMediaUrlsForChat(chatGuid)
-            Timber.d("[Reels] Found ${messagesWithLinks.size} messages with social media links")
+            // Query from social_media_links table (correct sender attribution, no reactions)
+            val pendingLinks = socialMediaLinkDao.getPendingLinksForChat(chatGuid)
+            Timber.d("[Reels] Found ${pendingLinks.size} pending social media links in table")
 
-            for (message in messagesWithLinks) {
-                val text = message.text ?: continue
-                val urls = extractSocialMediaUrls(text)
+            for (link in pendingLinks) {
+                // Skip if already cached (in case is_downloaded flag is out of sync)
+                if (cachedUrls.contains(link.url)) continue
+                // Skip if already in pending list (shouldn't happen with unique URLs)
+                if (pendingItems.any { it.originalUrl == link.url }) continue
 
-                for (url in urls) {
-                    // Skip if already cached
-                    if (cachedUrls.contains(url)) continue
-                    // Skip if already in pending list
-                    if (pendingItems.any { it.originalUrl == url }) continue
+                val platform = downloadService.detectPlatform(link.url) ?: continue
 
-                    val platform = downloadService.detectPlatform(url) ?: continue
+                // Look up sender display name
+                val handle = link.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
 
-                    // Look up sender info
-                    val handle = message.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
-
-                    pendingItems.add(
-                        ReelItem.pending(
-                            url = url,
-                            platform = platform,
-                            messageGuid = message.guid,
-                            chatGuid = chatGuid,
-                            senderName = handle?.cachedDisplayName ?: handle?.inferredName,
-                            senderAddress = message.senderAddress,
-                            sentTimestamp = message.dateCreated
-                        )
+                pendingItems.add(
+                    ReelItem.pending(
+                        url = link.url,
+                        platform = platform,
+                        messageGuid = link.messageGuid,
+                        chatGuid = chatGuid,
+                        senderName = if (link.isFromMe) "You" else (handle?.cachedDisplayName ?: handle?.inferredName),
+                        senderAddress = link.senderAddress,
+                        sentTimestamp = link.sentTimestamp
                     )
-                    Timber.d("[Reels] Added pending item: $url from message ${message.guid}")
-                }
+                )
+                Timber.d("[Reels] Added pending item: ${link.url} from message ${link.messageGuid}")
             }
         } catch (e: Exception) {
             Timber.w(e, "[Reels] Failed to find pending videos")
@@ -153,6 +165,7 @@ class ChatReelsDelegate @Inject constructor(
 
     /**
      * Extracts social media URLs from text.
+     * @deprecated Use social_media_links table instead for correct sender attribution.
      */
     private fun extractSocialMediaUrls(text: String): List<String> {
         val urls = mutableListOf<String>()
@@ -166,6 +179,83 @@ class ChatReelsDelegate @Inject constructor(
         }
 
         return urls
+    }
+
+    /**
+     * Loads video attachments from the chat and converts them to ReelItems.
+     * Includes reactions and reply counts for each video.
+     */
+    private suspend fun loadVideoAttachments(): List<ReelItem> {
+        return try {
+            val videoAttachments = attachmentDao.getVideoAttachmentsWithSenderForChat(chatGuid)
+            Timber.d("[Reels] Found ${videoAttachments.size} video attachments for chat $chatGuid")
+
+            videoAttachments.map { video ->
+                // Fetch reactions and reply count for the message
+                val messageGuid = video.attachment.messageGuid
+                val reactionMessages = try {
+                    messageDao.getReactionsForMessageOnce(messageGuid)
+                } catch (e: Exception) {
+                    Timber.w(e, "[Reels] Failed to fetch reactions for attachment message $messageGuid")
+                    emptyList()
+                }
+                val replyCount = try {
+                    messageDao.getReplyCountForMessage(messageGuid)
+                } catch (e: Exception) {
+                    Timber.w(e, "[Reels] Failed to fetch reply count for attachment message $messageGuid")
+                    0
+                }
+
+                // Convert reaction messages to ReactionUiModel
+                val reactions = reactionMessages.mapNotNull { reaction ->
+                    val tapback = parseReactionType(reaction.associatedMessageType)
+                    if (tapback != null) {
+                        val reactionHandle = reaction.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+                        ReactionUiModel(
+                            tapback = tapback,
+                            isFromMe = reaction.isFromMe,
+                            senderName = reactionHandle?.cachedDisplayName ?: reactionHandle?.inferredName
+                        )
+                    } else null
+                }
+
+                // Preserve existing tapback if we have one
+                val existingTapback = _state.value.reelItems
+                    .find { it.attachmentVideo?.guid == video.attachment.guid }
+                    ?.currentTapback
+
+                // Create AttachmentVideoData
+                val attachmentData = AttachmentVideoData(
+                    guid = video.attachment.guid,
+                    messageGuid = messageGuid,
+                    chatGuid = video.chatGuid,
+                    localPath = video.attachment.localPath ?: "",
+                    thumbnailPath = video.attachment.thumbnailPath,
+                    blurhash = video.attachment.blurhash,
+                    transferName = video.attachment.transferName,
+                    totalBytes = video.attachment.totalBytes,
+                    width = video.attachment.width,
+                    height = video.attachment.height,
+                    senderName = video.displayName ?: video.formattedAddress,
+                    senderAddress = video.senderAddress,
+                    sentTimestamp = video.dateCreated,
+                    isFromMe = video.isFromMe,
+                    viewedInReels = false // TODO: Track viewed state for attachments
+                )
+
+                ReelItem.fromAttachment(
+                    video = attachmentData,
+                    currentTapback = existingTapback,
+                    avatarPath = video.avatarPath,
+                    displayName = video.displayName ?: video.formattedAddress,
+                    reactions = reactions,
+                    replyCount = replyCount
+                )
+            }
+        } catch (e: Exception) {
+            Timber.w(e, "[Reels] Failed to load video attachments")
+            emptyList()
+        }
     }
 
     /**
@@ -183,19 +273,40 @@ class ChatReelsDelegate @Inject constructor(
                 .find { it.originalUrl == video.originalUrl }
                 ?.currentTapback
 
-            // Look up contact info from handle
-            val senderAddress = video.senderAddress
-            val handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+            // Look up contact info from handle, with fallback to message sender
+            var senderAddress = video.senderAddress
+            var handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+
+            // If no sender address in video metadata, try to get it from the message
+            if (senderAddress == null) {
+                val message = try {
+                    messageDao.getMessageByGuid(video.messageGuid)
+                } catch (e: Exception) {
+                    null
+                }
+                senderAddress = message?.senderAddress
+                handle = senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
+            }
+
             val avatarPath = handle?.cachedAvatarPath
-            val displayName = handle?.cachedDisplayName ?: handle?.inferredName
+            // Use fallback chain: handle lookup -> cached senderName -> senderAddress
+            val displayName = handle?.cachedDisplayName
+                ?: handle?.inferredName
+                ?: video.senderName
+                ?: senderAddress
 
             // Fetch reactions and reply count for the message
             val messageGuid = video.messageGuid
+            Timber.d("[Reels] Fetching reactions for messageGuid=$messageGuid, url=${video.originalUrl}")
             val reactionMessages = try {
                 messageDao.getReactionsForMessageOnce(messageGuid)
             } catch (e: Exception) {
                 Timber.w(e, "[Reels] Failed to fetch reactions for $messageGuid")
                 emptyList()
+            }
+            Timber.d("[Reels] Found ${reactionMessages.size} reaction messages for $messageGuid")
+            reactionMessages.forEach { reaction ->
+                Timber.d("[Reels] Reaction: guid=${reaction.guid}, type=${reaction.associatedMessageType}, assocGuid=${reaction.associatedMessageGuid}, isFromMe=${reaction.isFromMe}")
             }
             val replyCount = try {
                 messageDao.getReplyCountForMessage(messageGuid)
@@ -207,6 +318,7 @@ class ChatReelsDelegate @Inject constructor(
             // Convert reaction messages to ReactionUiModel
             val reactions = reactionMessages.mapNotNull { reaction ->
                 val tapback = parseReactionType(reaction.associatedMessageType)
+                Timber.d("[Reels] Parsing reaction type=${reaction.associatedMessageType} -> tapback=$tapback")
                 if (tapback != null) {
                     // Look up sender name for the reaction
                     val reactionHandle = reaction.senderAddress?.let { handleRepository.getHandleByAddressAny(it) }
@@ -217,6 +329,7 @@ class ChatReelsDelegate @Inject constructor(
                     )
                 } else null
             }
+            Timber.d("[Reels] Final reactions count: ${reactions.size}")
 
             ReelItem.fromCached(
                 video = video,
@@ -234,19 +347,28 @@ class ChatReelsDelegate @Inject constructor(
      */
     fun refreshCachedVideos() {
         scope.launch {
+            val includeAttachments = featurePreferences.reelsIncludeVideoAttachments.first()
             val cachedVideos = cacheManager.getCachedVideosForChat(chatGuid)
 
             // Find pending videos (social media links not yet cached)
             val pendingItems = findPendingVideos(cachedVideos)
+
+            // Load video attachments if setting is enabled
+            val attachmentItems = if (includeAttachments) {
+                loadVideoAttachments()
+            } else {
+                emptyList()
+            }
 
             // Recalculate unwatched count for videos received AFTER initial sync
             val unwatchedCount = cachedVideos.count { video ->
                 !video.viewedInReels && video.sentTimestamp > initialSyncCompleteTimestamp
             }
 
-            // Combine cached and pending items
+            // Combine cached social media and attachment items, then sort by timestamp
             val cachedReelItems = sortAndMapVideos(cachedVideos)
-            val allItems = cachedReelItems + pendingItems
+            val allItems = (cachedReelItems + attachmentItems + pendingItems)
+                .sortedByDescending { it.sentTimestamp }
 
             _state.value = _state.value.copy(
                 cachedVideos = cachedVideos,
@@ -395,15 +517,22 @@ class ChatReelsDelegate @Inject constructor(
 
     /**
      * Updates the tapback for a specific reel.
+     * Works for both social media videos (by messageGuid+url) and attachments (by messageGuid+attachmentGuid).
      */
     fun updateTapback(
         messageGuid: String,
         url: String,
-        tapback: ReelsTapback?
+        tapback: ReelsTapback?,
+        attachmentGuid: String? = null
     ) {
         val currentItems = _state.value.reelItems.toMutableList()
-        val index = currentItems.indexOfFirst {
-            it.messageGuid == messageGuid && it.originalUrl == url
+        val index = currentItems.indexOfFirst { item ->
+            when {
+                // For attachments, match by messageGuid and attachmentGuid
+                attachmentGuid != null -> item.attachmentVideo?.guid == attachmentGuid
+                // For social media videos, match by messageGuid and URL
+                else -> item.messageGuid == messageGuid && item.originalUrl == url
+            }
         }
 
         if (index >= 0) {
@@ -416,10 +545,15 @@ class ChatReelsDelegate @Inject constructor(
     }
 
     /**
-     * Gets the index of a reel by its original URL.
+     * Gets the index of a reel by its original URL or attachment GUID.
      */
-    fun getReelIndex(originalUrl: String): Int {
-        return _state.value.reelItems.indexOfFirst { it.originalUrl == originalUrl }
+    fun getReelIndex(originalUrl: String, attachmentGuid: String? = null): Int {
+        return _state.value.reelItems.indexOfFirst { item ->
+            when {
+                attachmentGuid != null -> item.attachmentVideo?.guid == attachmentGuid
+                else -> item.originalUrl == originalUrl
+            }
+        }
     }
 
     /**

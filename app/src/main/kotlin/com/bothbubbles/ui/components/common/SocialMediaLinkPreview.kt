@@ -2,6 +2,11 @@ package com.bothbubbles.ui.components.common
 
 import android.content.Intent
 import android.net.Uri
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -9,6 +14,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
@@ -84,6 +90,22 @@ class SocialMediaLinkViewModel @Inject constructor(
      * Gets the downloader service.
      */
     fun getDownloader(): SocialMediaDownloadService = downloader
+
+    /**
+     * Checks if a cached video exists for this URL.
+     */
+    suspend fun hasCachedVideo(url: String): Boolean {
+        return downloader.getCachedVideoPath(url) != null
+    }
+
+    /**
+     * Un-dismisses a link to show the cached video player again.
+     */
+    fun undismissLink(messageGuid: String, url: String) {
+        val key = "$messageGuid:$url"
+        _dismissedLinks.value = _dismissedLinks.value - key
+        downloader.clearDismissedLink(messageGuid, url)
+    }
 }
 
 /**
@@ -121,14 +143,17 @@ fun SmartLinkPreview(
     // Track if we should show video player vs link preview
     var showVideoPlayer by remember { mutableStateOf(false) }
     var isDismissed by remember { mutableStateOf(false) }
+    var hasCached by remember { mutableStateOf(false) }
 
     // Check if downloading is enabled and link isn't dismissed
     LaunchedEffect(url, messageGuid, platform, dismissedLinks) {
         if (platform != null) {
             val isEnabled = viewModel.isDownloadEnabled(platform)
             val isLinkDismissed = viewModel.isLinkDismissed(messageGuid, url)
+            val isCached = viewModel.hasCachedVideo(url)
             showVideoPlayer = isEnabled && !isLinkDismissed
             isDismissed = isLinkDismissed
+            hasCached = isCached
         } else {
             showVideoPlayer = false
         }
@@ -157,15 +182,35 @@ fun SmartLinkPreview(
             modifier = modifier
         )
     } else {
-        // Show regular link preview
-        BorderlessLinkPreview(
-            url = url,
-            isFromMe = isFromMe,
-            maxWidth = maxWidth,
-            onLongPress = onLongPress,
-            viewModel = linkPreviewViewModel,
+        // Show regular link preview with optional "Show Cached" link
+        Column(
+            horizontalAlignment = if (isFromMe) Alignment.End else Alignment.Start,
             modifier = modifier
-        )
+        ) {
+            BorderlessLinkPreview(
+                url = url,
+                isFromMe = isFromMe,
+                maxWidth = maxWidth,
+                onLongPress = onLongPress,
+                viewModel = linkPreviewViewModel
+            )
+
+            // Show "Show Cached" link if video is cached but dismissed
+            if (isDismissed && hasCached && platform != null) {
+                Text(
+                    text = "Show Cached",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .clickable {
+                            viewModel.undismissLink(messageGuid, url)
+                            showVideoPlayer = true
+                            isDismissed = false
+                        }
+                        .padding(top = 4.dp)
+                )
+            }
+        }
     }
 }
 

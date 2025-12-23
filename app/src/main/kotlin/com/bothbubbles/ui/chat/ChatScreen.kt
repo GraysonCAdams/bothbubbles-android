@@ -39,6 +39,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -59,6 +60,7 @@ import com.bothbubbles.ui.components.attachment.LocalExoPlayerPool
 import com.bothbubbles.ui.components.dialogs.ContactInfo
 import com.bothbubbles.ui.components.dialogs.ContactQuickActionsPopup
 import com.bothbubbles.ui.components.message.AnimatedThreadOverlay
+import com.bothbubbles.ui.components.message.ThreadReplyData
 import com.bothbubbles.ui.components.reels.ReelItem
 import com.bothbubbles.ui.components.reels.ReelsFeedScreen
 import com.bothbubbles.ui.components.reels.ReelsTapback
@@ -737,6 +739,10 @@ fun ChatScreen(
                 // Avatar click in group chats opens contact details popup
                 onAvatarClick = { message ->
                     currentState.selectedSenderMessage = message
+                },
+                // Social media video fullscreen opens Reels feed
+                onOpenReelsFeed = {
+                    currentState.showReelsFeed = true
                 }
             )
         }
@@ -827,13 +833,6 @@ fun ChatScreen(
         }
     )
 
-    // Wave 2: Thread overlay uses delegate for internal state collection
-    AnimatedThreadOverlay(
-        threadDelegate = viewModel.thread,
-        onMessageClick = { guid -> viewModel.thread.scrollToMessage(guid) },
-        onDismiss = { viewModel.thread.dismissThreadOverlay() },
-        bottomPadding = bottomBarHeightDp
-    )
     } // End of outer Box
     } // End of CompositionLocalProvider
 
@@ -1024,9 +1023,28 @@ fun ChatScreen(
             onStartDownload = { originalUrl ->
                 viewModel.reels.startDownload(originalUrl)
             },
+            onReplyClick = { messageGuid ->
+                // Open thread modal for this message (exclude origin since we're viewing the reel)
+                viewModel.thread.loadThread(messageGuid, excludeOrigin = true)
+            },
             modifier = Modifier.fillMaxSize()
         )
     }
+
+    // Thread overlay - rendered LAST to appear on top of everything including Reels
+    val threadBottomPadding = if (state.showReelsFeed) 0.dp else with(LocalDensity.current) { state.bottomBarBaseHeightPx.toDp() }
+    AnimatedThreadOverlay(
+        threadDelegate = viewModel.thread,
+        onMessageClick = { guid -> viewModel.thread.scrollToMessage(guid) },
+        onDismiss = { viewModel.thread.dismissThreadOverlay() },
+        onSendReply = if (state.showReelsFeed) { replyData ->
+            // Get origin GUID from thread state and send reply with text and attachments
+            viewModel.thread.state.value.threadOverlay?.originGuid?.let { originGuid ->
+                viewModel.sendThreadReply(replyData.text, originGuid, replyData.attachments)
+            }
+        } else null,
+        bottomPadding = threadBottomPadding
+    )
 }
 
 /**

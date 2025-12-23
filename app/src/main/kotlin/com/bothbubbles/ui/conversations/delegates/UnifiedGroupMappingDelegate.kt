@@ -93,10 +93,14 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         val address = primaryParticipant?.address ?: primaryChat.chatIdentifier ?: unifiedChat.normalizedAddress
 
         // Determine display name using unified chat's cached values
-        val displayName = unifiedChat.displayName?.takeIf { it.isNotBlank() }
-            ?: primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
-            ?: primaryChat.displayName?.let { PhoneNumberFormatter.format(it) }?.takeIf { it.isNotBlank() }
-            ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
+        // For group chats, prioritize chat display name over participant names
+        val displayName: String = unifiedChat.displayName?.takeIf { it.isNotBlank() }
+            ?: primaryChat.displayName?.takeIf { it.isNotBlank() }
+            ?: (if (!unifiedChat.isGroup) {
+                // Only use participant name for 1:1 chats
+                primaryParticipant?.cachedDisplayName?.takeIf { it.isNotBlank() }
+                    ?: primaryParticipant?.inferredName?.let { "Maybe: $it" }
+            } else null)
             ?: primaryChat.chatIdentifier?.let { PhoneNumberFormatter.format(it) }
             ?: PhoneNumberFormatter.format(address)
 
@@ -153,7 +157,10 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
         return ConversationUiModel(
             guid = unifiedChat.sourceId,
             displayName = displayName,
-            avatarPath = unifiedChat.effectiveAvatarPath ?: primaryParticipant?.cachedAvatarPath,
+            avatarPath = unifiedChat.effectiveAvatarPath
+                ?: primaryChat.serverGroupPhotoPath
+                ?: primaryParticipant?.cachedAvatarPath,
+            chatAvatarPath = primaryChat.serverGroupPhotoPath,  // Server group photo takes priority over collage
             lastMessageText = messageText,
             lastMessageTime = formatRelativeTime(latestTimestamp, application),
             lastMessageTimestamp = latestTimestamp,
@@ -161,7 +168,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             isPinned = unifiedChat.isPinned,
             pinIndex = unifiedChat.pinIndex ?: Int.MAX_VALUE,
             isMuted = unifiedChat.muteType != null,
-            isGroup = false,
+            isGroup = unifiedChat.isGroup,
             isTyping = anyTyping,
             isFromMe = isFromMe,
             hasDraft = unifiedChat.textFieldText?.isNotBlank() == true,
@@ -169,6 +176,7 @@ class UnifiedGroupMappingDelegate @AssistedInject constructor(
             lastMessageType = messageType,
             lastMessageStatus = messageStatus,
             participantNames = groupParticipants.map { it.displayName },
+            participantAvatarPaths = groupParticipants.map { it.cachedAvatarPath },
             address = address,
             hasInferredName = primaryParticipant?.hasInferredName == true,
             inferredName = primaryParticipant?.inferredName,

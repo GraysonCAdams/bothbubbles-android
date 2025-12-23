@@ -1494,12 +1494,113 @@ object DatabaseMigrations {
      * Group photos from the BlueBubbles server were previously stored on unified_chats,
      * but group chats don't use unified chats. This adds the fields directly to ChatEntity
      * so group photo sync can work properly.
+     *
+     * Note: Made idempotent to handle cases where columns already exist due to version mismatch.
      */
     val MIGRATION_54_55 = object : Migration(54, 55) {
         override fun migrate(db: SupportSQLiteDatabase) {
-            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_path TEXT DEFAULT NULL")
-            db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_guid TEXT DEFAULT NULL")
+            // Check if columns already exist before adding
+            val cursor = db.query("PRAGMA table_info(chats)")
+            val existingColumns = mutableSetOf<String>()
+            while (cursor.moveToNext()) {
+                existingColumns.add(cursor.getString(1)) // Column name is at index 1
+            }
+            cursor.close()
+
+            if ("server_group_photo_path" !in existingColumns) {
+                db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_path TEXT DEFAULT NULL")
+            }
+            if ("server_group_photo_guid" !in existingColumns) {
+                db.execSQL("ALTER TABLE chats ADD COLUMN server_group_photo_guid TEXT DEFAULT NULL")
+            }
             Timber.i("Migration 54→55 complete: Added group photo fields to chats table")
+        }
+    }
+
+    /**
+     * Migration 55 → 56: Sync is_group and display_name from chats to unified_chats.
+     *
+     * Group chats now use unified chats for contact card linking in the address book.
+     * This migration ensures existing group chats have their is_group flag and display_name
+     * properly set on their unified chat entries.
+     */
+    val MIGRATION_55_56 = object : Migration(55, 56) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // Update is_group on unified_chats from linked chats
+            db.execSQL("""
+                UPDATE unified_chats
+                SET is_group = 1
+                WHERE id IN (
+                    SELECT DISTINCT c.unified_chat_id
+                    FROM chats c
+                    WHERE c.unified_chat_id IS NOT NULL
+                    AND c.is_group = 1
+                )
+            """.trimIndent())
+
+            // Update display_name on unified_chats from linked group chats
+            // Only update if unified_chats.display_name is NULL or empty
+            db.execSQL("""
+                UPDATE unified_chats
+                SET display_name = (
+                    SELECT c.display_name
+                    FROM chats c
+                    WHERE c.unified_chat_id = unified_chats.id
+                    AND c.is_group = 1
+                    AND c.display_name IS NOT NULL
+                    AND c.display_name != ''
+                    LIMIT 1
+                )
+                WHERE is_group = 1
+                AND (display_name IS NULL OR display_name = '')
+            """.trimIndent())
+
+            Timber.i("Migration 55→56 complete: Synced is_group and display_name to unified_chats for group chats")
+        }
+    }
+
+    /**
+     * Migration 56 → 57: Add social_media_links table for Reels feed.
+     *
+     * This table replaces regex-based message lookups for social media videos.
+     * It stores detected social media URLs with correct sender attribution,
+     * avoiding the bug where tapback reactions (which quote the URL) were
+     * incorrectly attributed as the video sender.
+     *
+     * The migration:
+     * 1. Creates the social_media_links table
+     * 2. Note: Population from existing messages is done at runtime by SocialMediaLinkMigrationHelper
+     *    to avoid complex URL parsing in SQL and to properly handle URL normalization/hashing
+     * 3. Note: Cached video metadata repair is also done at runtime by SocialMediaCacheManager
+     */
+    val MIGRATION_56_57 = object : Migration(56, 57) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            Timber.i("Starting migration 56→57: Add social_media_links table")
+
+            // Create the social_media_links table
+            db.execSQL("""
+                CREATE TABLE IF NOT EXISTS social_media_links (
+                    url_hash TEXT PRIMARY KEY NOT NULL,
+                    url TEXT NOT NULL,
+                    message_guid TEXT NOT NULL,
+                    chat_guid TEXT NOT NULL,
+                    platform TEXT NOT NULL,
+                    sender_address TEXT DEFAULT NULL,
+                    is_from_me INTEGER NOT NULL DEFAULT 0,
+                    sent_timestamp INTEGER NOT NULL,
+                    is_downloaded INTEGER NOT NULL DEFAULT 0,
+                    created_at INTEGER NOT NULL DEFAULT ${System.currentTimeMillis()}
+                )
+            """.trimIndent())
+
+            // Create indexes
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_social_media_links_message_guid ON social_media_links(message_guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_social_media_links_chat_guid ON social_media_links(chat_guid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_social_media_links_is_downloaded ON social_media_links(is_downloaded)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_social_media_links_chat_guid_is_downloaded ON social_media_links(chat_guid, is_downloaded)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_social_media_links_sent_timestamp ON social_media_links(sent_timestamp)")
+
+            Timber.i("Migration 56→57 complete: Created social_media_links table")
         }
     }
 
@@ -1563,6 +1664,8 @@ object DatabaseMigrations {
         MIGRATION_51_52,
         MIGRATION_52_53,
         MIGRATION_53_54,
-        MIGRATION_54_55
+        MIGRATION_54_55,
+        MIGRATION_55_56,
+        MIGRATION_56_57
     )
 }

@@ -708,6 +708,33 @@ interface MessageDao {
     suspend fun getMessagesWithSocialMediaUrls(): List<MessageEntity>
 
     /**
+     * Find messages containing social media URLs, excluding reactions/tapbacks.
+     *
+     * Reactions are excluded because they quote the original URL in their text
+     * (e.g., 'Loved "https://instagram.com/..."'), which would cause incorrect
+     * sender attribution (the reactor, not the original sender).
+     *
+     * Used by SocialMediaLinkMigrationHelper to populate the social_media_links table.
+     */
+    @Query("""
+        SELECT * FROM messages
+        WHERE date_deleted IS NULL
+        AND associated_message_type IS NULL
+        AND (
+            text LIKE '%instagram.com/reel/%'
+            OR text LIKE '%instagram.com/p/%'
+            OR text LIKE '%instagram.com/reels/%'
+            OR text LIKE '%instagram.com/share/reel/%'
+            OR text LIKE '%instagram.com/share/p/%'
+            OR text LIKE '%tiktok.com/%/video/%'
+            OR text LIKE '%vm.tiktok.com/%'
+            OR text LIKE '%vt.tiktok.com/%'
+        )
+        ORDER BY date_created DESC
+    """)
+    suspend fun getMessagesWithSocialMediaUrlsExcludingReactions(): List<MessageEntity>
+
+    /**
      * Find messages containing social media URLs for a specific chat.
      * Used for showing pending (not-yet-downloaded) videos in the Reels feed.
      */

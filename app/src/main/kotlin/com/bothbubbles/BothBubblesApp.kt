@@ -129,6 +129,9 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
     lateinit var socialMediaDownloadService: com.bothbubbles.services.socialmedia.SocialMediaDownloadService
 
     @Inject
+    lateinit var socialMediaLinkMigrationHelper: com.bothbubbles.services.socialmedia.SocialMediaLinkMigrationHelper
+
+    @Inject
     @ApplicationScope
     lateinit var applicationScope: CoroutineScope
 
@@ -580,6 +583,10 @@ class BothBubblesApp : Application(), ImageLoaderFactory {
 
                 // Small delay to let other startup tasks complete first
                 kotlinx.coroutines.delay(2000)
+
+                // Run migration to populate social_media_links table and repair metadata
+                // This handles users upgrading from older versions
+                socialMediaLinkMigrationHelper.runMigrationIfNeeded()
 
                 val cached = socialMediaDownloadService.cacheRecentVideos(maxVideos = 5)
                 if (cached > 0) {

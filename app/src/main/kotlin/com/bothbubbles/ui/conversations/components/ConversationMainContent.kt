@@ -117,39 +117,27 @@ fun ConversationMainContent(
                     )
                 }
                 ConversationScreenState.CONTENT -> {
-                    // Log incoming conversations for debugging
-                    Timber.d("ConversationMainContent: Received ${conversations.size} conversations, filter=$conversationFilter")
+                    // MEMOIZE: Filter and sort conversations only when inputs change
+                    // This prevents expensive O(n) operations from running on every recomposition
+                    val filteredConversations = remember(conversations, conversationFilter, categoryFilter) {
+                        conversations.filter { conv ->
+                            // Apply status filter first
+                            val matchesStatus = when (conversationFilter) {
+                                ConversationFilter.ALL -> !conv.isSpam
+                                ConversationFilter.UNREAD -> !conv.isSpam && conv.unreadCount > 0
+                                ConversationFilter.SPAM -> conv.isSpam
+                                ConversationFilter.UNKNOWN_SENDERS -> !conv.isSpam && !conv.hasContact
+                                ConversationFilter.KNOWN_SENDERS -> !conv.isSpam && conv.hasContact
+                            }
 
-                    // Check for duplicates by contactKey BEFORE filtering
-                    val duplicatesByContactKey = conversations.filter { !it.isGroup && it.contactKey.isNotBlank() }
-                        .groupBy { it.contactKey }
-                        .filter { it.value.size > 1 }
-                    if (duplicatesByContactKey.isNotEmpty()) {
-                        Timber.e("ConversationMainContent: DUPLICATES IN INPUT: ${duplicatesByContactKey.map { (key, convs) ->
-                            "$key -> ${convs.map { "${it.guid} (${it.displayName})" }}"
-                        }}")
-                    }
+                            // Apply category filter if set
+                            val matchesCategory = categoryFilter?.let { category ->
+                                conv.category?.equals(category.name, ignoreCase = true) == true
+                            } ?: true
 
-                    // Apply conversation filter
-                    val filteredConversations = conversations.filter { conv ->
-                        // Apply status filter first
-                        val matchesStatus = when (conversationFilter) {
-                            ConversationFilter.ALL -> !conv.isSpam
-                            ConversationFilter.UNREAD -> !conv.isSpam && conv.unreadCount > 0
-                            ConversationFilter.SPAM -> conv.isSpam
-                            ConversationFilter.UNKNOWN_SENDERS -> !conv.isSpam && !conv.hasContact
-                            ConversationFilter.KNOWN_SENDERS -> !conv.isSpam && conv.hasContact
+                            matchesStatus && matchesCategory
                         }
-
-                        // Apply category filter if set
-                        val matchesCategory = categoryFilter?.let { category ->
-                            conv.category?.equals(category.name, ignoreCase = true) == true
-                        } ?: true
-
-                        matchesStatus && matchesCategory
                     }
-
-                    Timber.d("ConversationMainContent: After filter: ${filteredConversations.size} conversations")
 
                     // Show empty state if filter returns no results
                     val hasActiveFilter = conversationFilter != ConversationFilter.ALL || categoryFilter != null
@@ -170,9 +158,13 @@ fun ConversationMainContent(
                             )
                         }
                     } else {
-                        val pinnedConversations = filteredConversations.filter { it.isPinned }
-                            .sortedWith(compareBy<ConversationUiModel> { it.pinIndex }.thenByDescending { it.lastMessageTimestamp })
-                        val regularConversations = filteredConversations.filter { !it.isPinned }
+                        // MEMOIZE: Split pinned/regular only when filteredConversations changes
+                        val (pinnedConversations, regularConversations) = remember(filteredConversations) {
+                            val pinned = filteredConversations.filter { it.isPinned }
+                                .sortedWith(compareBy<ConversationUiModel> { it.pinIndex }.thenByDescending { it.lastMessageTimestamp })
+                            val regular = filteredConversations.filter { !it.isPinned }
+                            Pair(pinned, regular)
+                        }
 
                         // State for dragged pin overlay
                         var draggedPinConversation by remember { mutableStateOf<ConversationUiModel?>(null) }

@@ -117,6 +117,7 @@ class SocketService @Inject constructor(
     override val serverVersion: StateFlow<String?> = _serverVersion.asStateFlow()
 
     init {
+        timber.log.Timber.d("[SocketService] init started")
         // Listen for server version updates from socket events
         applicationScope.launch {
             events.collect { event ->
@@ -125,6 +126,7 @@ class SocketService @Inject constructor(
                 }
             }
         }
+        timber.log.Timber.d("[SocketService] init complete")
     }
 
     // Delegated components

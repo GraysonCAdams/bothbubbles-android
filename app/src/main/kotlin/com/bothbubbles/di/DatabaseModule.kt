@@ -23,6 +23,7 @@ import com.bothbubbles.data.local.db.dao.PendingReadStatusDao
 import com.bothbubbles.data.local.db.dao.QuickReplyTemplateDao
 import com.bothbubbles.data.local.db.dao.ScheduledMessageDao
 import com.bothbubbles.data.local.db.dao.SeenMessageDao
+import com.bothbubbles.data.local.db.dao.SocialMediaLinkDao
 import com.bothbubbles.data.local.db.dao.SyncRangeDao
 import com.bothbubbles.data.local.db.dao.TombstoneDao
 import com.bothbubbles.data.local.db.dao.UnifiedChatDao
@@ -213,5 +214,11 @@ object DatabaseModule {
     @Singleton
     fun provideContactCalendarDao(database: BothBubblesDatabase): ContactCalendarDao {
         return database.contactCalendarDao()
+    }
+
+    @Provides
+    @Singleton
+    fun provideSocialMediaLinkDao(database: BothBubblesDatabase): SocialMediaLinkDao {
+        return database.socialMediaLinkDao()
     }
 }

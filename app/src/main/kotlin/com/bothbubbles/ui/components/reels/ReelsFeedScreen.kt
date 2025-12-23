@@ -17,7 +17,10 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -42,6 +45,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +63,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -119,6 +124,7 @@ fun ReelsFeedScreen(
     onTapback: (messageGuid: String, url: String, tapback: ReelsTapback) -> Unit,
     onVideoViewed: (originalUrl: String) -> Unit = {},
     onStartDownload: (originalUrl: String) -> Unit = {},
+    onReplyClick: (messageGuid: String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -294,7 +300,8 @@ fun ReelsFeedScreen(
                             putExtra(Intent.EXTRA_TEXT, reel.originalUrl)
                         }
                         context.startActivity(Intent.createChooser(shareIntent, "Share video link"))
-                    }
+                    },
+                    onReplyClick = { onReplyClick(reel.messageGuid) }
                 )
             } else {
                 // Pending/downloading page
@@ -371,7 +378,8 @@ private fun ReelPage(
     isCurrentPage: Boolean,
     onTapback: (ReelsTapback) -> Unit,
     onOpenInBrowser: () -> Unit,
-    onShare: () -> Unit
+    onShare: () -> Unit,
+    onReplyClick: () -> Unit
 ) {
     val context = LocalContext.current
     val view = LocalView.current
@@ -379,6 +387,14 @@ private fun ReelPage(
     var showTapbackSelector by remember { mutableStateOf(false) }
     var isPaused by remember { mutableStateOf(false) }
     var showPauseIndicator by remember { mutableStateOf(false) }
+
+    // Hold-to-hide UI (TikTok-style) - hides all overlays when holding on video
+    var isHoldingOnVideo by remember { mutableStateOf(false) }
+    val uiAlpha by animateFloatAsState(
+        targetValue = if (isHoldingOnVideo) 0f else 1f,
+        animationSpec = tween(durationMillis = 150),
+        label = "uiAlpha"
+    )
 
     // Video progress tracking
     var videoProgress by remember { mutableFloatStateOf(0f) }
@@ -455,6 +471,24 @@ private fun ReelPage(
                         view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
                         showTapbackSelector = true
                     },
+                    onLongPress = {
+                        // Only trigger hold-to-hide if not scrubbing
+                        if (!isScrubbing) {
+                            view.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
+                            isHoldingOnVideo = true
+                        }
+                    },
+                    onPress = { offset ->
+                        // Wait for the press to be released
+                        try {
+                            awaitRelease()
+                        } finally {
+                            // Always release the hold when finger is lifted
+                            if (isHoldingOnVideo) {
+                                isHoldingOnVideo = false
+                            }
+                        }
+                    },
                     onTap = {
                         // Single tap to pause/play
                         if (exoPlayer.isPlaying) {
@@ -489,12 +523,14 @@ private fun ReelPage(
             modifier = Modifier.fillMaxSize()
         )
 
-        // Pause indicator overlay
+        // Pause indicator overlay (fades with hold gesture)
         AnimatedVisibility(
             visible = showPauseIndicator && isPaused,
             enter = fadeIn() + scaleIn(initialScale = 0.5f),
             exit = fadeOut() + scaleOut(targetScale = 0.5f),
-            modifier = Modifier.align(Alignment.Center)
+            modifier = Modifier
+                .align(Alignment.Center)
+                .alpha(uiAlpha)
         ) {
             Box(
                 modifier = Modifier
@@ -511,7 +547,7 @@ private fun ReelPage(
             }
         }
 
-        // Tapback acknowledgement animation (center)
+        // Tapback acknowledgement animation (center) - stays visible during hold
         if (tapbackAcknowledgement != null) {
             Box(
                 modifier = Modifier
@@ -526,12 +562,13 @@ private fun ReelPage(
             }
         }
 
-        // Bottom gradient overlay
+        // Bottom gradient overlay (fades with hold gesture)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(200.dp)
                 .align(Alignment.BottomCenter)
+                .alpha(uiAlpha)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))
@@ -539,7 +576,7 @@ private fun ReelPage(
                 )
         )
 
-        // TikTok-style progress scrubber - bottom
+        // TikTok-style progress scrubber - bottom (fades with hold gesture)
         VideoScrubber(
             progress = videoProgress,
             onScrubStart = {
@@ -564,24 +601,27 @@ private fun ReelPage(
                 .padding(horizontal = 8.dp)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(bottom = 4.dp)
+                .alpha(uiAlpha)
         )
 
-        // Sender info badge - bottom left (above scrubber)
+        // Sender info badge - bottom left (above scrubber) - fades with hold gesture
+        val platform = reel.platform ?: return@Box
         SenderInfoBadge(
             senderName = reel.senderName,
             senderAddress = reel.senderAddress,
             avatarPath = reel.avatarPath,
-            platform = reel.platform,
+            platform = platform,
             timestamp = reel.sentTimestamp,
             currentTapback = reel.currentTapback,
             reactions = reel.reactions,
             replyCount = reel.replyCount,
             onOpenInBrowser = onOpenInBrowser,
-            onReplyClick = { /* TODO: Show thread modal */ },
+            onReplyClick = onReplyClick,
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 .windowInsetsPadding(WindowInsets.systemBars)
                 .padding(start = 16.dp, bottom = 24.dp)
+                .alpha(uiAlpha)
         )
 
         // Tapback selector overlay
@@ -727,22 +767,25 @@ private fun PendingReelPage(
         }
 
         // Sender info badge - bottom left
-        SenderInfoBadge(
-            senderName = reel.senderName,
-            senderAddress = reel.senderAddress,
-            avatarPath = reel.avatarPath,
-            platform = reel.platform,
-            timestamp = reel.sentTimestamp,
-            currentTapback = null, // No tapback for pending items
-            reactions = reel.reactions,
-            replyCount = reel.replyCount,
-            onOpenInBrowser = onOpenInBrowser,
-            onReplyClick = { /* TODO: Show thread modal */ },
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .windowInsetsPadding(WindowInsets.systemBars)
-                .padding(start = 16.dp, bottom = 24.dp)
-        )
+        val platform = reel.platform
+        if (platform != null) {
+            SenderInfoBadge(
+                senderName = reel.senderName,
+                senderAddress = reel.senderAddress,
+                avatarPath = reel.avatarPath,
+                platform = platform,
+                timestamp = reel.sentTimestamp,
+                currentTapback = null, // No tapback for pending items
+                reactions = reel.reactions,
+                replyCount = reel.replyCount,
+                onOpenInBrowser = onOpenInBrowser,
+                onReplyClick = { /* TODO: Show thread modal */ },
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .windowInsetsPadding(WindowInsets.systemBars)
+                    .padding(start = 16.dp, bottom = 24.dp)
+            )
+        }
     }
 }
 
@@ -778,6 +821,7 @@ private fun FailedReelCard(
                         when (reel.platform) {
                             SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C).copy(alpha = 0.15f)
                             SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA).copy(alpha = 0.15f)
+                            null -> MaterialTheme.colorScheme.surfaceVariant
                         }
                     ),
                 contentAlignment = Alignment.Center
@@ -794,6 +838,7 @@ private fun FailedReelCard(
                         tint = when (reel.platform) {
                             SocialMediaPlatform.INSTAGRAM -> Color(0xFFE1306C)
                             SocialMediaPlatform.TIKTOK -> Color(0xFF00F2EA)
+                            null -> MaterialTheme.colorScheme.primary
                         }
                     )
                     Spacer(modifier = Modifier.height(8.dp))
@@ -824,7 +869,7 @@ private fun FailedReelCard(
             ) {
                 // Platform name
                 Text(
-                    text = reel.platform.displayName.uppercase(),
+                    text = reel.platform?.displayName?.uppercase() ?: "VIDEO",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -836,6 +881,7 @@ private fun FailedReelCard(
                     when (reel.platform) {
                         SocialMediaPlatform.INSTAGRAM -> "Instagram Reel"
                         SocialMediaPlatform.TIKTOK -> "TikTok Video"
+                        null -> "Video"
                     }
                 }
                 Text(
@@ -1059,39 +1105,47 @@ private fun SenderInfoBadge(
                 }
             }
 
-            // Reactions and reply section
-            if (reactions.isNotEmpty() || replyCount > 0) {
+            // Reactions display (if any)
+            if (reactions.isNotEmpty()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Reactions display
-                    if (reactions.isNotEmpty()) {
-                        ReactionsDisplay(
-                            reactions = reactions,
-                            isFromMe = false, // Always show as received in Reels context
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
-                    } else {
-                        Spacer(modifier = Modifier.weight(1f))
-                    }
+                ReactionsDisplay(
+                    reactions = reactions,
+                    isFromMe = false, // Always show as received in Reels context
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
 
-                    // Reply count/button
-                    if (replyCount > 0) {
-                        Surface(
-                            onClick = onReplyClick,
-                            shape = RoundedCornerShape(12.dp),
-                            color = Color.White.copy(alpha = 0.15f)
-                        ) {
-                            Text(
-                                text = "$replyCount ${if (replyCount == 1) "reply" else "replies"}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.White,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                            )
-                        }
+            // Centered reply count/button with comment icon
+            Spacer(modifier = Modifier.height(8.dp))
+            Box(
+                modifier = Modifier.fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Surface(
+                    onClick = onReplyClick,
+                    shape = RoundedCornerShape(16.dp),
+                    color = Color.White.copy(alpha = 0.15f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            Icons.Outlined.ChatBubbleOutline,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = when {
+                                replyCount == 0 -> "No replies"
+                                replyCount == 1 -> "1 reply"
+                                else -> "$replyCount replies"
+                            },
+                            style = MaterialTheme.typography.labelMedium,
+                            color = Color.White
+                        )
                     }
                 }
             }
@@ -1236,7 +1290,8 @@ private fun formatRelativeTime(timestamp: Long): String {
 }
 
 /**
- * Toggle chip for filtering to unwatched videos only.
+ * Toggle switch for filtering to unwatched videos only.
+ * Has a semi-transparent background for visibility over video content.
  */
 @Composable
 private fun UnwatchedOnlyToggle(
@@ -1245,25 +1300,26 @@ private fun UnwatchedOnlyToggle(
     modifier: Modifier = Modifier
 ) {
     Surface(
-        onClick = { onToggle(!isEnabled) },
-        shape = RoundedCornerShape(20.dp),
-        color = if (isEnabled) {
-            MaterialTheme.colorScheme.primaryContainer
-        } else {
-            Color.Black.copy(alpha = 0.5f)
-        },
+        shape = RoundedCornerShape(24.dp),
+        color = Color.Black.copy(alpha = 0.5f),
         modifier = modifier
     ) {
-        Text(
-            text = "Unwatched only",
-            style = MaterialTheme.typography.labelMedium,
-            fontWeight = if (isEnabled) FontWeight.Bold else FontWeight.Normal,
-            color = if (isEnabled) {
-                MaterialTheme.colorScheme.onPrimaryContainer
-            } else {
-                Color.White
-            },
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 6.dp, bottom = 6.dp)
+        ) {
+            Text(
+                text = "Unwatched",
+                style = MaterialTheme.typography.labelMedium,
+                color = Color.White
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            androidx.compose.material3.Switch(
+                checked = isEnabled,
+                onCheckedChange = onToggle,
+                modifier = Modifier.height(24.dp)
+            )
+        }
     }
 }
+

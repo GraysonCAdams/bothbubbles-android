@@ -1,5 +1,6 @@
 package com.bothbubbles.ui.components.reels
 
+import com.bothbubbles.core.model.entity.AttachmentEntity
 import com.bothbubbles.services.socialmedia.CachedVideo
 import com.bothbubbles.services.socialmedia.DownloadProgress
 import com.bothbubbles.services.socialmedia.SocialMediaPlatform
@@ -18,17 +19,58 @@ enum class ReelsTapback(val emoji: String, val label: String, val reactionType: 
 }
 
 /**
+ * Represents a video attachment from a message (not social media).
+ * Used for regular video attachments sent in the chat.
+ */
+data class AttachmentVideoData(
+    /** Unique identifier (attachment guid) */
+    val guid: String,
+    /** Message GUID the attachment belongs to */
+    val messageGuid: String,
+    /** Chat GUID for the message */
+    val chatGuid: String? = null,
+    /** Local file path to the video */
+    val localPath: String,
+    /** Thumbnail path for preview */
+    val thumbnailPath: String? = null,
+    /** Blurhash for placeholder */
+    val blurhash: String? = null,
+    /** Original filename */
+    val transferName: String? = null,
+    /** File size in bytes */
+    val totalBytes: Long? = null,
+    /** Video width in pixels */
+    val width: Int? = null,
+    /** Video height in pixels */
+    val height: Int? = null,
+    /** Sender name */
+    val senderName: String? = null,
+    /** Sender address (phone/email) */
+    val senderAddress: String? = null,
+    /** Timestamp when the message was sent */
+    val sentTimestamp: Long = 0L,
+    /** Whether the video was sent by the user */
+    val isFromMe: Boolean = false,
+    /** Whether this has been viewed in Reels */
+    val viewedInReels: Boolean = false
+)
+
+/**
  * Represents an item in the Reels feed.
  *
- * Can be either:
- * - A cached video (ready to play)
- * - A pending video (needs downloading)
+ * Can be:
+ * - A cached social media video (ready to play)
+ * - A pending social media video (needs downloading)
+ * - A video attachment from a message (ready to play)
  */
 data class ReelItem(
-    /** The cached video data, null if video is still pending download */
+    /** The cached social media video data, null if video is pending or an attachment */
     val cachedVideo: CachedVideo? = null,
 
-    // === Pending video fields (used when cachedVideo is null) ===
+    /** Video attachment data, null if this is a social media video */
+    val attachmentVideo: AttachmentVideoData? = null,
+
+    // === Pending video fields (used when cachedVideo and attachmentVideo are null) ===
     /** Original URL of the video (for pending items) */
     val pendingUrl: String? = null,
     /** Platform of the pending video */
@@ -62,32 +104,58 @@ data class ReelItem(
     /** Error message if download failed */
     val downloadError: String? = null
 ) {
-    /** Whether this is a cached (ready to play) video */
+    /** Whether this is a cached social media video (ready to play) */
     val isCached: Boolean get() = cachedVideo != null
 
-    /** Whether this is a pending (needs download) video */
-    val isPending: Boolean get() = cachedVideo == null && pendingUrl != null
+    /** Whether this is a video attachment (ready to play) */
+    val isAttachment: Boolean get() = attachmentVideo != null
 
-    /** The original URL, from either cached or pending */
+    /** Whether this is a pending (needs download) video */
+    val isPending: Boolean get() = cachedVideo == null && attachmentVideo == null && pendingUrl != null
+
+    /** Whether this item is ready to play (either cached or attachment) */
+    val isReadyToPlay: Boolean get() = isCached || isAttachment
+
+    /** The original URL for social media, or local path for attachments */
     val originalUrl: String get() = cachedVideo?.originalUrl ?: pendingUrl ?: ""
 
-    /** The message GUID, from either cached or pending */
-    val messageGuid: String get() = cachedVideo?.messageGuid ?: pendingMessageGuid ?: ""
+    /** Local file path for playback */
+    val localPath: String? get() = cachedVideo?.localPath ?: attachmentVideo?.localPath
 
-    /** The platform, from either cached or pending */
-    val platform: SocialMediaPlatform get() = cachedVideo?.platform ?: pendingPlatform ?: SocialMediaPlatform.TIKTOK
+    /** The message GUID, from either cached, attachment, or pending */
+    val messageGuid: String get() = cachedVideo?.messageGuid ?: attachmentVideo?.messageGuid ?: pendingMessageGuid ?: ""
 
-    /** Sender name, from either cached or pending */
-    val senderName: String? get() = cachedVideo?.senderName ?: pendingSenderName
+    /** The platform (null for attachments) */
+    val platform: SocialMediaPlatform? get() = cachedVideo?.platform ?: pendingPlatform
 
-    /** Sender address, from either cached or pending */
-    val senderAddress: String? get() = cachedVideo?.senderAddress ?: pendingSenderAddress
+    /** Sender name, from either source */
+    val senderName: String? get() = cachedVideo?.senderName ?: attachmentVideo?.senderName ?: pendingSenderName
 
-    /** Sent timestamp, from either cached or pending */
-    val sentTimestamp: Long get() = cachedVideo?.sentTimestamp ?: pendingSentTimestamp
+    /** Sender address, from either source */
+    val senderAddress: String? get() = cachedVideo?.senderAddress ?: attachmentVideo?.senderAddress ?: pendingSenderAddress
+
+    /** Sent timestamp, from either source */
+    val sentTimestamp: Long get() = cachedVideo?.sentTimestamp ?: attachmentVideo?.sentTimestamp ?: pendingSentTimestamp
 
     /** Whether this video has been viewed in the Reels feed */
-    val isViewed: Boolean get() = cachedVideo?.viewedInReels ?: false
+    val isViewed: Boolean get() = cachedVideo?.viewedInReels ?: attachmentVideo?.viewedInReels ?: false
+
+    /** Whether this was sent by the current user */
+    val isFromMe: Boolean get() = attachmentVideo?.isFromMe ?: false
+
+    /** Thumbnail path for preview (attachments only) */
+    val thumbnailPath: String? get() = attachmentVideo?.thumbnailPath
+
+    /** Blurhash for placeholder (attachments only) */
+    val blurhash: String? get() = attachmentVideo?.blurhash
+
+    /** Display name for the video (filename for attachments, platform for social media) */
+    val displayTitle: String? get() = when {
+        attachmentVideo != null -> attachmentVideo.transferName
+        cachedVideo != null -> cachedVideo.platform.name
+        pendingPlatform != null -> pendingPlatform.name
+        else -> null
+    }
 
     companion object {
         /**
@@ -103,6 +171,30 @@ data class ReelItem(
         ): ReelItem {
             return ReelItem(
                 cachedVideo = if (displayName != null) {
+                    video.copy(senderName = displayName)
+                } else {
+                    video
+                },
+                currentTapback = currentTapback,
+                avatarPath = avatarPath,
+                reactions = reactions,
+                replyCount = replyCount
+            )
+        }
+
+        /**
+         * Creates a ReelItem from an AttachmentVideoData.
+         */
+        fun fromAttachment(
+            video: AttachmentVideoData,
+            currentTapback: ReelsTapback? = null,
+            avatarPath: String? = null,
+            displayName: String? = null,
+            reactions: List<ReactionUiModel> = emptyList(),
+            replyCount: Int = 0
+        ): ReelItem {
+            return ReelItem(
+                attachmentVideo = if (displayName != null) {
                     video.copy(senderName = displayName)
                 } else {
                     video

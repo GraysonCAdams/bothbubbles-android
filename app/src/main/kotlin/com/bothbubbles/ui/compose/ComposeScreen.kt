@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -137,7 +139,7 @@ fun ComposeScreen(
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
-        contentWindowInsets = WindowInsets.ime
+        contentWindowInsets = WindowInsets.ime.union(WindowInsets.navigationBars)
     ) { paddingValues ->
         // Use Box to allow popup to overlay content without pushing it down
         Box(
@@ -180,6 +182,7 @@ fun ComposeScreen(
                         is ComposeConversationState.Existing -> {
                             MessageList(
                                 messages = state.messages,
+                                isGroup = state.isGroup,
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
@@ -187,9 +190,7 @@ fun ComposeScreen(
                 }
 
                 // Full ChatComposer with GIF picker, attachments, camera, etc.
-                // Note: Don't add separate navigationBars padding - Scaffold's ime contentWindowInsets
-                // handles keyboard, and when keyboard is closed nav bars are at screen bottom.
-                // Adding explicit nav bar padding causes dead space when keyboard is open.
+                // Scaffold's contentWindowInsets handles both IME and nav bar via union.
                 ChatComposer(
                     state = composerState,
                     onEvent = viewModel::onComposerEvent,
@@ -271,11 +272,13 @@ private fun NewConversationPlaceholder() {
 }
 
 /**
- * Preview message list using the real MessageBubble component for proper styling.
+ * Message list using the real MessageBubble component for proper styling.
+ * Supports group chats with sender names and avatars.
  */
 @Composable
 private fun MessageList(
     messages: List<MessageUiModel>,
+    isGroup: Boolean,
     modifier: Modifier = Modifier
 ) {
     val listState = rememberLazyListState()
@@ -287,24 +290,96 @@ private fun MessageList(
         }
     }
 
+    // Pre-compute message groupings for visual consistency
+    val groupPositions = remember(messages) {
+        computeGroupPositions(messages)
+    }
+
+    val showAvatarMap = remember(messages, isGroup) {
+        if (!isGroup) emptyMap()
+        else computeShowAvatarMap(messages)
+    }
+
     LazyColumn(
         state = listState,
         modifier = modifier,
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         items(
             items = messages,
             key = { it.guid }
         ) { message ->
-            // Use the real MessageBubble component with minimal callbacks
+            val index = messages.indexOf(message)
+            // Use the real MessageBubble component with group chat support
             MessageBubble(
                 message = message,
                 onLongPress = { /* No long-press menu in preview */ },
                 onMediaClick = { /* No media viewer in preview */ },
-                showDeliveryIndicator = false // Hide delivery status in preview
+                showDeliveryIndicator = false, // Hide delivery status in preview
+                isGroupChat = isGroup,
+                groupPosition = groupPositions[index] ?: com.bothbubbles.ui.components.message.MessageGroupPosition.SINGLE,
+                showAvatar = showAvatarMap[index] ?: false
             )
         }
     }
+}
+
+/**
+ * Compute visual group positions for messages (SINGLE, FIRST, MIDDLE, LAST).
+ * Groups consecutive messages from the same sender.
+ */
+private fun computeGroupPositions(messages: List<MessageUiModel>): Map<Int, com.bothbubbles.ui.components.message.MessageGroupPosition> {
+    if (messages.isEmpty()) return emptyMap()
+
+    val result = mutableMapOf<Int, com.bothbubbles.ui.components.message.MessageGroupPosition>()
+
+    for (i in messages.indices) {
+        val current = messages[i]
+        if (current.isReaction) continue
+
+        val prev = messages.getOrNull(i - 1)?.takeIf { !it.isReaction }
+        val next = messages.getOrNull(i + 1)?.takeIf { !it.isReaction }
+
+        val sameAsPrev = prev?.isFromMe == current.isFromMe &&
+            prev?.senderAddress == current.senderAddress
+        val sameAsNext = next?.isFromMe == current.isFromMe &&
+            next?.senderAddress == current.senderAddress
+
+        result[i] = when {
+            !sameAsPrev && !sameAsNext -> com.bothbubbles.ui.components.message.MessageGroupPosition.SINGLE
+            !sameAsPrev && sameAsNext -> com.bothbubbles.ui.components.message.MessageGroupPosition.FIRST
+            sameAsPrev && sameAsNext -> com.bothbubbles.ui.components.message.MessageGroupPosition.MIDDLE
+            sameAsPrev && !sameAsNext -> com.bothbubbles.ui.components.message.MessageGroupPosition.LAST
+            else -> com.bothbubbles.ui.components.message.MessageGroupPosition.SINGLE
+        }
+    }
+
+    return result
+}
+
+/**
+ * Compute which messages should show sender avatars in group chats.
+ * Avatar is shown on the last message in a consecutive group from the same sender.
+ */
+private fun computeShowAvatarMap(messages: List<MessageUiModel>): Map<Int, Boolean> {
+    val result = mutableMapOf<Int, Boolean>()
+
+    for (i in messages.indices) {
+        val message = messages[i]
+        if (message.isFromMe || message.isReaction) {
+            result[i] = false
+            continue
+        }
+
+        val nextMessage = messages.getOrNull(i + 1)?.takeIf { !it.isReaction }
+
+        // Show avatar if next message is from a different sender or from me
+        result[i] = nextMessage == null ||
+            nextMessage.isFromMe ||
+            nextMessage.senderAddress != message.senderAddress
+    }
+
+    return result
 }
 

@@ -168,6 +168,11 @@ class ChatSendModeManager @AssistedInject constructor(
             _contactIMessageAvailable.value = true
             _canToggleSendMode.value = true
             _showSendModeRevealAnimation.value = !_sendModeManuallySet.value
+            // Clear fallback mode for existing iMessage chats so AUTO routing uses iMessage
+            if (_currentSendMode.value == ChatSendMode.IMESSAGE && chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                Timber.i("Existing iMessage chat, clearing fallback mode for $chatGuid")
+                chatFallbackTracker.exitFallbackMode(chatGuid)
+            }
             onUpdateState(true, false, _currentSendMode.value, true, _showSendModeRevealAnimation.value)
             initTutorialIfNeeded()
             return
@@ -206,6 +211,12 @@ class ChatSendModeManager @AssistedInject constructor(
                         _currentSendMode.value = newMode
                         _canToggleSendMode.value = canToggle
                         _showSendModeRevealAnimation.value = canToggle && !_sendModeManuallySet.value
+
+                        // Clear fallback mode when system determines iMessage should be used
+                        if (newMode == ChatSendMode.IMESSAGE && chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                            Timber.i("iMessage available and stable, clearing fallback mode for $chatGuid")
+                            chatFallbackTracker.exitFallbackMode(chatGuid)
+                        }
 
                         onUpdateState(available, false, newMode, canToggle, _showSendModeRevealAnimation.value)
 
@@ -282,6 +293,11 @@ class ChatSendModeManager @AssistedInject constructor(
             if (!isServerStable()) {
                 Timber.w("Cannot switch to iMessage: server not stable yet")
                 return false
+            }
+            // User explicitly chose iMessage - exit fallback mode so AUTO routing uses iMessage
+            if (chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                Timber.i("User selected iMessage mode, exiting fallback mode for $chatGuid")
+                chatFallbackTracker.exitFallbackMode(chatGuid)
             }
         }
 
@@ -437,6 +453,12 @@ class ChatSendModeManager @AssistedInject constructor(
                     if (persistedMode != null) {
                         _currentSendMode.value = persistedMode
                         _sendModeManuallySet.value = true
+                        // If user's persisted preference is iMessage, ensure fallback mode is cleared
+                        // so AUTO routing respects the user's choice
+                        if (persistedMode == ChatSendMode.IMESSAGE && chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                            Timber.i("Restoring iMessage mode preference, exiting fallback mode for $chatGuid")
+                            chatFallbackTracker.exitFallbackMode(chatGuid)
+                        }
                     }
                 }
             } catch (e: Exception) {
@@ -482,6 +504,11 @@ class ChatSendModeManager @AssistedInject constructor(
                     if (shouldBeIMessage && wasAutoSwitchedToSms) {
                         if (isServerStable()) {
                             _currentSendMode.value = ChatSendMode.IMESSAGE
+                            // Clear any fallback mode to ensure routing matches UI
+                            if (chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                                Timber.i("Server reconnected and stable, clearing fallback mode for $chatGuid")
+                                chatFallbackTracker.exitFallbackMode(chatGuid)
+                            }
                         } else {
                             scheduleIMessageModeCheck()
                         }
@@ -549,6 +576,11 @@ class ChatSendModeManager @AssistedInject constructor(
 
             if (_contactIMessageAvailable.value == true) {
                 _currentSendMode.value = ChatSendMode.IMESSAGE
+                // Clear any fallback mode to ensure routing matches UI
+                if (chatFallbackTracker.isInFallbackMode(chatGuid)) {
+                    Timber.i("Server stable after delay, clearing fallback mode for $chatGuid")
+                    chatFallbackTracker.exitFallbackMode(chatGuid)
+                }
             }
         }
     }

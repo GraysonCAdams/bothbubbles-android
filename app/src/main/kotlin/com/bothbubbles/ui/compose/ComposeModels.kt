@@ -89,10 +89,11 @@ sealed class ComposeConversationState {
     /** No existing conversation - will create new */
     data object NewConversation : ComposeConversationState()
 
-    /** Existing conversation found with real message models */
+    /** Existing conversation found with full message models (reactions, sender info, etc.) */
     data class Existing(
         val chatGuid: String,
-        val messages: ImmutableList<MessageUiModel>
+        val messages: ImmutableList<MessageUiModel>,
+        val isGroup: Boolean = false
     ) : ComposeConversationState()
 }
 

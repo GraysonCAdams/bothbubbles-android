@@ -139,7 +139,8 @@ data class MessageListCallbacks(
     val onNavigateSearchUp: () -> Unit,
     val onNavigateSearchDown: () -> Unit,
     val onViewAllSearchResults: () -> Unit,
-    val onAvatarClick: ((MessageUiModel) -> Unit)?
+    val onAvatarClick: ((MessageUiModel) -> Unit)?,
+    val onOpenReelsFeed: (() -> Unit)?
 )
 
 /**
@@ -492,16 +493,14 @@ fun ChatMessageList(
                     }
                 }
 
+                // Show avatar beside every message from other participants in group chats
                 val showAvatarMap = remember(messages, chatInfoState.isGroup) {
                     if (!chatInfoState.isGroup) emptyMap()
                     else {
                         val map = mutableMapOf<Int, Boolean>()
                         for (i in messages.indices) {
                             val message = messages[i]
-                            val newerMessage = messages.getOrNull(i - 1)
-                            map[i] = !message.isFromMe &&
-                                (newerMessage == null || newerMessage.isFromMe ||
-                                    newerMessage.senderName != message.senderName)
+                            map[i] = !message.isFromMe
                         }
                         map
                     }
@@ -605,7 +604,8 @@ fun ChatMessageList(
                                     onClearHighlight = callbacks.onClearHighlight,
                                     onDownloadAttachment = callbacks.onDownloadAttachment,
                                     onStopSharingEta = callbacks.onStopSharingEta,
-                                    onAvatarClick = callbacks.onAvatarClick
+                                    onAvatarClick = callbacks.onAvatarClick,
+                                    onOpenReelsFeed = callbacks.onOpenReelsFeed
                                 )
                             )
                         }

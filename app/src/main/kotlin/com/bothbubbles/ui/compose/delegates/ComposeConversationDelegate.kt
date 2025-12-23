@@ -1,11 +1,15 @@
 package com.bothbubbles.ui.compose.delegates
 
+import kotlinx.coroutines.flow.first
 import timber.log.Timber
 import com.bothbubbles.data.local.db.entity.ChatEntity
+import com.bothbubbles.data.local.db.entity.displayName
 import com.bothbubbles.data.repository.AttachmentRepository
 import com.bothbubbles.data.repository.ChatRepository
 import com.bothbubbles.data.repository.MessageRepository
-import com.bothbubbles.ui.chat.MessageTransformationUtils.toUiModel
+import com.bothbubbles.ui.components.message.MessageUiModel
+import com.bothbubbles.ui.components.message.normalizeAddress
+import com.bothbubbles.ui.components.message.toUiModel
 import com.bothbubbles.ui.compose.ComposeConversationState
 import com.bothbubbles.ui.compose.RecipientChip
 import com.bothbubbles.util.parsing.PhoneAndCodeParsingUtils
@@ -15,7 +19,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -25,7 +28,7 @@ import javax.inject.Inject
  * Handles:
  * - Looking up existing 1:1 conversations by address
  * - Looking up existing group conversations by GUID
- * - Loading message previews for existing conversations
+ * - Loading message previews for existing conversations with full details (reactions, sender info)
  * - Detecting new conversation scenarios
  */
 class ComposeConversationDelegate @Inject constructor(
@@ -94,7 +97,7 @@ class ComposeConversationDelegate @Inject constructor(
         try {
             // Get normalized addresses from chips for comparison
             val chipAddresses = chips.map { chip ->
-                normalizeAddress(chip.address)
+                normalizeAddressForLookup(chip.address)
             }.toSet()
 
             Timber.d("Looking for group with ${chipAddresses.size} participants: $chipAddresses")
@@ -118,7 +121,7 @@ class ComposeConversationDelegate @Inject constructor(
             // Find groups with exact participant match
             val matchingGroups = groupChats.filter { chat ->
                 val participants = participantsByChat[chat.guid] ?: emptyList()
-                val participantAddresses = participants.map { normalizeAddress(it.address) }.toSet()
+                val participantAddresses = participants.map { normalizeAddressForLookup(it.address) }.toSet()
 
                 val matches = participantAddresses == chipAddresses
                 if (matches) {
@@ -152,9 +155,9 @@ class ComposeConversationDelegate @Inject constructor(
     }
 
     /**
-     * Normalize an address for comparison (phone numbers and emails).
+     * Normalize an address for lookup (phone numbers and emails).
      */
-    private fun normalizeAddress(address: String): String {
+    private fun normalizeAddressForLookup(address: String): String {
         return if (address.contains("@")) {
             address.lowercase()
         } else {
@@ -172,7 +175,7 @@ class ComposeConversationDelegate @Inject constructor(
                 return
             }
 
-            val normalizedAddress = normalizeAddress(chip.address)
+            val normalizedAddress = normalizeAddressForLookup(chip.address)
 
             // Check all possible GUID variants
             val possibleGuids = listOf(
@@ -243,6 +246,10 @@ class ComposeConversationDelegate @Inject constructor(
         }
     }
 
+    /**
+     * Load messages with full details (reactions, attachments, sender info).
+     * Uses the same transformation logic as the main chat for consistent rendering.
+     */
     private suspend fun loadMessagesForChat(chatGuid: String) {
         try {
             // Resolve merged GUIDs for unified conversation navigation
@@ -257,27 +264,52 @@ class ComposeConversationDelegate @Inject constructor(
                 return
             }
 
-            // Load attachments for all messages in batch
+            // Check if this is a group chat
+            val chat = chatRepository.getChat(chatGuid)
+            val isGroup = chat?.isGroup ?: false
+
+            // Load participants for contact resolution (same as main chat)
+            val participants = chatRepository.observeParticipantsForChats(listOf(chatGuid)).first()
+            val handleIdToName: Map<Long, String> = participants.associate { it.id to it.displayName }
+            val addressToName: Map<String, String> = participants.associate { normalizeAddress(it.address) to it.displayName }
+            val addressToAvatarPath: Map<String, String?> = participants.associate { normalizeAddress(it.address) to it.cachedAvatarPath }
+
+            // Fetch reactions for all messages
             val messageGuids = messages.map { it.guid }
+            val reactions = messageRepository.getReactionsForMessages(messageGuids)
+            val reactionsByMessage = reactions.groupBy { reaction ->
+                reaction.associatedMessageGuid?.let { guid ->
+                    if (guid.contains("/")) guid.substringAfter("/") else guid
+                }
+            }
+
+            // Batch load attachments
             val allAttachments = attachmentRepository.getAttachmentsForMessages(messageGuids)
             val attachmentsByMessage = allAttachments.groupBy { it.messageGuid }
 
-            // Convert to MessageUiModel for proper styling
-            val uiModels = messages.map { message ->
-                val attachments = attachmentsByMessage[message.guid] ?: emptyList()
-                message.toUiModel(
-                    reactions = emptyList(), // Don't need reactions for preview
-                    attachments = attachments,
-                    handleIdToName = emptyMap(),
-                    addressToName = emptyMap(),
-                    addressToAvatarPath = emptyMap(),
-                    replyPreview = null
+            // Transform each message with full details
+            val uiModels = messages.mapNotNull { entity ->
+                // Skip reaction messages
+                if (entity.associatedMessageType?.contains("reaction") == true) {
+                    return@mapNotNull null
+                }
+
+                val entityReactions = reactionsByMessage[entity.guid] ?: emptyList()
+                val entityAttachments = attachmentsByMessage[entity.guid] ?: emptyList()
+
+                entity.toUiModel(
+                    reactions = entityReactions,
+                    attachments = entityAttachments,
+                    handleIdToName = handleIdToName,
+                    addressToName = addressToName,
+                    addressToAvatarPath = addressToAvatarPath
                 )
             }.sortedBy { it.dateCreated } // Sort oldest first for display
 
             _conversationState.value = ComposeConversationState.Existing(
                 chatGuid = chatGuid,
-                messages = uiModels.toImmutableList()
+                messages = uiModels.toImmutableList(),
+                isGroup = isGroup
             )
             _foundChatGuid.value = chatGuid
             _foundMergedGuids.value = if (mergedGuids.size > 1) mergedGuids else null

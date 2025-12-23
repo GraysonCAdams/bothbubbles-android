@@ -180,6 +180,21 @@ class ChatSyncOperations @Inject constructor(
                     sourceId = chatDto.guid
                 )
             )
+
+            // If existing unified chat has SMS source but this chat is iMessage, prefer iMessage
+            // This ensures users navigate to iMessage when available for better experience
+            val currentSourceId = unifiedChat.sourceId
+            val newChatGuid = chatDto.guid
+            val isCurrentSourceSms = currentSourceId.startsWith("sms;", ignoreCase = true) ||
+                                      currentSourceId.startsWith("mms;", ignoreCase = true)
+            val isNewChatIMessage = !newChatGuid.startsWith("sms;", ignoreCase = true) &&
+                                     !newChatGuid.startsWith("mms;", ignoreCase = true)
+
+            if (isCurrentSourceSms && isNewChatIMessage) {
+                unifiedChatDao.updateSourceId(unifiedChat.id, newChatGuid)
+                Timber.tag(TAG).i("Upgraded unified chat ${unifiedChat.id} source from SMS to iMessage: $newChatGuid")
+            }
+
             unifiedChat.id
         } catch (e: Exception) {
             Timber.tag(TAG).w(e, "Failed to link chat ${chatDto.guid} to unified chat")

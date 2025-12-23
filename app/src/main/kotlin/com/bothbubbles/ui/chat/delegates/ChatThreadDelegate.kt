@@ -56,8 +56,12 @@ class ChatThreadDelegate @AssistedInject constructor(
     /**
      * Load a thread chain for display in the thread overlay.
      * Called when user taps a reply indicator.
+     *
+     * @param originGuid The GUID of the origin message for the thread.
+     * @param excludeOrigin If true, only show replies without the origin message.
+     *                      Used when opening thread from Reels where the origin is already visible.
      */
-    fun loadThread(originGuid: String) {
+    fun loadThread(originGuid: String, excludeOrigin: Boolean = false) {
         scope.launch {
             val threadMessages = messageRepository.getThreadMessages(originGuid)
             val origin = threadMessages.find { it.guid == originGuid }
@@ -96,7 +100,8 @@ class ChatThreadDelegate @AssistedInject constructor(
             }
 
             val threadChain = ThreadChain(
-                originMessage = origin?.toUiModel(
+                originGuid = originGuid,
+                originMessage = if (excludeOrigin) null else origin?.toUiModel(
                     reactions = reactionsByMessage[origin.guid].orEmpty(),
                     attachments = allAttachments[origin.guid].orEmpty(),
                     handleIdToName = handleIdToName,

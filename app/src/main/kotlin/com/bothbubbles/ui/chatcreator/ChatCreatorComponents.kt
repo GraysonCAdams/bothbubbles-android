@@ -633,126 +633,34 @@ fun PopularChatListItem(
 
 /**
  * A section displaying a preview of the conversation with selected recipients.
- * Shows recent message bubbles in a scrollable mini-chat view.
+ * Uses the shared MessagePreviewList component for consistent rendering with the main chat.
+ *
+ * Features shown in preview:
+ * - Full message bubbles with reactions
+ * - Sender names and avatars in group chats
+ * - Attachment thumbnails
  */
 @Composable
 fun ConversationPreviewSection(
     previewState: ConversationPreviewState,
     modifier: Modifier = Modifier
 ) {
-    Surface(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 120.dp, max = 200.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerLow,
-        shape = RoundedCornerShape(16.dp)
-    ) {
-        when (previewState) {
-            is ConversationPreviewState.Loading -> {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        strokeWidth = 2.dp
-                    )
-                }
-            }
-
-            is ConversationPreviewState.NewConversation -> {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(16.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Chat,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(32.dp)
-                        )
-                        Text(
-                            text = "New Conversation",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            is ConversationPreviewState.Existing -> {
-                // Display messages in a scrollable column (newest at bottom)
-                val messages = previewState.messages.reversed()  // Oldest first for display
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    messages.forEach { message ->
-                        MessagePreviewBubble(
-                            message = message,
-                            modifier = Modifier.padding(vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * A compact message bubble for the conversation preview.
- */
-@Composable
-private fun MessagePreviewBubble(
-    message: MessagePreview,
-    modifier: Modifier = Modifier
-) {
-    val isFromMe = message.isFromMe
-    val bubbleColor = if (isFromMe) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
-    }
-    val textColor = if (isFromMe) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-
-    val displayText = message.text
-        ?: message.attachmentPreviewText
-        ?: ""
-
-    Row(
-        modifier = modifier.fillMaxWidth(),
-        horizontalArrangement = if (isFromMe) Arrangement.End else Arrangement.Start
-    ) {
-        Surface(
-            color = bubbleColor,
-            shape = RoundedCornerShape(
-                topStart = 12.dp,
-                topEnd = 12.dp,
-                bottomStart = if (isFromMe) 12.dp else 4.dp,
-                bottomEnd = if (isFromMe) 4.dp else 12.dp
-            ),
-            modifier = Modifier.widthIn(max = 240.dp)
-        ) {
-            Text(
-                text = displayText,
-                style = MaterialTheme.typography.bodySmall,
-                color = textColor,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+    // Convert ChatCreator's ConversationPreviewState to the shared MessagePreviewListState
+    val listState = when (previewState) {
+        is ConversationPreviewState.Loading ->
+            com.bothbubbles.ui.components.message.MessagePreviewListState.Loading
+        is ConversationPreviewState.NewConversation ->
+            com.bothbubbles.ui.components.message.MessagePreviewListState.NewConversation
+        is ConversationPreviewState.Existing ->
+            com.bothbubbles.ui.components.message.MessagePreviewListState.Existing(
+                chatGuid = previewState.chatGuid,
+                messages = previewState.messages,
+                isGroup = previewState.isGroup
             )
-        }
     }
+
+    com.bothbubbles.ui.components.message.MessagePreviewList(
+        previewState = listState,
+        modifier = modifier
+    )
 }

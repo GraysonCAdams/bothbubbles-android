@@ -271,6 +271,7 @@ class SettingsDataStore @Inject constructor(
     val socialMediaDownloadOnCellularEnabled: Flow<Boolean> get() = featurePrefs.socialMediaDownloadOnCellularEnabled
     val tiktokVideoQuality: Flow<String> get() = featurePrefs.tiktokVideoQuality
     val reelsFeedEnabled: Flow<Boolean> get() = featurePrefs.reelsFeedEnabled
+    val reelsIncludeVideoAttachments: Flow<Boolean> get() = featurePrefs.reelsIncludeVideoAttachments
 
     suspend fun setSpamDetectionEnabled(enabled: Boolean) = featurePrefs.setSpamDetectionEnabled(enabled)
     suspend fun setSpamThreshold(threshold: Int) = featurePrefs.setSpamThreshold(threshold)
@@ -298,6 +299,7 @@ class SettingsDataStore @Inject constructor(
     suspend fun setSocialMediaDownloadOnCellularEnabled(enabled: Boolean) = featurePrefs.setSocialMediaDownloadOnCellularEnabled(enabled)
     suspend fun setTiktokVideoQuality(quality: String) = featurePrefs.setTiktokVideoQuality(quality)
     suspend fun setReelsFeedEnabled(enabled: Boolean) = featurePrefs.setReelsFeedEnabled(enabled)
+    suspend fun setReelsIncludeVideoAttachments(enabled: Boolean) = featurePrefs.setReelsIncludeVideoAttachments(enabled)
 
     // ===== Global Operations =====
 

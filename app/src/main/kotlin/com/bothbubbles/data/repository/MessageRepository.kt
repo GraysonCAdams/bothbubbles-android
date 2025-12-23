@@ -14,6 +14,7 @@ import com.bothbubbles.core.network.api.dto.MessageDto
 import com.bothbubbles.core.network.api.dto.MessageQueryRequest
 import com.bothbubbles.services.sync.SyncRangeTracker
 import com.bothbubbles.util.NetworkConfig
+import com.bothbubbles.util.parsing.HtmlEntityDecoder
 import com.bothbubbles.util.retryWithBackoff
 import com.bothbubbles.util.retryWithRateLimitAwareness
 import kotlinx.coroutines.flow.Flow
@@ -601,8 +602,8 @@ class MessageRepository @Inject constructor(
             chatGuid = chatGuid,
             handleId = handleId,
             senderAddress = handle?.address,
-            text = text,
-            subject = subject,
+            text = HtmlEntityDecoder.decode(text),
+            subject = HtmlEntityDecoder.decode(subject),
             dateCreated = dateCreated ?: System.currentTimeMillis(),
             dateRead = dateRead,
             dateDelivered = dateDelivered,
